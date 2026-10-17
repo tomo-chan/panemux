@@ -122,16 +122,23 @@ session's host and can relay a localhost URL of that host (issue #387,
 ### The connection
 
 - `session.DialPreviewConn` dials with the pane dialer (`dialSSHClient`): the same authentication,
-  ProxyJump, ProxyCommand and `knownhosts` verification as a pane, for the session's
-  `ssh_connections` entry as it resolves when the preview is opened. It is never the pane's own
-  connection, so closing the pane ends neither a tab opened on a file nor a relay.
+  ProxyJump, ProxyCommand and `knownhosts` verification as a pane, with the `SSHConfig` the session
+  itself was dialed with (`session.PreviewTarget`), never its `ssh_connections` entry as it reads
+  now. An edited entry restarts no pane, and re-resolving it would read a host the pane is not on,
+  under the pane's working directory there. It is never the pane's own connection, so closing the
+  pane ends neither a tab opened on a file nor a relay.
 - **No command runs over it.** Files are read over the SFTP subsystem and URLs reached over
   direct-tcpip channels. No path, port or host name a preview names is ever part of a remote shell
-  command, so none of [command-execution.md](command-execution.md)'s shell-argument rules apply; a
-  host without an SFTP subsystem cannot show files.
-- A host's connection is made again when it ends, to the same resolved entry: what was opened on a
-  host stays on it. An edited entry gets a new `preview.Remote`; the old one is kept for the previews
-  and relays already opened on it. All are closed when the server shuts down.
+  command, so none of [command-execution.md](command-execution.md)'s shell-argument rules apply. The
+  **SFTP subsystem is required**: a host without one cannot show files, and no other reading method
+  (`scp`, `cat` over exec) is used in its place.
+- Sessions dialed with the same `SSHConfig` share one `preview.Remote`, which is made again, to that
+  same configuration, when its connection ends, stops answering a keepalive (`keepalive@openssh.com`
+  every 15 s, 15 s to answer), lets a request's lookups run past 15 s, or fails with anything but an
+  SFTP status about a file (its SFTP subsystem is gone): what was opened on a host stays on it. The
+  SSH connection is closed before its SFTP client, whose `Close` would otherwise wait behind a
+  request stalled on the host. All are closed when the server shuts down, and `Close` never waits
+  for a connection being made, which is closed once it is.
 
 ### Remote paths and symbolic links
 
@@ -166,6 +173,9 @@ A relay binds a real listening socket on the panemux host, so its scope is delib
 - **Loopback targets only.** `ParseLoopbackURL` accepts only `http`/`https` URLs of `localhost`,
   `127.0.0.0/8` or `::1`; the relay dials that address and port from the host, over the preview's
   connection. It is never a route to another machine.
+- **TLS is passed through.** The relay copies bytes and terminates nothing, so an `https` relay of a
+  `localhost` URL is named `https://localhost:<relay port>`: the browser verifies the host's own
+  certificate for the name it was issued for. panemux never sees or holds the page's TLS keys.
 - **One relay per host and address.** A relay is keyed by the `preview.Remote`, the address and the
   port, and never handed to another: a tab keeps the target it was opened on (#359).
 - **Kept for the server's lifetime.** #359 rules out tying a tab to the pane, a count limit or an idle

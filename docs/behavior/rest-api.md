@@ -225,8 +225,8 @@ and port on the session's host are relayed to a port of their own on `127.0.0.1`
 - `404`: no session exists for `id`, or no file exists at the path (the reason names where it looked)
 - `413`: the file is larger than 10 MiB
 - `422`: the session's working directory and its agent's worktrees are all unknown
-- `502`: the session's SSH host cannot be reached (or its `ssh_connections` entry no longer
-  resolves), or nothing answers at the URL's address on it
+- `502`: the session's SSH host cannot be reached, or offers no SFTP subsystem for a path, or nothing
+  answers at the URL's address on it
 - `200`: the preview to show, or the files to choose from
 
 Errors carry their reason as plain text, which the preview shows. A file to show:

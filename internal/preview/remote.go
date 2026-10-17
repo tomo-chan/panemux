@@ -9,8 +9,10 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
 )
 
 // ErrRemote reports that the SSH host a preview is read from, or relayed
@@ -27,55 +29,165 @@ type RemoteConn interface {
 	// Dial opens a TCP connection from the host to addr.
 	Dial(ctx context.Context, addr string) (net.Conn, error)
 	SFTP() *sftp.Client
+	// Ping reports whether the host still answers on the connection.
+	Ping(ctx context.Context) error
 	// Done is closed once the connection has ended.
 	Done() <-chan struct{}
 	Close() error
 }
 
+// How a host's connection is checked. They bound how long a host that
+// stops answering is waited for, never how long a preview or a tab lasts.
+const (
+	defaultKeepaliveInterval = 15 * time.Second
+	defaultKeepaliveTimeout  = 15 * time.Second
+	// defaultLookupTimeout bounds one request's lookups on the host: the
+	// LSTAT, READLINK and STAT of resolving a path, and the OPEN.
+	defaultLookupTimeout = 15 * time.Second
+)
+
 // Remote is an SSH host previews are read from and relayed through. Its
-// connection is made when first needed and made again once it ends, always
-// to the host it was created for: a preview, or a tab opened on one, keeps
-// the host it was opened on.
+// connection is made when first needed, always to the host it was created
+// for — a preview, or a tab opened on one, keeps the host it was opened on —
+// and made again once it ends, stops answering, or loses its SFTP
+// subsystem. It is checked with a keepalive while it is open.
 type Remote struct {
 	connect func() (RemoteConn, error)
 	conn    RemoteConn
+	dialing *dialAttempt
 	name    string
-	mu      sync.Mutex
-	closed  bool
+
+	keepaliveInterval time.Duration
+	keepaliveTimeout  time.Duration
+	lookupTimeout     time.Duration
+
+	mu     sync.Mutex
+	closed bool
+}
+
+// dialAttempt is a connection being made; everyone who needs the host
+// while it is made waits for it rather than making another.
+type dialAttempt struct {
+	done chan struct{}
+	conn RemoteConn
+	err  error
 }
 
 // NewRemote returns the host called name, reached with connect.
 func NewRemote(name string, connect func() (RemoteConn, error)) *Remote {
-	return &Remote{name: name, connect: connect}
+	return &Remote{
+		name:              name,
+		connect:           connect,
+		keepaliveInterval: defaultKeepaliveInterval,
+		keepaliveTimeout:  defaultKeepaliveTimeout,
+		lookupTimeout:     defaultLookupTimeout,
+	}
 }
 
 // Name is the host's ssh_connections name, as the preview shows it.
 func (r *Remote) Name() string { return r.name }
 
-func (r *Remote) get() (RemoteConn, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return nil, fmt.Errorf("%w: %s: closed", ErrRemote, r.name)
-	}
-	if r.conn != nil {
-		select {
-		case <-r.conn.Done():
-			_ = r.conn.Close()
-			r.conn = nil
-		default:
-			return r.conn, nil
-		}
-	}
-	conn, err := r.connect()
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrRemote, r.name, err)
-	}
-	r.conn = conn
-	return conn, nil
+func (r *Remote) errClosed() error {
+	return fmt.Errorf("%w: %s: closed", ErrRemote, r.name)
 }
 
-// Dial opens a TCP connection from the host to addr.
+// get returns the host's connection, making it when there is none. The lock
+// is never held while connecting, which can take as long as the SSH dial's
+// own retries: Close, and every other caller, would wait behind it.
+func (r *Remote) get() (RemoteConn, error) {
+	r.mu.Lock()
+	for {
+		if r.closed {
+			r.mu.Unlock()
+			return nil, r.errClosed()
+		}
+		if r.conn != nil {
+			select {
+			case <-r.conn.Done():
+				_ = r.conn.Close()
+				r.conn = nil
+			default:
+				conn := r.conn
+				r.mu.Unlock()
+				return conn, nil
+			}
+		}
+		attempt := r.dialing
+		if attempt == nil {
+			break
+		}
+		r.mu.Unlock()
+		<-attempt.done
+		if attempt.err != nil {
+			return nil, attempt.err
+		}
+		r.mu.Lock()
+	}
+	attempt := &dialAttempt{done: make(chan struct{})}
+	r.dialing = attempt
+	r.mu.Unlock()
+
+	conn, err := r.connect()
+	r.mu.Lock()
+	r.dialing = nil
+	switch {
+	case err != nil:
+		attempt.err = fmt.Errorf("%w: %s: %v", ErrRemote, r.name, err)
+	case r.closed:
+		_ = conn.Close()
+		attempt.err = r.errClosed()
+	default:
+		attempt.conn = conn
+		r.conn = conn
+		go r.keepAlive(conn)
+	}
+	r.mu.Unlock()
+	close(attempt.done)
+	return attempt.conn, attempt.err
+}
+
+// drop closes conn and, when it is still the host's connection, forgets it,
+// so the next request connects again.
+func (r *Remote) drop(conn RemoteConn) {
+	r.mu.Lock()
+	if r.conn == conn {
+		r.conn = nil
+	}
+	r.mu.Unlock()
+	_ = conn.Close()
+}
+
+// keepAlive pings conn while it is the host's connection, and drops it once
+// the host does not answer: a stopped sshd or a dropped network leaves the
+// connection open, but no request on it would ever be answered.
+func (r *Remote) keepAlive(conn RemoteConn) {
+	ticker := time.NewTicker(r.keepaliveInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-conn.Done():
+			return
+		case <-ticker.C:
+		}
+		r.mu.Lock()
+		current := r.conn == conn
+		r.mu.Unlock()
+		if !current {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), r.keepaliveTimeout)
+		err := conn.Ping(ctx)
+		cancel()
+		if err != nil {
+			r.drop(conn)
+			return
+		}
+	}
+}
+
+// Dial opens a TCP connection from the host to addr. A refusal from the
+// host — nothing listens at addr — leaves the connection as it is; any
+// other failure is the connection's, which is dropped.
 func (r *Remote) Dial(ctx context.Context, addr string) (net.Conn, error) {
 	conn, err := r.get()
 	if err != nil {
@@ -83,19 +195,25 @@ func (r *Remote) Dial(ctx context.Context, addr string) (net.Conn, error) {
 	}
 	tcp, err := conn.Dial(ctx, addr)
 	if err != nil {
+		var refused *ssh.OpenChannelError
+		if !errors.As(err, &refused) && ctx.Err() == nil {
+			r.drop(conn)
+		}
 		return nil, fmt.Errorf("%s: %w", r.name, err)
 	}
 	return tcp, nil
 }
 
 // Close closes the host's connection; nothing is reached through it after.
+// It does not wait for a connection being made, which is closed once made.
 func (r *Remote) Close() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.closed = true
-	if r.conn != nil {
-		_ = r.conn.Close()
-		r.conn = nil
+	conn := r.conn
+	r.conn = nil
+	r.mu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
 	}
 }
 
@@ -105,6 +223,30 @@ func (r *Remote) files() (*sftp.Client, error) {
 		return nil, err
 	}
 	return conn.SFTP(), nil
+}
+
+// withFiles runs lookup, a request's lookups on the host, over its SFTP
+// client, bounded by lookupTimeout: a host that does not answer in time
+// has its connection closed, which ends the lookup. A failure that is not
+// about a file — the connection or its SFTP subsystem is gone — drops the
+// connection, and lookup runs once more over a new one, so a tab is served
+// again as soon as the host is.
+func (r *Remote) withFiles(lookup func(*sftp.Client) error) error {
+	var err error
+	for range 2 {
+		var conn RemoteConn
+		if conn, err = r.get(); err != nil {
+			return err
+		}
+		timer := time.AfterFunc(r.lookupTimeout, func() { r.drop(conn) })
+		err = lookup(conn.SFTP())
+		timer.Stop()
+		if err == nil || isFileError(err) {
+			return err
+		}
+		r.drop(conn)
+	}
+	return err
 }
 
 // ResolveRemote is Resolve for a pane whose shell runs on remote: it finds
@@ -121,16 +263,6 @@ func ResolveRemote(remote *Remote, name string, workdirs []string) ([]Found, err
 	if len(dirs) == 0 {
 		return nil, ErrNoWorkdir
 	}
-	files, err := remote.files()
-	if err != nil {
-		return nil, err
-	}
-	var roots []string
-	for _, dir := range dirs {
-		if resolved, err := realPath(files, dir); err == nil {
-			roots = append(roots, resolved)
-		}
-	}
 	var paths []string
 	if path.IsAbs(name) {
 		paths = []string{path.Clean(name)}
@@ -142,25 +274,13 @@ func ResolveRemote(remote *Remote, name string, workdirs []string) ([]Found, err
 
 	var found []Found
 	escaped := false
-	seen := map[string]bool{}
-	for _, file := range paths {
-		resolved, err := realPath(files, file)
-		if err != nil {
-			if !isFileError(err) {
-				return nil, remoteFileError(file, err)
-			}
-			continue
-		}
-		root := remoteRootOf(resolved, roots)
-		if root == "" {
-			escaped = true
-			continue
-		}
-		if info, err := files.Stat(resolved); err != nil || !info.Mode().IsRegular() || seen[resolved] {
-			continue
-		}
-		seen[resolved] = true
-		found = append(found, Found{Root: root, File: file})
+	err := remote.withFiles(func(files *sftp.Client) error {
+		var err error
+		found, escaped, err = findRemote(files, dirs, paths)
+		return err
+	})
+	if err != nil {
+		return nil, remoteFileError(name, err)
 	}
 	if len(found) > 0 {
 		return found, nil
@@ -169,6 +289,48 @@ func ResolveRemote(remote *Remote, name string, workdirs []string) ([]Found, err
 		return nil, fmt.Errorf("%w: %s (allowed: %s)", ErrEscapes, name, strings.Join(dirs, ", "))
 	}
 	return nil, fmt.Errorf("%w: %s (looked in %s)", ErrNotFound, name, strings.Join(dirs, ", "))
+}
+
+// findRemote looks for paths on the host, inside the working directories
+// dirs, as ResolveRemote describes; it reports whether any of them led
+// outside, and fails only when the connection does.
+func findRemote(files *sftp.Client, dirs, paths []string) ([]Found, bool, error) {
+	var roots []string
+	for _, dir := range dirs {
+		resolved, err := realPath(files, dir)
+		if err == nil {
+			roots = append(roots, resolved)
+		} else if !isFileError(err) {
+			return nil, false, err
+		}
+	}
+	var found []Found
+	escaped := false
+	seen := map[string]bool{}
+	for _, file := range paths {
+		resolved, err := realPath(files, file)
+		if err != nil {
+			if !isFileError(err) {
+				return nil, false, err
+			}
+			continue
+		}
+		root := remoteRootOf(resolved, roots)
+		if root == "" {
+			escaped = true
+			continue
+		}
+		info, err := files.Stat(resolved)
+		if err != nil && !isFileError(err) {
+			return nil, false, fmt.Errorf("stat %s: %w", resolved, err)
+		}
+		if err != nil || !info.Mode().IsRegular() || seen[resolved] {
+			continue
+		}
+		seen[resolved] = true
+		found = append(found, Found{Root: root, File: file})
+	}
+	return found, escaped, nil
 }
 
 // maxRemoteLinks bounds the symbolic links one path may lead through, as
@@ -266,21 +428,27 @@ func (r *Registry) OpenRemote(remote *Remote, root, file string) (string, error)
 	if !IsPreviewable(file) {
 		return "", ErrNotPreviewable
 	}
-	files, err := remote.files()
-	if err != nil {
-		return "", err
-	}
-	resolved, err := realPath(files, path.Clean(file))
+	root = path.Clean(root)
+	var resolved string
+	var info fs.FileInfo
+	err := remote.withFiles(func(files *sftp.Client) error {
+		var err error
+		if resolved, err = realPath(files, path.Clean(file)); err != nil {
+			return err
+		}
+		if !remoteWithin(root, resolved) {
+			return nil
+		}
+		if info, err = files.Stat(resolved); err != nil {
+			return fmt.Errorf("stat %s: %w", resolved, err)
+		}
+		return nil
+	})
 	if err != nil {
 		return "", remoteFileError(file, err)
 	}
-	root = path.Clean(root)
 	if !remoteWithin(root, resolved) {
 		return "", fmt.Errorf("%w: %s", ErrEscapes, file)
-	}
-	info, err := files.Stat(resolved)
-	if err != nil { //coverage:exempt realPath has just looked the file up; only a change on the host in between fails this
-		return "", remoteFileError(file, err)
 	}
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("%w: %s", ErrNotFound, file)
@@ -315,20 +483,31 @@ func remoteFileError(file string, err error) error {
 // resolving it as OpenRemote does: what it leads to must still lie inside
 // the root, so a link added after the preview opened is refused too.
 func openRemote(e entry, rest string) (fileReader, fs.FileInfo, bool) {
-	files, err := e.remote.files()
+	var f *sftp.File
+	var info fs.FileInfo
+	err := e.remote.withFiles(func(files *sftp.Client) error {
+		resolved, err := realPath(files, path.Join(e.root, rest))
+		if err != nil {
+			return err
+		}
+		if !remoteWithin(e.root, resolved) {
+			return fs.ErrNotExist
+		}
+		opened, err := files.Open(resolved)
+		if err != nil {
+			return fmt.Errorf("open %s: %w", resolved, err)
+		}
+		if info, err = opened.Stat(); err != nil {
+			_ = opened.Close()
+			return fmt.Errorf("stat %s: %w", resolved, err)
+		}
+		f = opened
+		return nil
+	})
 	if err != nil {
 		return nil, nil, false
 	}
-	resolved, err := realPath(files, path.Join(e.root, rest))
-	if err != nil || !remoteWithin(e.root, resolved) {
-		return nil, nil, false
-	}
-	f, err := files.Open(resolved)
-	if err != nil {
-		return nil, nil, false
-	}
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
+	if !info.Mode().IsRegular() {
 		_ = f.Close()
 		return nil, nil, false
 	}

@@ -48,9 +48,14 @@ working directory and the worktrees are all unknown, no path opens.
 A path clicked in an `ssh` or `ssh_tmux` pane, or in the Type in pane popup of a task on an SSH host,
 names a file on that host (issue #387). It is resolved exactly as above — against the shell's working
 directory on the host, then each worktree the pane's agent is working in there — and only files
-inside those directories open. The host is the pane's `ssh_connections` entry (for a task, the host
-it was collected from), reached with that entry's authentication and `known_hosts` as the pane is.
-The preview header names the host by that entry's name.
+inside those directories open. The host is the one the pane's shell is on: the preview connects with
+the host, port, user, authentication and `known_hosts` the pane itself was connected with (for a
+task, its attach's). Editing the pane's `ssh_connections` entry afterwards restarts no pane, so it
+moves none of its previews either; a pane connected after the edit previews the host it is on. The
+preview header names the host by the entry's name.
+
+Files are read over the host's **SFTP subsystem**, and only over it: a host whose SSH server offers
+no SFTP subsystem shows the reason instead of the file, and no other way of reading files is tried.
 
 The file is read over a connection of the preview's own to the host, not the pane's, so a tab opened
 on it keeps working once the pane, the popup or the session is closed. Inside the host's working
@@ -60,6 +65,13 @@ file is served from the innermost working directory holding the path the link le
 beside that are reachable, and nothing outside it. The 10 MiB limit and everything under
 [What is shown](#what-is-shown) are the same as for a local file. A host that cannot be reached shows
 the reason.
+
+The preview's connection is checked while it is open, so a host that stops answering is not waited
+for: a request's lookups on the host are given 15 seconds, the connection is pinged every 15
+seconds, and one that does not answer — or that has lost its SFTP subsystem while SSH stays up — is
+closed and made again, to the same host, for the next request. A tab on the host is served again as
+soon as the host answers. This bounds the wait on an unanswering host; it does not end a preview, a
+tab or a relay.
 
 ### Localhost URLs of an SSH host
 
@@ -79,12 +91,20 @@ relay port:
   host;
 - clicking the same host's URL again, from any pane or popup on that host, reuses its relay;
 - a relay, and the tab opened on it with **Open in new tab**, keep the host and port they were opened
-  on: a relay is never handed to another host or port, and editing the `ssh_connections` entry
-  afterwards gives the next preview a relay of its own, leaving those already open where they were.
+  on: a relay is never handed to another host or port. The host is the pane's, as for a file, so an
+  edited `ssh_connections` entry moves no relay, and a pane on the same host — after the entry was
+  edited and edited back, say — gets that host's relay again.
 
 A relay is kept for as long as panemux runs, over the preview's own connection to the host, so the
 tab keeps working after the pane, the popup or the session is closed. When the host cannot be
 reached, or nothing answers at the URL's address on it, the preview shows that instead.
+
+The relayed URL names `127.0.0.1` and the relay's port, and keeps the path, query and fragment; a
+URL printed without a path (`http://localhost:5173`) opens at `/`. An `https` URL that named
+`localhost` keeps `localhost`: the relay passes TLS through untouched, so the browser checks the
+host's certificate against the name in the URL, and a development certificate is issued for
+`localhost`. An `https` URL of `[::1]` is relayed as `127.0.0.1`, which its certificate does not
+name.
 
 The relayed page runs in its own origin, `http://127.0.0.1:<relay port>`, with its scripts, forms
 and storage, which a development server needs. What a relay does not change:

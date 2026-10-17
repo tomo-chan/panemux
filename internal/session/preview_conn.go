@@ -59,16 +59,21 @@ func (c *PreviewConn) Dial(ctx context.Context, addr string) (net.Conn, error) {
 	return conn, nil
 }
 
+// Ping reports whether the host still answers: see CommandConn.Ping.
+func (c *PreviewConn) Ping(ctx context.Context) error { return pingSSH(ctx, c.client) }
+
 // SFTP is the connection's SFTP client.
 func (c *PreviewConn) SFTP() *sftp.Client { return c.files }
 
 // Done is closed once the connection has ended.
 func (c *PreviewConn) Done() <-chan struct{} { return c.done }
 
-// Close closes the connection and, after it, any ProxyJump connection.
+// Close closes the connection and, after it, any ProxyJump connection. The
+// SSH connection goes first: an SFTP request stalled on a host that stopped
+// answering holds the SFTP client, whose own Close would wait behind it.
 func (c *PreviewConn) Close() error {
-	_ = c.files.Close()
 	err := c.client.Close()
+	_ = c.files.Close()
 	if c.jumpClient != nil {
 		_ = c.jumpClient.Close()
 	}

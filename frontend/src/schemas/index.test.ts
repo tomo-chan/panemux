@@ -1558,6 +1558,18 @@ describe('PreviewResponseSchema', () => {
     expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'https://127.0.0.1:50000/' }).success).toBe(true)
   })
 
+  it('accepts a relay at its root without a slash, and an https relay named localhost (issue #387)', () => {
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://127.0.0.1:63655' }).success).toBe(true)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://127.0.0.1:63655?x=1' }).success).toBe(true)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'https://localhost:63655/app' }).success).toBe(true)
+  })
+
+  it('names localhost only for an https relay', () => {
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://localhost:63655/' }).success).toBe(false)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'https://localhost.example.com:63655/' }).success).toBe(false)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://127.0.0.1:63655@example.com/' }).success).toBe(false)
+  })
+
   it('rejects a relayed URL that is not a relay on the panemux host', () => {
     expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://localhost:5173/app' }).success).toBe(false)
     expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://127.0.0.1.example.com:80/' }).success).toBe(false)

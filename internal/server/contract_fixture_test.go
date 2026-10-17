@@ -472,7 +472,6 @@ var contractFixtures = map[string]contractFixture{
 		e := newAPIEnv(t)
 		dev := httptest.NewServer(http.NotFoundHandler())
 		t.Cleanup(dev.Close)
-		e.cfg.SSHConnections = map[string]config.SSHConnection{"devbox": {Host: "devbox.example.invalid", User: "demo"}}
 		e.srv.api.SetPreviewDialer(func(session.SSHConfig) (preview.RemoteConn, error) {
 			return fixturePreviewConn{addr: dev.Listener.Addr().String()}, nil
 		})
@@ -1473,6 +1472,9 @@ type fixtureSSHPreviewSession struct{ *wsFakeSession }
 
 func (s *fixtureSSHPreviewSession) Type() session.Type     { return session.TypeSSH }
 func (s *fixtureSSHPreviewSession) ConnectionName() string { return "devbox" }
+func (s *fixtureSSHPreviewSession) PreviewSSHConfig() session.SSHConfig {
+	return session.SSHConfig{Host: "devbox.example.invalid", User: "demo", ConnectionName: "devbox"}
+}
 
 // fixturePreviewConn is the preview's connection to devbox: its loopback
 // dials reach addr on this machine.
@@ -1482,9 +1484,10 @@ func (c fixturePreviewConn) Dial(ctx context.Context, _ string) (net.Conn, error
 	var d net.Dialer
 	return d.DialContext(ctx, "tcp", c.addr)
 }
-func (fixturePreviewConn) SFTP() *sftp.Client    { return nil }
-func (fixturePreviewConn) Done() <-chan struct{} { return nil }
-func (fixturePreviewConn) Close() error          { return nil }
+func (fixturePreviewConn) SFTP() *sftp.Client         { return nil }
+func (fixturePreviewConn) Done() <-chan struct{}      { return nil }
+func (fixturePreviewConn) Ping(context.Context) error { return nil }
+func (fixturePreviewConn) Close() error               { return nil }
 
 type fixturePreviewSession struct {
 	*wsFakeSession

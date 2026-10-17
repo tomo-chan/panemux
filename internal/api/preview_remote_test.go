@@ -41,8 +41,9 @@ func (c *previewTestConn) Dial(ctx context.Context, addr string) (net.Conn, erro
 	return d.DialContext(ctx, "tcp", target)
 }
 
-func (c *previewTestConn) SFTP() *sftp.Client    { return c.files }
-func (c *previewTestConn) Done() <-chan struct{} { return c.done }
+func (c *previewTestConn) SFTP() *sftp.Client         { return c.files }
+func (c *previewTestConn) Done() <-chan struct{}      { return c.done }
+func (c *previewTestConn) Ping(context.Context) error { return nil }
 
 func (c *previewTestConn) Close() error {
 	c.mu.Lock()
@@ -93,16 +94,23 @@ func (f *previewHostFixture) dial(t *testing.T) func(session.SSHConfig) (preview
 }
 
 // sshPreviewSession is an ssh pane: its working directory, its agent's
-// worktrees, and the ssh_connections entry it was made from.
+// worktrees, the ssh_connections entry it was made from, and the
+// connection it was dialed with — by default to <connection>.example.invalid.
 type sshPreviewSession struct {
 	connection string
+	cfg        session.SSHConfig
 	mockCWDSession
 }
 
-func (s *sshPreviewSession) ConnectionName() string { return s.connection }
+func (s *sshPreviewSession) ConnectionName() string              { return s.connection }
+func (s *sshPreviewSession) PreviewSSHConfig() session.SSHConfig { return s.cfg }
 
 func sshCWDSession(id, connection, cwd string, active ...string) *sshPreviewSession {
-	sess := &sshPreviewSession{mockCWDSession: *cwdSession(id, cwd, active...), connection: connection}
+	sess := &sshPreviewSession{
+		mockCWDSession: *cwdSession(id, cwd, active...),
+		connection:     connection,
+		cfg:            session.SSHConfig{Host: connection + ".example.invalid", User: "demo", ConnectionName: connection},
+	}
 	sess.typ = session.TypeSSH
 	return sess
 }
@@ -187,7 +195,6 @@ func TestPostSessionPreview_RemoteRefusals(t *testing.T) {
 	h := newRemotePreviewHandler(t, hosts,
 		sshCWDSession("pane-ssh", "alpha", cwd),
 		sshCWDSession("pane-down", "beta", cwd),
-		sshCWDSession("pane-gone", "removed", cwd),
 		unnamed,
 		cwdSession("pane-local", cwd),
 	)
@@ -200,8 +207,6 @@ func TestPostSessionPreview_RemoteRefusals(t *testing.T) {
 			`{"path":` + jsonString(t, filepath.Join(outside, "secret.html")) + `}`, "outside", http.StatusForbidden},
 		{"missing", "pane-ssh", `{"path":"missing.md"}`, "missing.md", http.StatusNotFound},
 		{"an unreachable host", "pane-down", `{"path":"index.html"}`, "no route to host", http.StatusBadGateway},
-		{"a connection no longer configured", "pane-gone", `{"path":"index.html"}`, "removed",
-			http.StatusBadGateway},
 		{"an ssh pane naming no connection", "unnamed", `{"path":"index.html"}`, "SSH connection",
 			http.StatusBadRequest},
 		{"a URL that is not loopback", "pane-ssh", `{"url":"https://example.com/"}`, "only http and https URLs",
@@ -209,8 +214,6 @@ func TestPostSessionPreview_RemoteRefusals(t *testing.T) {
 		{"a URL of a pane on the panemux host", "pane-local", `{"url":"http://localhost:5173/"}`, "SSH host",
 			http.StatusBadRequest},
 		{"a URL of an unreachable host", "pane-down", `{"url":"http://localhost:5173/"}`, "no route to host",
-			http.StatusBadGateway},
-		{"a URL of a connection no longer configured", "pane-gone", `{"url":"http://localhost:5173/"}`, "removed",
 			http.StatusBadGateway},
 		{"a URL nothing answers at", "pane-ssh", `{"url":"http://localhost:5173/"}`,
 			"alpha: connection refused: localhost:5173",
@@ -278,30 +281,52 @@ func TestPostSessionPreview_RelaysEachHostsLoopbackURLToAPortOfItsOwn(t *testing
 	assert.Equal(t, "alpha /app?x=1", fetch(t, relayed["alpha"]))
 }
 
-func TestPreviewKeepsTheHostItWasOpenedOn(t *testing.T) {
+func TestPreviewReachesTheHostThePaneIsOn(t *testing.T) {
+	// #359: a pane's preview, and a tab opened on it, stay on the host the
+	// pane's shell runs on. Editing the ssh_connections entry restarts no
+	// pane, so it moves no preview; a pane dialed after the edit is on the
+	// new host, and a pane back on the first host reuses its relay.
 	cwd := previewDir(t)
 	writePreviewFile(t, filepath.Join(cwd, "index.html"), "<p>x</p>")
 	hosts := &previewHostFixture{loopback: map[string]map[string]string{
 		"alpha.example.invalid": {"localhost:5173": startDevServer(t, "alpha")},
 		"moved.example.invalid": {"localhost:5173": startDevServer(t, "moved")},
 	}}
-	h := newRemotePreviewHandler(t, hosts, sshCWDSession("pane-a", "alpha", cwd))
+	before := sshCWDSession("pane-a", "alpha", cwd)
+	h := newRemotePreviewHandler(t, hosts, before)
 
-	rec := postPreview(t, h, "pane-a", `{"url":"http://localhost:5173/"}`)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	before := decodePreview(t, rec).URL
-	rec = postPreview(t, h, "pane-a", `{"url":"http://localhost:5173/"}`)
-	assert.Equal(t, before, decodePreview(t, rec).URL, "the same host and port keep their relay")
+	relay := func(id string) string {
+		t.Helper()
+		rec := postPreview(t, h, id, `{"url":"http://localhost:5173/"}`)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return decodePreview(t, rec).URL
+	}
+	first := relay("pane-a")
+	assert.Equal(t, first, relay("pane-a"), "the same host and port keep their relay")
 
-	// The entry is edited to name another host: what was opened stays on
-	// the first, and the next preview reaches the new one.
 	h.cfg.SSHConnections["alpha"] = config.SSHConnection{Host: "moved.example.invalid", User: "demo"}
-	rec = postPreview(t, h, "pane-a", `{"url":"http://localhost:5173/"}`)
+	assert.Equal(t, first, relay("pane-a"), "the pane is still on alpha")
+	assert.Equal(t, "alpha /", fetch(t, first))
+	rec := postPreview(t, h, "pane-a", `{"path":"index.html"}`)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	after := decodePreview(t, rec).URL
-	assert.NotEqual(t, before, after)
-	assert.Equal(t, "alpha /", fetch(t, before))
-	assert.Equal(t, "moved /", fetch(t, after))
+
+	moved := sshCWDSession("pane-moved", "alpha", cwd)
+	moved.cfg.Host = "moved.example.invalid"
+	h.manager.Add(moved)
+	second := relay("pane-moved")
+	assert.NotEqual(t, first, second)
+	assert.Equal(t, "moved /", fetch(t, second))
+
+	// The entry is edited back, and a pane is dialed to alpha again.
+	delete(h.cfg.SSHConnections, "alpha")
+	h.manager.Add(sshCWDSession("pane-back", "alpha", cwd))
+	assert.Equal(t, first, relay("pane-back"), "alpha's relay is the one it had")
+	assert.Equal(t, "alpha /", fetch(t, first))
+
+	hosts.mu.Lock()
+	defer hosts.mu.Unlock()
+	assert.Equal(t, []string{"alpha.example.invalid", "moved.example.invalid"}, hosts.dialed,
+		"one connection per host the panes are on")
 }
 
 func TestHandlerCloseClosesThePreviewHosts(t *testing.T) {

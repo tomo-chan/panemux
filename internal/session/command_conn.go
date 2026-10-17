@@ -71,12 +71,18 @@ func (c *CommandConn) Run(ctx context.Context, cmd string, stdin io.Reader) ([]b
 // request still replies (with a refusal), so only a dead or stalled
 // connection makes Ping fail.
 func (c *CommandConn) Ping(ctx context.Context) error {
+	return pingSSH(ctx, c.client)
+}
+
+// pingSSH sends client an OpenSSH keepalive request and waits for any reply,
+// or for ctx to end.
+func pingSSH(ctx context.Context, client *ssh.Client) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	replied := make(chan error, 1)
 	go func() {
-		_, _, err := c.client.SendRequest("keepalive@openssh.com", true, nil)
+		_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
 		replied <- err
 	}()
 	select {

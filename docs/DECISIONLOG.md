@@ -1512,9 +1512,21 @@ split preview #385 built, through the same registry, route and policies.
   server, for one, does not — so the boundary check resolves each component with `LSTAT`/`READLINK`
   itself. The window between that check and the `OPEN` is accepted and recorded in
   [preview security](security/preview.md#remote-paths-and-symbolic-links).
-- **Its own connection.** The pane's connection ends with the pane, and #359 requires a tab to outlive
-  it, so the preview dials its own with the pane dialer. A host is fixed when first used for an entry
-  as it resolves, and an edited entry gets a new one, so a tab keeps its host.
+- **Its own connection, to the pane's host.** The pane's connection ends with the pane, and #359
+  requires a tab to outlive it, so the preview dials its own with the pane dialer, with the
+  configuration the pane was dialed with. Resolving the pane's `ssh_connections` name again was the
+  first implementation and was rejected in review: editing an entry restarts no pane, so a live pane
+  on host A previewed host B, and an entry edited A→B→A got A a new relay port.
+- **SFTP only.** The operator decided a host without an SFTP subsystem shows the reason and no
+  fallback (`scp`, `cat` over exec) is added.
+- **A checked connection, not a bounded tab.** Review found a stopped `sshd` left file tabs waiting
+  indefinitely and a lost `sftp-server` left them failing until restart. The connection is pinged,
+  a request's lookups are bounded, and a connection failing for anything but a file is made again.
+  None of this ends a tab, which #359 rules out.
+- **Connecting outside the lock.** Holding the host's lock while dialing made `Close`, and so a
+  graceful shutdown, wait out the SSH dial's retries; callers now wait for one attempt instead.
+- **TLS keeps `localhost`.** An `https` relay of a `localhost` URL is named `localhost`, since the
+  relay passes TLS through and the certificate names `localhost`; `http` relays name `127.0.0.1`.
 - **A relay per host and address, not loopback port forwarding.** The OAuth forward republishes a port
   at its own number, which collides with the panemux host's and another host's same port, and is
   bounded by count and idle expiry. A relay takes a port the system chooses, is never reassigned, and

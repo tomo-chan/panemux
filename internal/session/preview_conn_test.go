@@ -94,3 +94,52 @@ func TestDialPreviewConnReportsAnUnreachableHost(t *testing.T) {
 	_, err := DialPreviewConn(SSHConfig{Host: "127.0.0.1", Port: 1, User: "u", Password: "p"})
 	require.Error(t, err)
 }
+
+// The preview reaches a pane's host with the connection the pane itself
+// was dialed with (issue #387): an ssh_connections entry edited afterwards
+// does not move it. Only where the shell starts is left out — it is the
+// pane's, not the host's.
+func TestSSHSessionsKeepTheConnectionTheyWereDialedWith(t *testing.T) {
+	withBrowserShimEnabled(t, false)
+	jump := &SSHConfig{Host: "jump.example.invalid", User: "demo"}
+	cfg := SSHConfig{
+		Host: "devbox.example.invalid", Port: 2222, User: "demo", KeyFile: "/workspace/user/.ssh/id",
+		KnownHostsFile: "/workspace/user/.ssh/known_hosts", ConnectionName: "devbox", JumpHost: jump,
+		Cwd: "/remote/home/demo/project", Shell: "/bin/zsh",
+	}
+	want := cfg
+	want.Cwd, want.Shell = "", ""
+
+	client, _ := startSessionTestSSHServer(t, nil)
+	sess, err := newSSHSessionFromClient("pane-ssh", "SSH", cfg, client, nil)
+	require.NoError(t, err)
+	defer sess.Close()
+	assert.Equal(t, want, sess.PreviewSSHConfig())
+
+	client, _ = startSessionTestSSHServer(t, nil)
+	tmux, err := newTmuxSSHSessionFromClient("pane-tmux", "tmux", "work", cfg, client, nil)
+	require.NoError(t, err)
+	defer tmux.Close()
+	assert.Equal(t, want, tmux.PreviewSSHConfig())
+
+	var _ PreviewTarget = sess
+	var _ PreviewTarget = tmux
+}
+
+func TestPreviewConnPingAnswersWhileTheHostDoes(t *testing.T) {
+	conn, transport, _, err := startPreviewTestSSHServer(t, "", true)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, conn.Ping(ctx))
+
+	transport.closeConnections()
+	<-conn.Done()
+	require.Error(t, conn.Ping(ctx))
+
+	canceled, stop := context.WithCancel(context.Background())
+	stop()
+	require.ErrorIs(t, conn.Ping(canceled), context.Canceled)
+}

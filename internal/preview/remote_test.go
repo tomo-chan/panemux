@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,11 +23,17 @@ import (
 // fakeRemoteConn is an SSH host's connection as the preview uses it: SFTP
 // served by pkg/sftp's server over an in-memory pipe, reading this
 // machine's filesystem, and loopback dials sent to the addresses in loopback.
+// stall makes the host stop answering, as a stopped sshd or a dropped
+// network does, without the connection ending.
 type fakeRemoteConn struct {
 	files    *sftp.Client
 	loopback map[string]string
 	done     chan struct{}
+	server   *stallingConn
+	pipe     net.Conn
 	closed   bool
+	stalled  bool
+	pings    int
 	mu       sync.Mutex
 }
 
@@ -42,11 +49,26 @@ func (c *fakeRemoteConn) Dial(ctx context.Context, addr string) (net.Conn, error
 func (c *fakeRemoteConn) SFTP() *sftp.Client    { return c.files }
 func (c *fakeRemoteConn) Done() <-chan struct{} { return c.done }
 
+func (c *fakeRemoteConn) Ping(ctx context.Context) error {
+	c.mu.Lock()
+	c.pings++
+	stalled := c.stalled
+	c.mu.Unlock()
+	if stalled {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return nil
+}
+
 func (c *fakeRemoteConn) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.closed {
 		c.closed = true
+		// The transport first, as an SSH connection's: a request stalled
+		// on it holds the SFTP client until it ends.
+		_ = c.pipe.Close()
 		_ = c.files.Close()
 	}
 	return nil
@@ -64,16 +86,67 @@ func (c *fakeRemoteConn) end() {
 	close(c.done)
 }
 
+// stall makes the host stop answering: SFTP requests and keepalives get no
+// reply, and the connection does not end.
+func (c *fakeRemoteConn) stall() {
+	c.mu.Lock()
+	c.stalled = true
+	c.mu.Unlock()
+	c.server.stall()
+}
+
+// stallingConn is the SFTP server's end of the pipe; while stalled the
+// server reads nothing, so it answers nothing.
+type stallingConn struct {
+	net.Conn
+	gate   chan struct{}
+	closed chan struct{}
+	once   sync.Once
+	mu     sync.Mutex
+}
+
+func newStallingConn(conn net.Conn) *stallingConn {
+	gate := make(chan struct{})
+	close(gate)
+	return &stallingConn{Conn: conn, gate: gate, closed: make(chan struct{})}
+}
+
+func (c *stallingConn) stall() {
+	c.mu.Lock()
+	c.gate = make(chan struct{})
+	c.mu.Unlock()
+}
+
+func (c *stallingConn) Read(p []byte) (int, error) {
+	c.mu.Lock()
+	gate := c.gate
+	c.mu.Unlock()
+	select {
+	case <-gate:
+	case <-c.closed:
+		return 0, net.ErrClosed
+	}
+	return c.Conn.Read(p)
+}
+
+func (c *stallingConn) Close() error {
+	c.once.Do(func() { close(c.closed) })
+	return c.Conn.Close()
+}
+
 func newFakeRemoteConn(t *testing.T, loopback map[string]string) *fakeRemoteConn {
 	t.Helper()
-	serverSide, clientSide := net.Pipe()
+	serverPipe, clientSide := net.Pipe()
+	serverSide := newStallingConn(serverPipe)
 	server, err := sftp.NewServer(serverSide)
 	require.NoError(t, err)
 	go func() { _ = server.Serve() }()
-	t.Cleanup(func() { _ = server.Close() })
+	t.Cleanup(func() { _ = serverSide.Close() })
 	client, err := sftp.NewClientPipe(clientSide, clientSide)
 	require.NoError(t, err)
-	conn := &fakeRemoteConn{files: client, loopback: loopback, done: make(chan struct{})}
+	conn := &fakeRemoteConn{
+		files: client, loopback: loopback, done: make(chan struct{}), server: serverSide, pipe: clientSide,
+	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return conn
 }
@@ -410,13 +483,15 @@ func TestRemoteWithin(t *testing.T) {
 }
 
 func TestRemoteLookupsOverABrokenConnection(t *testing.T) {
-	// The SFTP client is gone but the connection has not reported its end:
-	// what fails is the connection, not the file, and is reported so.
+	// The SFTP client is gone but the connection has not reported its end,
+	// and the host cannot be connected to again: what fails is the
+	// connection, not the file, and is reported so.
 	f := newResolveFixture(t)
 	remote := newFakeRemote(t, nil)
 	_, err := ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
 	require.NoError(t, err)
 	require.NoError(t, remote.conns()[0].Close())
+	remote.failWith(errors.New("no route to host"))
 
 	_, err = ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
 	require.ErrorIs(t, err, ErrRemote)
@@ -448,4 +523,125 @@ func TestRemoteFilesWithoutPermission(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 	assert.Contains(t, err.Error(), "permission denied")
 	assert.Equal(t, http.StatusNotFound, serveRemote(t, r, url).Code)
+}
+
+// The connection is checked, not trusted (issue #387's review): a host that
+// stops answering, or whose SFTP subsystem goes away while the SSH
+// connection stays up, is connected to again rather than left failing.
+
+func TestRemoteConnectsAgainAfterItsSFTPGoesAway(t *testing.T) {
+	f := newResolveFixture(t)
+	remote := newFakeRemote(t, nil)
+	r := NewRegistry()
+	url, err := r.OpenRemote(remote.Remote, f.cwd, filepath.Join(f.cwd, "mockups", "index.html"))
+	require.NoError(t, err)
+
+	// sftp-server ends; the SSH connection does not.
+	require.NoError(t, remote.conns()[0].files.Close())
+
+	rec := serveRemote(t, r, url)
+	assert.Equal(t, http.StatusOK, rec.Code, "the tab is served over a new connection")
+	_, err = ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
+	require.NoError(t, err)
+	require.Len(t, remote.conns(), 2)
+	assert.True(t, remote.conns()[0].isClosed(), "the broken connection is closed")
+}
+
+func TestRemoteDoesNotWaitForAHostThatStopsAnswering(t *testing.T) {
+	f := newResolveFixture(t)
+	remote := newFakeRemote(t, nil)
+	remote.lookupTimeout = 200 * time.Millisecond
+	r := NewRegistry()
+	url, err := r.OpenRemote(remote.Remote, f.cwd, filepath.Join(f.cwd, "mockups", "index.html"))
+	require.NoError(t, err)
+	remote.conns()[0].stall()
+
+	start := time.Now()
+	rec := serveRemote(t, r, url)
+	assert.Less(t, time.Since(start), 5*time.Second, "a lookup is bounded")
+	assert.Equal(t, http.StatusOK, rec.Code, "and answered over a new connection")
+	assert.True(t, remote.conns()[0].isClosed())
+	assert.Len(t, remote.conns(), 2)
+}
+
+func TestRemoteKeepaliveEndsAConnectionThatStopsAnswering(t *testing.T) {
+	f := newResolveFixture(t)
+	remote := newFakeRemote(t, nil)
+	remote.keepaliveInterval = 20 * time.Millisecond
+	remote.keepaliveTimeout = 50 * time.Millisecond
+	_, err := ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
+	require.NoError(t, err)
+
+	first := remote.conns()[0]
+	require.Eventually(t, func() bool {
+		first.mu.Lock()
+		defer first.mu.Unlock()
+		return first.pings >= 2
+	}, 5*time.Second, 10*time.Millisecond, "an answering connection is kept and checked")
+	assert.False(t, first.isClosed())
+
+	first.stall()
+	require.Eventually(t, first.isClosed, 5*time.Second, 10*time.Millisecond,
+		"a connection that stops answering is closed with no request waiting on it")
+	_, err = ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
+	require.NoError(t, err)
+	assert.Len(t, remote.conns(), 2)
+}
+
+func TestRemoteDoesNotHoldItsLockWhileConnecting(t *testing.T) {
+	release := make(chan struct{})
+	var dials atomic.Int32
+	remote := NewRemote("devbox", func() (RemoteConn, error) {
+		dials.Add(1)
+		<-release
+		return newFakeRemoteConn(t, nil), nil
+	})
+
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := remote.files()
+			results <- err
+		}()
+	}
+	require.Eventually(t, func() bool { return dials.Load() == 1 }, 5*time.Second, time.Millisecond)
+
+	closed := make(chan struct{})
+	go func() {
+		remote.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close waited for the connection being made")
+	}
+	close(release)
+	for range 2 {
+		require.ErrorIs(t, <-results, ErrRemote, "a host closed while connecting is closed")
+	}
+	assert.Equal(t, int32(1), dials.Load(), "both callers waited for the one connection")
+}
+
+func TestRemoteReportsAFailedConnectionToEveryoneWaiting(t *testing.T) {
+	release := make(chan struct{})
+	remote := NewRemote("devbox", func() (RemoteConn, error) {
+		<-release
+		return nil, errors.New("connection refused")
+	})
+	t.Cleanup(remote.Close)
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := remote.files()
+			results <- err
+		}()
+	}
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	for range 2 {
+		err := <-results
+		require.ErrorIs(t, err, ErrRemote)
+		assert.Contains(t, err.Error(), "connection refused")
+	}
 }

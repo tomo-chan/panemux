@@ -181,7 +181,7 @@ A path the terminal shows as an HTML or Markdown link is sent to
 `POST /api/sessions/{id}/preview`, which resolves it on the session's host and returns a
 `/preview/<token>/…` address. `PreviewSplit` frames that address beside the terminal; Open in new tab
 opens the same address. For an `ssh` or `ssh_tmux` session the API's `previewHosts` keeps one
-`preview.Remote` per `ssh_connections` entry as it resolved, connected with
+`preview.Remote` per connection a session was dialed with (`session.PreviewTarget`), connected with
 `session.DialPreviewConn` — the pane dialer, its own connection — and files are read over its SFTP
 subsystem. A localhost URL clicked in such a session is sent as `url`; `preview.Relays` gives the
 host's address and port a listener on `127.0.0.1:0` and returns that address, which `PreviewSplit`

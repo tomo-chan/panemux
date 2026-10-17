@@ -321,7 +321,9 @@ const PreviewReadySchema = z.discriminatedUnion('kind', [
   z.object({
     status: z.literal('ready'),
     kind: z.literal('url'),
-    url: z.string().regex(/^https?:\/\/127\.0\.0\.1:\d+\//),
+    // The relay's address: 127.0.0.1, or localhost for an https URL that
+    // named it, so its certificate still matches.
+    url: z.string().regex(/^(?:https?:\/\/127\.0\.0\.1|https:\/\/localhost):\d+(?:[/?#]|$)/),
     path: z.string().min(1),
     host: z.string().min(1),
   }),

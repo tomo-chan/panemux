@@ -247,3 +247,39 @@ func TestRelaysRefuse(t *testing.T) {
 	}
 	assert.Error(t, err, "a closed relay no longer listens")
 }
+
+func TestRelayedURLKeepsWhatTheBrowserChecks(t *testing.T) {
+	server := startRemoteDevServer(t, "dev")
+	remote := newFakeRemote(t, map[string]string{
+		"localhost:5173": server, "localhost:8443": server, "127.0.0.1:8443": server, "[::1]:8443": server,
+	})
+	relays := NewRelays()
+	t.Cleanup(relays.Close)
+
+	for _, tc := range []struct {
+		raw, host, path, query string
+		scheme                 string
+	}{
+		// A root URL printed without its slash is the root.
+		{"http://localhost:5173", "127.0.0.1", "/", "", "http"},
+		{"http://localhost:5173?x=1", "127.0.0.1", "/", "x=1", "http"},
+		// TLS checks the certificate against the name the browser asks
+		// for, and sends it as SNI: a localhost certificate needs localhost.
+		{"https://localhost:8443/app", "localhost", "/app", "", "https"},
+		{"https://127.0.0.1:8443/app", "127.0.0.1", "/app", "", "https"},
+		// The relay listens on 127.0.0.1 only, so [::1] is reached there.
+		{"https://[::1]:8443/app", "127.0.0.1", "/app", "", "https"},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			relayed, err := relays.Open(remote.Remote, tc.raw)
+			require.NoError(t, err)
+			u, err := url.Parse(relayed)
+			require.NoError(t, err)
+			assert.Equal(t, tc.scheme, u.Scheme)
+			assert.Equal(t, tc.host, u.Hostname())
+			assert.Equal(t, tc.path, u.Path)
+			assert.Equal(t, tc.query, u.RawQuery)
+			assert.NotEmpty(t, u.Port())
+		})
+	}
+}

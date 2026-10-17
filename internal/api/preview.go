@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"reflect"
 	"sync"
@@ -73,7 +72,7 @@ func (h *Handler) PostSessionPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	t := sess.Type()
 	remote := t == session.TypeSSH || t == session.TypeSSHTmux
-	namer, named := sess.(session.SSHConnNamer)
+	target, named := sess.(session.PreviewTarget)
 	if remote && !named {
 		http.Error(w, reasonPreviewNoConnection, http.StatusBadRequest)
 		return
@@ -83,11 +82,11 @@ func (h *Handler) PostSessionPreview(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, reasonPreviewURLLocal, http.StatusBadRequest)
 			return
 		}
-		h.previewRemoteURL(w, namer, req.URL)
+		h.previewRemoteURL(w, target, req.URL)
 		return
 	}
 	if remote {
-		h.previewRemoteFile(w, sess, namer, req.Path)
+		h.previewRemoteFile(w, sess, target, req.Path)
 		return
 	}
 
@@ -112,13 +111,9 @@ func (h *Handler) PostSessionPreview(w http.ResponseWriter, r *http.Request) {
 // SSH host: the file is found inside the pane's working directories on that
 // host and read from it over the preview's own connection.
 func (h *Handler) previewRemoteFile(
-	w http.ResponseWriter, sess session.Session, namer session.SSHConnNamer, name string,
+	w http.ResponseWriter, sess session.Session, target session.PreviewTarget, name string,
 ) {
-	remote, err := h.previewRemote(namer)
-	if err != nil {
-		writePreviewError(w, err)
-		return
-	}
+	remote := h.previewHosts.remote(target)
 	found, err := preview.ResolveRemote(remote, name, sessionWorkdirs(sess))
 	if err != nil {
 		writePreviewError(w, err)
@@ -141,12 +136,8 @@ func (h *Handler) previewRemoteFile(
 
 // previewRemoteURL relays a loopback URL of a pane's SSH host to a port of
 // its own on the panemux host, and answers the URL that reaches it.
-func (h *Handler) previewRemoteURL(w http.ResponseWriter, namer session.SSHConnNamer, raw string) {
-	remote, err := h.previewRemote(namer)
-	if err != nil {
-		writePreviewError(w, err)
-		return
-	}
+func (h *Handler) previewRemoteURL(w http.ResponseWriter, target session.PreviewTarget, raw string) {
+	remote := h.previewHosts.remote(target)
 	url, err := h.previewRelays.Open(remote, raw)
 	if err != nil {
 		writePreviewError(w, err)
@@ -157,17 +148,6 @@ func (h *Handler) previewRemoteURL(w http.ResponseWriter, namer session.SSHConnN
 	})
 }
 
-// previewRemote is the preview's host for a pane's ssh_connections entry,
-// as that entry resolves now.
-func (h *Handler) previewRemote(namer session.SSHConnNamer) (*preview.Remote, error) {
-	name := namer.ConnectionName()
-	cfg, err := session.ResolveSSHConfig(name, h.sshConnections(), h.sshConfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", preview.ErrRemote, name, err)
-	}
-	return h.previewHosts.remote(name, cfg), nil
-}
-
 func writePreviewChoice(w http.ResponseWriter, found []preview.Found, host string) {
 	candidates := make([]string, len(found))
 	for i, f := range found {
@@ -176,16 +156,16 @@ func writePreviewChoice(w http.ResponseWriter, found []preview.Found, host strin
 	writeJSON(w, previewResponse{Status: previewStatusChoose, Candidates: candidates, Host: host})
 }
 
-// previewHosts holds the preview's SSH hosts. A host is made for an
-// ssh_connections name as it resolves when a preview is opened, and kept
-// while the name resolves the same way. Once the entry changes, the next
-// preview gets a host of its own, and the previews and relays already
-// opened keep the host they were opened on.
+// previewHosts holds the preview's SSH hosts. A host is the connection a
+// session was dialed with (session.PreviewTarget), never its ssh_connections
+// entry as it reads now: an edited entry restarts no pane, so a pane's
+// previews stay on the host its shell is on (#359). Sessions dialed alike
+// share one host, and with it its relays, however often the entry changes
+// in between.
 type previewHosts struct {
-	dial   func(cfg session.SSHConfig) (preview.RemoteConn, error)
-	byName map[string]previewHost
-	all    []*preview.Remote
-	mu     sync.Mutex
+	dial  func(cfg session.SSHConfig) (preview.RemoteConn, error)
+	hosts []previewHost
+	mu    sync.Mutex
 }
 
 type previewHost struct {
@@ -199,7 +179,6 @@ func newPreviewHosts() *previewHosts {
 		dial: func(cfg session.SSHConfig) (preview.RemoteConn, error) {
 			return session.DialPreviewConn(cfg)
 		},
-		byName: map[string]previewHost{},
 	}
 }
 
@@ -212,24 +191,26 @@ func (h *Handler) SetPreviewDialer(dial func(cfg session.SSHConfig) (preview.Rem
 	h.previewHosts.dial = dial
 }
 
-func (p *previewHosts) remote(name string, cfg session.SSHConfig) *preview.Remote {
+func (p *previewHosts) remote(target session.PreviewTarget) *preview.Remote {
+	cfg := target.PreviewSSHConfig()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if host, ok := p.byName[name]; ok && reflect.DeepEqual(host.cfg, cfg) {
-		return host.remote
+	for _, host := range p.hosts {
+		if reflect.DeepEqual(host.cfg, cfg) {
+			return host.remote
+		}
 	}
 	dial := p.dial
-	remote := preview.NewRemote(name, func() (preview.RemoteConn, error) { return dial(cfg) })
-	p.byName[name] = previewHost{remote: remote, cfg: cfg}
-	p.all = append(p.all, remote)
+	remote := preview.NewRemote(target.ConnectionName(), func() (preview.RemoteConn, error) { return dial(cfg) })
+	p.hosts = append(p.hosts, previewHost{remote: remote, cfg: cfg})
 	return remote
 }
 
 func (p *previewHosts) close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, remote := range p.all {
-		remote.Close()
+	for _, host := range p.hosts {
+		host.remote.Close()
 	}
 }
 

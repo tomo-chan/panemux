@@ -27,6 +27,7 @@ var ErrNoAnswer = errors.New("nothing answers on the SSH host")
 const relayBindHost = "127.0.0.1"
 
 const (
+	schemeHTTP   = "http"
 	schemeHTTPS  = "https"
 	loopbackName = "localhost"
 )
@@ -73,7 +74,7 @@ func ParseLoopbackURL(raw string) (*url.URL, string, int, error) {
 		return nil, "", 0, ErrNotLoopbackURL
 	}
 	scheme := strings.ToLower(u.Scheme)
-	if scheme != "http" && scheme != schemeHTTPS {
+	if scheme != schemeHTTP && scheme != schemeHTTPS {
 		return nil, "", 0, ErrNotLoopbackURL
 	}
 	host := u.Hostname()
@@ -123,8 +124,23 @@ func (r *Relays) Open(remote *Remote, rawURL string) (string, error) {
 	}
 	relayed := *u
 	relayed.User = nil
-	relayed.Host = net.JoinHostPort(relayBindHost, strconv.Itoa(local))
+	relayed.Host = net.JoinHostPort(relayedHost(u, host), strconv.Itoa(local))
+	if relayed.Path == "" {
+		relayed.Path = "/"
+	}
 	return relayed.String(), nil
+}
+
+// relayedHost is the host name the relayed URL names. The relay listens on
+// 127.0.0.1, which an http URL names as it is. An https URL that named
+// localhost keeps that name: the relay passes TLS through untouched, so the
+// browser checks the host's certificate against, and sends as SNI, the name
+// in the URL, and a development certificate is issued for localhost.
+func relayedHost(u *url.URL, host string) string {
+	if strings.EqualFold(u.Scheme, schemeHTTPS) && host == loopbackName {
+		return loopbackName
+	}
+	return relayBindHost
 }
 
 func (r *Relays) ensure(key relayKey) (int, error) {
