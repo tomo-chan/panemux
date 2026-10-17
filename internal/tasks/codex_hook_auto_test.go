@@ -243,3 +243,10 @@ func TestCodexHookAutoSettingErrors(t *testing.T) {
 	assert.False(t, got.AutoUpdate)
 	assert.Contains(t, got.AutoError, "codex hook settings file", "a settings file that cannot be read says so")
 }
+
+func TestCodexHookAutoStoreReportsAFileItCannotOpen(t *testing.T) {
+	path := t.TempDir() // a directory where the file should be
+	_, err := NewCodexHookAutoStore(path).Enabled("")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading codex hook settings file")
+}
