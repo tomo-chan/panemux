@@ -242,7 +242,7 @@ func startDevServer(t *testing.T, name string) string {
 
 func fetch(t *testing.T, raw string) string {
 	t.Helper()
-	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}, Timeout: 5 * time.Second}
 	resp, err := client.Get(raw) //nolint:noctx // a test server's URL
 	require.NoError(t, err)
 	defer resp.Body.Close()

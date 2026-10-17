@@ -85,7 +85,7 @@ func startRemoteDevServer(t *testing.T, name string) string {
 func get(t *testing.T, raw string) string {
 	t.Helper()
 	// A connection of its own each time, so every request is relayed anew.
-	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}, Timeout: 5 * time.Second}
 	resp, err := client.Get(raw) //nolint:noctx // a test server's URL
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -126,9 +126,11 @@ func TestRelaysKeepTheSamePortOfEachHostApart(t *testing.T) {
 
 	for name, raw := range map[string]string{"alpha": alphaURL, "beta": betaURL} {
 		u, _ := url.Parse(raw)
-		ws, resp, dialErr := websocket.DefaultDialer.Dial("ws://"+u.Host+"/ws", nil)
+		dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+		ws, resp, dialErr := dialer.Dial("ws://"+u.Host+"/ws", nil)
 		require.NoError(t, dialErr)
 		_ = resp.Body.Close()
+		require.NoError(t, ws.SetReadDeadline(time.Now().Add(5*time.Second)))
 		require.NoError(t, ws.WriteMessage(websocket.TextMessage, []byte("hmr")))
 		_, msg, readErr := ws.ReadMessage()
 		require.NoError(t, readErr)
