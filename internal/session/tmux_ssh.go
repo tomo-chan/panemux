@@ -33,7 +33,9 @@ type TmuxSSHSession struct {
 	tmuxSession    string
 	connectionName string
 	state          State
-	mu             sync.RWMutex
+	// previewCfg is the connection the session was dialed with.
+	previewCfg SSHConfig
+	mu         sync.RWMutex
 }
 
 // NewTmuxSSH creates a session that attaches to a remote tmux session.
@@ -158,6 +160,7 @@ func startTmuxSSHSession(
 		stdin:          stdin,
 		reader:         pr,
 		connectionName: cfg.ConnectionName,
+		previewCfg:     previewSSHConfig(cfg),
 		jumpClient:     jumpClient,
 	}
 
@@ -250,6 +253,9 @@ func (s *TmuxSSHSession) ConnectionName() string { return s.connectionName }
 // BoardHostID identifies this session's Agent Board host as its SSH
 // connection name — the same identifier ConnectionName already returns.
 func (s *TmuxSSHSession) BoardHostID() string { return s.connectionName }
+
+// PreviewSSHConfig is the connection the session was dialed with.
+func (s *TmuxSSHSession) PreviewSSHConfig() SSHConfig { return s.previewCfg }
 
 // RunBoardCommand runs an agmsg script on the remote host over a new SSH
 // exec channel, matching the pattern GetCWD/InspectGitContext already use.

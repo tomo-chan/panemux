@@ -1522,7 +1522,14 @@ describe('SSHConnectionRequestSchema', () => {
 })
 
 describe('PreviewResponseSchema', () => {
-  const ready = { status: 'ready', url: '/preview/0123/index.html', path: '/workspace/user/project/index.html', host: '' }
+  const ready = {
+    status: 'ready',
+    kind: 'file',
+    url: '/preview/0123/index.html',
+    path: '/workspace/user/project/index.html',
+    host: '',
+  }
+  const relayed = { status: 'ready', kind: 'url', url: 'http://127.0.0.1:49152/app', path: 'http://localhost:5173/app', host: 'devbox' }
 
   it('accepts a preview to show', () => {
     expect(PreviewResponseSchema.safeParse(ready).success).toBe(true)
@@ -1544,5 +1551,37 @@ describe('PreviewResponseSchema', () => {
 
   it('rejects an unknown status', () => {
     expect(PreviewResponseSchema.safeParse({ ...ready, status: 'other' }).success).toBe(false)
+  })
+
+  it('accepts a localhost URL relayed from an SSH host (issue #387)', () => {
+    expect(PreviewResponseSchema.safeParse(relayed).success).toBe(true)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'https://127.0.0.1:50000/' }).success).toBe(true)
+  })
+
+  it('accepts a relay at its root without a slash, and an https relay named localhost (issue #387)', () => {
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://127.0.0.1:63655' }).success).toBe(true)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://127.0.0.1:63655?x=1' }).success).toBe(true)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'https://localhost:63655/app' }).success).toBe(true)
+  })
+
+  // efficacy:exempt pins what the earlier schema already refused, so widening it for https cannot over-widen
+  it('names localhost only for an https relay', () => {
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://localhost:63655/' }).success).toBe(false)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'https://localhost.example.com:63655/' }).success).toBe(false)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://127.0.0.1:63655@example.com/' }).success).toBe(false)
+  })
+
+  it('rejects a relayed URL that is not a relay on the panemux host', () => {
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://localhost:5173/app' }).success).toBe(false)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'http://127.0.0.1.example.com:80/' }).success).toBe(false)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: '/preview/0123/index.html' }).success).toBe(false)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, url: 'javascript:alert(1)//127.0.0.1:1/' }).success).toBe(false)
+    expect(PreviewResponseSchema.safeParse({ ...relayed, host: '' }).success).toBe(false)
+  })
+
+  it('keeps a file preview below the preview route', () => {
+    expect(PreviewResponseSchema.safeParse({ ...ready, url: relayed.url }).success).toBe(false)
+    const { kind: _kind, ...withoutKind } = ready
+    expect(PreviewResponseSchema.safeParse(withoutKind).success).toBe(false)
   })
 })

@@ -258,17 +258,27 @@ describe('TaskDashboard Type in pane: localhost preview', () => {
     expect(within(dialog()).getByTitle('Preview of http://localhost:5173/')).toBeInTheDocument()
   })
 
-  it('opens a clicked localhost link in a tab for a task on another host', async () => {
+  it('previews a localhost link of a task on an SSH host through its relay (issue #387)', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(async () => new Response(JSON.stringify({
+      status: 'ready', kind: 'url', url: 'http://127.0.0.1:49152/', path: 'http://localhost:5173/', host: 'dev-server',
+    })))
     renderDashboard()
     await openPopup('idle-1')
     setStatus('connected')
 
-    act(() => terminals.onLinkActivate!('http://localhost:5173/'))
-    expect(open).toHaveBeenCalledWith('http://localhost:5173/', '_blank', 'noopener,noreferrer')
-    expect(within(dialog()).queryByRole('region', { name: 'Preview' })).toBeNull()
+    await act(async () => {
+      terminals.onLinkActivate!('http://localhost:5173/')
+    })
+    const frame = within(dialog()).getByTitle('Preview of http://localhost:5173/')
+    expect(frame).toHaveAttribute('srcdoc', localhostFrameDocument('http://127.0.0.1:49152/'))
+    expect(within(dialog()).getByRole('region', { name: 'Preview' })).toHaveTextContent('dev-server')
+    expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/sessions\/board-.*\/preview$/),
+      expect.objectContaining({ body: JSON.stringify({ url: 'http://localhost:5173/' }) }))
+    expect(open).not.toHaveBeenCalled()
 
-    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/'))
-    expect(within(dialog()).queryByRole('button', { name: 'Preview' })).toBeNull()
+    // A program's request offers Preview there too.
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5174/'))
+    expect(within(dialog()).getByRole('button', { name: 'Preview' })).toBeInTheDocument()
   })
 
   // Not connected, the preview cannot open, so it is not offered; a request
@@ -788,7 +798,8 @@ void React
 describe('TaskDashboard Type in pane: preview', () => {
   beforeEach(() => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({
-      status: 'ready', url: '/preview/ab/mockups/index.html', path: '/workspace/user/review-api/mockups/index.html', host: '',
+      status: 'ready', kind: 'file', url: '/preview/ab/mockups/index.html',
+      path: '/workspace/user/review-api/mockups/index.html', host: '',
     })))
   })
 
@@ -832,7 +843,7 @@ describe('TaskDashboard Type in pane: preview', () => {
     expect(window.localStorage.getItem('panemux:preview-split:task:wait-1')).toBe('55')
   })
 
-  it('links paths only in a task on the panemux host', async () => {
+  it('links paths in every task, on the panemux host or an SSH host (issue #387)', async () => {
     renderDashboard()
     await openPopup()
     setStatus('connected')
@@ -842,7 +853,7 @@ describe('TaskDashboard Type in pane: preview', () => {
     await openPopup('idle-1')
     setStatus('connected')
     expect(within(dialog()).getByRole('heading', { name: 'docs' })).toBeInTheDocument()
-    expect(terminals.onPreviewPath).toBeUndefined()
+    expect(typeof terminals.onPreviewPath).toBe('function')
   })
 
   it('hides the preview when the terminal disconnects', async () => {

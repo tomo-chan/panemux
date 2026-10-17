@@ -26,6 +26,10 @@ A forward binds a real listening socket on the panemux host, so its scope is del
   [command-execution.md](command-execution.md#security-command-execution-sinks) apply — there is no
   command string for a port number to be interpolated into.
 
+The split preview's relays of an SSH host's localhost URLs are a different mechanism with different
+bounds — a port chosen by the system rather than the URL's own, kept for the server's lifetime —
+described in [preview.md](preview.md#relays). Nothing above applies to them.
+
 What a forward does grant, stated plainly: while it is open, every process on the panemux host can
 reach that one port on the pane's host through `127.0.0.1:<port>`. That is the point of the feature
 (the browser is one such process), but it is a real widening of what a local process can reach, which

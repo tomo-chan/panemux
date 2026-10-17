@@ -142,11 +142,16 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
   const ready = view.kind === 'ready' || view.kind === 'page' ? view : null
   const frameRef = useRef<HTMLIFrameElement>(null)
   const pageFocused = usePageFocus(frameRef, view)
-  // A localhost page is named by the URL its frame shows.
-  const target = view.kind === 'ready' ? view.path : view.kind === 'page' ? view.frameUrl : view.request
-  // A localhost page is on the panemux host, as a file is.
+  // A localhost page is named by the URL its frame shows, or, relayed from
+  // an SSH host (issue #387), by the URL as it was clicked there.
+  const target =
+    view.kind === 'ready' ? view.path : view.kind === 'page' ? (view.shown ?? view.frameUrl) : view.request
+  // A localhost page is on the panemux host, as a file is, unless it was
+  // relayed from an SSH host.
   const host =
-    view.kind === 'ready' || view.kind === 'choose' ? previewHostLabel(view.host) : view.kind === 'page' ? previewHostLabel('') : null
+    view.kind === 'ready' || view.kind === 'choose'
+      ? previewHostLabel(view.host)
+      : view.kind === 'page' ? previewHostLabel(view.host ?? '') : null
 
   return (
     <section className="pm-preview" aria-label="Preview" style={{ minWidth }}>
@@ -218,7 +223,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
             // server's origin, never the dashboard's; that document holds no
             // script. Neither can navigate the dashboard.
             srcDoc={localhostFrameDocument(view.frameUrl)}
-            title={`Preview of ${view.frameUrl}`}
+            title={`Preview of ${view.shown ?? view.frameUrl}`}
             sandbox={LOCALHOST_PAGE_SANDBOX}
             referrerPolicy="no-referrer"
           />

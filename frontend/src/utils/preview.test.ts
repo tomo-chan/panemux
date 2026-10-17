@@ -195,12 +195,12 @@ describe('previewHostLabel', () => {
 describe('requestPreview', () => {
   it('posts the clicked path and parses the answer', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ status: 'ready', url: '/preview/ab/index.html', path: '/w/index.html', host: '' })),
+      new Response(JSON.stringify({ status: 'ready', kind: 'file', url: '/preview/ab/index.html', path: '/w/index.html', host: '' })),
     )
 
-    const resp = await requestPreview('pane/1', './index.html')
+    const resp = await requestPreview('pane/1', { path: './index.html' })
 
-    expect(resp).toEqual({ status: 'ready', url: '/preview/ab/index.html', path: '/w/index.html', host: '' })
+    expect(resp).toEqual({ status: 'ready', kind: 'file', url: '/preview/ab/index.html', path: '/w/index.html', host: '' })
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/pane%2F1/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -208,20 +208,33 @@ describe('requestPreview', () => {
     })
   })
 
+  it('posts a clicked localhost URL to be relayed (issue #387)', async () => {
+    const relayed = { status: 'ready', kind: 'url', url: 'http://127.0.0.1:49152/', path: 'http://localhost:5173/', host: 'devbox' }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(relayed)))
+
+    await expect(requestPreview('pane-1', { url: 'http://localhost:5173/' })).resolves.toEqual(relayed)
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/pane-1/preview', expect.objectContaining({
+      body: JSON.stringify({ url: 'http://localhost:5173/' }),
+    }))
+  })
+
+  // efficacy:exempt only the call's argument took #387's target shape; it pins #385 error handling
   it("rejects with the server's reason", async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('file not found: x.md\n', { status: 404 }))
-    await expect(requestPreview('pane-1', 'x.md')).rejects.toThrow('file not found: x.md')
+    await expect(requestPreview('pane-1', { path: 'x.md' })).rejects.toThrow('file not found: x.md')
   })
 
+  // efficacy:exempt only the call's argument took #387's target shape; it pins #385 error handling
   it('rejects with the status when the server gives no reason', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 500 }))
-    await expect(requestPreview('pane-1', 'x.md')).rejects.toThrow('preview failed (500)')
+    await expect(requestPreview('pane-1', { path: 'x.md' })).rejects.toThrow('preview failed (500)')
   })
 
+  // efficacy:exempt only the call's argument took #387's target shape; it pins #385 error handling
   it('rejects an answer that does not match the schema', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ status: 'ready', url: 'https://example.com/', path: '/x', host: '' })),
+      new Response(JSON.stringify({ status: 'ready', kind: 'file', url: 'https://example.com/', path: '/x', host: '' })),
     )
-    await expect(requestPreview('pane-1', 'x.md')).rejects.toThrow()
+    await expect(requestPreview('pane-1', { path: 'x.md' })).rejects.toThrow()
   })
 })

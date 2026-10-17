@@ -105,11 +105,13 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
   const tmuxSession = attach.phase === 'ready' ? attach.tmuxSession : task.location.tmux_session ?? ''
   const openAction = taskOpenAction(task, pane)
   const isMaximized = maximized && !sheet
-  // Paths in a task on the panemux host open beside the terminal (issue
-  // #385); the preview is hidden whenever the terminal is not connected.
-  const preview = usePreview(attach.phase === 'ready' ? attach.sessionId : '', chip === 'connected')
-  // URLs open as in a pane (issue #386): a localhost URL of a task on the
-  // panemux host beside the terminal. The attach is not a pane, so no
+  // Paths open beside the terminal (issue #385), read from the task's host
+  // when it is an SSH host, and a localhost URL of a task on an SSH host
+  // opens there through its relay (issue #387); the preview is hidden
+  // whenever the terminal is not connected.
+  const preview = usePreview(attach.phase === 'ready' ? attach.sessionId : '', chip === 'connected', task.host !== '')
+  // URLs open as in a pane (issue #386): a localhost URL beside the
+  // terminal — on an SSH host, through its relay (issue #387). The attach is not a pane, so no
   // forward is asked for it, and the opener is keyed by the terminal itself
   // — each Retry or Reconnect is a new one, even on the same attach — so a
   // request raised by the terminal that was replaced is dropped with it.
@@ -117,7 +119,7 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
   const urlOpen = usePaneUrlOpen(terminalKey, {
     forward: false,
     // Offered only while the preview can open.
-    previewUrl: task.host === '' && chip === 'connected' ? preview.openUrl : undefined,
+    previewUrl: chip === 'connected' ? preview.openUrl : undefined,
   })
 
   useTerminalPopupKeyboard({
@@ -162,7 +164,7 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
           key={terminalKey}
           sessionId={attach.sessionId}
           onStatus={onTerminalStatus}
-          onPreviewPath={task.host === '' ? preview.open : undefined}
+          onPreviewPath={preview.open}
           onLinkActivate={urlOpen.openUrl}
           onBrowserOpenRequest={urlOpen.requestOpen}
         />

@@ -16,7 +16,8 @@ function respond(...bodies: Array<{ status: number; body: unknown }>) {
   return fetchMock
 }
 
-const ready = { status: 'ready', url: '/preview/ab/index.html', path: '/w/index.html', host: '' }
+const ready = { status: 'ready', kind: 'file', url: '/preview/ab/index.html', path: '/w/index.html', host: '' }
+const relayed = { status: 'ready', kind: 'url', url: 'http://127.0.0.1:49152/', path: 'http://localhost:5173/', host: 'devbox' }
 
 // Issue #386: a localhost URL on the panemux host is shown as it is served,
 // with nothing to resolve on the server.
@@ -112,6 +113,43 @@ describe('usePreview', () => {
     expect(result.current.view).toEqual({
       kind: 'ready', url: '/preview/ab/index.html', path: '/w/index.html', host: '', generation: 0,
     })
+  })
+
+  it('opens a localhost URL through its relay (issue #387)', async () => {
+    const fetchMock = respond({ status: 200, body: relayed })
+    const { result } = renderHook(() => usePreview('pane-ssh', true, true))
+
+    act(() => result.current.openUrl('http://localhost:5173/'))
+    expect(result.current.view).toEqual({ kind: 'loading', request: 'http://localhost:5173/' })
+
+    await waitFor(() => expect(result.current.view?.kind).toBe('page'))
+    expect(result.current.view).toEqual({
+      kind: 'page', url: 'http://127.0.0.1:49152/', frameUrl: 'http://127.0.0.1:49152/', generation: 0,
+      host: 'devbox', shown: 'http://localhost:5173/',
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/pane-ssh/preview', expect.objectContaining({
+      body: JSON.stringify({ url: 'http://localhost:5173/' }),
+    }))
+  })
+
+  it("shows why a localhost URL could not be relayed", async () => {
+    respond({ status: 502, body: 'nothing answers on the SSH host: localhost:5173 on devbox' })
+    const { result } = renderHook(() => usePreview('pane-ssh', true, true))
+
+    act(() => result.current.openUrl('http://localhost:5173/'))
+    await waitFor(() => expect(result.current.view?.kind).toBe('error'))
+    expect(result.current.view).toEqual({
+      kind: 'error', request: 'http://localhost:5173/', message: 'nothing answers on the SSH host: localhost:5173 on devbox',
+    })
+  })
+
+  // efficacy:exempt pins #386's rule that nothing opens while disconnected, which the relay path keeps
+  it('does not open a URL while the terminal is not connected', () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    const { result } = renderHook(() => usePreview('pane-ssh', false, true))
+    act(() => result.current.openUrl('http://localhost:5173/'))
+    expect(result.current.view).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('offers the candidates, and opens the chosen one', async () => {

@@ -39,12 +39,13 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const gitInfoEnabled = !ctx?.maximizedPaneId || ctx.maximizedPaneId === pane.id
 
   const { gitInfo, refreshIfStale, refreshNow } = useGitInfo(pane.id, gitInfoEnabled)
-  // Paths and localhost URLs in a pane on the panemux host open in the split
-  // preview (issues #385 and #386). usePreview needs the terminal's
-  // connection, so the terminal and the URL opener are handed stable
-  // callbacks that reach it through a ref.
+  // Paths and localhost URLs open in the split preview (issues #385 and
+  // #386): in a pane on an SSH host, a path is read from that host and a
+  // localhost URL is that host's, reached through its relay (issue #387).
+  // usePreview needs the terminal's connection, so the terminal and the URL
+  // opener are handed stable callbacks that reach it through a ref.
   const previewRef = useRef<{ open: (path: string) => void; openUrl: (url: string) => void } | null>(null)
-  const previewable = pane.type === 'local' || pane.type === 'tmux'
+  const remote = pane.type === 'ssh' || pane.type === 'ssh_tmux'
   const openPreviewPath = useCallback((path: string) => previewRef.current?.open(path), [])
   const openPreviewUrl = useCallback((url: string) => previewRef.current?.openUrl(url), [])
   // The URL opener needs the terminal's connection too, so the terminal's
@@ -63,13 +64,14 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
     onInteraction: refreshIfStale,
     onLinkActivate: openLink,
     onBrowserOpenRequest: requestOpen,
-    onPreviewPath: previewable ? openPreviewPath : undefined,
+    onPreviewPath: openPreviewPath,
   })
   const terminalLive = connected && sessionState === 'running'
-  const preview = usePreview(pane.id, terminalLive)
+  const preview = usePreview(pane.id, terminalLive, remote)
   previewRef.current = preview
-  // Preview is offered only while the preview can open.
-  const urlOpen = usePaneUrlOpen(pane.id, { previewUrl: previewable && terminalLive ? openPreviewUrl : undefined })
+  // Preview is offered only while the preview can open. Open keeps the tab
+  // and the OAuth callback forward, on an SSH host as everywhere.
+  const urlOpen = usePaneUrlOpen(pane.id, { previewUrl: terminalLive ? openPreviewUrl : undefined })
   urlOpenRef.current = urlOpen
 
   // Observe resize events for this pane

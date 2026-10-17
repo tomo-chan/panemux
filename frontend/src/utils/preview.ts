@@ -1,4 +1,5 @@
 import { PreviewResponseSchema, type PreviewResponse } from '../schemas'
+import { isLoopbackUrl, isOpenableUrl } from './paneUrlOpen'
 
 // The split preview (issue #385): a workspace pane or the task dashboard's
 // Type in pane popup shows its terminal on the left and the HTML or Markdown
@@ -80,6 +81,15 @@ export function savePreviewSplit(key: string, value: number) {
 }
 
 /**
+ * Whether a clicked URL opens in the preview of a terminal on an SSH host
+ * (issue #387): an http or https URL of that host's localhost, which the
+ * server relays to the panemux host. Every other URL opens in a tab.
+ */
+export function isPreviewableUrl(url: string): boolean {
+  return isOpenableUrl(url) && isLoopbackUrl(url)
+}
+
+/**
  * The sandbox of a localhost page (issue #386), and of the frame holding the
  * document it is framed inside: the page keeps its server's origin — its
  * module scripts, hot reload socket and storage depend on it — and cannot
@@ -133,15 +143,19 @@ export function previewHostLabel(host: string): string {
   return host === '' ? 'local' : host
 }
 
+/** What a preview is opened on: a clicked path, or a clicked localhost URL. */
+export type PreviewTarget = { path: string } | { url: string }
+
 /**
  * Asks the server to resolve a clicked path from the session's working
- * directory and register the file for the preview.
+ * directory and register the file for the preview, or to relay a clicked
+ * localhost URL of a pane on an SSH host (issue #387).
  */
-export async function requestPreview(sessionId: string, path: string): Promise<PreviewResponse> {
+export async function requestPreview(sessionId: string, target: PreviewTarget): Promise<PreviewResponse> {
   const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/preview`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path }),
+    body: JSON.stringify(target),
   })
   if (!res.ok) {
     const message = (await res.text()).trim()

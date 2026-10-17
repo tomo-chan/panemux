@@ -101,8 +101,9 @@ policy.
 ### Paths and symbolic links
 
 `POST /api/sessions/{id}/preview` is an `/api/*` route behind the request guard; a page on another
-site cannot ask for a file. It resolves only for `local` and `tmux` sessions, whose files are on this
-host, and only HTML and Markdown names.
+site cannot ask for a file. This section covers `local` and `tmux` sessions, whose files are on this
+host; `ssh` and `ssh_tmux` sessions are in [Previewing Files of an SSH Host](#previewing-files-of-an-ssh-host).
+Only HTML and Markdown names resolve.
 
 Only files inside the session's working directory and its agent's worktrees can be previewed. That
 is the boundary #359's "path and symlink escape" asks for: the request names a path, and the server
@@ -152,3 +153,98 @@ file that grew does not turn rendering into an unbounded read. HTML is served th
 what it is given to learn the length: a file that grows past the limit while it is being served is
 cut at the checked size. Other files are streamed with
 `http.ServeContent` and are not bounded.
+
+## Previewing Files of an SSH Host
+
+For an `ssh` or `ssh_tmux` session (a pane, or a task's attach) the preview reads the file from the
+session's host and can relay a localhost URL of that host (issue #387,
+[behavior](../behavior/preview.md#panes-on-an-ssh-host)). Read this section before changing
+`internal/preview`'s `remote.go` or `relay.go`, `session.PreviewConn`, or `previewHosts` in
+`internal/api/preview.go`.
+
+### The connection
+
+- `session.DialPreviewConn` dials with the pane dialer (`dialSSHClient`): the same authentication,
+  ProxyJump, ProxyCommand and `knownhosts` verification as a pane, with the `SSHConfig` the session
+  itself was dialed with (`session.PreviewTarget`), never its `ssh_connections` entry as it reads
+  now. An edited entry restarts no pane, and re-resolving it would read a host the pane is not on,
+  under the pane's working directory there. It is never the pane's own connection, so closing the
+  pane ends neither a tab opened on a file nor a relay.
+- **No command runs over it.** Files are read over the SFTP subsystem and URLs reached over
+  direct-tcpip channels. No path, port or host name a preview names is ever part of a remote shell
+  command, so none of [command-execution.md](command-execution.md)'s shell-argument rules apply. The
+  **SFTP subsystem is required**: a host without one cannot show files, and no other reading method
+  (`scp`, `cat` over exec) is used in its place.
+- Sessions dialed with the same `SSHConfig` share one `preview.Remote`, which is made again, to that
+  same configuration, when its connection ends, receives nothing for 15 s while a keepalive
+  (`keepalive@openssh.com`, sent after 15 s with nothing received) or a request's lookups wait on it,
+  or fails with anything but an SFTP status about a file (its SFTP subsystem is gone): what was
+  opened on a host stays on it. Liveness is anything read on the transport
+  (`session.PreviewConn.LastRead`, recorded by a wrapper around the transport to the host), as
+  OpenSSH's `ServerAliveInterval` counts it: a reply queued behind relay data on a slow link is late,
+  and a fixed bound on it alone would close a connection that is busy, not dead. The
+  SSH connection is closed before its SFTP client, whose `Close` would otherwise wait behind a
+  request stalled on the host. All are closed when the server shuts down, and `Close` never waits
+  for a connection being made, which is closed once it is.
+
+### Remote paths and symbolic links
+
+The boundary is the one above: only files inside the session's working directories on its host. The
+host's filesystem cannot be opened through an `os.Root`, so the guard is a resolution done by panemux
+itself:
+
+- `realPath` resolves a path one component at a time with SFTP `LSTAT`, replacing each symbolic link
+  by its `READLINK` target (absolute, or relative to the directory holding the link) and taking `..`
+  against the already resolved, link-free prefix. SFTP's own `REALPATH` is **not** used: servers
+  differ in whether it follows links (pkg/sftp's server cleans the path lexically), and a check built
+  on it would let a link out of the working directory through on such a server. At most 40 links are
+  followed, so a loop ends.
+- Each working directory is resolved the same way, and a file is found, registered and served only
+  when the path it resolves to lies inside the path a working directory resolves to. Unlike a local
+  file, a link with an absolute target that stays inside works: the decision is made on the resolved
+  path, not by an `os.Root`. A path in another letter case on a case-insensitive host is not matched.
+- Every request below a token resolves again before it opens, so a link added afterwards is refused
+  too. What remains is the interval between that resolution and the `OPEN` of the resolved path: a
+  process on the host that can write inside the working directory could swap a component for a link
+  in between. That process can already write the files the preview shows; the check exists for
+  paths and links a file names, not to contain the host's own users.
+- The request path is checked with `fs.ValidPath` and backslashes refused, as for a local file; the
+  10 MiB limit, the policies and the token are the same.
+
+### Relays
+
+A relay binds a real listening socket on the panemux host, so its scope is deliberately narrow:
+
+- **Loopback only.** `relayBindHost` is the constant `127.0.0.1`, and the port is `0`, chosen by the
+  system; nothing derives either from a request.
+- **Loopback targets only.** `ParseLoopbackURL` accepts only `http`/`https` URLs of `localhost`,
+  `127.0.0.0/8` or `::1`; the relay dials that address and port from the host, over the preview's
+  connection. It is never a route to another machine.
+- **TLS is passed through.** The relay copies bytes and terminates nothing, so an `https` relay of a
+  `localhost` URL is named `https://localhost:<relay port>`: the browser verifies the host's own
+  certificate for the name it was issued for. panemux never sees or holds the page's TLS keys.
+- **One relay per host and address.** A relay is keyed by the `preview.Remote`, the address and the
+  port, and never handed to another: a tab keeps the target it was opened on (#359).
+- **Kept for the server's lifetime.** #359 rules out tying a tab to the pane, a count limit or an idle
+  expiry, so relays have none; they close when the server shuts down. This differs on purpose from
+  [loopback port forwarding](url-open.md#loopback-port-forwarding), which republishes an OAuth
+  callback at its own port number and is bounded.
+
+What a relay grants, stated plainly: while panemux runs, every process on the panemux host can reach
+that one loopback address of the SSH host through `127.0.0.1:<relay port>`, as with a forward.
+
+### The relayed page's origin
+
+A relayed page is not served by panemux and carries no panemux policy. It runs in the origin of its
+relay, `http://127.0.0.1:<relay port>`, which is never the dashboard's: the relay's port is another
+loopback port, and the [shared browser request guard](auth.md#shared-browser-request-guard) refuses
+another loopback port and every `same-site` request before any handler runs, so the page cannot call
+`/api/*` or `/ws/*`.
+
+`PreviewSplit` frames it exactly as a [localhost page](#localhost-pages): inside panemux's own
+`srcdoc` document whose `frame-src` keeps the frame on loopback, with the localhost page's sandbox.
+That keeps the page in its own origin rather than an opaque one, because a development server's
+module scripts, storage and hot-reload WebSocket need it; it is safe only because that origin is the
+relay's. **Never give a frame of a `/preview/` file `allow-same-origin`** — that origin is the
+dashboard's ([Isolation](#isolation-from-the-dashboards-origin)). Cookies are kept by host name, so
+relayed pages share `127.0.0.1`'s cookies with each other; panemux itself keeps none.

@@ -150,6 +150,23 @@ describe('PreviewSplit', () => {
     expect(region).toHaveTextContent('/workspace/user/project/mockups/index.html')
   })
 
+  it('shows a localhost page relayed from an SSH host, naming the host and the URL clicked (issue #387)', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    renderSplit({
+      kind: 'page', url: 'http://127.0.0.1:49152/app', frameUrl: 'http://127.0.0.1:49152/app', generation: 0,
+      host: 'devbox', shown: 'http://localhost:5173/app',
+    })
+
+    const frame = screen.getByTitle('Preview of http://localhost:5173/app') as HTMLIFrameElement
+    expect(frame.getAttribute('srcdoc')).toBe(localhostFrameDocument('http://127.0.0.1:49152/app'))
+    const region = screen.getByRole('region', { name: 'Preview' })
+    expect(region).toHaveTextContent('devbox')
+    expect(region).not.toHaveTextContent('local ·')
+    expect(region).toHaveTextContent('http://localhost:5173/app')
+    fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }))
+    expect(open).toHaveBeenCalledWith('http://127.0.0.1:49152/app', '_blank', 'noopener,noreferrer')
+  })
+
   it('starts from the ratio stored for this pane', () => {
     savePreviewSplit(paneSplitKey('pane-1'), 35)
     renderSplit(ready)

@@ -307,14 +307,30 @@ export type OpenUrlResponse = z.infer<typeof OpenUrlResponseSchema>
 // Response from POST /api/sessions/{id}/preview (issue #385): the preview of
 // the HTML or Markdown file a clicked path names, or the files a relative
 // path may name when more than one working directory holds it. host is ""
-// for the panemux host.
-export const PreviewResponseSchema = z.discriminatedUnion('status', [
+// for the panemux host, or the ssh_connections name of the pane's host. A
+// clicked localhost URL of a pane on an SSH host (issue #387) is ready as
+// kind "url": url is its relay on 127.0.0.1 and path the URL as clicked.
+const PreviewReadySchema = z.discriminatedUnion('kind', [
   z.object({
     status: z.literal('ready'),
+    kind: z.literal('file'),
     url: z.string().startsWith('/preview/'),
     path: z.string().min(1),
     host: z.string(),
   }),
+  z.object({
+    status: z.literal('ready'),
+    kind: z.literal('url'),
+    // The relay's address: 127.0.0.1, or localhost for an https URL that
+    // named it, so its certificate still matches.
+    url: z.string().regex(/^(?:https?:\/\/127\.0\.0\.1|https:\/\/localhost):\d+(?:[/?#]|$)/),
+    path: z.string().min(1),
+    host: z.string().min(1),
+  }),
+])
+
+export const PreviewResponseSchema = z.union([
+  PreviewReadySchema,
   z.object({
     status: z.literal('choose'),
     candidates: z.array(z.string().min(1)).min(2),

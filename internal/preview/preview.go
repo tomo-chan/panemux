@@ -273,8 +273,18 @@ func within(dir, file string) bool {
 }
 
 type entry struct {
-	root string
-	file string // slash-separated, relative to root
+	// remote is the SSH host the file is on, or nil for the panemux host.
+	remote *Remote
+	root   string
+	file   string // slash-separated, relative to root
+}
+
+// fileReader is what a previewed file is served through: an *os.File, or an
+// *sftp.File for a file on an SSH host.
+type fileReader interface {
+	io.ReadSeeker
+	io.ReaderAt
+	io.Closer
 }
 
 // Registry maps the tokens of opened previews to their files. Entries are
@@ -312,7 +322,11 @@ func (r *Registry) Open(root, file string) (string, error) {
 		return "", ErrTooLarge
 	}
 
-	e := entry{root: root, file: filepath.ToSlash(rel)}
+	return r.register(entry{root: root, file: filepath.ToSlash(rel)})
+}
+
+// register returns the address e is served at, under a token of its own.
+func (r *Registry) register(e entry) (string, error) {
 	token, err := r.tokenFor(e)
 	if err != nil { //coverage:exempt tokenFor fails only when crypto/rand does
 		return "", err
@@ -391,10 +405,13 @@ func serveHTML(w http.ResponseWriter, req *http.Request, info fs.FileInfo, f io.
 }
 
 // open opens a regular file below a registered root, or reports false.
-func (r *Registry) open(token, rest string) (*os.File, fs.FileInfo, bool) {
+func (r *Registry) open(token, rest string) (fileReader, fs.FileInfo, bool) {
 	e, ok := r.lookup(token)
 	if !ok || rest == "." || !fs.ValidPath(rest) || strings.Contains(rest, `\`) {
 		return nil, nil, false
+	}
+	if e.remote != nil {
+		return openRemote(e, rest)
 	}
 	root, err := os.OpenRoot(e.root)
 	if err != nil {

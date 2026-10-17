@@ -305,8 +305,9 @@ rules.
 
 - The terminal keeps the left side and the preview takes the right, starting at 50:50. The pane
   header, status bar and every pane operation stay as they are; the split lives in the pane's body.
-- The preview header follows the mock in #359: the host (`local`) in the accent blue, then the
-  absolute path, truncated with the full value as a tooltip; below it Reload, an outlined
+- The preview header follows the mock in #359: the host (`local`, or the SSH host's connection
+  name) in the accent blue, then the absolute path — or, for a relayed localhost URL of an SSH host,
+  the URL as clicked, not the relay's address — truncated with the full value as a tooltip; below it Reload, an outlined
   `Open in new tab`, and Close. Opening larger is a new tab — the preview has no full screen of its
   own, so the terminal is never hidden behind it.
 - While the previewed page has focus, a one-line note under the header says that keys go to the
