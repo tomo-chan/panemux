@@ -115,6 +115,7 @@ const roundTrips: RoundTrip[] = [
   { fixture: 'task-attach', schemaName: 'TaskAttachSchema', schema: schemas.TaskAttachSchema },
   { fixture: 'host-session-name', schemaName: 'HostSessionNameSchema', schema: schemas.HostSessionNameSchema },
   { fixture: 'host-terminal', schemaName: 'HostTerminalSchema', schema: schemas.HostTerminalSchema },
+  { fixture: 'task-codex-hook', schemaName: 'CodexHookSchema', schema: schemas.CodexHookSchema },
   { fixture: 'task-summary', schemaName: 'TaskSummarySchema', schema: schemas.TaskSummarySchema },
   // The two WebSocket fixtures hold one frame per element, in the order the
   // server sent them, so the schema that owns a single frame is wrapped here
