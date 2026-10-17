@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.26.0](https://github.com/tomo-chan/panemux/compare/v0.25.0...v0.26.0) (2026-10-17)
+
+
+### Features
+
+* add the agent registry for agent IDs, aliases and process rules ([#378](https://github.com/tomo-chan/panemux/issues/378)) ([9aeb984](https://github.com/tomo-chan/panemux/commit/9aeb98440bf658d3c99fbfb0b4b85261c8c0297e))
+* install the codex permission hook from the host menu ([#398](https://github.com/tomo-chan/panemux/issues/398)) ([30aa6ac](https://github.com/tomo-chan/panemux/commit/30aa6ac0239f378a141fa1866ef72b6921fa7483))
+* notify codex approval waits on SSH hosts ([#393](https://github.com/tomo-chan/panemux/issues/393)) ([c627fb3](https://github.com/tomo-chan/panemux/commit/c627fb3f97199c2aae38d0a6f69c1bb79d6b661d))
+* preview local HTML and Markdown beside the terminal ([#390](https://github.com/tomo-chan/panemux/issues/390)) ([17dcfec](https://github.com/tomo-chan/panemux/commit/17dcfec3fa13388e94c345b78fdeed375aaaa0b5))
+* preview localhost URLs and route every terminal URL through one opener ([#397](https://github.com/tomo-chan/panemux/issues/397)) ([880f9c5](https://github.com/tomo-chan/panemux/commit/880f9c5b0776109bbe7bf7303102fce6cc216e27))
+* preview SSH hosts' files and relay their localhost URLs ([#399](https://github.com/tomo-chan/panemux/issues/399)) ([93c0077](https://github.com/tomo-chan/panemux/commit/93c0077db5b006e893d3c704e5e5d95537af2738))
+* show codex permission waits in their pane with Input given ([#406](https://github.com/tomo-chan/panemux/issues/406)) ([7acb8be](https://github.com/tomo-chan/panemux/commit/7acb8be63ea6228e118ed88f6b07c8d8db152684))
+* show local codex approval waits and clear them with Input given ([#388](https://github.com/tomo-chan/panemux/issues/388)) ([e461b78](https://github.com/tomo-chan/panemux/commit/e461b7822c90fc52662ba10f4592c2dfa611bcbd))
+* update the codex permission hook by itself on hosts that turn it on ([#403](https://github.com/tomo-chan/panemux/issues/403)) ([a1c6af2](https://github.com/tomo-chan/panemux/commit/a1c6af2c5fe0052be046883a17ac14a4349d4f12))
+
+
+### Bug Fixes
+
+* bound the stop hook's stdin read when timeout is missing ([#369](https://github.com/tomo-chan/panemux/issues/369)) ([82d418d](https://github.com/tomo-chan/panemux/commit/82d418d7e2adad9667e163b7f9c6da0bd12ecab5))
+* guard all APIs and WebSockets with one browser origin policy ([#361](https://github.com/tomo-chan/panemux/issues/361)) ([f893845](https://github.com/tomo-chan/panemux/commit/f8938455e13c39941aabcb044a6f9edb53637bb4))
+* run hook checks in the worktree that holds the edited file ([#368](https://github.com/tomo-chan/panemux/issues/368)) ([588e470](https://github.com/tomo-chan/panemux/commit/588e47011fa6b6e6c2df7e009b467a7d084cd4b7))
+* skip nested checkouts in the docs-links check ([#371](https://github.com/tomo-chan/panemux/issues/371)) ([2006249](https://github.com/tomo-chan/panemux/commit/20062493d85c9a61efba86816f82643f15a3488f))
+
 ## [0.25.0](https://github.com/tomo-chan/panemux/compare/v0.24.0...v0.25.0) (2026-10-10)
 
 
