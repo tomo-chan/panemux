@@ -150,5 +150,4 @@ describe('CodexHookItem (issue #396)', () => {
     expect(button).toBeEnabled()
     expect(screen.queryByRole('status')).toBeNull()
   })
-
 })
