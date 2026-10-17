@@ -191,8 +191,11 @@ var errCodexHookOutput = errors.New("codex hook check output ended early")
 // host without codex, otherwise the hook file and hooks.json. Anything a
 // login shell printed before the first marker is skipped.
 func parseCodexHookOutput(out []byte) (string, []codexHookFileContent, error) {
-	for len(out) > 0 && !bytes.HasPrefix(out, []byte("::codex none\n")) && !bytes.HasPrefix(out, []byte("::home ")) {
-		_, out, _ = bytes.Cut(out, []byte("\n"))
+	for !bytes.HasPrefix(out, []byte("::codex none\n")) && !bytes.HasPrefix(out, []byte("::home ")) {
+		var ok bool
+		if _, out, ok = bytes.Cut(out, []byte("\n")); !ok {
+			return "", nil, errCodexHookOutput
+		}
 	}
 	if bytes.HasPrefix(out, []byte("::codex none\n")) {
 		return "", nil, nil
@@ -214,7 +217,7 @@ func parseCodexHookOutput(out []byte) (string, []codexHookFileContent, error) {
 		}
 		size, mode, _ := strings.Cut(strings.TrimPrefix(string(line), "::file "), " ")
 		n, err := strconv.Atoi(size)
-		if err != nil || n < 0 || len(out) < n+1 || out[n] != '\n' {
+		if err != nil || n < 0 || len(out) <= n || out[n] != '\n' {
 			return "", nil, errCodexHookOutput
 		}
 		files = append(files, codexHookFileContent{data: out[:n:n], executable: mode == "x"})

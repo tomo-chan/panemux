@@ -138,17 +138,25 @@ func codexHookOutput(hook []byte, executable bool, hooksJSON []byte) []byte {
 	return []byte(b.String())
 }
 
-func TestCodexHookStatus(t *testing.T) {
-	registered := []byte(`{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"` +
+// statusCase is one output of codexHookReadScript (or a failed run) and
+// the status it reads as.
+type statusCase struct {
+	name    string
+	want    CodexHookStatus
+	wantErr string
+	runErr  error
+	out     []byte
+}
+
+var (
+	testRegistered = []byte(`{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"` +
 		testHookCommand + `"}]}]}}`)
-	hook := []byte(codexPermissionHook)
-	cases := []struct {
-		name    string
-		want    CodexHookStatus
-		wantErr string
-		runErr  error
-		out     []byte
-	}{
+	testHook = []byte(codexPermissionHook)
+)
+
+func TestCodexHookStatus(t *testing.T) {
+	hook, registered := testHook, testRegistered
+	checkCodexHookStatuses(t, []statusCase{
 		{name: "no codex", out: []byte("::codex none\n"), want: CodexHookAbsent},
 		{name: "nothing installed", out: codexHookOutput(nil, false, nil), want: CodexHookMissing},
 		{name: "hooks.json without it", out: codexHookOutput(nil, false, []byte(`{"hooks":{}}`)), want: CodexHookMissing},
@@ -168,13 +176,37 @@ func TestCodexHookStatus(t *testing.T) {
 			want:    CodexHookInvalid,
 			wantErr: "~/.codex/hooks.json is not valid JSON",
 		},
-		{name: "host fails", runErr: errors.New("boom"), want: CodexHookUnknown, wantErr: "boom"},
 		{
-			name: "output cut short", out: []byte("::home /remote/home/demo\n::file 900 x\n#!/bin/sh\n"),
-			want: CodexHookUnknown, wantErr: "ended early",
+			name: "an empty hooks.json is a file, not none", out: codexHookOutput(hook, true, []byte{}),
+			want: CodexHookInvalid, wantErr: "is not valid JSON",
 		},
-		{name: "no output", out: []byte(""), want: CodexHookUnknown, wantErr: "ended early"},
-	}
+		{name: "host fails", runErr: errors.New("boom"), want: CodexHookUnknown, wantErr: "boom"},
+	})
+}
+
+func TestCodexHookStatusOfOutputCutShort(t *testing.T) {
+	const early = "ended early"
+	checkCodexHookStatuses(t, []statusCase{
+		{name: "no output", out: []byte(""), want: CodexHookUnknown, wantErr: early},
+		{name: "only the home line", out: []byte("::home /remote/home/demo\n"), want: CodexHookUnknown, wantErr: early},
+		{name: "the home line cut short", out: []byte("::home /remote/home/demo"), want: CodexHookUnknown, wantErr: early},
+		{
+			name: "a file cut short", out: []byte("::home /remote/home/demo\n::file 900 x\n#!/bin/sh\n"),
+			want: CodexHookUnknown, wantErr: early,
+		},
+		{
+			name: "content shorter than its size", out: []byte("::home /remote/home/demo\n::file 3 x\nabc"),
+			want: CodexHookUnknown, wantErr: early,
+		},
+		{
+			name: "no end marker", out: bytes.TrimSuffix(codexHookOutput(testHook, true, testRegistered), []byte("::end\n")),
+			want: CodexHookUnknown, wantErr: early,
+		},
+	})
+}
+
+func checkCodexHookStatuses(t *testing.T, cases []statusCase) {
+	t.Helper()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := New(Options{
