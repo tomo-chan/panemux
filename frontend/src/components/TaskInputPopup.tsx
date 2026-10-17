@@ -3,12 +3,19 @@ import type { Task } from '../schemas'
 import {
   TASK_STATE_LABELS,
   hostLabel,
+  isPermissionWait,
   taskOpenAction,
   taskTitle,
 } from '../utils/taskBoard'
 import type { TaskPaneRef } from '../utils/taskBoard'
 import { TaskTerminal } from './TaskTerminal'
 import { useTerminalPopupKeyboard } from '../hooks/useTerminalPopupKeyboard'
+import { usePreview } from '../hooks/usePreview'
+import { usePaneUrlOpen } from '../hooks/usePaneUrlOpen'
+import { taskSplitKey } from '../utils/preview'
+import { PaneApprovalNotice } from './PaneApprovalNotice'
+import { PaneUrlOpenNotice } from './PaneUrlOpenNotice'
+import { PreviewSplit } from './PreviewSplit'
 import type { TaskTerminalStatus } from './TaskTerminal'
 
 // The task dashboard's Type in pane popup (issue #284): a real terminal on a
@@ -71,6 +78,8 @@ export interface TaskInputPopupProps {
   onClose: () => void
   onRetry: () => void
   onOpenTask: (task: Task) => void
+  /** Marks the codex permission request the task waits on answered (issue #404), answering why it failed or null. */
+  onInputGiven: (task: Task) => Promise<string | null>
   /** The state pill's colors, as the dashboard's cards use them. */
   stateStyle: React.CSSProperties
 }
@@ -91,6 +100,7 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
   onClose,
   onRetry,
   onOpenTask,
+  onInputGiven,
   stateStyle,
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -100,6 +110,22 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
   const tmuxSession = attach.phase === 'ready' ? attach.tmuxSession : task.location.tmux_session ?? ''
   const openAction = taskOpenAction(task, pane)
   const isMaximized = maximized && !sheet
+  // Paths open beside the terminal (issue #385), read from the task's host
+  // when it is an SSH host, and a localhost URL of a task on an SSH host
+  // opens there through its relay (issue #387); the preview is hidden
+  // whenever the terminal is not connected.
+  const preview = usePreview(attach.phase === 'ready' ? attach.sessionId : '', chip === 'connected', task.host !== '')
+  // URLs open as in a pane (issue #386): a localhost URL beside the
+  // terminal — on an SSH host, through its relay (issue #387). The attach is not a pane, so no
+  // forward is asked for it, and the opener is keyed by the terminal itself
+  // — each Retry or Reconnect is a new one, even on the same attach — so a
+  // request raised by the terminal that was replaced is dropped with it.
+  const terminalKey = attach.phase === 'ready' ? `${attach.sessionId}:${attempt}` : ''
+  const urlOpen = usePaneUrlOpen(terminalKey, {
+    forward: false,
+    // Offered only while the preview can open.
+    previewUrl: chip === 'connected' ? preview.openUrl : undefined,
+  })
 
   useTerminalPopupKeyboard({
     dialogRef,
@@ -133,6 +159,34 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
     : movedTo
       ? `Moved to ${movedTo} on the board. This terminal stays on ${title}.`
       : null
+
+  // The terminal's area: the popup's keyboard rules treat every key typed in
+  // it as the terminal's own, so the preview sits beside it, not inside.
+  const terminalBody = (
+    <div ref={bodyRef} className="td-input-body" data-input={chip === 'connected' ? 'on' : 'off'}>
+      {attach.phase === 'ready' ? (
+        <TaskTerminal
+          key={terminalKey}
+          sessionId={attach.sessionId}
+          onStatus={onTerminalStatus}
+          onPreviewPath={preview.open}
+          onLinkActivate={urlOpen.openUrl}
+          onBrowserOpenRequest={urlOpen.requestOpen}
+        />
+      ) : (
+        <div className="td-input-blank">
+          {attach.phase === 'connecting' ? (
+            <>
+              <strong>Connecting to tmux {tmuxSession}…</strong>
+              <span>Keys are not sent until it connects.</span>
+            </>
+          ) : (
+            <strong>Not connected.</strong>
+          )}
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div className="td-input-layer" data-maximized={isMaximized} data-sheet={sheet}>
@@ -203,6 +257,18 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
           </div>
         </header>
 
+        {isPermissionWait(task) && (
+          <PaneApprovalNotice
+            key={task.wait_signature}
+            waits={1}
+            onInputGiven={async () => {
+              const failure = await onInputGiven(task)
+              // The strip goes, and its button with the focus: the terminal takes the keys again.
+              if (!failure) bodyRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()
+              return failure
+            }}
+          />
+        )}
         {notice && (
           <div role="status" className="td-input-note">
             {notice}
@@ -223,21 +289,30 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
           </div>
         )}
 
-        <div ref={bodyRef} className="td-input-body" data-input={chip === 'connected' ? 'on' : 'off'}>
-          {attach.phase === 'ready' ? (
-            <TaskTerminal key={`${attach.sessionId}:${attempt}`} sessionId={attach.sessionId} onStatus={onTerminalStatus} />
-          ) : (
-            <div className="td-input-blank">
-              {attach.phase === 'connecting' ? (
-                <>
-                  <strong>Connecting to tmux {tmuxSession}…</strong>
-                  <span>Keys are not sent until it connects.</span>
-                </>
-              ) : (
-                <strong>Not connected.</strong>
-              )}
-            </div>
-          )}
+        <div className="td-input-split">
+          <PreviewSplit
+            splitKey={taskSplitKey(task.id)}
+            view={preview.view}
+            terminal={
+              <>
+                {terminalBody}
+                {/* Over the terminal only, so an open preview's header stays in view. */}
+                <PaneUrlOpenNotice
+                  pendingUrl={urlOpen.pendingUrl}
+                  source={urlOpen.pendingSource}
+                  canPreview={urlOpen.canPreview}
+                  error={urlOpen.error}
+                  onPreview={urlOpen.previewPendingOpen}
+                  onConfirm={urlOpen.confirmPendingOpen}
+                  onDismiss={urlOpen.dismissPendingOpen}
+                  onDismissError={urlOpen.dismissError}
+                />
+              </>
+            }
+            onChoose={preview.open}
+            onReload={preview.reload}
+            onClose={preview.close}
+          />
         </div>
 
         <footer className="td-input-foot">

@@ -1368,6 +1368,83 @@ navigation to protected APIs fail closed. Authority comparison preserves the exi
 termination contract and its documented scheme limitation; authentication and broader DNS
 rebinding protection remain separate work.
 
+## 2026-10-15: The split preview's isolation and bounds (#385)
+
+The #360 entry above anticipated isolated preview pages on another loopback port. #385 isolates them
+on the dashboard's own port instead: every preview response is sandboxed by Content-Security-Policy
+without `allow-same-origin`, so the page runs in an opaque origin, framed or in a tab, and its
+requests to `/api` and `/ws` reach the shared request guard as cross-site and are refused. A second
+listener would have been the same isolation with a port to choose, bind and close, and the remote
+relays of #386/#387 decide their own ports. The frame repeats `sandbox` so the isolation does not
+rest on the header alone.
+
+Previews are served under a random token rather than by path behind the request guard, because a
+sandboxed page's own stylesheets and images are cross-site requests the guard would refuse. Tokens
+are kept for the server's lifetime: #359's lifetime rule is that a tab opened on a preview outlives
+the pane, popup and session it came from, and no expiry was asked for.
+
+A file is served from the innermost working directory holding it, looked up through that
+directory's `os.Root` when it is opened and on every request, so "path and symlink escape" has one
+boundary that relative stylesheets can still use. #359 requires a size limit
+without a value; 10 MiB bounds the HTML or Markdown document — the file read whole for rendering —
+and not the files it loads. Markdown is rendered on the server by goldmark with raw HTML omitted, so
+the page needs no script.
+
+The first cut let an absolute path name any file on the host, served from its own directory, and
+checked symbolic links with `filepath.EvalSymlinks` and `os.Stat` on the clicked path. CodeQL flagged
+both as uncontrolled data in a path expression, and the operator chose to bound previews instead of
+dismissing the alerts: only files inside the session's working directory and its agent's worktrees
+open, and a file is found and checked only through `os.Root` for one of them. A path elsewhere is
+refused with the directories allowed, rather than opened, because an agent-printed path is the input
+and #359's "path and symlink escape" names the boundary. Using `os.Root` for lookup as well as
+serving also refuses symbolic links with an absolute target; the first cut registered such a link
+when it pointed inside the root and then answered `404` for it, since serving already went through
+`os.Root`.
+
+Comparing the clicked path with the working directories as strings then refused files that are
+inside them: a pane's working directory is reported resolved (`/private/tmp/...` on macOS), while
+the shell and its agents print the path they were given (`/tmp/...`), and a case-insensitive
+filesystem accepts another letter case. A path that is not inside a working directory as written is
+now compared by the identity of the directories above it, each resolved and looked up through an
+`os.Root` for `/`; the scope is unchanged, only how a path is recognized as inside it. Matching a
+resolved form of each working directory instead would have missed the logical form the shell prints,
+which cannot be derived from the resolved one.
+
+## 2026-10-16: Localhost pages in the split preview, and one URL opener (#386)
+
+A localhost URL on the panemux host is framed directly, not proxied through panemux. A development
+server's pages use root-absolute paths (`/@vite/client`, `/src/main.ts`) and open their hot reload
+socket on their own host and port, so serving them under `/preview/<token>/` would have broken them,
+and a proxy on another port would have been a new listener to choose, bind and close for a page the
+browser can already reach. The frame keeps the page's own origin (`allow-same-origin`), because a
+sandboxed opaque origin makes Vite refuse its module scripts as cross-origin; that origin is the
+development server's, the request guard already refuses another loopback port, and the dashboard's
+own responses refuse framing. The browser running on the panemux host is the assumption URL opening
+already documents.
+
+Framed directly, the page could lead the frame anywhere: review of #397 showed a `302` or
+`location.href` to an external site displayed inside the preview under the localhost URL. The
+suggested dashboard-wide `frame-src` would have had to list every loopback host up front, and CSP
+cannot name `[::1]` or the rest of `127/8` with a wildcard. The page is instead framed inside a
+`srcdoc` document whose own policy names `localhost`, `127.0.0.1` and the URL's IPv4 address, so
+other `127.x` addresses keep working. `[::1]`, which no policy can name, is framed as `localhost` on
+the same port, path, query and fragment; the operator chose this over dropping Preview for `[::1]`
+(a restriction #359 does not have) or leaving `[::1]` unguarded, accepting that its cookies and
+storage in the preview are localhost's.
+
+Whether a frame was refused (`X-Frame-Options`, `frame-ancestors`) or hot reload works cannot be read
+from a cross-origin frame. Probing the URL from the server would have added a request panemux makes
+on the page's behalf; instead the preview always says what a frame may not show and points at Open
+in new tab.
+
+Printed links, OSC 8 links and the browser shim now go through one opener (`usePaneUrlOpen`).
+OSC 8 links used to bypass it through xterm's default handler: a `confirm()` dialog and a tab, with
+no forward and no preview. They now wait in the shim's approval strip, since their target is chosen
+by the terminal output as the shim's is. Printed links stay one click, their text being the URL.
+"Double launch" is answered by each approval taking its request as it acts and a click removing a
+request for the same URL; "replay re-issue" by the existing rule that a request in replayed
+scrollback is ignored, which OSC 8 links never needed, as they open only on a click.
+
 ## Agent registry
 
 ### One registry declares agents; capabilities are ports in their consumers (2026-10-12, issue #372)
@@ -1484,6 +1561,42 @@ the collection from guessing past a format it does not know. Nothing reads the r
   would have changed every fixture of that row; `codex/rollouts` already took optional trailing
   columns, and its rollouts include the live ones written in the last 7 days.
 
+## 2026-10-17: Updating the codex permission hook by itself (#294, #402)
+
+Stage 4 of #294 was to ship the hook as a binary for four targets and update it. Stage 3 had already
+made it a POSIX `sh` script embedded in panemux, which reaches any host, so the binaries were dropped
+and only the updating kept.
+
+- **Opt-in per host, Update only.** `Update automatically` is off until a host's menu turns it on.
+  It never installs on a host that has no hook, and never touches codex itself.
+- **When the check runs.** Stage 3 checks only when a host's menu opens, which would have left an
+  update waiting for someone to open it. A host with the setting on is therefore also checked once
+  in the background after panemux starts, on its first successful collection, so restarting a new
+  panemux updates every such host with nothing pressed.
+- **Once per process.** Each host is updated by itself at most once per panemux process, success or
+  failure; a failure is shown and not retried until a restart. No lock between panemux instances, no
+  downgrade guard and no online lookup of a newer hook: each would answer a failure no one has met.
+- **A file of its own.** The setting lives in `~/.config/panemux/codex-hook.json`, not in
+  `config.yaml` (which has no entry for the panemux host) or the task record file (keyed by task).
+
+## 2026-10-16: Installing the codex permission hook from the host menu (#294, #396)
+
+Stage 3 of #294 replaces copying the hook and editing `~/.codex/hooks.json` by hand with an
+`Install` / `Update` item in each host's menu. The panemux host's chip, which opened nothing, opens a
+menu with that item alone.
+
+- **Content decides, not versions.** A hook that differs from the one this panemux embeds shows
+  `Update`; there is no version number, no downgrade guard, no lock between two panemux instances and
+  no crash journal. Each would answer a failure no one has met yet.
+- **Read in Go, written by a fixed script.** `hooks.json` is merged in Go, from the file the check
+  read, and written back through a quoted heredoc, because a host may have no `jq` and the shell
+  cannot merge JSON. A file that is not the shape codex reads is reported and left alone rather than
+  repaired.
+- **Trust stays with the person.** panemux says to trust the hook in codex's `/hooks` and neither
+  writes nor checks codex's trust.
+- **No codex is not the same as not checked.** A host that could not be checked says so; hiding the
+  item there would read as a host without codex.
+
 ## 2026-10-15: Codex approval waits from a PermissionRequest hook (#294, #384)
 
 Codex's own files record nothing when it asks to run a command, so approval waits showed as `busy`.
@@ -1501,3 +1614,43 @@ turn and time, read by the existing collection; the wait clears when the person 
   panemux's memory, since a request of a finished turn is not shown anyway.
 - **Later stages** — SSH hosts, installing from the host menu, a bundled helper, the pane's own
   prompt — are #294's, each its own change.
+
+## 2026-10-16: Previewing an SSH host's files and localhost URLs (#387)
+
+#359's C stage: paths and localhost URLs of `ssh` and `ssh_tmux` panes and remote tasks open in the
+split preview #385 built, through the same registry, route and policies.
+
+- **SFTP, not a shell.** Files are read over the SFTP subsystem of a connection the preview keeps per
+  host, so no path reaches a remote shell. Reading with `cat` over exec was rejected: it would need
+  every path through `validRemotePath`, which refuses names a working directory may hold, and would
+  still put the path in a command.
+- **Links resolved by panemux.** SFTP's `REALPATH` is not trusted to follow symbolic links — pkg/sftp's
+  server, for one, does not — so the boundary check resolves each component with `LSTAT`/`READLINK`
+  itself. The window between that check and the `OPEN` is accepted and recorded in
+  [preview security](security/preview.md#remote-paths-and-symbolic-links).
+- **Its own connection, to the pane's host.** The pane's connection ends with the pane, and #359
+  requires a tab to outlive it, so the preview dials its own with the pane dialer, with the
+  configuration the pane was dialed with. Resolving the pane's `ssh_connections` name again was the
+  first implementation and was rejected in review: editing an entry restarts no pane, so a live pane
+  on host A previewed host B, and an entry edited A→B→A got A a new relay port.
+- **SFTP only.** The operator decided a host without an SFTP subsystem shows the reason and no
+  fallback (`scp`, `cat` over exec) is added.
+- **A checked connection, not a bounded tab.** Review found a stopped `sshd` left file tabs waiting
+  indefinitely and a lost `sftp-server` left them failing until restart. The connection is pinged,
+  a request's lookups are bounded, and a connection failing for anything but a file is made again.
+  None of this ends a tab, which #359 rules out. A fixed 15 s bound on the keepalive reply and on a
+  lookup was the first form, and a later review found it closed busy connections on links slower than
+  about 100 KB/s, where both wait behind relay data. Liveness is now anything arriving on the
+  transport, as OpenSSH's `ServerAliveInterval` counts it, so only a connection that receives nothing
+  is closed.
+- **Connecting outside the lock.** Holding the host's lock while dialing made `Close`, and so a
+  graceful shutdown, wait out the SSH dial's retries; callers now wait for one attempt instead.
+- **TLS keeps `localhost`.** An `https` relay of a `localhost` URL is named `localhost`, since the
+  relay passes TLS through and the certificate names `localhost`; `http` relays name `127.0.0.1`.
+- **A relay per host and address, not loopback port forwarding.** The OAuth forward republishes a port
+  at its own number, which collides with the panemux host's and another host's same port, and is
+  bounded by count and idle expiry. A relay takes a port the system chooses, is never reassigned, and
+  has no count limit, idle expiry or pane-bound lifetime — all three were rejected in #359.
+- **The relayed page keeps its own origin.** Its frame adds `allow-same-origin`, unlike a file's,
+  because development servers' module scripts and hot reload fail in an opaque origin; the relay's
+  port is not the dashboard's, which the request guard refuses.

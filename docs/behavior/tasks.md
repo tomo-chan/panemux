@@ -374,20 +374,71 @@ does write:
 
 A codex `PermissionRequest` command hook (`internal/tasks/codex_permission_hook.sh`, a POSIX `sh`
 script) records each approval request, so the session shows as `wait` and the
-[input-wait notification](task-events.md) fires. It is registered by hand, on the panemux host only
-for now: copy the script somewhere of the user's, make it executable, add it to `~/.codex/hooks.json`,
-and trust it in codex's `/hooks` review:
+[input-wait notification](task-events.md) fires. It is installed on each host whose codex should be
+watched from the host's menu ([Opening a host](#opening-a-host)), and then trusted in codex's `/hooks`
+review there.
 
-```json
-{
-  "hooks": {
-    "PermissionRequest": [
-      { "hooks": [{ "type": "command", "command": "/workspace/user/bin/codex_permission_hook.sh", "timeout": 1 }] }
-    ]
-  }
-}
-```
+- **`Codex input notifications` in the host menu.** The menu checks the host when it opens
+  ([`GET /api/tasks/codex-hook`](#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update)) and shows one of:
 
+  | Host | Shown |
+  |---|---|
+  | No `~/.codex` and no `codex` on the `PATH` of `sh -s` there | Nothing (the panemux host's menu says no Codex was found) |
+  | Neither the hook file nor its `hooks.json` entry | `Not installed` and `Install` |
+  | The hook file as panemux embeds it, executable, and its entry in `hooks.json` | `Installed` |
+  | Anything else: an older or edited hook file, one not executable, or only one of the two | `Update` |
+  | A `hooks.json` that is not JSON, not an object, or whose `hooks` or `hooks.PermissionRequest` is not an object or a list, or one larger than 1 MiB (which the check does not read) | `Cannot install:` and the reason; nothing is offered |
+  | The check could not run (the connection failed, the output ended early) | `Not checked:` and the reason, never taken for a host without codex |
+
+- **What `Install` and `Update` do.** They write the script panemux embeds to
+  `~/.local/bin/panemux-codex-permission-hook.sh` (mode 755) and, unless `~/.codex/hooks.json`
+  already has a `PermissionRequest` hook whose `command` is that file's absolute path, add one entry
+  to it — creating the file when there is none:
+
+  ```json
+  { "hooks": [{ "type": "command", "command": "/remote/home/demo/.local/bin/panemux-codex-permission-hook.sh", "timeout": 1 }] }
+  ```
+
+  Every other key and hook in the file is kept, `&`, `<` and `>` as written; the file is rewritten
+  with two-space indentation and its top-level keys sorted. The new content is written to a
+  temporary file in `~/.codex` first and copied over `hooks.json` only once that succeeded, so a
+  write that fails (a full disk, a file-size limit) leaves `hooks.json` as it was. It is copied in
+  place, so a `hooks.json` that is a symbolic link stays one, and keeps its mode. When that copy
+  fails part way (a link onto a full volume), the temporary file, which holds the user's hooks with
+  panemux's entry, is kept, and the reason shown says where it is. A `hooks.json` that cannot be written (read-only) is
+  reported as `~/.codex/hooks.json is not writable` and left as it was, and no temporary file is kept. A failed write
+  shows the shell's own reason, such as `Permission denied`, on the local host and on an SSH host
+  alike. A hook file larger than 1 MiB is not read either, and shows `Update`. A `hooks.json` the check could not read as above is never written, and neither is the hook.
+  The menu then shows the status read back, and says to trust the hook in codex's `/hooks`: panemux
+  neither trusts it nor checks whether it is trusted. A hook that differs from this panemux's shows
+  `Update` until it is pressed, unless the host has `Update automatically` on (below).
+- **`Update automatically`.** A checkbox under the status, offered on a host showing `Not
+  installed`, `Update` or `Installed`, and off on every host until turned on there. The hosts it is
+  on for are kept in `~/.config/panemux/codex-hook.json` (`{"version":1,"auto_update":["","gpu-box"]}`,
+  mode 600, the panemux host as `""`), so the setting survives a restart; a file panemux cannot read
+  is reported (`Could not read the setting:` and the reason under the status, with the checkbox
+  disabled until it can be read; `Could not save:` when it fails on saving) and never written over.
+  Changing the checkbox, and `Install` or `Update`, are each disabled while the other runs. Turning
+  it on on a host showing `Update` checks the hook again at once, which updates it. On such
+  a host, a check that finds `Update` runs `Update` by itself: the check when the host's menu opens,
+  and one more made in the background after panemux starts, on the host's first successful
+  collection, so replacing panemux and restarting it updates the hook with nothing pressed. Nothing
+  is installed by itself on a host showing `Not installed`, and codex itself is never updated. Each
+  host is updated by itself at most once per panemux process, whatever came of it: the menu then says
+  `Updated automatically. Trust it in codex's /hooks before it runs.` (the new content may need
+  trusting again), or `Could not update automatically:` and the reason, which is not tried again until
+  panemux restarts. `Update` can still be pressed; once it succeeds, the message is cleared. Both
+  outcomes are also written to the server log.
+- **By hand.** Copy `internal/tasks/codex_permission_hook.sh` to a path of the user's on the host,
+  make it executable, add an entry like the one above with that path to the host's
+  `~/.codex/hooks.json`, and trust it in `/hooks`. The menu knows only its own path: a hook
+  installed at another path shows `Not installed`, and `Install` adds panemux's entry beside it, so
+  remove the hand-made entry then.
+- **On an `ssh_connections` host.** The same check and install run on the host over its connection.
+  The records stay on that host; the task collection, which runs there over the host's connection,
+  reads them as it does locally. The wait and its `Input given` are the host's task's: the wait
+  signature includes the host, so marking it answered leaves the same session ID's request on
+  another host waiting.
 - **What the hook writes.** It reads the hook's JSON on stdin and keeps only `session_id`, `turn_id`
   (hex digits and dashes) and the time, as `<session ID> <turn ID> <unix seconds>` in
   `~/.local/state/panemux/codex-permission/<session ID>` — one file per session, replaced by the next
@@ -402,7 +453,9 @@ and trust it in codex's `/hooks` review:
   other turn, ignores the record: the wait clears by itself when the turn is over.
 - **`Input given`.** The detail panel of such a task offers `Input given`, which
   [`POST /api/tasks/input-given`](#post-apitasksinput-given) sends. panemux keeps the answered
-  requests in memory only; the next request in the same turn waits again.
+  requests in memory only; the next request in the same turn waits again. The pane running the task
+  and the Type in pane popup on it offer the same button, on a strip below their header
+  ([Codex permission requests in a pane](task-events.md#codex-permission-requests-in-a-pane)).
 - **Known limits.** Codex runs the hook before it approves a request on its own too, so a request
   that needed no person can show as a wait until its turn ends or `Input given` is pressed. Codex
   records nothing when the person answers in the pane, so the wait stays until one of those.
@@ -945,8 +998,12 @@ A host chip in the dashboard's host list opens a terminal on that host:
 | Host | Chip |
 |---|---|
 | A host of `ssh_connections` whose last collection succeeded (`ok`) | A button (`Open a terminal on <host>`) that opens the connection menu |
-| The panemux host (`""`) | Not a button; the panemux host is not opened from here |
+| The panemux host (`""`) whose last collection succeeded | A button (`Codex input notifications on Local`) that opens a menu with that item alone; the panemux host is not opened from here |
 | `connecting`, `error` or not yet collected | Not a button; an `error` host keeps its `Reconnect` button |
+
+Under its actions, the connection menu carries the host's
+[`Codex input notifications`](#codex-permission-requests) item. The panemux host's menu has the item
+and `Close` only.
 
 The connection menu is a dialog under the chip ([UI](../ui-design.md#task-dashboard)). It offers
 `ssh` (the default) or `ssh_tmux`, and three actions:
@@ -1208,6 +1265,36 @@ requests](#codex-permission-requests)):
   changes nothing.
 - Answers `204`; `400` for a body that is not valid or an empty `wait_signature`; `403` for a
   cross-site request.
+
+### `GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`
+
+Whether a host's codex has panemux's permission hook, and installing or updating it ([Codex
+permission requests](#codex-permission-requests)):
+
+```
+GET /api/tasks/codex-hook?host=gpu-box
+POST /api/tasks/codex-hook   { "host": "gpu-box" }
+```
+
+- `host` is an `ssh_connections` key, or empty (or absent from the query) for the panemux host. The
+  request names nothing else: the paths and the content written are panemux's own.
+- Both answer `200` with `{ "status": "<status>" }`, and `"error"` with the reason for `invalid` and
+  `unknown`. The status is `absent` (no codex), `missing`, `installed`, `outdated`, `invalid` (a
+  `hooks.json` panemux will not rewrite) or `unknown` (the check could not run). `POST` answers the
+  status read back after writing, and writes nothing for a host already `installed`.
+- Both also carry `"auto_update"`, whether the host's hook is updated by itself, and, once this
+  panemux process did so, `"auto_updated": true` or `"auto_error"` with why it failed. A setting that
+  could not be read gives `"auto_settings_error"` with why, and `"auto_update": false`. `GET` runs
+  that update itself when it finds `outdated`
+  ([`Update automatically`](#codex-permission-requests)), and answers the status read back after it.
+- `404` for a host that is not in `ssh_connections`. `POST` answers `502` with the reason when the
+  host has no codex, its `hooks.json` is `invalid`, or the check or the write failed, and `400` for a
+  body it cannot decode strictly. Both answer `403` to a cross-site request.
+- `POST /api/tasks/codex-hook/auto-update` with `{ "host": "gpu-box", "enabled": true }` turns
+  `Update automatically` on or off for that host and answers `200` with `{ "auto_update": true }`.
+  It touches nothing on the host. `404` for a host not in `ssh_connections`, `400` for a body it
+  cannot decode strictly, `500` with the reason when the settings file cannot be read or written,
+  `403` for a cross-site request.
 
 ### `POST /api/hosts/session-name`
 

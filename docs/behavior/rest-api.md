@@ -205,7 +205,61 @@ A `409` is reported rather than worked around. An OAuth provider matches the reg
 `redirect_uri` exactly, so rewriting the callback to a different local port would break the login it
 is meant to complete.
 
-### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume`, `POST /api/tasks/summary`, `POST /api/tasks/input-given` and `POST`/`DELETE /api/tasks/attach`
+### `POST /api/sessions/{id}/preview`
+
+Accepts `{ "path": "<the path as the terminal showed it>" }`, resolves it from the session's working
+directory and its agent's worktrees, and registers the HTML or Markdown file it names for the
+[split preview](preview.md). For an `ssh` or `ssh_tmux` session — a pane, or a task's attach — the
+path is resolved on, and the file read from, the session's SSH host.
+
+Accepts `{ "url": "<a localhost URL>" }` instead for an `ssh` or `ssh_tmux` session: the URL's address
+and port on the session's host are relayed to a port of their own on `127.0.0.1` of the panemux host
+([Localhost URLs of an SSH host](preview.md#localhost-urls-of-an-ssh-host)).
+
+- `400`: invalid JSON body; a path that is not `.html`, `.htm`, `.md` or `.markdown`; a URL that is
+  not an http or https URL of `localhost`, `127.0.0.1` or `[::1]`; a URL for a session on the panemux
+  host; or an `ssh`/`ssh_tmux` session that names no SSH connection
+- `403`: the file is outside the session's working directory and its agent's worktrees — an absolute
+  path elsewhere, a `../` that leaves them, or a symbolic link that leads out of them (the reason names
+  the directories allowed)
+- `404`: no session exists for `id`, or no file exists at the path (the reason names where it looked)
+- `413`: the file is larger than 10 MiB
+- `422`: the session's working directory and its agent's worktrees are all unknown
+- `502`: the session's SSH host cannot be reached, or offers no SFTP subsystem for a path, or nothing
+  answers at the URL's address on it
+- `200`: the preview to show, or the files to choose from
+
+Errors carry their reason as plain text, which the preview shows. A file to show:
+
+```json
+{ "status": "ready", "kind": "file", "url": "/preview/<token>/mockups/index.html", "path": "/workspace/user/project/mockups/index.html", "host": "" }
+```
+
+A relayed URL, with `path` the URL as clicked:
+
+```json
+{ "status": "ready", "kind": "url", "url": "http://127.0.0.1:<relay port>/app", "path": "http://localhost:5173/app", "host": "devbox" }
+```
+
+Several files a relative path may name, absolute, in the order the directories were searched; the
+chosen one is sent back as `path`:
+
+```json
+{ "status": "choose", "candidates": ["/workspace/user/project/docs/design.md", "/workspace/user/project-wt/docs/design.md"], "host": "" }
+```
+
+`host` is `""` for the panemux host, otherwise the session's `ssh_connections` name.
+
+### `GET /preview/{token}/*`
+
+Serves a registered preview and the files under the same root. It sits outside `/api` and its
+request guard, since the page it serves runs in an opaque origin and all of its own requests are
+cross-site; the token is what grants access. Missing tokens and files, directories, `..` and paths or
+symbolic links leading outside the root answer `404`; an HTML or Markdown file over 10 MiB answers
+`413`. Markdown is answered rendered as HTML. Headers and policies are in
+[security/preview.md](../security/preview.md).
+
+### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume`, `POST /api/tasks/summary`, `POST /api/tasks/input-given`, `GET`/`POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update` and `POST`/`DELETE /api/tasks/attach`
 
 The task dashboard's collection, its per-host reconnect, the done and label records (and the labels
 used before, `known_labels` on `GET /api/tasks`), starting
@@ -216,7 +270,8 @@ starting and resuming are in [Starting a task](tasks.md#starting-a-task),
 [Resuming a task](tasks.md#resuming-a-task), [`POST /api/tasks`](tasks.md#post-apitasks) and
 [`POST /api/tasks/resume`](tasks.md#post-apitasksresume); summaries are in [Summaries](tasks.md#summaries)
 and [`POST /api/tasks/summary`](tasks.md#post-apitaskssummary); marking a codex permission request
-answered is in [`POST /api/tasks/input-given`](tasks.md#post-apitasksinput-given); the board's temporary tmux attach is in
+answered is in [`POST /api/tasks/input-given`](tasks.md#post-apitasksinput-given); a host's codex permission hook
+and updating it by itself are in [`GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`](tasks.md#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update); the board's temporary tmux attach is in
 [`POST /api/tasks/attach`](tasks.md#post-apitasksattach).
 
 ### `POST /api/hosts/session-name` and `POST`/`DELETE /api/hosts/terminal`

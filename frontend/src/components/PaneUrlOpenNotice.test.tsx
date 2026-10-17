@@ -78,4 +78,44 @@ describe('PaneUrlOpenNotice', () => {
 
     expect(screen.getByTitle(longUrl)).toBeInTheDocument()
   })
+
+  // Issue #386: a localhost URL on the panemux host can be previewed.
+  it('offers Preview, Open and Ignore when the URL can be previewed', () => {
+    const onPreview = vi.fn()
+    const onConfirm = vi.fn()
+    render(
+      <PaneUrlOpenNotice
+        {...defaultProps}
+        pendingUrl="http://localhost:5173/"
+        canPreview
+        onPreview={onPreview}
+        onConfirm={onConfirm}
+      />,
+    )
+
+    const buttons = screen.getAllByRole('button').map((b) => b.textContent)
+    expect(buttons).toEqual(['Preview', 'Open', 'Ignore'])
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+    expect(onPreview).toHaveBeenCalledTimes(1)
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
+  it('offers Preview only for a URL that can be previewed', () => {
+    const { rerender } = render(
+      <PaneUrlOpenNotice {...defaultProps} pendingUrl="http://localhost:5173/" canPreview onPreview={vi.fn()} />,
+    )
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeInTheDocument()
+
+    rerender(<PaneUrlOpenNotice {...defaultProps} pendingUrl="https://example.com/" onPreview={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open' })).toBeInTheDocument()
+  })
+
+  it('says a clicked link asks, not the pane', () => {
+    const { rerender } = render(<PaneUrlOpenNotice {...defaultProps} pendingUrl="https://example.com/" />)
+    expect(screen.getByText('This pane wants to open')).toBeInTheDocument()
+
+    rerender(<PaneUrlOpenNotice {...defaultProps} pendingUrl="https://example.com/" source="link" />)
+    expect(screen.getByText('This link goes to')).toBeInTheDocument()
+  })
 })

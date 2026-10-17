@@ -2,11 +2,15 @@ import React, { useCallback, useContext, useEffect, useRef, useState } from 'rea
 import { DisplayConfig, PaneConfig } from '../types'
 import { useTerminal } from '../hooks/useTerminal'
 import { useGitInfo } from '../hooks/useGitInfo'
-import { usePaneUrlOpen } from '../hooks/usePaneUrlOpen'
+import { usePaneUrlOpen, type UrlOpenSource } from '../hooks/usePaneUrlOpen'
+import { usePreview } from '../hooks/usePreview'
+import { paneSplitKey } from '../utils/preview'
 import type { PaneEdge } from '../utils/layoutTree'
 import { PaneHeader } from './PaneHeader'
 import { PaneStatusBar } from './PaneStatusBar'
+import { PaneApprovalNotice } from './PaneApprovalNotice'
 import { PaneUrlOpenNotice } from './PaneUrlOpenNotice'
+import { PreviewSplit } from './PreviewSplit'
 import { LayoutActionsContext } from './SplitContainer'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
@@ -17,34 +21,61 @@ interface TerminalPaneProps {
 }
 
 export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
-  const containerRef = useRef<HTMLDivElement | null>(null)
+  // The body holds the terminal and, when one is open, its preview; it is
+  // what a dragged pane drops onto. The terminal's own container is xterm's.
+  const bodyRef = useRef<HTMLDivElement | null>(null)
   const [containerEl, setContainerEl] = React.useState<HTMLElement | null>(null)
   const [hoverEdge, setHoverEdge] = useState<PaneEdge | null>(null)
 
   const setRef = useCallback((el: HTMLDivElement | null) => {
-    containerRef.current = el
     setContainerEl(el)
   }, [])
 
   const ctx = useContext(LayoutActionsContext)
   const displayConfig = ctx?.displayConfig ?? DEFAULT_DISPLAY
   const hasAttention = ctx?.hasPaneAttention(pane.id) ?? false
+  const approval = ctx?.approval
+  const approvalWaits = approval?.waits(pane.id) ?? []
   const isActivePane = ctx?.activePaneId === pane.id
   const isDragSource = ctx?.dragSourcePaneId === pane.id
   const dragActive = Boolean(ctx?.dragSourcePaneId)
   const gitInfoEnabled = !ctx?.maximizedPaneId || ctx.maximizedPaneId === pane.id
 
   const { gitInfo, refreshIfStale, refreshNow } = useGitInfo(pane.id, gitInfoEnabled)
-  const urlOpen = usePaneUrlOpen(pane.id)
+  // Paths and localhost URLs open in the split preview (issues #385 and
+  // #386): in a pane on an SSH host, a path is read from that host and a
+  // localhost URL is that host's, reached through its relay (issue #387).
+  // usePreview needs the terminal's connection, so the terminal and the URL
+  // opener are handed stable callbacks that reach it through a ref.
+  const previewRef = useRef<{ open: (path: string) => void; openUrl: (url: string) => void } | null>(null)
+  const remote = pane.type === 'ssh' || pane.type === 'ssh_tmux'
+  const openPreviewPath = useCallback((path: string) => previewRef.current?.open(path), [])
+  const openPreviewUrl = useCallback((url: string) => previewRef.current?.openUrl(url), [])
+  // The URL opener needs the terminal's connection too, so the terminal's
+  // URL callbacks reach it through a ref as well.
+  const urlOpenRef = useRef<ReturnType<typeof usePaneUrlOpen> | null>(null)
+  const openLink = useCallback((url: string) => urlOpenRef.current?.openUrl(url), [])
+  const requestOpen = useCallback(
+    (url: string, source?: UrlOpenSource) => urlOpenRef.current?.requestOpen(url, source),
+    [],
+  )
 
   const { handleResize, connected, dims, sessionState, reconnectFailed, restartSession } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
     repoURL: gitInfo.repo_url,
     onInteraction: refreshIfStale,
-    onLinkActivate: urlOpen.openUrl,
-    onBrowserOpenRequest: urlOpen.requestOpen,
+    onLinkActivate: openLink,
+    onBrowserOpenRequest: requestOpen,
+    onPreviewPath: openPreviewPath,
   })
+  const terminalLive = connected && sessionState === 'running'
+  const preview = usePreview(pane.id, terminalLive, remote)
+  previewRef.current = preview
+  // Preview is offered only while the preview can open. Open keeps the tab
+  // and the OAuth callback forward, on an SSH host as everywhere.
+  const urlOpen = usePaneUrlOpen(pane.id, { previewUrl: terminalLive ? openPreviewUrl : undefined })
+  urlOpenRef.current = urlOpen
 
   // Observe resize events for this pane
   useEffect(() => {
@@ -106,8 +137,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   }, [ctx, pane.id])
 
   const updateHoverEdge = useCallback((clientX: number, clientY: number) => {
-    if (!containerRef.current || !ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
-    const rect = containerRef.current.getBoundingClientRect()
+    if (!bodyRef.current || !ctx?.dragSourcePaneId || ctx.dragSourcePaneId === pane.id) return
+    const rect = bodyRef.current.getBoundingClientRect()
     setHoverEdge(resolvePaneDropEdge(rect, clientX, clientY))
   }, [ctx?.dragSourcePaneId, pane.id])
 
@@ -165,12 +196,31 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         onOpenVSCode={handleOpenVSCode}
         moveHandleProps={{ onDragStart: handleDragStart, onDragEnd: handleDragEnd, onMouseDown: handleMoveHandleMouseDown }}
       />
+      {approval && approvalWaits.length > 0 && (
+        <PaneApprovalNotice
+          // A new wait starts with no failure shown.
+          key={approvalWaits[0].wait_id}
+          waits={approvalWaits.length}
+          onInputGiven={async () => {
+            const clicked = document.activeElement
+            const failure = await approval.inputGiven(approvalWaits[0])
+            // The strip goes, and its button with the focus: the terminal takes
+            // the keys again, unless the person went elsewhere meanwhile.
+            const stayed = document.activeElement === clicked || document.activeElement === document.body
+            if (!failure && stayed) bodyRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()
+            return failure
+          }}
+          onReview={() => approval.review(approvalWaits[0].id)}
+        />
+      )}
       <div
-        ref={setRef}
+        ref={bodyRef}
+        data-pane-body=""
         style={{
           flex: 1,
+          minHeight: 0,
+          display: 'flex',
           overflow: 'hidden',
-          padding: '4px',
           position: 'relative',
         }}
         onDragOver={(e) => {
@@ -182,7 +232,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         onDragLeave={() => setHoverEdge(null)}
         onDrop={(e) => {
           e.preventDefault()
-          const rect = containerRef.current?.getBoundingClientRect()
+          const rect = bodyRef.current?.getBoundingClientRect()
           const edge = rect ? resolvePaneDropEdge(rect, e.clientX, e.clientY) : hoverEdge
           if (edge) handleEdgeDrop(edge)
         }}
@@ -197,12 +247,28 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
           handleEdgeDrop(edge)
         }}
       >
-        <PaneUrlOpenNotice
-          pendingUrl={urlOpen.pendingUrl}
-          error={urlOpen.error}
-          onConfirm={urlOpen.confirmPendingOpen}
-          onDismiss={urlOpen.dismissPendingOpen}
-          onDismissError={urlOpen.dismissError}
+        <PreviewSplit
+          splitKey={paneSplitKey(pane.id)}
+          view={preview.view}
+          terminal={
+            <>
+              <div ref={setRef} style={{ overflow: 'hidden', padding: '4px' }} />
+              {/* Over the terminal only, so an open preview's header stays in view. */}
+              <PaneUrlOpenNotice
+                pendingUrl={urlOpen.pendingUrl}
+                source={urlOpen.pendingSource}
+                canPreview={urlOpen.canPreview}
+                error={urlOpen.error}
+                onPreview={urlOpen.previewPendingOpen}
+                onConfirm={urlOpen.confirmPendingOpen}
+                onDismiss={urlOpen.dismissPendingOpen}
+                onDismissError={urlOpen.dismissError}
+              />
+            </>
+          }
+          onChoose={preview.open}
+          onReload={preview.reload}
+          onClose={preview.close}
         />
         {dragActive && !isDragSource && hoverEdge && (
           <div

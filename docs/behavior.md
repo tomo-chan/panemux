@@ -94,7 +94,8 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 | WebSocket Protocol; Command Center WebSocket Protocol | [websocket.md](behavior/websocket.md) |
 | Frontend Runtime Behavior; Pane Git and PR metadata | [frontend.md](behavior/frontend.md) |
 | Opening URLs from a Pane | [url-open.md](behavior/url-open.md) |
-| Task Dashboard; Wait signature; `GET /api/tasks`; `POST /api/tasks/hosts/{name}/reconnect`; `PUT /api/tasks/records`; `POST /api/tasks`; `POST /api/tasks/resume`; `POST /api/tasks/summary`; `POST /api/tasks/input-given` | [tasks.md](behavior/tasks.md) |
+| Split Preview; Panes on an SSH host; Localhost URLs of an SSH host; `POST /api/sessions/{id}/preview` | [preview.md](behavior/preview.md) |
+| Task Dashboard; Wait signature; `GET /api/tasks`; `POST /api/tasks/hosts/{name}/reconnect`; `PUT /api/tasks/records`; `POST /api/tasks`; `POST /api/tasks/resume`; `POST /api/tasks/summary`; `POST /api/tasks/input-given`; `GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update` | [tasks.md](behavior/tasks.md) |
 | Task summaries: what they cost (measurements) | [task-summary-cost.md](behavior/task-summary-cost.md) |
 | Task Events; `GET /ws/tasks/events` | [task-events.md](behavior/task-events.md) (Japanese: [task-events.ja.md](behavior/task-events.ja.md)) |
 

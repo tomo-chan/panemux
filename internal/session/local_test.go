@@ -1850,3 +1850,72 @@ func TestTmuxLocalSessionGetActiveWorkdir_WhenPanePIDIsCodex_PrefersCodexExecCom
 	require.NoError(t, err)
 	assert.Equal(t, []string{"/tmp/tmux-root-codex-worktree"}, cwds)
 }
+
+// The pty reporting the terminal gone is the session's end: the read loop
+// ends every subscription on that error, and the state it then reports must
+// not still be "connected" because the process monitor has yet to record
+// the exit. A read that succeeds leaves the session as it was.
+func TestLocalSession_ReadErrorMarksExited(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+	s := &LocalSession{id: "read-test", state: StateConnected, ptmx: r}
+
+	_, err = w.Write([]byte("output"))
+	require.NoError(t, err)
+	buf := make([]byte, 16)
+	n, err := s.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "output", string(buf[:n]))
+	assert.Equal(t, StateConnected, s.State())
+
+	require.NoError(t, w.Close())
+	_, err = s.Read(buf)
+	require.Error(t, err)
+	assert.Equal(t, StateExited, s.State())
+}
+
+// A shell that exits ends its subscription in the exited state, so the
+// WebSocket handler sends the "exited" status the dashboard hides a pane's
+// preview on (issue #385), not the "connected" it read while the process
+// monitor had yet to record the exit. The race shows on macOS; on Linux the
+// monitor usually records the exit first, so this passes there without the
+// fix, and TestLocalSession_ReadErrorMarksExited is the deterministic check.
+//
+//efficacy:exempt its race rarely shows on Linux; TestLocalSession_ReadErrorMarksExited is the red check
+func TestNewLocal_ExitEndsTheSubscription(t *testing.T) {
+	testcap.RequirePTY(t)
+	sess, err := NewLocal("exit-test", "/bin/sh", "", "exit")
+	require.NoError(t, err)
+	mgr := NewManager()
+	mgr.Add(sess)
+	t.Cleanup(func() { _ = mgr.Remove("exit-test") })
+	_, updates, unsubscribe, ok := mgr.Subscribe("exit-test")
+	require.True(t, ok)
+	defer unsubscribe()
+
+	_, err = sess.Write([]byte("echo pm385-ready\n"))
+	require.NoError(t, err)
+	select {
+	case <-updates:
+		assert.Equal(t, StateConnected, sess.State(), "output that is read leaves the session running")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the shell printed nothing")
+	}
+
+	_, err = sess.Write([]byte("exit\n"))
+	require.NoError(t, err)
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case _, open := <-updates:
+			if !open {
+				assert.Equal(t, StateExited, sess.State())
+				return
+			}
+		case <-deadline:
+			t.Fatalf("the subscription did not end after the shell exited (state %s)", sess.State())
+		}
+	}
+}

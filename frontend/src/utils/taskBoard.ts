@@ -67,6 +67,17 @@ export function canRecord(task: Task): boolean {
 // refused there (issues #257 and #264).
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/** What a codex task waits for while its permission hook recorded a request: the server's codexWaitingForPermission. */
+export const CODEX_PERMISSION_WAIT = 'a permission request from codex'
+
+/**
+ * Whether a task waits on a codex permission request its hook recorded
+ * (issue #384), the one wait Input given clears.
+ */
+export function isPermissionWait(task: Pick<Task, 'state' | 'agent' | 'waiting_for' | 'wait_signature'>): boolean {
+  return task.state === 'wait' && task.agent === 'codex' && task.waiting_for === CODEX_PERMISSION_WAIT && !!task.wait_signature
+}
+
 /**
  * Whether the dashboard offers Resume: a stopped claude or codex task with a
  * session ID. Done does not matter; a done task can be resumed and stays done.

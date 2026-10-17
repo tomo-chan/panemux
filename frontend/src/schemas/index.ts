@@ -303,6 +303,42 @@ export const OpenUrlResponseSchema = z.object({
 })
 
 export type OpenUrlResponse = z.infer<typeof OpenUrlResponseSchema>
+
+// Response from POST /api/sessions/{id}/preview (issue #385): the preview of
+// the HTML or Markdown file a clicked path names, or the files a relative
+// path may name when more than one working directory holds it. host is ""
+// for the panemux host, or the ssh_connections name of the pane's host. A
+// clicked localhost URL of a pane on an SSH host (issue #387) is ready as
+// kind "url": url is its relay on 127.0.0.1 and path the URL as clicked.
+const PreviewReadySchema = z.discriminatedUnion('kind', [
+  z.object({
+    status: z.literal('ready'),
+    kind: z.literal('file'),
+    url: z.string().startsWith('/preview/'),
+    path: z.string().min(1),
+    host: z.string(),
+  }),
+  z.object({
+    status: z.literal('ready'),
+    kind: z.literal('url'),
+    // The relay's address: 127.0.0.1, or localhost for an https URL that
+    // named it, so its certificate still matches.
+    url: z.string().regex(/^(?:https?:\/\/127\.0\.0\.1|https:\/\/localhost):\d+(?:[/?#]|$)/),
+    path: z.string().min(1),
+    host: z.string().min(1),
+  }),
+])
+
+export const PreviewResponseSchema = z.union([
+  PreviewReadySchema,
+  z.object({
+    status: z.literal('choose'),
+    candidates: z.array(z.string().min(1)).min(2),
+    host: z.string(),
+  }),
+])
+
+export type PreviewResponse = z.infer<typeof PreviewResponseSchema>
 // Deliberately no .max() on any field, unlike most schemas in this file.
 // Every value here is free text an agent wrote about itself, and the Go side
 // (internal/board's ParseStatus) imposes no length limit of its own, so a
@@ -639,6 +675,29 @@ export const HostSessionNameSchema = z.object({
 })
 
 export type HostSessionName = z.infer<typeof HostSessionNameSchema>
+
+// GET and POST /api/tasks/codex-hook (issue #396): whether a host's codex
+// has panemux's permission hook. `error` says why for invalid and unknown.
+// auto_update is whether the hook is updated by itself (issue #402),
+// auto_updated that panemux did so, auto_error why that failed, and
+// auto_settings_error why the setting could not be read.
+export const CodexHookSchema = z.object({
+  status: z.enum(['absent', 'missing', 'installed', 'outdated', 'invalid', 'unknown']),
+  error: z.string().optional(),
+  auto_update: z.boolean().optional(),
+  auto_updated: z.boolean().optional(),
+  auto_error: z.string().optional(),
+  auto_settings_error: z.string().optional(),
+})
+
+export type CodexHook = z.infer<typeof CodexHookSchema>
+
+// POST /api/tasks/codex-hook/auto-update (issue #402): the setting stored.
+export const CodexHookAutoSchema = z.object({
+  auto_update: z.boolean(),
+})
+
+export type CodexHookAuto = z.infer<typeof CodexHookAutoSchema>
 
 // POST /api/hosts/terminal (issue #314): a host terminal the task dashboard
 // opens, served by `/ws/{session_id}` like a board attach. `tmux_session` is

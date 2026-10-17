@@ -26,6 +26,10 @@ A forward binds a real listening socket on the panemux host, so its scope is del
   [command-execution.md](command-execution.md#security-command-execution-sinks) apply — there is no
   command string for a port number to be interpolated into.
 
+The split preview's relays of an SSH host's localhost URLs are a different mechanism with different
+bounds — a port chosen by the system rather than the URL's own, kept for the server's lifetime —
+described in [preview.md](preview.md#relays). Nothing above applies to them.
+
 What a forward does grant, stated plainly: while it is open, every process on the panemux host can
 reach that one port on the pane's host through `127.0.0.1:<port>`. That is the point of the feature
 (the browser is one such process), but it is a real widening of what a local process can reach, which
@@ -77,6 +81,15 @@ required — neither is redundant:
    requirement — browsers only open a tab from a user gesture — but it is documented here as a
    security property, because removing the approval step to "smooth out the flow" would hand any
    process that can write to a pane's terminal the ability to navigate the operator's browser.
+
+An **OSC 8 hyperlink** is terminal output too: the operator clicks its text, but the program chose its
+target. A click on one therefore shows the same approval strip, naming the target, instead of opening
+it; this replaces xterm's own `confirm()` dialog, which a terminal with no strip still uses. xterm
+links OSC 8 targets only for `http` and `https`, and `useTerminal` checks the scheme again. The strip's
+**Preview** frames a localhost page beside the terminal under the isolation in
+[preview.md](preview.md#localhost-pages). Each approval opens once: the buttons take the pending
+request as they act, so a repeated press cannot open a second tab, and a request in replayed
+scrollback is never raised.
 
 The shim's fall-through path (`xdg-open report.pdf`, `open -a Safari …`) execs the real opener
 resolved from the pane's original `PATH`, exported as `PANEMUX_SHIM_FALLBACK_PATH` before the shim

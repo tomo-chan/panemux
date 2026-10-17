@@ -4,7 +4,9 @@ import { FitAddon } from '@xterm/addon-fit'
 import { bufferRangeFor, createUrlLinkProvider, readLineCells } from '../utils/terminalLinks'
 import { useWebSocket } from './useWebSocket'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
-import { BROWSER_OPEN_OSC_IDENT, openUrlTab, parseBrowserOpenOsc } from '../utils/paneUrlOpen'
+import { BROWSER_OPEN_OSC_IDENT, isOpenableUrl, openUrlTab, parseBrowserOpenOsc } from '../utils/paneUrlOpen'
+import type { UrlOpenSource } from './usePaneUrlOpen'
+import { PREVIEW_PATH_REGEX } from '../utils/preview'
 import type { SessionState } from '../schemas'
 
 const REPAINT_SETTLE_DELAYS_MS = [50, 250]
@@ -52,8 +54,12 @@ interface UseTerminalOptions {
   // open directly in a new tab and no port forward is prepared for them.
   onLinkActivate?: (url: string) => void
   // Called when a program inside the pane asks panemux to open a URL (see the
-  // browser shim in internal/session/browseropen.go).
-  onBrowserOpenRequest?: (url: string) => void
+  // browser shim in internal/session/browseropen.go), or when the operator
+  // activates an OSC 8 hyperlink, whose target the terminal output chose.
+  onBrowserOpenRequest?: (url: string, source?: UrlOpenSource) => void
+  // Called when the operator activates an HTML or Markdown path in this
+  // terminal (issue #385). Without it, paths are not links.
+  onPreviewPath?: (path: string) => void
   // Whether a disconnect asks POST /api/sessions/{id}/restart to recreate the
   // session (the default). That route knows only panes, so a board attach
   // (issue #284) turns it off and reports reconnectFailed for its caller to
@@ -79,7 +85,8 @@ interface TerminalEntry {
   awaitingReplayEnd: boolean
   repoURL: string | null
   onLinkActivate: ((url: string) => void) | null
-  onBrowserOpen: ((url: string) => void) | null
+  onBrowserOpen: ((url: string, source?: UrlOpenSource) => void) | null
+  onPreviewPath: ((path: string) => void) | null
 }
 
 interface PendingTerminalMessage {
@@ -97,6 +104,7 @@ export function useTerminal({
   onInteraction,
   onLinkActivate,
   onBrowserOpenRequest,
+  onPreviewPath,
   recoverOnDisconnect = true,
   reconnectDelay,
   maxReconnectDelay,
@@ -108,7 +116,8 @@ export function useTerminal({
   const sendRef = useRef<((data: string | ArrayBuffer | Uint8Array) => void) | null>(null)
   const entryRef = useRef<TerminalEntry | null>(null)
   const onLinkActivateRef = useRef<((url: string) => void) | null>(null)
-  const onBrowserOpenRef = useRef<((url: string) => void) | null>(null)
+  const onBrowserOpenRef = useRef<((url: string, source?: UrlOpenSource) => void) | null>(null)
+  const onPreviewPathRef = useRef<((path: string) => void) | null>(null)
   const pendingMessagesRef = useRef<PendingTerminalMessage[]>([])
   const reconnectingAfterDisconnectRef = useRef(false)
   const recoverDisconnectedSessionRef = useRef<(() => Promise<void>) | null>(null)
@@ -290,6 +299,7 @@ export function useTerminal({
     entry.send = sendRef.current
     entry.onLinkActivate = onLinkActivateRef.current
     entry.onBrowserOpen = onBrowserOpenRef.current
+    entry.onPreviewPath = onPreviewPathRef.current
     entryRef.current = entry
     termRef.current = entry.term
     fitAddonRef.current = entry.fitAddon
@@ -310,6 +320,7 @@ export function useTerminal({
       currentEntry.send = null
       currentEntry.onLinkActivate = null
       currentEntry.onBrowserOpen = null
+      currentEntry.onPreviewPath = null
       currentEntry.disposeTimer = setTimeout(() => {
         if (currentEntry.attachedContainer) return
         clearScheduledRepaints(currentEntry)
@@ -330,11 +341,13 @@ export function useTerminal({
   useEffect(() => {
     onLinkActivateRef.current = onLinkActivate ?? null
     onBrowserOpenRef.current = onBrowserOpenRequest ?? null
+    onPreviewPathRef.current = onPreviewPath ?? null
     const entry = entryRef.current
     if (!entry) return
     entry.onLinkActivate = onLinkActivateRef.current
     entry.onBrowserOpen = onBrowserOpenRef.current
-  }, [onLinkActivate, onBrowserOpenRequest])
+    entry.onPreviewPath = onPreviewPathRef.current
+  }, [onLinkActivate, onBrowserOpenRequest, onPreviewPath])
 
   useEffect(() => {
     if (!container || !onInteraction) return
@@ -433,6 +446,23 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
       brightWhite: '#ffffff',
     },
     allowProposedApi: true,
+    // OSC 8 hyperlinks (http and https only, xterm's default). Their target
+    // is chosen by the terminal output, not shown by the text clicked, so
+    // they wait for the operator's approval as the browser shim's requests
+    // do — the same strip, and the same Preview, Open and Ignore.
+    linkHandler: {
+      activate: (_event, uri) => {
+        if (!isOpenableUrl(uri)) return
+        if (entry.onBrowserOpen) {
+          entry.onBrowserOpen(uri, 'link')
+          return
+        }
+        // xterm's own default, kept for a terminal with no strip to ask in.
+        if (window.confirm(`Do you want to navigate to ${uri}?\n\nWARNING: This link could potentially be dangerous`)) {
+          openUrlTab(uri)
+        }
+      },
+    },
   })
 
   const fitAddon = new FitAddon()
@@ -444,6 +474,11 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
       return
     }
     openUrlTab(uri)
+  })
+  // HTML and Markdown paths open in the split preview. The same provider
+  // finds them, so a path wrapped at the pane edge is linked whole.
+  const pathLinkProvider = createUrlLinkProvider(term, PREVIEW_PATH_REGEX, (path) => {
+    entry.onPreviewPath?.(path)
   })
   const entry: TerminalEntry = {
     term,
@@ -459,6 +494,7 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
     repoURL: null,
     onLinkActivate: null,
     onBrowserOpen: null,
+    onPreviewPath: null,
   }
 
   term.loadAddon(fitAddon)
@@ -466,6 +502,17 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
   // earliest-registered provider when two intersect, and a "#123" inside a URL
   // belongs to the URL.
   term.registerLinkProvider(urlLinkProvider)
+  // After the url provider, so a path inside a URL is the URL's. A terminal
+  // with no preview (a remote pane, a host terminal) shows no path links.
+  term.registerLinkProvider({
+    provideLinks(y, callback) {
+      if (!entry.onPreviewPath) {
+        callback(undefined)
+        return
+      }
+      pathLinkProvider.provideLinks(y, callback)
+    },
+  })
   term.registerLinkProvider({
     provideLinks(y, callback) {
       callback(computePullRequestLinks(term, entry.repoURL, y))

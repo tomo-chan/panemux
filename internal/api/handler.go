@@ -29,6 +29,7 @@ import (
 	"panemux/internal/config"
 	"panemux/internal/homedir"
 	"panemux/internal/portforward"
+	"panemux/internal/preview"
 	"panemux/internal/session"
 	"panemux/internal/sshconfig"
 	"panemux/internal/tasks"
@@ -63,14 +64,22 @@ type Handler struct {
 	nowFn                   func() time.Time
 	cfg                     *config.Config
 	forwards                *portforward.Registry
-	restartInFlight         map[string]struct{}
-	ghBinaryPath            string
-	codeBinaryPath          string
-	sshConfigPath           string
-	restartMu               sync.Mutex
-	preferredCWDMu          sync.Mutex
-	gitInfoCacheMu          sync.Mutex
-	taskGitCacheMu          sync.Mutex
+	// previews holds the files opened in the split preview. It lives as
+	// long as the server: a preview's tab outlives its pane.
+	previews *preview.Registry
+	// previewRelays and previewHosts relay the loopback URLs of SSH hosts
+	// and hold the connections previews of those hosts use; both live as
+	// long as the server, for the same reason.
+	previewRelays   *preview.Relays
+	previewHosts    *previewHosts
+	restartInFlight map[string]struct{}
+	ghBinaryPath    string
+	codeBinaryPath  string
+	sshConfigPath   string
+	restartMu       sync.Mutex
+	preferredCWDMu  sync.Mutex
+	gitInfoCacheMu  sync.Mutex
+	taskGitCacheMu  sync.Mutex
 	// cfgMu guards the parts of cfg the routes change — the workspaces and
 	// layout, and ssh_connections — and every write of config.yaml, which
 	// serializes all of cfg. A route that changes cfg or saves it holds it
@@ -190,6 +199,9 @@ func NewHandler(
 		gitInfoCacheBySession: make(map[string]gitInfoCacheEntry),
 		taskGitCache:          make(map[string]taskGitCacheEntry),
 		boardCache:            boardCache,
+		previews:              preview.NewRegistry(),
+		previewRelays:         preview.NewRelays(),
+		previewHosts:          newPreviewHosts(),
 	}
 	h.tasks = newTaskService(h)
 	h.taskRecords = tasks.NewRecordStore("")

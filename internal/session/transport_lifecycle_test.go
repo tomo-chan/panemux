@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
@@ -40,6 +41,7 @@ type testSSHTransport struct {
 	stdins      []string
 	resizes     [][2]uint32
 	mu          sync.Mutex
+	sftp        bool // serve the sftp subsystem
 }
 
 func startSessionTestSSHServer(t *testing.T, handler func(string) testSSHResponse) (*ssh.Client, *testSSHTransport) {
@@ -138,14 +140,12 @@ func (s *testSSHTransport) serveSession(channel ssh.Channel, requests <-chan *ss
 		case "pty-req":
 			request.Reply(true, nil)
 		case "window-change":
-			var size struct{ Columns, Rows, Width, Height uint32 }
-			_ = ssh.Unmarshal(request.Payload, &size)
-			s.mu.Lock()
-			s.resizes = append(s.resizes, [2]uint32{size.Columns, size.Rows})
-			s.mu.Unlock()
+			s.recordResize(request)
 		case "shell":
 			request.Reply(true, nil)
 			go func() { _, _ = io.Copy(channel, channel) }()
+		case "subsystem":
+			s.serveSubsystem(channel, request)
 		case "exec":
 			var payload struct{ Command string }
 			_ = ssh.Unmarshal(request.Payload, &payload)
@@ -182,6 +182,35 @@ func (s *testSSHTransport) serveSession(channel ssh.Channel, requests <-chan *ss
 			request.Reply(false, nil)
 		}
 	}
+}
+
+func (s *testSSHTransport) recordResize(request *ssh.Request) {
+	var size struct{ Columns, Rows, Width, Height uint32 }
+	_ = ssh.Unmarshal(request.Payload, &size)
+	s.mu.Lock()
+	s.resizes = append(s.resizes, [2]uint32{size.Columns, size.Rows})
+	s.mu.Unlock()
+}
+
+// serveSubsystem serves the sftp subsystem, when the transport does, from
+// this machine's filesystem, as a host's sftp-server serves its own.
+func (s *testSSHTransport) serveSubsystem(channel ssh.Channel, request *ssh.Request) {
+	var payload struct{ Name string }
+	_ = ssh.Unmarshal(request.Payload, &payload)
+	s.mu.Lock()
+	serveSFTP := s.sftp
+	s.mu.Unlock()
+	if payload.Name != "sftp" || !serveSFTP {
+		request.Reply(false, nil)
+		return
+	}
+	request.Reply(true, nil)
+	go func() {
+		defer channel.Close()
+		if server, err := sftp.NewServer(channel); err == nil {
+			_ = server.Serve()
+		}
+	}()
 }
 
 func (s *testSSHTransport) closeConnections() {

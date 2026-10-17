@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,12 +20,14 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
+	"panemux/internal/preview"
 	"panemux/internal/session"
 	"panemux/internal/taskevents"
 	"panemux/internal/tasks"
@@ -391,6 +396,26 @@ var contractFixtures = map[string]contractFixture{
 		return captureBoardSession(t, e, "/api/tasks/attach", `{"id":"local:claude:7c21e0a4"}`), nil
 	}},
 
+	// The panemux host's codex permission hook (issue #396), with a
+	// hooks.json it will not rewrite, so the reason is in the capture.
+	"task-codex-hook": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		require.NoError(t, os.Mkdir(filepath.Join(e.home, ".codex"), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(e.home, ".codex", "hooks.json"), []byte(`{"hooks":[]}`), 0o600))
+
+		rr := e.do(t, http.MethodGet, "/api/tasks/codex-hook?host=", "")
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		return rr.Body.Bytes(), nil
+	}},
+
+	// Updating a host's codex hook by itself turned on (issue #402).
+	"task-codex-hook-auto-update": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		rr := e.do(t, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"","enabled":true}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		return rr.Body.Bytes(), nil
+	}},
+
 	// A host's tmux session name (issue #314). Its random suffix is stood in
 	// for.
 	"host-session-name": {capture: func(t *testing.T) ([]byte, map[string]string) {
@@ -432,6 +457,55 @@ var contractFixtures = map[string]contractFixture{
 			`{"url":"http://localhost:53682/callback"}`)
 		require.Equal(t, http.StatusOK, rr.Code)
 		return rr.Body.Bytes(), map[string]string{e.home: fixtureHomePath}
+	}},
+
+	// A clicked path that names one file (issue #385). The fake pane's
+	// working directory and the random token are stood in for.
+	"preview": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		dir := fixturePreviewDir(t, e, "pane-preview")
+
+		rr := e.do(t, http.MethodPost, "/api/sessions/pane-preview/preview", `{"path":"mockups/index.html"}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		var got struct {
+			URL string `json:"url"`
+		}
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+		token := strings.Split(got.URL, "/")[2]
+		require.Regexp(t, `^[0-9a-f]{32}$`, token)
+		return rr.Body.Bytes(), map[string]string{dir: fixtureHomePath, token: "0123456789abcdef0123456789abcdef"}
+	}},
+
+	// A clicked path that two worktrees hold (issue #385).
+	"preview-choose": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		dir := fixturePreviewDir(t, e, "pane-preview")
+
+		rr := e.do(t, http.MethodPost, "/api/sessions/pane-preview/preview", `{"path":"docs/design.md"}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		return rr.Body.Bytes(), map[string]string{dir: fixtureHomePath}
+	}},
+
+	// A clicked localhost URL of a pane on an SSH host, relayed to a port
+	// of its own (issue #387). The relay's random port is stood in for.
+	"preview-url": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		dev := httptest.NewServer(http.NotFoundHandler())
+		t.Cleanup(dev.Close)
+		e.srv.api.SetPreviewDialer(func(session.SSHConfig) (preview.RemoteConn, error) {
+			return fixturePreviewConn{addr: dev.Listener.Addr().String()}, nil
+		})
+		e.mgr.Add(&fixtureSSHPreviewSession{wsFakeSession: newWSFakeSession("pane-ssh")})
+
+		rr := e.do(t, http.MethodPost, "/api/sessions/pane-ssh/preview", `{"url":"http://localhost:5173/app"}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		var got struct {
+			URL string `json:"url"`
+		}
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+		relayed, err := url.Parse(got.URL)
+		require.NoError(t, err)
+		return rr.Body.Bytes(), map[string]string{":" + relayed.Port() + "/": ":49152/"}
 	}},
 
 	"board-status": {capture: func(t *testing.T) ([]byte, map[string]string) {
@@ -1393,4 +1467,56 @@ func fixtureCodexTranscript() []byte {
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[` +
 		`{"type":"input_text","text":"Add task summaries"}]}}` + "\n"
 	return []byte("::panemux-transcript v1 " + strconv.Itoa(len(body)) + "\n" + body + "\n::end\n")
+}
+
+// fixturePreviewDir registers a fake local pane working in a fresh directory
+// that holds mockups/index.html and docs/design.md, with a second worktree,
+// <dir>/worktree, holding docs/design.md too.
+func fixturePreviewDir(t *testing.T, e *apiEnv, id string) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	for _, name := range []string{"mockups/index.html", "docs/design.md", "worktree/docs/design.md"} {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte("x"), 0o600))
+	}
+	e.mgr.Add(&fixturePreviewSession{
+		wsFakeSession: newWSFakeSession(id), cwd: dir, worktree: filepath.Join(dir, "worktree"),
+	})
+	return dir
+}
+
+// fixtureSSHPreviewSession is an ssh pane made from the devbox entry.
+type fixtureSSHPreviewSession struct{ *wsFakeSession }
+
+func (s *fixtureSSHPreviewSession) Type() session.Type     { return session.TypeSSH }
+func (s *fixtureSSHPreviewSession) ConnectionName() string { return "devbox" }
+func (s *fixtureSSHPreviewSession) PreviewSSHConfig() session.SSHConfig {
+	return session.SSHConfig{Host: "devbox.example.invalid", User: "demo", ConnectionName: "devbox"}
+}
+
+// fixturePreviewConn is the preview's connection to devbox: its loopback
+// dials reach addr on this machine.
+type fixturePreviewConn struct{ addr string }
+
+func (c fixturePreviewConn) Dial(ctx context.Context, _ string) (net.Conn, error) {
+	var d net.Dialer
+	return d.DialContext(ctx, "tcp", c.addr)
+}
+func (fixturePreviewConn) SFTP() *sftp.Client         { return nil }
+func (fixturePreviewConn) Done() <-chan struct{}      { return nil }
+func (fixturePreviewConn) Ping(context.Context) error { return nil }
+func (fixturePreviewConn) LastRead() time.Time        { return time.Now() }
+func (fixturePreviewConn) Close() error               { return nil }
+
+type fixturePreviewSession struct {
+	*wsFakeSession
+	cwd, worktree string
+}
+
+func (s *fixturePreviewSession) GetCWD() (string, error) { return s.cwd, nil }
+
+func (s *fixturePreviewSession) GetActiveWorkdirs() ([]string, error) {
+	return []string{s.worktree}, nil
 }

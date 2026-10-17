@@ -9,6 +9,9 @@ import { useModalKeyboard } from '../hooks/useModalKeyboard'
 // board). The ssh_tmux session name is the server's (POST
 // /api/hosts/session-name), asked for once the first time ssh_tmux is chosen
 // and used by both buttons, so the name shown is the name opened.
+//
+// The menu also carries the host's Codex input notifications item (issue
+// #396). The panemux host opens no terminal, so its menu has that item alone.
 
 type SessionNamePhase =
   | { phase: 'idle' }
@@ -24,6 +27,9 @@ export interface HostConnectDialogProps {
   onTypeIn: (type: HostTerminalType, tmuxSession: string | undefined) => void
   /** The chip that opened the menu: a press on it toggles the menu rather than counting as outside. */
   anchorRef?: RefObject<HTMLElement | null>
+  /** False for a host that opens no terminal: the menu has codexHook alone. */
+  terminal?: boolean
+  codexHook?: React.ReactNode
 }
 
 export const HostConnectDialog: React.FC<HostConnectDialogProps> = ({
@@ -33,16 +39,19 @@ export const HostConnectDialog: React.FC<HostConnectDialogProps> = ({
   onOpen,
   onTypeIn,
   anchorRef,
+  terminal = true,
+  codexHook,
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null)
   const typeInRef = useRef<HTMLButtonElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
   const [type, setType] = useState<HostTerminalType>('ssh')
   const [name, setName] = useState<SessionNamePhase>({ phase: 'idle' })
 
   useModalKeyboard({ isOpen: true, dialogRef, onEscape: onCancel })
 
   useEffect(() => {
-    typeInRef.current?.focus()
+    ;(typeInRef.current ?? closeRef.current)?.focus()
   }, [])
 
   // A popover, not a sheet over the board: a press anywhere else closes it.
@@ -79,6 +88,29 @@ export const HostConnectDialog: React.FC<HostConnectDialogProps> = ({
 
   const tmuxSession = type === 'ssh_tmux' && name.phase === 'ready' ? name.name : undefined
   const ready = type === 'ssh' || tmuxSession !== undefined
+
+  if (!terminal) {
+    return (
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Codex input notifications on ${host}`}
+        className="td-host-menu"
+      >
+        <div className="td-host-menu-title">
+          <span className="td-host-dot" aria-hidden="true" />
+          <b>{host}</b>
+        </div>
+        {codexHook}
+        <div className="td-host-menu-actions">
+          <button ref={closeRef} type="button" className="td-btn" onClick={onCancel}>
+            Close
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Open a terminal on ${host}`} className="td-host-menu">
@@ -140,6 +172,7 @@ export const HostConnectDialog: React.FC<HostConnectDialogProps> = ({
           Type in pane
         </button>
       </div>
+      {codexHook}
     </div>
   )
 }

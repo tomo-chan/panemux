@@ -225,7 +225,8 @@ func taskServiceOptions(h *Handler) tasks.Options {
 			//coverage:exempt a connection needs a reachable SSH server; internal/session tests CommandConn against one
 			return conn, nil
 		},
-		SummaryStore: tasks.NewSummaryStore(""),
+		SummaryStore:  tasks.NewSummaryStore(""),
+		CodexHookAuto: tasks.NewCodexHookAutoStore(""),
 	}
 }
 
@@ -270,10 +271,12 @@ func (h *Handler) TaskEventSource() taskevents.Source {
 }
 
 // Close releases what the handler holds open across requests: the task
-// dashboard's per-host connections.
+// dashboard's per-host connections, and the preview's relays and hosts.
 func (h *Handler) Close() {
 	h.boardAttaches.close()
 	h.tasks.Close()
+	h.previewRelays.Close()
+	h.previewHosts.close()
 }
 
 // GetTasks collects the agent sessions on every host and returns them with

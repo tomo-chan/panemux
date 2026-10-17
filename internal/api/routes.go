@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"panemux/internal/preview"
 	"panemux/internal/requestsecurity"
 )
 
@@ -49,6 +50,7 @@ func (h *Handler) Mount(r chi.Router, boardAuth func(http.Handler) http.Handler)
 		r.Post("/sessions/{id}/restart", h.RestartSession)
 		r.Post("/sessions/{id}/open-vscode", h.PostOpenVSCode)
 		r.Post("/sessions/{id}/open-url", h.PostOpenURL)
+		r.Post("/sessions/{id}/preview", h.PostSessionPreview)
 		r.Get("/sessions/{id}/git-info", h.GetGitInfo)
 		r.Get("/display", h.GetDisplay)
 		r.Get("/ssh-connections", h.GetSSHConnections)
@@ -71,6 +73,9 @@ func (h *Handler) Mount(r chi.Router, boardAuth func(http.Handler) http.Handler)
 		r.Delete("/hosts/terminal/{id}", h.DeleteHostTerminal)
 		r.Post("/tasks/summary", h.PostTaskSummary)
 		r.Post("/tasks/input-given", h.PostTaskInputGiven)
+		r.Get("/tasks/codex-hook", h.GetTaskCodexHook)
+		r.Post("/tasks/codex-hook", h.PostTaskCodexHook)
+		r.Post("/tasks/codex-hook/auto-update", h.PostTaskCodexHookAutoUpdate)
 		r.Put("/tasks/records", h.PutTaskRecord)
 		// Deliberately NOT placed under /board/ — chi routes any path
 		// starting with /api/board/ into the BoardRoutePrefix sub-router
@@ -81,6 +86,10 @@ func (h *Handler) Mount(r chi.Router, boardAuth func(http.Handler) http.Handler)
 		// must stay unauthenticated.
 		r.Get("/session-token", h.GetBoardSessionToken)
 	})
+	// Previews sit outside /api and its origin check on purpose: a preview
+	// page runs in an opaque origin (see internal/preview), so every request
+	// it makes is cross-site, including those for its own stylesheets.
+	r.Get(preview.RoutePrefix+"/{token}/*", h.ServePreview)
 	r.Route(BoardRoutePrefix, func(r chi.Router) {
 		r.Use(requestsecurity.Middleware)
 		if boardAuth != nil {

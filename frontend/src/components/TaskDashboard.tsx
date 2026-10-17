@@ -12,6 +12,7 @@ import { useTaskInput } from '../hooks/useTaskInput'
 import type { TaskInputOrigin } from '../hooks/useTaskInput'
 import { TaskInputPopup } from './TaskInputPopup'
 import { HostConnectDialog } from './HostConnectDialog'
+import { CodexHookItem } from './CodexHookItem'
 import { HostTerminalPopup } from './HostTerminalPopup'
 import { useHostTerminal } from '../hooks/useHostTerminal'
 import { loadTaskTerminalMaximized, saveTaskTerminalMaximized } from '../utils/taskTerminalPrefs'
@@ -26,6 +27,7 @@ import {
   filterTasks,
   findLaunchedTask,
   findTaskPane,
+  isPermissionWait,
   formatElapsed,
   groupIntoLanes,
   hostLabel,
@@ -202,7 +204,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   // comes back. Focus that was in the menu moves to the host's Reconnect
   // button, or to the dashboard while the host is connecting.
   const menuHost = hostMenu === null ? undefined : hosts.find((host) => host.name === hostMenu)
-  const menuGone = hostMenu !== null && !(menuHost && hostOpensTerminal(menuHost))
+  const menuGone = hostMenu !== null && !(menuHost && hostHasMenu(menuHost))
   useEffect(() => {
     if (!menuGone || hostMenu === null) return
     setHostMenu(null)
@@ -413,6 +415,9 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
                   hostInput.open(host.name, type, tmuxSession, chip)
                 },
                 sessionName: tasksState.hostSessionName,
+                codexHook: tasksState.codexHook,
+                installCodexHook: tasksState.installCodexHook,
+                setCodexHookAuto: tasksState.setCodexHookAuto,
               }}
             />
           ))}
@@ -641,6 +646,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
               input.close()
               open(task)
             }}
+            onInputGiven={inputGiven}
             stateStyle={stateStyle(shownInputTask.state)}
           />
         </div>
@@ -714,12 +720,17 @@ interface HostChipMenu {
   onOpen: (type: HostTerminalType, tmuxSession: string | undefined) => void
   onTypeIn: (type: HostTerminalType, tmuxSession: string | undefined, chip: HTMLElement | null) => void
   sessionName: TasksState['hostSessionName']
+  codexHook: TasksState['codexHook']
+  installCodexHook: TasksState['installCodexHook']
+  setCodexHookAuto: TasksState['setCodexHookAuto']
 }
 
-// Only a reachable remote host opens a terminal: the panemux host is not a
-// connection, and one that is connecting or failing has nothing to open yet.
-function hostOpensTerminal(host: TaskHost): boolean {
-  return host.status === 'ok' && host.name !== ''
+// A reachable host has a menu; one that is connecting or failing has
+// nothing to open or check yet. Only a remote one opens a terminal: the
+// panemux host is not a connection, and its menu has the Codex input
+// notifications item alone (issue #396).
+function hostHasMenu(host: TaskHost): boolean {
+  return host.status === 'ok'
 }
 
 const HostChip: React.FC<HostChipProps> = ({ host, running, onReconnect, menu }) => {
@@ -743,7 +754,8 @@ const HostChip: React.FC<HostChipProps> = ({ host, running, onReconnect, menu })
       <span className="td-host-detail">{detail}</span>
     </>
   )
-  if (menu && hostOpensTerminal(host)) {
+  if (menu && hostHasMenu(host)) {
+    const terminal = host.name !== ''
     const cancel = () => {
       menu.onCancel()
       chipRef.current?.focus()
@@ -758,22 +770,35 @@ const HostChip: React.FC<HostChipProps> = ({ host, running, onReconnect, menu })
           data-host-chip={host.name}
           aria-haspopup="dialog"
           aria-expanded={menu.open}
-          aria-label={`Open a terminal on ${host.name}`}
+          aria-label={terminal ? `Open a terminal on ${host.name}` : `Codex input notifications on ${label}`}
           onClick={menu.onToggle}
         >
           {content}
-          <svg className="td-host-icon" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M2.5 4.5l4 3.5-4 3.5M8 12h5.5" />
-          </svg>
+          {terminal && (
+            <svg className="td-host-icon" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M2.5 4.5l4 3.5-4 3.5M8 12h5.5" />
+            </svg>
+          )}
         </button>
         {menu.open && (
           <HostConnectDialog
-            host={host.name}
+            host={terminal ? host.name : label}
             sessionName={menu.sessionName}
             anchorRef={chipRef}
             onCancel={cancel}
             onOpen={menu.onOpen}
             onTypeIn={(type, tmuxSession) => menu.onTypeIn(type, tmuxSession, chipRef.current)}
+            terminal={terminal}
+            codexHook={
+              <CodexHookItem
+                host={host.name}
+                label={label}
+                load={menu.codexHook}
+                install={menu.installCodexHook}
+                setAuto={menu.setCodexHookAuto}
+                alone={!terminal}
+              />
+            }
           />
         )}
       </li>
@@ -1404,15 +1429,6 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   )
 }
 
-// Whether a task waits on a codex permission request its hook recorded
-// (issue #384), the one wait Input given clears. The reason is the server's
-// codexWaitingForPermission.
-function isPermissionWait(task: Task): boolean {
-  return task.state === 'wait' && task.agent === 'codex' && task.waiting_for === CODEX_PERMISSION_WAIT && !!task.wait_signature
-}
-
-const CODEX_PERMISSION_WAIT = 'a permission request from codex'
-
 // What Mark done asks, saying where the task will be afterwards: a running
 // task stays where it is until it stops, and a stopped one leaves the board
 // while the Done column is hidden.
@@ -1446,7 +1462,8 @@ const StateNote: React.FC<{ task: Task }> = ({ task }) => {
       break
     case 'busy':
       if (task.agent === 'codex') {
-        note = 'Codex does not record approval prompts: a command waiting for approval also shows as working.'
+        note =
+          "Unless codex's permission hook is registered on this host, a command waiting for approval also shows as working."
       }
       break
     case 'unknown':

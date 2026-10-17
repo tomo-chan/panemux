@@ -90,6 +90,9 @@ const roundTrips: RoundTrip[] = [
     schema: schemas.BoardSessionTokenResponseSchema,
   },
   { fixture: 'open-url', schemaName: 'OpenUrlResponseSchema', schema: schemas.OpenUrlResponseSchema },
+  { fixture: 'preview', schemaName: 'PreviewResponseSchema', schema: schemas.PreviewResponseSchema },
+  { fixture: 'preview-choose', schemaName: 'PreviewResponseSchema', schema: schemas.PreviewResponseSchema },
+  { fixture: 'preview-url', schemaName: 'PreviewResponseSchema', schema: schemas.PreviewResponseSchema },
   {
     fixture: 'board-status',
     schemaName: 'BoardStatusResponseSchema',
@@ -113,6 +116,12 @@ const roundTrips: RoundTrip[] = [
   { fixture: 'task-attach', schemaName: 'TaskAttachSchema', schema: schemas.TaskAttachSchema },
   { fixture: 'host-session-name', schemaName: 'HostSessionNameSchema', schema: schemas.HostSessionNameSchema },
   { fixture: 'host-terminal', schemaName: 'HostTerminalSchema', schema: schemas.HostTerminalSchema },
+  { fixture: 'task-codex-hook', schemaName: 'CodexHookSchema', schema: schemas.CodexHookSchema },
+  {
+    fixture: 'task-codex-hook-auto-update',
+    schemaName: 'CodexHookAutoSchema',
+    schema: schemas.CodexHookAutoSchema,
+  },
   { fixture: 'task-summary', schemaName: 'TaskSummarySchema', schema: schemas.TaskSummarySchema },
   // The two WebSocket fixtures hold one frame per element, in the order the
   // server sent them, so the schema that owns a single frame is wrapped here
@@ -413,6 +422,11 @@ const unexercisedOptionals: Record<string, string> = {
   'task-summary.done_candidate': 'the captured summary has work remaining; tasks pins done_candidate',
   // Set only when the labels could not be recorded after the task started;
   // the capture records them, which is the path worth pinning.
+  // Set only once panemux updated a host's hook by itself (issue #402); the
+  // capture's hooks.json cannot be read, so there is nothing to update.
+  'task-codex-hook.auto_updated': 'needs a hook updated by itself, and the captured hooks.json cannot be updated',
+  'task-codex-hook.auto_error': 'needs an update by itself that fails, and the captured hooks.json cannot be updated',
+  'task-codex-hook.auto_settings_error': 'needs a codex hook settings file that cannot be read, and the capture has none',
   'task-launch.records_error': 'needs an unreadable task record file, and the capture records the labels instead',
   // A claude launch records its labels at once; the codex capture pins the
   // held ones (issue #264).

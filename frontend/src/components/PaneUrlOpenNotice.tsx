@@ -1,8 +1,14 @@
 import React from 'react'
+import type { UrlOpenSource } from '../hooks/usePaneUrlOpen'
 
 interface PaneUrlOpenNoticeProps {
-  /** URL a program inside the pane asked panemux to open. */
+  /** URL waiting for the operator's approval. */
   pendingUrl: string | null
+  /** Who asked: a program inside the pane (the default) or a clicked OSC 8 link. */
+  source?: UrlOpenSource | null
+  /** Whether the URL can be shown in the preview beside the terminal. */
+  canPreview?: boolean
+  onPreview?: () => void
   /** Last port-forwarding failure for this pane. */
   error: string | null
   onConfirm: () => void
@@ -49,10 +55,14 @@ const buttonStyle: React.CSSProperties = {
 /**
  * Pane-local strip for URL opening. A URL a pane asked to open always needs
  * the operator's approval first: terminal output is untrusted, so anything
- * able to write to the pane's terminal could otherwise drive the browser.
+ * able to write to the pane's terminal could otherwise drive the browser. An
+ * OSC 8 link waits here too, since its target is not the text clicked.
  */
 export const PaneUrlOpenNotice: React.FC<PaneUrlOpenNoticeProps> = ({
   pendingUrl,
+  source,
+  canPreview = false,
+  onPreview,
   error,
   onConfirm,
   onDismiss,
@@ -61,8 +71,9 @@ export const PaneUrlOpenNotice: React.FC<PaneUrlOpenNoticeProps> = ({
   if (pendingUrl) {
     return (
       <div style={barStyle} data-pane-url-request="true">
-        <span style={{ flexShrink: 0 }}>This pane wants to open</span>
+        <span style={{ flexShrink: 0 }}>{source === 'link' ? 'This link goes to' : 'This pane wants to open'}</span>
         <span style={urlStyle} title={pendingUrl}>{pendingUrl}</span>
+        {canPreview && onPreview && <button style={buttonStyle} onClick={onPreview}>Preview</button>}
         <button style={buttonStyle} onClick={onConfirm}>Open</button>
         <button style={buttonStyle} onClick={onDismiss}>Ignore</button>
       </div>

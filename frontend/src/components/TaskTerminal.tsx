@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useTerminal } from '../hooks/useTerminal'
+import type { UrlOpenSource } from '../hooks/usePaneUrlOpen'
 
 // The terminal of the task dashboard's Type in pane popup (issue #284): the
 // board's temporary attach (`/ws/{session_id}`, issue #283) drawn by the same
@@ -32,9 +33,21 @@ export function taskTerminalStatus({
 interface TaskTerminalProps {
   sessionId: string
   onStatus: (status: TaskTerminalStatus) => void
+  /** Opens a clicked HTML or Markdown path in the popup's preview (issue #385). */
+  onPreviewPath?: (path: string) => void
+  /** Opens a clicked link (issue #386). */
+  onLinkActivate?: (url: string) => void
+  /** A URL the browser shim or an OSC 8 link asks to open, after the operator approves it. */
+  onBrowserOpenRequest?: (url: string, source?: UrlOpenSource) => void
 }
 
-export const TaskTerminal: React.FC<TaskTerminalProps> = ({ sessionId, onStatus }) => {
+export const TaskTerminal: React.FC<TaskTerminalProps> = ({
+  sessionId,
+  onStatus,
+  onPreviewPath,
+  onLinkActivate,
+  onBrowserOpenRequest,
+}) => {
   const [container, setContainer] = useState<HTMLDivElement | null>(null)
   const [everConnected, setEverConnected] = useState(false)
   const { connected, sessionState, reconnectFailed, handleResize } = useTerminal({
@@ -42,6 +55,9 @@ export const TaskTerminal: React.FC<TaskTerminalProps> = ({ sessionId, onStatus 
     container,
     // /api/sessions/{id}/restart knows only panes; the popup opens the attach again instead.
     recoverOnDisconnect: false,
+    onPreviewPath,
+    onLinkActivate,
+    onBrowserOpenRequest,
   })
 
   if (connected && !everConnected) setEverConnected(true)

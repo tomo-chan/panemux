@@ -326,6 +326,26 @@ var apiCases = map[string]apiCase{
 		},
 	},
 
+	"POST /api/sessions/{id}/preview": {run: func(t *testing.T, e *apiEnv) {
+		// A session whose working directory is known, since only files
+		// inside it can be previewed and reading a live shell's working
+		// directory may be denied by the sandbox.
+		dir := fixturePreviewDir(t, e, "pane-preview")
+		file := filepath.Join(dir, "index.html")
+		require.NoError(t, os.WriteFile(file, []byte("<p>mock</p>"), 0o600))
+
+		rr := e.do(t, http.MethodPost, "/api/sessions/pane-preview/preview", fmt.Sprintf(`{"path":%q}`, file))
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		var resp struct {
+			URL string `json:"url"`
+		}
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+
+		page := e.do(t, http.MethodGet, resp.URL, "")
+		assert.Equal(t, http.StatusOK, page.Code)
+		assert.Equal(t, "<p>mock</p>", page.Body.String())
+	}},
+
 	"POST /api/sessions/{id}/open-url": {run: func(t *testing.T, e *apiEnv) {
 		e.createPane(t, "pane-url")
 
@@ -597,6 +617,38 @@ var apiCases = map[string]apiCase{
 		assert.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
 		rr = e.do(t, http.MethodPost, "/api/tasks/input-given", `{"wait_signature":"w1-0"}`)
 		assert.Equal(t, http.StatusNoContent, rr.Code, rr.Body.String())
+	}},
+
+	"GET /api/tasks/codex-hook": {run: func(t *testing.T, e *apiEnv) {
+		require.NoError(t, os.Mkdir(filepath.Join(e.home, ".codex"), 0o700))
+
+		rr := e.do(t, http.MethodGet, "/api/tasks/codex-hook?host=", "")
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.JSONEq(t, `{"status":"missing","auto_update":false}`, rr.Body.String())
+		rr = e.do(t, http.MethodGet, "/api/tasks/codex-hook?host=not-configured", "")
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+	}},
+
+	"POST /api/tasks/codex-hook": {run: func(t *testing.T, e *apiEnv) {
+		require.NoError(t, os.Mkdir(filepath.Join(e.home, ".codex"), 0o700))
+
+		rr := e.do(t, http.MethodPost, "/api/tasks/codex-hook", `{"host":""}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.JSONEq(t, `{"status":"installed","auto_update":false}`, rr.Body.String())
+		_, err := os.Stat(filepath.Join(e.home, ".local", "bin", "panemux-codex-permission-hook.sh"))
+		require.NoError(t, err)
+		rr = e.do(t, http.MethodPost, "/api/tasks/codex-hook", `{"host":"not-configured"}`)
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+	}},
+
+	"POST /api/tasks/codex-hook/auto-update": {run: func(t *testing.T, e *apiEnv) {
+		rr := e.do(t, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"","enabled":true}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.JSONEq(t, `{"auto_update":true}`, rr.Body.String())
+		_, err := os.Stat(filepath.Join(e.home, ".config", "panemux", "codex-hook.json"))
+		require.NoError(t, err)
+		rr = e.do(t, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"not-configured","enabled":true}`)
+		assert.Equal(t, http.StatusNotFound, rr.Code)
 	}},
 
 	"POST /api/tasks/hosts/{name}/reconnect": {run: func(t *testing.T, e *apiEnv) {

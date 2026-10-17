@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import type { ILink } from '@xterm/xterm'
 import { TERMINAL_URL_REGEX, __computePullRequestLinksForTests } from './useTerminal'
 import { createUrlLinkProvider } from '../utils/terminalLinks'
+import { PREVIEW_PATH_REGEX } from '../utils/preview'
 
 // Integration check against the real xterm.js terminal. useTerminal.test.ts mocks
 // the terminal and this provider, so it can only assert how panemux wires them
@@ -437,5 +438,32 @@ describe('pull request link provider', () => {
 
     expect(__computePullRequestLinksForTests(term, null, 1)).toEqual([])
     term.dispose()
+  })
+})
+
+// Issue #385: HTML and Markdown paths go through the same provider, so the
+// cell mapping and the wrap handling above hold for them too.
+describe('path link provider', () => {
+  async function detectPaths(input: string, cols = 80): Promise<ILink[]> {
+    const term = new Terminal({ cols, rows: 10, allowProposedApi: true })
+    const provider = createUrlLinkProvider(term, PREVIEW_PATH_REGEX, vi.fn())
+    await new Promise<void>((resolve) => term.write(input, resolve))
+    const links = await new Promise<ILink[] | undefined>((resolve) => provider.provideLinks(1, resolve))
+    term.dispose()
+    return links ?? []
+  }
+
+  it('links a path after wide characters at the right cells', async () => {
+    const links = await detectPaths('確認：./mockups/index.html')
+
+    expect(links.map((link) => link.text)).toEqual(['./mockups/index.html'])
+    // 確, 認 and ： are two cells each.
+    expect(links[0].range).toEqual({ start: { x: 7, y: 1 }, end: { x: 26, y: 1 } })
+  })
+
+  it('links a path the terminal wrapped, whole', async () => {
+    const links = await detectPaths('see /workspace/user/project/docs/design.md now', 20)
+
+    expect(links.map((link) => link.text)).toEqual(['/workspace/user/project/docs/design.md'])
   })
 })

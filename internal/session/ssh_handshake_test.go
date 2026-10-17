@@ -221,7 +221,7 @@ func TestDialSSHClientUntil_HangingHandshakeIsBounded(t *testing.T) {
 	cfg := SSHConfig{Host: "example.test", User: "demo", Password: "secret", KnownHostsFile: knownHosts}
 
 	start := time.Now()
-	_, _, err := dialSSHClientUntil(cfg, nowFn().Add(dialRetryBudget))
+	_, _, err := dialSSHClientUntil(cfg, nowFn().Add(dialRetryBudget), nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ssh handshake")
@@ -262,7 +262,7 @@ func TestDialSSHClientUntil_HandshakeSharesTheDialBudget(t *testing.T) {
 	// A transport dial that consumed all but 20ms of the budget leaves the
 	// handshake 20ms, not a fresh window.
 	start := time.Now()
-	_, _, err := dialSSHClientUntil(cfg, nowFn().Add(20*time.Millisecond))
+	_, _, err := dialSSHClientUntil(cfg, nowFn().Add(20*time.Millisecond), nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ssh handshake")

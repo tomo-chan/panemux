@@ -38,6 +38,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `internal/ws` | Bridge session bytes and control messages to terminal WebSockets, stream command-center events, and serve the task event stream (`/ws/tasks/events`). |
 | `internal/requestsecurity` | Guard every API and WebSocket before side effects using browser Origin, Referer and Fetch Metadata evidence. |
 | `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
+| `internal/preview` | Resolve a clicked HTML or Markdown path against a session's working directories, refusing any file outside them, register the file under a random token for the server's lifetime, and serve it and the files under its root sandboxed in an opaque origin, rendering Markdown. For an SSH session the same is done on the host over SFTP (`Remote`, `ResolveRemote`, `Registry.OpenRemote`), and a clicked localhost URL of the host is relayed to a port of its own on `127.0.0.1` (`Relays`). |
 | `internal/portforward` | Maintain short-lived loopback listeners that forward callback traffic through a session's SSH connection. |
 | `internal/board` | Invoke agmsg through its documented scripts, relay rows across configured hosts, and maintain the in-memory status/history view. |
 | `internal/commandcenter` | Run one headless Claude query at a time, persist its session/history state, and stream structured events. |
@@ -53,11 +54,12 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `useLayout` | Own the normalized recursive layout tree, optimistic edits, and persistence requests. |
 | `TerminalPane` and `useTerminal` | Own xterm.js setup, fitting, addons, pane input, replay sequencing and suppression, pending terminal messages, and terminal lifecycle. |
 | `useWebSocket` | Own the pane connection, reconnect behavior, send-if-open transport, and validation of structured text control frames. |
-| `usePaneUrlOpen` | Receive validated URL-open events and coordinate browser navigation/callback forwarding. |
+| `PreviewSplit` and `usePreview` | Split a workspace pane's or the Type in pane popup's body into the terminal and a preview of a clicked HTML or Markdown path (`utils/preview`) or a localhost URL, own the divider and its per-pane / per-task ratio, and hide the preview when the terminal disconnects. |
+| `usePaneUrlOpen` | The one opener for a terminal's printed links, OSC 8 links and browser-shim requests: hold the ones from terminal output for approval, and open each once — in a tab with its callback forward, or a localhost URL on the panemux host in the preview. |
 | task event store (`useTaskEvents`, `utils/taskEvents`) | Hold one `/ws/tasks/events` connection per tab and the tasks and hosts it reports, validated and in `seq` order; reconnect from a fresh snapshot on any gap or close, 2 to 30 seconds apart with no limit. |
 | attention and notifications (`App`, `utils/taskEvents`) | Project the task event store and visibility changes into pane/workspace indicators, browser notifications and the task dashboard's state column, matching tasks to panes with `utils/taskBoard` and recording the `wait_id`s each tab notified, and those whose attention a person cleared, in its session storage. |
 | Agent Board hooks and panels | Poll status/message APIs, stream command-center output, and present dashboard, palette, and history overlays. |
-| `TaskDashboard` and `useTasks` | Poll `GET /api/tasks` while the task dashboard is shown, present tasks as a kanban by state, save done and labels through `PUT /api/tasks/records`, start and resume tasks through `POST /api/tasks` and `POST /api/tasks/resume` (`NewTaskDialog`), and match each task to the pane attached to its tmux session, or to the `local` / `ssh` pane its agent's `PANEMUX_PANE_ID` names (`utils/taskBoard`). Type in pane opens and ends the board's temporary attach through `POST`/`DELETE /api/tasks/attach` (`useTaskInput`) and shows it in `TaskInputPopup` / `TaskTerminal`. A host chip opens `HostConnectDialog`: `Open` adds an `ssh` / `ssh_tmux` pane (`paneConfigForHost`), and Type in pane opens a host terminal through `POST`/`DELETE /api/hosts/terminal` (`useHostTerminal`) shown in `HostTerminalPopup`; an `ssh_tmux` session name comes from `POST /api/hosts/session-name`. |
+| `TaskDashboard` and `useTasks` | Poll `GET /api/tasks` while the task dashboard is shown, present tasks as a kanban by state, save done and labels through `PUT /api/tasks/records`, start and resume tasks through `POST /api/tasks` and `POST /api/tasks/resume` (`NewTaskDialog`), and match each task to the pane attached to its tmux session, or to the `local` / `ssh` pane its agent's `PANEMUX_PANE_ID` names (`utils/taskBoard`). Type in pane opens and ends the board's temporary attach through `POST`/`DELETE /api/tasks/attach` (`useTaskInput`) and shows it in `TaskInputPopup` / `TaskTerminal`. A host chip opens `HostConnectDialog`: `Open` adds an `ssh` / `ssh_tmux` pane (`paneConfigForHost`), and Type in pane opens a host terminal through `POST`/`DELETE /api/hosts/terminal` (`useHostTerminal`) shown in `HostTerminalPopup`; an `ssh_tmux` session name comes from `POST /api/hosts/session-name`. The menu's `CodexHookItem` reads and installs the host's codex permission hook through `GET`/`POST /api/tasks/codex-hook`, and turns updating it by itself on or off through `POST /api/tasks/codex-hook/auto-update`; the panemux host's chip opens a menu with that item alone. |
 | Zod schemas | Runtime-validate structured success payloads and control frames for which schemas are defined. Generated TypeScript types derive from these schemas. |
 
 ## State and ownership
@@ -173,6 +175,22 @@ operands, with a fixed initial-pane bootstrap for PATH and the configured shell/
 uses pane-local tmux passthrough to deliver the same OSC event as an ordinary
 SSH pane; existing sessions and the tmux server's environment are not reconfigured.
 
+### Preview flow
+
+A path the terminal shows as an HTML or Markdown link is sent to
+`POST /api/sessions/{id}/preview`, which resolves it on the session's host and returns a
+`/preview/<token>/…` address. `PreviewSplit` frames that address beside the terminal; Open in new tab
+opens the same address. A localhost URL on the panemux host needs no server step: `usePaneUrlOpen`,
+the one opener for printed links, OSC 8 links and browser-shim requests, hands it to `usePreview`,
+and `PreviewSplit` frames the URL in its own origin, inside a `srcdoc` document whose policy keeps the frame on loopback.
+For an `ssh` or `ssh_tmux` session the API's `previewHosts` keeps one `preview.Remote` per connection
+a session was dialed with (`session.PreviewTarget`), connected with `session.DialPreviewConn` — the
+pane dialer, its own connection — and files are read over its SFTP subsystem. A localhost URL
+`usePreview` is handed for such a session is sent as `url`; `preview.Relays` gives the host's address
+and port a listener on `127.0.0.1:0` and returns that address, which `PreviewSplit` frames as it
+frames a localhost page. Behavior is in [the split preview](behavior/preview.md), and the isolation in
+[preview security](security/preview.md).
+
 ## Trust boundaries
 
 - Core terminal routes assume a trusted deployment and are not an authenticated multi-user surface.
@@ -190,7 +208,14 @@ SSH pane; existing sessions and the tmux server's environment are not reconfigur
   paths, and subprocess operands follow the per-sink rules in [Security design](security.md).
 - Panemux runs no copy of itself on remote hosts. SSH-backed features use the existing SSH session
   and operator-installed remote tools; the task dashboard uses its own SSH connection per host and
-  runs only its two fixed scripts over it — collection, and starting or resuming a claude task.
+  runs only its two fixed scripts over it — collection, and starting or resuming a claude task. The
+  split preview keeps its own SSH connection per host too, and runs no command over it: it reads files
+  over SFTP and opens direct-tcpip channels to the host's loopback.
+- Previewed HTML and Markdown are untrusted content. They are served under `/preview/<token>/` in a
+  sandboxed opaque origin, so their requests to `/api/*` and `/ws/*` are cross-site and refused; the
+  token, issued only by the guarded API, is what grants access to a file
+  ([preview security](security/preview.md)). A relayed localhost page of an SSH host runs in the
+  origin of its relay port on `127.0.0.1`, another loopback port, which the request guard refuses.
 - The browser is untrusted input to Go handlers. Structured backend payloads with declared frontend
   schemas remain untrusted until validation succeeds; other input paths apply their own parsing and
   bounds checks.

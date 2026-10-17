@@ -5,6 +5,10 @@ import {
   TaskAttachSchema,
   HostSessionName,
   HostSessionNameSchema,
+  CodexHook,
+  CodexHookAuto,
+  CodexHookAutoSchema,
+  CodexHookSchema,
   HostTerminal,
   HostTerminalSchema,
   TaskLaunched,
@@ -18,6 +22,7 @@ import {
 } from '../schemas'
 import { mergeKnownLabels } from '../utils/labelSuggestions'
 import { applyTaskRecord } from '../utils/taskBoard'
+import { postInputGiven } from '../utils/inputGiven'
 
 // How often the dashboard re-collects while it is on screen. Collection runs
 // a script on every host, so it happens only while the dashboard is shown and
@@ -101,6 +106,12 @@ export interface TasksState {
    * session, from hostSessionName.
    */
   hostTerminal: (host: string, type: HostTerminalType, tmuxSession?: string) => Promise<TaskActionResult<HostTerminal>>
+  /** Whether host's codex has panemux's permission hook (issue #396). */
+  codexHook: (host: string) => Promise<TaskActionResult<CodexHook>>
+  /** Installs or updates host's codex permission hook, answering the status read back. */
+  installCodexHook: (host: string) => Promise<TaskActionResult<CodexHook>>
+  /** Turns updating host's codex permission hook by itself on or off (issue #402). */
+  setCodexHookAuto: (host: string, enabled: boolean) => Promise<TaskActionResult<CodexHookAuto>>
   /**
    * Ends a host terminal. An ssh terminal logs out; an ssh_tmux one ends only
    * its tmux client. A failure is not reported, as with detach.
@@ -112,17 +123,23 @@ export type HostTerminalType = 'ssh' | 'ssh_tmux'
 
 // postTaskAction POSTs body to path and parses the answer with schema. A
 // refusal comes back as the server's own reason.
-async function postTaskAction<T>(
+function postTaskAction<T>(path: string, body: unknown, schema: ResponseSchema<T>): Promise<TaskActionResult<T>> {
+  return requestTaskAction(
+    path,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    schema,
+  )
+}
+
+type ResponseSchema<T> = { safeParse: (value: unknown) => { success: true; data: T } | { success: false } }
+
+async function requestTaskAction<T>(
   path: string,
-  body: unknown,
-  schema: { safeParse: (value: unknown) => { success: true; data: T } | { success: false } },
+  init: RequestInit | undefined,
+  schema: ResponseSchema<T>,
 ): Promise<TaskActionResult<T>> {
   try {
-    const res = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    const res = await fetch(path, init)
     if (!res.ok) {
       const reason = (await res.text()).trim()
       return { ok: false, error: reason || `HTTP ${res.status}` }
@@ -283,16 +300,8 @@ export function useTasks(enabled: boolean): TasksState {
   const inputGiven = useCallback(async (task: Task) => {
     const signature = task.wait_signature
     if (!signature) return 'This task is not waiting'
-    try {
-      const res = await fetch('/api/tasks/input-given', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wait_signature: signature }),
-      })
-      if (!res.ok) return (await res.text()).trim() || `HTTP ${res.status}`
-    } catch (err) {
-      return err instanceof Error ? err.message : 'Failed to mark the input given'
-    }
+    const failure = await postInputGiven(signature)
+    if (failure) return failure
     setInputGivenWaits((current) => new Set(current).add(signature))
     await refreshAfterAction()
     return null
@@ -323,6 +332,23 @@ export function useTasks(enabled: boolean): TasksState {
         tmuxSession === undefined ? { connection: host, type } : { connection: host, type, tmux_session: tmuxSession },
         HostTerminalSchema,
       ),
+    [],
+  )
+
+  const codexHook = useCallback(
+    (host: string) =>
+      requestTaskAction(`/api/tasks/codex-hook?host=${encodeURIComponent(host)}`, undefined, CodexHookSchema),
+    [],
+  )
+
+  const installCodexHook = useCallback(
+    (host: string) => postTaskAction('/api/tasks/codex-hook', { host }, CodexHookSchema),
+    [],
+  )
+
+  const setCodexHookAuto = useCallback(
+    (host: string, enabled: boolean) =>
+      postTaskAction('/api/tasks/codex-hook/auto-update', { host, enabled }, CodexHookAutoSchema),
     [],
   )
 
@@ -367,5 +393,8 @@ export function useTasks(enabled: boolean): TasksState {
     hostSessionName,
     hostTerminal,
     closeHostTerminal,
+    codexHook,
+    installCodexHook,
+    setCodexHookAuto,
   }
 }

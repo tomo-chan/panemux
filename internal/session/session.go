@@ -107,6 +107,22 @@ type SSHConnNamer interface {
 	ConnectionName() string
 }
 
+// PreviewTarget is implemented by sessions whose shell runs on an SSH host.
+// The split preview reaches that host as the session does (issue #387):
+// PreviewSSHConfig is the connection the session was dialed with, not its
+// ssh_connections entry as it reads now, which may have been edited since.
+type PreviewTarget interface {
+	SSHConnNamer
+	PreviewSSHConfig() SSHConfig
+}
+
+// previewSSHConfig is cfg as the host is reached: where a pane's shell
+// starts on it is the pane's own, not the connection's.
+func previewSSHConfig(cfg SSHConfig) SSHConfig {
+	cfg.Cwd, cfg.Shell = "", ""
+	return cfg
+}
+
 // boardHostIDLocal is the BoardHostID value shared by every local/tmux-local
 // session, identifying the host panemux itself runs on.
 const boardHostIDLocal = "local"

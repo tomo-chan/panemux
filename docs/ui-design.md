@@ -296,6 +296,43 @@ asked for it — before deciding.
 
 ---
 
+## Split Preview
+
+A clicked HTML or Markdown path opens beside the terminal rather than over it (issue #385), in a
+workspace pane and in the task dashboard's Type in pane popup alike: the point is to check a mock
+while still instructing the agent in the same terminal. [Behavior](behavior/preview.md) has the full
+rules.
+
+- The terminal keeps the left side and the preview takes the right, starting at 50:50. The pane
+  header, status bar and every pane operation stay as they are; the split lives in the pane's body.
+- The preview header follows the mock in #359: the host (`local`, or the SSH host's connection
+  name) in the accent blue, then the absolute path — or, for a relayed localhost URL of an SSH host,
+  the URL as clicked, not the relay's address — truncated with the full value as a tooltip; below it Reload, an outlined
+  `Open in new tab`, and Close. Opening larger is a new tab — the preview has no full screen of its
+  own, so the terminal is never hidden behind it.
+- While the previewed page has focus, a one-line note under the header says that keys go to the
+  page and the terminal takes them back: the page is sandboxed in another origin, so panemux's
+  shortcuts cannot hear keys typed in it, and the note keeps them from failing silently. It is a
+  status, not an alert, and goes as soon as focus leaves the page.
+- The divider is a 6 px bar with a centered grip. It highlights in the accent blue on hover, focus
+  and while dragged; it is a focusable `separator` that the arrow keys move and a double-click
+  returns to 50:50. Neither side gets narrower than 160 px; in a narrow pane its range narrows to
+  match, so its announced value, its key steps and the drawn split agree.
+- Loading, the reason a path cannot be opened, and the choice between files a relative path names
+  are shown in the preview's own area, so the terminal is never covered and keeps taking keys.
+- The preview's page is white like a browser page, framed by the dark panemux chrome.
+- A localhost URL (issue #386) opens in the same split. Above its page, a one-line note in the same
+  style as the keys note says that a page refusing to be framed stays blank and that hot reload,
+  sign-in or storage can differ in a frame, pointing at `Open in new tab`: a frame cannot report
+  either, so the note is always shown for a localhost page rather than guessed at.
+- The pane's URL strip adds `Preview` before `Open` and `Ignore` when the URL is a localhost page on
+  the panemux host, and says `This link goes to` instead of `This pane wants to open` for a clicked
+  OSC 8 link. The strip covers the terminal side only — the whole body when no preview is open — so
+an open preview's header stays visible while another URL is asked about. The Type in pane popup
+draws the same strip over its terminal.
+
+---
+
 ## Attention Indicators
 
 Agent-attention highlighting remains visually distinct from layout-editing affordances.
@@ -314,6 +351,18 @@ both also clear by themselves once the task's wait ends, so a wait answered from
 popup or another terminal leaves nothing flashing. A browser notification leads to the same place the flash does: its
 pane, focused and briefly outlined, or — for a task no pane shows — the task selected and highlighted
 on the task dashboard.
+
+A codex permission request is answered in the codex pane itself, so a pane whose task waits on one
+also carries a thin gold strip between its header and its terminal — `Waiting for input: a permission
+request from codex`, the Tasks detail's own words, and the detail's `Input given` — so the wait can
+be marked answered without opening the dashboard. The Type in pane popup shows the same strip between
+its header and its terminal. A pane running several such tasks says how many and offers
+`Review in Tasks` instead. The strip is buttons only: it takes no key, so Tab, Escape and everything
+else typed in the pane stay the terminal's, and it is not the attention: focusing or clicking the pane
+or closing the popup does not take it away, and only `Input given` or the end of the wait removes it;
+after `Input given` the terminal has the focus again, so typing goes on where it was, unless the focus
+moved to another pane while the request was answered
+([behavior](behavior/task-events.md#codex-permission-requests-in-a-pane)).
 
 ---
 
@@ -344,8 +393,9 @@ terminal that had focus cannot receive what is typed into the dashboard.
   line, the actions wrap to the next line as a whole, flush right, rather than one by one; only a
   screen too narrow for the group on a line of its own wraps it inside, so no action is cut off.
 - **Host connection menu.** The chip of a remote host whose collection succeeded is a button
-  (`aria-haspopup="dialog"`, `aria-expanded`) with a small terminal icon; the panemux host's chip and
-  a `connecting`, failed or not-yet-collected chip are plain text
+  (`aria-haspopup="dialog"`, `aria-expanded`) with a small terminal icon; the panemux host's chip
+  opens only its Codex input notifications (below), and a `connecting`, failed or not-yet-collected
+  chip is plain text
   ([behavior](behavior/tasks.md#opening-a-host)). Pressing it opens a small popover dialog anchored
   under the chip, titled after the host: a `Connection` group of `ssh` / `ssh_tmux` radios (`ssh`
   checked), the tmux session name the server generated in the monospace face once `ssh_tmux` is
@@ -353,6 +403,17 @@ terminal that had focus cannot receive what is typed into the dashboard.
   in the interactive blue, labelled `Open: <host>` and `Type in pane: <host>` like a task's
   buttons. A press outside it closes it; focus returns to the chip. A host that stops being
   reachable takes its menu with it, and focus goes to its `Reconnect`.
+- **Codex input notifications.** Below the menu's actions, separated by a rule, a row reads
+  `Codex input notifications` with a small `Install` or `Update` button at its end, or `Installed`
+  in the Working green, and a muted line under it (`Not installed`, `Not checked: …`); a
+  `hooks.json` panemux will not rewrite reads `Cannot install: …` in red, with no button. After an
+  install, a muted line says to trust the hook in codex's `/hooks`. A host without codex shows no row.
+  Under the status, an `Update automatically` checkbox, off until turned on; a muted line says the
+  hook was updated automatically and to trust it, and a red one why that failed, the setting could
+  not be read (the checkbox is then disabled), or it was not saved. The checkbox and the
+  `Install`/`Update` button are each disabled while the other's request runs.
+  The panemux host's chip is a button too, with no terminal icon: its menu holds this row and
+  `Close` alone ([behavior](behavior/tasks.md#codex-permission-requests)).
 - **Unreadable state.** The warning is amber, one for every host together, and never beside a host
   chip, where it would crowd them as hosts are added. It opens a modal anchored below the top bar at
   the right and kept within the screen's height, titled "Unreadable session state · <n> files on <m> hosts": a table with one row per
@@ -443,7 +504,7 @@ terminal that had focus cannot receive what is typed into the dashboard.
   held at a start-up screen, or running its session in codex's shared daemon, to be seen in the pane;
   a session the daemon runs shows "codex's shared daemon · cannot open in a pane" where a card says
   where it runs, and says why; a working one may be waiting for approval, which codex does not
-  record; an unknown one has no turn its history or log end reports); **Work**, the summary and the
+  record unless its permission hook is registered on that host; an unknown one has no turn its history or log end reports); **Work**, the summary and the
   remaining work as a numbered list ("No remaining work found." when there is none); links
   (repository, branch, pull request, then issues noted "closed by the pull request" and References
   noted "from the branch name or pull request title", each row only when there is something to

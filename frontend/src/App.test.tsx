@@ -189,6 +189,8 @@ function tasksStateWith(tasks: unknown[]) {
     updatedAt: null,
     refresh: vi.fn(),
     reconnect: vi.fn(),
+    codexHook: vi.fn().mockResolvedValue({ ok: true, launched: { status: 'absent' } }),
+    setCodexHookAuto: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
   }
 }
 
@@ -197,6 +199,134 @@ beforeEach(() => {
   taskEventsMock.state = { store: null, status: 'connecting' }
   taskEventsMock.onChange = null
   window.sessionStorage.clear()
+})
+
+// Issue #404: a pane whose task waits on a codex permission request.
+describe('codex permission waits in a pane', () => {
+  function permissionTask(id: string, paneId: string, waitId: string) {
+    return paneTask(id, paneId, 'wait', { agent: 'codex', waiting_for: 'a permission request from codex', wait_id: waitId })
+  }
+
+  beforeEach(() => {
+    mockUseBrowserNotificationPermission.mockImplementation(() => {})
+    mockUseSessionsOverview.mockReturnValue({})
+    mockUseGitInfoSnapshotMap.mockReturnValue({})
+    mockUseBoardSessionToken.mockReturnValue({ token: '', commandCenterEnabled: false, agentBoardEnabled: false })
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
+      const ctx = useContext(LayoutActionsContext)
+      const waits = ctx?.approval?.waits(pane.id) ?? []
+      return (
+        <div data-pane-id={pane.id} data-approval={waits.map((task) => task.id).join(',')}>
+          <button onClick={() => ctx?.clearPaneAttention(pane.id)}>Clear {pane.id}</button>
+          <button onClick={() => void ctx?.approval?.inputGiven(waits[0])}>Input given {pane.id}</button>
+          <button onClick={() => ctx?.approval?.review(waits[0].id)}>Review {pane.id}</button>
+        </div>
+      )
+    })
+  })
+
+  afterEach(() => {
+    mockUseBrowserNotificationPermission.mockReset()
+    mockUseSessionsOverview.mockReset()
+    mockUseGitInfoSnapshotMap.mockReset()
+    mockUseBoardSessionToken.mockReset()
+    mockTerminalPane.mockReset()
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => <div data-pane-id={pane.id} />)
+    vi.unstubAllGlobals()
+  })
+
+  const approval = (paneId: string) => document.querySelector(`[data-pane-id="${paneId}"]`)?.getAttribute('data-approval')
+
+  it('gives each pane the permission waits of the tasks it runs, kept while its attention is cleared', () => {
+    render(<App />)
+    emitTaskSnapshot([
+      permissionTask('a', 'main', 'w1-a'),
+      permissionTask('b', 'main', 'w1-b'),
+      waitingTask('q', 'side', 'w1-q'),
+    ])
+    expect(approval('main')).toBe('a,b')
+    expect(approval('side')).toBe('')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear main' }))
+    expect(approval('main')).toBe('a,b')
+  })
+
+  it('goes when the turn ends', () => {
+    render(<App />)
+    emitTaskSnapshot([permissionTask('a', 'main', 'w1-a')])
+    expect(approval('main')).toBe('a')
+
+    emitTaskChange('changed', paneTask('a', 'main', 'busy', { agent: 'codex' }), 'wait')
+    expect(approval('main')).toBe('')
+  })
+
+  it('marks the input given through the Tasks API and stops offering it', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    emitTaskSnapshot([permissionTask('a', 'main', 'w1-a')])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Input given main' }))
+
+    await waitFor(() => expect(approval('main')).toBe(''))
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/input-given', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ wait_signature: 'w1-a' }),
+    }))
+  })
+
+  it('keeps offering it when marking the input given fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('boom', { status: 500 })))
+    render(<App />)
+    emitTaskSnapshot([permissionTask('a', 'main', 'w1-a')])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Input given main' }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled())
+    expect(approval('main')).toBe('a')
+  })
+
+  it('stops offering a wait the dashboard marked input given', () => {
+    mockUseTasks.mockReturnValue({ ...tasksStateWith([]), inputGivenWaits: new Set(['w1-a']) })
+    render(<App />)
+    emitTaskSnapshot([permissionTask('a', 'main', 'w1-a'), permissionTask('b', 'side', 'w1-b')])
+
+    expect(approval('main')).toBe('')
+    expect(approval('side')).toBe('b')
+  })
+
+  it('stops showing a wait in Tasks once a pane marked it input given', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+    mockUseTasks.mockReturnValue(tasksStateWith([paneTask('a', 'main', 'busy', { agent: 'codex' })]))
+    render(<App />)
+    emitTaskSnapshot([permissionTask('a', 'main', 'w1-a')])
+    expect(screen.getByRole('button', { name: /^Tasks, 1 waiting/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Input given main' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument())
+  })
+
+  it('goes while the event stream is lost', () => {
+    const { rerender } = render(<App />)
+    emitTaskSnapshot([permissionTask('a', 'main', 'w1-a')])
+    expect(approval('main')).toBe('a')
+
+    taskEventsMock.state = { store: null, status: 'offline' }
+    rerender(<App />)
+    expect(approval('main')).toBe('')
+  })
+
+  it('opens the dashboard on the task for Review in Tasks', async () => {
+    mockUseTasks.mockReturnValue(tasksStateWith([paneTask('a', 'main', 'busy', { agent: 'codex' })]))
+    render(<App />)
+    emitTaskSnapshot([permissionTask('a', 'main', 'w1-a')])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review main' }))
+
+    const card = await screen.findByTestId('task-card-a')
+    await waitFor(() => expect(card).toHaveAttribute('data-selected', 'true'))
+  })
 })
 
 describe('App workspace deletion', () => {

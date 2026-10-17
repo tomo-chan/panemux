@@ -6,18 +6,34 @@ import type { TasksState, TaskActionResult } from '../hooks/useTasks'
 import type { SSHConnectionsState } from '../hooks/useSSHConnections'
 import type { Task, TaskAttach, TasksResponse, Workspace } from '../schemas'
 import type { TaskTerminalStatus } from './TaskTerminal'
+import { localhostFrameDocument } from '../utils/preview'
 
 // Issue #284: the dashboard's Type in pane popup. The terminal itself is
 // TaskTerminal's (tested on its own); here it is a stub whose status the test
 // drives, and whose mounts are counted so a resize or a poll that remounted it
 // — a new WebSocket, a lost input target — would show.
 const { terminals } = vi.hoisted(() => ({
-  terminals: { mounts: [] as string[], onStatus: null as ((status: TaskTerminalStatus) => void) | null },
+  terminals: {
+    mounts: [] as string[],
+    onStatus: null as ((status: TaskTerminalStatus) => void) | null,
+    onPreviewPath: undefined as ((path: string) => void) | undefined,
+    onLinkActivate: undefined as ((url: string) => void) | undefined,
+    onBrowserOpenRequest: undefined as ((url: string, source?: 'program' | 'link') => void) | undefined,
+  },
 }))
 
 vi.mock('./TaskTerminal', () => ({
-  TaskTerminal: ({ sessionId, onStatus }: { sessionId: string; onStatus: (status: TaskTerminalStatus) => void }) => {
+  TaskTerminal: ({ sessionId, onStatus, onPreviewPath, onLinkActivate, onBrowserOpenRequest }: {
+    sessionId: string
+    onStatus: (status: TaskTerminalStatus) => void
+    onPreviewPath?: (path: string) => void
+    onLinkActivate?: (url: string) => void
+    onBrowserOpenRequest?: (url: string, source?: 'program' | 'link') => void
+  }) => {
     terminals.onStatus = onStatus
+    terminals.onPreviewPath = onPreviewPath
+    terminals.onLinkActivate = onLinkActivate
+    terminals.onBrowserOpenRequest = onBrowserOpenRequest
     useEffect(() => {
       terminals.mounts.push(sessionId)
     }, [sessionId])
@@ -117,6 +133,9 @@ function tasksState(overrides: Partial<TasksState> = {}, tasks: Task[] = ALL): T
     hostSessionName: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     hostTerminal: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     closeHostTerminal: vi.fn().mockResolvedValue(undefined),
+    codexHook: vi.fn().mockResolvedValue({ ok: true, launched: { status: 'absent' } }),
+    setCodexHookAuto: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
+    installCodexHook: vi.fn().mockResolvedValue({ ok: false, error: 'not stubbed' }),
     ...overrides,
   }
 }
@@ -183,12 +202,180 @@ function setNarrow(narrow: boolean) {
 beforeEach(() => {
   terminals.mounts = []
   terminals.onStatus = null
+  terminals.onPreviewPath = undefined
   window.localStorage.clear()
   setNarrow(false)
 })
 
 afterEach(() => {
   window.localStorage.clear()
+})
+
+// Issue #404: a task waiting on a codex permission request can be marked
+// answered from the popup, between its header and the terminal.
+describe('TaskDashboard Type in pane: codex permission wait', () => {
+  const permission = task({ id: 'perm-1', agent: 'codex', state: 'wait', waiting_for: 'a permission request from codex',
+    wait_signature: 'w1-perm', cwd: '/workspace/user/approve', location: { kind: 'tmux', tmux_session: 'approve', attachable: true } })
+
+  it('offers Input given for the task, between the header and the terminal', async () => {
+    const state = tasksState({}, [permission, waiting])
+    renderDashboard(state)
+    await openPopup('perm-1')
+
+    const notice = within(dialog()).getByRole('status', { name: 'Codex permission request' })
+    expect(notice).toHaveTextContent('Waiting for input: a permission request from codex')
+    expect(within(dialog()).getByTestId('task-input-header').compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(notice.compareDocumentPosition(within(dialog()).getByTestId('task-terminal')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    await act(async () => {
+      fireEvent.click(within(notice).getByRole('button', { name: 'Input given' }))
+    })
+    expect(state.inputGiven).toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-1', wait_signature: 'w1-perm' }))
+  })
+
+  it('drops the failure of one wait when the next starts', async () => {
+    const state = tasksState({ inputGiven: vi.fn().mockResolvedValue('boom') }, [permission, waiting])
+    const { rerenderWith } = renderDashboard(state)
+    await openPopup('perm-1')
+    await act(async () => {
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Input given' }))
+    })
+    expect(within(dialog()).getByRole('alert')).toHaveTextContent('Could not mark the input given: boom')
+
+    rerenderWith({ ...state, data: response([{ ...permission, wait_signature: 'w1-perm-2' }, waiting]) })
+    expect(within(dialog()).queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('gives the terminal the keys back once the input is given', async () => {
+    renderDashboard(tasksState({}, [permission, waiting]))
+    await openPopup('perm-1')
+    const button = within(dialog()).getByRole('button', { name: 'Input given' })
+    button.focus()
+
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(document.activeElement).toBe(within(dialog()).getByRole('textbox', { name: 'Terminal input' }))
+  })
+
+  //efficacy:exempt the strip's absence is what the branch keeps from main, so it passes without the branch too
+  it('shows nothing for a task waiting on anything else', async () => {
+    renderDashboard()
+    await openPopup('wait-1')
+    expect(within(dialog()).queryByRole('status', { name: 'Codex permission request' })).not.toBeInTheDocument()
+  })
+})
+
+// Issue #386: the popup opens a localhost URL as a pane does — a clicked link
+// beside the terminal, a request or an OSC 8 link after Preview — and no
+// forward is asked for its attach.
+describe('TaskDashboard Type in pane: localhost preview', () => {
+  let open: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('{}'))
+    open = vi.spyOn(window, 'open').mockReturnValue(null)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('previews a clicked localhost link beside the terminal', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+
+    act(() => terminals.onLinkActivate!('http://localhost:5173/'))
+
+    const frame = within(dialog()).getByTitle('Preview of http://localhost:5173/')
+    expect(frame).toHaveAttribute('srcdoc', localhostFrameDocument('http://localhost:5173/'))
+    expect(open).not.toHaveBeenCalled()
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(expect.stringContaining('/open-url'), expect.anything())
+  })
+
+  it('asks before opening a requested localhost URL, with Preview, Open and Ignore', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/'))
+    expect(within(dialog()).getByText('http://localhost:5173/')).toBeInTheDocument()
+    expect(within(dialog()).getByRole('button', { name: 'Ignore' })).toBeInTheDocument()
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Open' }))
+
+    expect(open).toHaveBeenCalledWith('http://localhost:5173/', '_blank', 'noopener,noreferrer')
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(within(dialog()).queryByRole('button', { name: 'Ignore' })).toBeNull()
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/', 'link'))
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Preview' }))
+    expect(within(dialog()).getByTitle('Preview of http://localhost:5173/')).toBeInTheDocument()
+  })
+
+  it('previews a localhost link of a task on an SSH host through its relay (issue #387)', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(async () => new Response(JSON.stringify({
+      status: 'ready', kind: 'url', url: 'http://127.0.0.1:49152/', path: 'http://localhost:5173/', host: 'dev-server',
+    })))
+    renderDashboard()
+    await openPopup('idle-1')
+    setStatus('connected')
+
+    await act(async () => {
+      terminals.onLinkActivate!('http://localhost:5173/')
+    })
+    const frame = within(dialog()).getByTitle('Preview of http://localhost:5173/')
+    expect(frame).toHaveAttribute('srcdoc', localhostFrameDocument('http://127.0.0.1:49152/'))
+    expect(within(dialog()).getByRole('region', { name: 'Preview' })).toHaveTextContent('dev-server')
+    expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/sessions\/board-.*\/preview$/),
+      expect.objectContaining({ body: JSON.stringify({ url: 'http://localhost:5173/' }) }))
+    expect(open).not.toHaveBeenCalled()
+
+    // A program's request offers Preview there too.
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5174/'))
+    expect(within(dialog()).getByRole('button', { name: 'Preview' })).toBeInTheDocument()
+  })
+
+  // Not connected, the preview cannot open, so it is not offered; a request
+  // raised by the attach that ended is gone once Reconnect replaces it.
+  it('offers no Preview while disconnected, and drops a request when the attach is replaced', async () => {
+    const state = tasksState({
+      attach: vi.fn()
+        .mockResolvedValueOnce(attached('board-0000000000000001'))
+        .mockResolvedValueOnce(attached('board-0000000000000001')),
+    })
+    renderDashboard(state)
+    await openPopup()
+    setStatus('connected')
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/'))
+    expect(within(dialog()).getByRole('button', { name: 'Preview' })).toBeInTheDocument()
+    setStatus('disconnected')
+    expect(within(dialog()).queryByRole('button', { name: 'Preview' })).toBeNull()
+    expect(within(dialog()).getByRole('button', { name: 'Ignore' })).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Reconnect' }))
+    })
+    setStatus('connected')
+    expect(within(dialog()).queryByRole('button', { name: 'Ignore' })).toBeNull()
+  })
+
+  // The strip asks about another URL while a preview is open: it stays over
+  // the terminal, so the preview's header and its controls stay in view.
+  it('keeps the approval strip on the terminal side while a preview is open', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    act(() => terminals.onLinkActivate!('http://localhost:5173/first'))
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/second'))
+
+    const strip = dialog().querySelector('[data-pane-url-request="true"]') as HTMLElement
+    expect(strip).not.toBeNull()
+    expect(strip.closest('.pm-preview-terminal')).not.toBeNull()
+    expect(strip.closest('.pm-preview')).toBeNull()
+  })
 })
 
 describe('TaskDashboard Type in pane: entry', () => {
@@ -643,6 +830,7 @@ describe('TaskDashboard Type in pane: maximize', () => {
     expect(dialog()).toHaveAttribute('data-maximized', 'true')
   })
 
+  // efficacy:exempt unchanged by #385; it is reported only because the preview tests follow it.
   it('is a full sheet with no maximize on a narrow screen', async () => {
     setNarrow(true)
     window.localStorage.setItem('panemux:task-terminal-maximized', 'true')
@@ -661,3 +849,94 @@ describe('TaskDashboard Type in pane: maximize', () => {
 
 // Keep React in scope for the JSX in the mock factory above.
 void React
+
+describe('TaskDashboard Type in pane: preview', () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({
+      status: 'ready', kind: 'file', url: '/preview/ab/mockups/index.html',
+      path: '/workspace/user/review-api/mockups/index.html', host: '',
+    })))
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  async function openPreview() {
+    await act(async () => {
+      terminals.onPreviewPath!('./mockups/index.html')
+    })
+  }
+
+  it('opens a clicked path beside the terminal, through the attach, without remounting the terminal', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+
+    await openPreview()
+
+    const frame = within(dialog()).getByTitle('Preview of /workspace/user/review-api/mockups/index.html')
+    expect(frame).toHaveAttribute('src', '/preview/ab/mockups/index.html')
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/sessions/board-0000000000000001/preview', expect.objectContaining({ method: 'POST' }),
+    )
+    expect(terminals.mounts).toEqual(['board-0000000000000001'])
+    expect(within(dialog()).getByRole('separator', { name: 'Resize terminal and preview' })).toBeInTheDocument()
+
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Close preview' }))
+    expect(within(dialog()).queryByRole('region', { name: 'Preview' })).toBeNull()
+    expect(terminals.mounts).toEqual(['board-0000000000000001'])
+  })
+
+  it('keeps the ratio per task', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    await openPreview()
+
+    fireEvent.keyDown(within(dialog()).getByRole('separator'), { key: 'ArrowRight' })
+    expect(window.localStorage.getItem('panemux:preview-split:task:wait-1')).toBe('55')
+  })
+
+  it('links paths in every task, on the panemux host or an SSH host (issue #387)', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    expect(typeof terminals.onPreviewPath).toBe('function')
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+
+    await openPopup('idle-1')
+    setStatus('connected')
+    expect(within(dialog()).getByRole('heading', { name: 'docs' })).toBeInTheDocument()
+    expect(typeof terminals.onPreviewPath).toBe('function')
+  })
+
+  it('hides the preview when the terminal disconnects', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    await openPreview()
+
+    setStatus('disconnected')
+    expect(within(dialog()).queryByRole('region', { name: 'Preview' })).toBeNull()
+  })
+
+  it('keeps Tab inside the popup past the preview, and Escape there does not close it', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    await openPreview()
+
+    const close = within(dialog()).getByRole('button', { name: 'Close preview' })
+    close.focus()
+    expect(key(close, { key: 'Escape' }).defaultPrevented).toBe(false)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    const buttons = within(dialog()).getAllByRole('button')
+    const last = buttons[buttons.length - 1]
+    last.focus()
+    const wrapped = key(last, { key: 'Tab' })
+    expect(wrapped.defaultPrevented).toBe(true)
+    expect(dialog().contains(document.activeElement)).toBe(true)
+  })
+})

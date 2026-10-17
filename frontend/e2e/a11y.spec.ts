@@ -107,6 +107,9 @@ async function showTaskDashboard(page: Page) {
       },
     })
   })
+  // The menus' Codex input notifications item (issue #396), with its
+  // Install button.
+  await page.route(/\/api\/tasks\/codex-hook\?/, (route) => route.fulfill({ json: { status: 'missing' } }))
   await page.goto('/')
   await expect(page.locator('[data-pane-id]').first()).toBeVisible()
   await page.getByRole('button', { name: /^Tasks/ }).click()
@@ -127,6 +130,7 @@ test('holds the host connection menu at or below its accessibility ceiling', asy
 
   await page.getByRole('button', { name: 'Open a terminal on gpu-box' }).click()
   await expect(page.getByRole('dialog', { name: 'Open a terminal on gpu-box' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Install Codex input notifications on gpu-box' })).toBeVisible()
 
   const { results, failures } = await scan(page, testInfo, 'host-connect-menu')
 

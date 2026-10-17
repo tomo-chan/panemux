@@ -7,6 +7,7 @@ import {
   useTerminal,
 } from './useTerminal'
 import { createUrlLinkProvider } from '../utils/terminalLinks'
+import { PREVIEW_PATH_REGEX } from '../utils/preview'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 
 // ── xterm.js mocks ───────────────────────────────────────────────────────────
@@ -67,6 +68,14 @@ const {
 
 vi.mock('@xterm/xterm', () => ({ Terminal: mockTerminalCtor }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn(function () { return mockFitAddon }) }))
+
+// The handler useTerminal gives xterm for OSC 8 hyperlinks (issue #386).
+type OscLinkHandler = { activate: (event: MouseEvent, uri: string) => void; allowNonHttpProtocols?: boolean }
+function osc8Handler(): OscLinkHandler {
+  const options = (mockTerminalCtor.mock.calls.at(-1) as unknown as [{ linkHandler?: OscLinkHandler }])[0]
+  expect(options.linkHandler).toBeDefined()
+  return options.linkHandler!
+}
 // Only the provider factory is stubbed: computePullRequestLinks uses this
 // module's real cell-mapping helpers, and a stub of those would make the
 // coordinate assertions below assert the stub.
@@ -198,21 +207,44 @@ describe('useTerminal', () => {
     expect(mockTerm.loadAddon).toHaveBeenCalledTimes(1)
   })
 
-  it('builds the url link provider with the CJK-aware url regex', () => {
+  it('builds the url link provider with the CJK-aware url regex, and the path one with the preview regex', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container }))
 
-    expect(createUrlLinkProvider).toHaveBeenCalledTimes(1)
+    expect(createUrlLinkProvider).toHaveBeenCalledTimes(2)
     expect(vi.mocked(createUrlLinkProvider).mock.calls[0][1]).toBe(TERMINAL_URL_REGEX)
+    expect(vi.mocked(createUrlLinkProvider).mock.calls[1][1]).toBe(PREVIEW_PATH_REGEX)
   })
 
-  it('registers the url provider before the pull request one, so a #123 inside a url stays part of it', () => {
+  it('registers the url provider first, so a #123 or a path inside a url stays part of it', () => {
     const container = makeContainer()
     renderHook(() => useTerminal({ sessionId: 's1', container, repoURL: 'https://github.com/example/panemux' }))
 
-    expect(mockTerm.registerLinkProvider).toHaveBeenCalledTimes(2)
+    expect(mockTerm.registerLinkProvider).toHaveBeenCalledTimes(3)
     const urlProvider = vi.mocked(createUrlLinkProvider).mock.results[0].value
     expect(mockTerm.registerLinkProvider.mock.calls[0][0]).toBe(urlProvider)
+  })
+
+  it('offers path links only while the terminal has a preview to open them in', () => {
+    const container = makeContainer()
+    const { rerender } = renderHook(
+      ({ onPreviewPath }: { onPreviewPath?: (path: string) => void }) =>
+        useTerminal({ sessionId: 's1', container, onPreviewPath }),
+      { initialProps: {} as { onPreviewPath?: (path: string) => void } },
+    )
+    const pathProvider = vi.mocked(createUrlLinkProvider).mock.results[1].value as { provideLinks: ReturnType<typeof vi.fn> }
+    const registered = mockTerm.registerLinkProvider.mock.calls[1][0] as {
+      provideLinks: (y: number, cb: (links: unknown) => void) => void
+    }
+
+    const callback = vi.fn()
+    registered.provideLinks(1, callback)
+    expect(callback).toHaveBeenCalledWith(undefined)
+    expect(pathProvider.provideLinks).not.toHaveBeenCalled()
+
+    rerender({ onPreviewPath: vi.fn() })
+    registered.provideLinks(2, callback)
+    expect(pathProvider.provideLinks).toHaveBeenCalledWith(2, callback)
   })
 
   // A buffer line the real cell-mapping helper can read: one cell per
@@ -1215,6 +1247,70 @@ describe('useTerminal URL opening', () => {
 
     expect(onBrowserOpenRequest).toHaveBeenCalledTimes(1)
     expect(onBrowserOpenRequest).toHaveBeenCalledWith('https://example.com/live')
+  })
+
+  // Issue #386: an OSC 8 hyperlink goes through the same approval as the
+  // browser shim, since its target is not the text the operator clicked.
+  it('hands an activated OSC 8 link to the pane as a link request', () => {
+    const onBrowserOpenRequest = vi.fn()
+    window.open = vi.fn() as unknown as typeof window.open
+    mountTerminal('osc8-1', { onBrowserOpenRequest })
+
+    osc8Handler().activate(new MouseEvent('click'), 'http://localhost:5173/')
+
+    expect(onBrowserOpenRequest).toHaveBeenCalledTimes(1)
+    expect(onBrowserOpenRequest).toHaveBeenCalledWith('http://localhost:5173/', 'link')
+    expect(window.open).not.toHaveBeenCalled()
+  })
+
+  it('leaves other schemes unlinked and never hands them on', () => {
+    const onBrowserOpenRequest = vi.fn()
+    mountTerminal('osc8-2', { onBrowserOpenRequest })
+
+    expect(osc8Handler().allowNonHttpProtocols).not.toBe(true)
+    osc8Handler().activate(new MouseEvent('click'), 'javascript:alert(1)')
+
+    expect(onBrowserOpenRequest).not.toHaveBeenCalled()
+  })
+
+  it('asks before opening a tab when the terminal has no pane to ask', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    window.open = vi.fn() as unknown as typeof window.open
+    mountTerminal('osc8-3')
+
+    osc8Handler().activate(new MouseEvent('click'), 'https://example.com/')
+    expect(window.open).not.toHaveBeenCalled()
+    osc8Handler().activate(new MouseEvent('click'), 'https://example.com/')
+
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(window.open).toHaveBeenCalledWith('https://example.com/', '_blank', 'noopener,noreferrer')
+  })
+
+  it('hands an activated path to the preview', () => {
+    const onPreviewPath = vi.fn()
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    renderHook(() => useTerminal({ sessionId: 'path-1', container, onPreviewPath }))
+
+    linkHandlers[1]('./mockups/index.html')
+
+    expect(onPreviewPath).toHaveBeenCalledWith('./mockups/index.html')
+  })
+
+  it('does nothing with an activated path once the preview handler is gone', () => {
+    const onPreviewPath = vi.fn()
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const { rerender } = renderHook(
+      ({ handler }: { handler?: (path: string) => void }) =>
+        useTerminal({ sessionId: 'path-2', container, onPreviewPath: handler }),
+      { initialProps: { handler: onPreviewPath } as { handler?: (path: string) => void } },
+    )
+
+    rerender({ handler: undefined })
+    linkHandlers[1]('./mockups/index.html')
+
+    expect(onPreviewPath).not.toHaveBeenCalled()
   })
 
   it('keeps handlers working after the pane passes new callbacks', () => {
