@@ -102,6 +102,39 @@ describe('TerminalPane codex permission wait', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review in Tasks' }))
     expect(approval.review).toHaveBeenCalledWith('a')
   })
+
+  it('drops the failure of one wait when the next starts', async () => {
+    let waits = [permissionTask('a')]
+    const approval = { waits: vi.fn(() => waits), inputGiven: vi.fn(async () => 'boom'), review: vi.fn() }
+    const pane = () => (
+      <LayoutActionsContext.Provider value={makeCtx({ approval })}>
+        <TerminalPane pane={{ id: 'pane-1', type: 'local', title: 'Pane 1' }} />
+      </LayoutActionsContext.Provider>
+    )
+    const { rerender } = render(pane())
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Input given' }))
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not mark the input given: boom')
+
+    waits = [permissionTask('b')]
+    rerender(pane())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('gives the terminal the keys back once the input is given', async () => {
+    const { container } = renderPane([permissionTask('a')])
+    const terminalInput = document.createElement('textarea')
+    terminalInput.className = 'xterm-helper-textarea'
+    container.querySelector('[data-pane-body]')!.appendChild(terminalInput)
+    const button = screen.getByRole('button', { name: 'Input given' })
+    button.focus()
+
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(document.activeElement).toBe(terminalInput)
+  })
 })
 
 describe('TerminalPane localhost preview', () => {

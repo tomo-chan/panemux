@@ -233,6 +233,31 @@ describe('TaskDashboard Type in pane: codex permission wait', () => {
     expect(state.inputGiven).toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-1', wait_signature: 'w1-perm' }))
   })
 
+  it('drops the failure of one wait when the next starts', async () => {
+    const state = tasksState({ inputGiven: vi.fn().mockResolvedValue('boom') }, [permission, waiting])
+    const { rerenderWith } = renderDashboard(state)
+    await openPopup('perm-1')
+    await act(async () => {
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Input given' }))
+    })
+    expect(within(dialog()).getByRole('alert')).toHaveTextContent('Could not mark the input given: boom')
+
+    rerenderWith({ ...state, data: response([{ ...permission, wait_signature: 'w1-perm-2' }, waiting]) })
+    expect(within(dialog()).queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('gives the terminal the keys back once the input is given', async () => {
+    renderDashboard(tasksState({}, [permission, waiting]))
+    await openPopup('perm-1')
+    const button = within(dialog()).getByRole('button', { name: 'Input given' })
+    button.focus()
+
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(document.activeElement).toBe(within(dialog()).getByRole('textbox', { name: 'Terminal input' }))
+  })
+
   //efficacy:exempt the strip's absence is what the branch keeps from main, so it passes without the branch too
   it('shows nothing for a task waiting on anything else', async () => {
     renderDashboard()

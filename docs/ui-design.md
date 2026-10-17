@@ -358,7 +358,8 @@ be marked answered without opening the dashboard. The Type in pane popup shows t
 its header and its terminal. A pane running several such tasks says how many and offers
 `Review in Tasks` instead. The strip is buttons only: it takes no key, so Tab, Escape and everything
 else typed in the pane stay the terminal's, and it is not the attention: focusing or clicking the pane
-or closing the popup does not take it away, and only `Input given` or the end of the wait removes it
+or closing the popup does not take it away, and only `Input given` or the end of the wait removes it;
+after `Input given` the terminal has the focus again, so typing goes on where it was
 ([behavior](behavior/task-events.md#codex-permission-requests-in-a-pane)).
 
 ---

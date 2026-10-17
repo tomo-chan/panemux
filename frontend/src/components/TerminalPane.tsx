@@ -199,7 +199,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
           // A new wait starts with no failure shown.
           key={approvalWaits[0].wait_id}
           waits={approvalWaits.length}
-          onInputGiven={() => approval.inputGiven(approvalWaits[0])}
+          onInputGiven={async () => {
+            const failure = await approval.inputGiven(approvalWaits[0])
+            // The strip goes, and its button with the focus: the terminal takes the keys again.
+            if (!failure) bodyRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()
+            return failure
+          }}
           onReview={() => approval.review(approvalWaits[0].id)}
         />
       )}

@@ -259,7 +259,12 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
           <PaneApprovalNotice
             key={task.wait_signature}
             waits={1}
-            onInputGiven={() => onInputGiven(task)}
+            onInputGiven={async () => {
+              const failure = await onInputGiven(task)
+              // The strip goes, and its button with the focus: the terminal takes the keys again.
+              if (!failure) bodyRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()
+              return failure
+            }}
           />
         )}
         {notice && (
