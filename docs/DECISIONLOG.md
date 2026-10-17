@@ -1557,7 +1557,11 @@ split preview #385 built, through the same registry, route and policies.
 - **A checked connection, not a bounded tab.** Review found a stopped `sshd` left file tabs waiting
   indefinitely and a lost `sftp-server` left them failing until restart. The connection is pinged,
   a request's lookups are bounded, and a connection failing for anything but a file is made again.
-  None of this ends a tab, which #359 rules out.
+  None of this ends a tab, which #359 rules out. A fixed 15 s bound on the keepalive reply and on a
+  lookup was the first form, and a later review found it closed busy connections on links slower than
+  about 100 KB/s, where both wait behind relay data. Liveness is now anything arriving on the
+  transport, as OpenSSH's `ServerAliveInterval` counts it, so only a connection that receives nothing
+  is closed.
 - **Connecting outside the lock.** Holding the host's lock while dialing made `Close`, and so a
   graceful shutdown, wait out the SSH dial's retries; callers now wait for one attempt instead.
 - **TLS keeps `localhost`.** An `https` relay of a `localhost` URL is named `localhost`, since the

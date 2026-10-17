@@ -1487,6 +1487,7 @@ func (c fixturePreviewConn) Dial(ctx context.Context, _ string) (net.Conn, error
 func (fixturePreviewConn) SFTP() *sftp.Client         { return nil }
 func (fixturePreviewConn) Done() <-chan struct{}      { return nil }
 func (fixturePreviewConn) Ping(context.Context) error { return nil }
+func (fixturePreviewConn) LastRead() time.Time        { return time.Now() }
 func (fixturePreviewConn) Close() error               { return nil }
 
 type fixturePreviewSession struct {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/assert"
@@ -44,6 +45,7 @@ func (c *previewTestConn) Dial(ctx context.Context, addr string) (net.Conn, erro
 func (c *previewTestConn) SFTP() *sftp.Client         { return c.files }
 func (c *previewTestConn) Done() <-chan struct{}      { return c.done }
 func (c *previewTestConn) Ping(context.Context) error { return nil }
+func (c *previewTestConn) LastRead() time.Time        { return time.Now() }
 
 func (c *previewTestConn) Close() error {
 	c.mu.Lock()

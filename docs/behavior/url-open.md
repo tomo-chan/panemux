@@ -112,8 +112,10 @@ A printed link, whose text is the URL, opens when clicked. A localhost link open
 [the split preview](preview.md#opening-a-localhost-url) instead of a tab: in a terminal on the
 panemux host as it is, and in an `ssh` or `ssh_tmux` pane, or the popup of a task on an SSH host,
 that host's URL through a relay of its own rather than a forward
-([Localhost URLs of an SSH host](preview.md#localhost-urls-of-an-ssh-host)); clicking a printed
-localhost link prepares no forward. In a pane the strip's `Open` keeps the tab and the callback
+([Localhost URLs of an SSH host](preview.md#localhost-urls-of-an-ssh-host)). While the terminal is
+connected, clicking a printed localhost link previews it and prepares no forward; while it is not,
+the preview cannot open, and the link opens in a tab — in a pane with its callback forward, in the
+Type in pane popup without one. In a pane the strip's `Open` keeps the tab and the callback
 forward, on an SSH host as everywhere, so an OAuth flow whose callback must arrive at its own port
 number is opened from the strip with `Open`. The Type in pane popup is not a pane and has no
 forwards; its `Open` opens the tab only.

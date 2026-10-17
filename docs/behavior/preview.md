@@ -120,11 +120,15 @@ beside that are reachable, and nothing outside it. The 10 MiB limit and everythi
 the reason.
 
 The preview's connection is checked while it is open, so a host that stops answering is not waited
-for: a request's lookups on the host are given 15 seconds, the connection is pinged every 15
-seconds, and one that does not answer — or that has lost its SFTP subsystem while SSH stays up — is
-closed and made again, to the same host, for the next request. A tab on the host is served again as
-soon as the host answers. This bounds the wait on an unanswering host; it does not end a preview, a
-tab or a relay.
+for. Anything arriving on the connection — relay data, an answer, a keepalive reply — shows the host
+answers. A connection nothing has arrived on for 15 seconds is pinged; one whose ping goes
+unanswered for 15 seconds with nothing else arriving, one a request's lookups wait on for 15 seconds
+with nothing arriving, and one that has lost its SFTP subsystem while SSH stays up, are closed and
+made again, to the same host, for the next request. A tab on the host is served again as soon as the
+host answers. A slow link is not an unanswering host: while data keeps arriving, however slowly —
+a page streaming a large bundle over tethering — a ping or a lookup waits behind it, and the
+connection and every relay on it stay open. This bounds the wait on a host that sends nothing; it
+does not end a preview, a tab or a relay.
 
 ### Localhost URLs of an SSH host
 
@@ -132,8 +136,10 @@ A `localhost`, `127.x.x.x` or `[::1]` URL (http or https) in an `ssh` or `ssh_tm
 popup of a task on an SSH host, opens in the preview the ways
 [Opening a localhost URL](#opening-a-localhost-url) lists — a printed link at once, a shim request
 or an OSC 8 link from the strip's **Preview** — typically the development server an agent started
-there (`http://localhost:5173/`). A printed link is not offered the strip: clicking it previews it
-through the relay, and prepares no same-port forward. The strip's **Open** is unchanged: in a pane,
+there (`http://localhost:5173/`). A printed link is not offered the strip. While the terminal is
+connected, clicking it previews it through the relay and prepares no same-port forward; while it is
+not, the preview cannot open, and the link opens in a tab as any link does — in a pane with its
+same-port forward, in the Type in pane popup without one. The strip's **Open** is unchanged: in a pane,
 a tab on the URL itself with the same-port OAuth callback forward of
 [opening URLs from a pane](url-open.md), so a flow whose callback must reach its own port number is
 opened from the strip with Open; in the Type in pane popup, which is not a pane and has no forwards,

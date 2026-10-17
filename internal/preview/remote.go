@@ -31,13 +31,21 @@ type RemoteConn interface {
 	SFTP() *sftp.Client
 	// Ping reports whether the host still answers on the connection.
 	Ping(ctx context.Context) error
+	// LastRead is when anything last arrived on the connection: relay
+	// data, an SFTP answer or a keepalive reply alike.
+	LastRead() time.Time
 	// Done is closed once the connection has ended.
 	Done() <-chan struct{}
 	Close() error
 }
 
 // How a host's connection is checked. They bound how long a host that
-// stops answering is waited for, never how long a preview or a tab lasts.
+// sends nothing is waited for, never how long a preview or a tab lasts,
+// nor how slow the link may be: anything arriving on the connection shows
+// the host answers, as OpenSSH's ServerAliveInterval counts it. On a slow
+// link a keepalive reply or an SFTP answer waits behind the relay data
+// queued ahead of it, so a fixed bound on the reply alone would close a
+// connection that is busy, not dead.
 const (
 	defaultKeepaliveInterval = 15 * time.Second
 	defaultKeepaliveTimeout  = 15 * time.Second
@@ -166,6 +174,40 @@ func (r *Remote) liveLocked() RemoteConn {
 	}
 }
 
+// watch drops conn once nothing has arrived on it for lookupTimeout, until
+// the returned func is called. While data arrives — an answer held up
+// behind relay data on a slow link — it waits on.
+func (r *Remote) watch(conn RemoteConn) (stop func()) {
+	var mu sync.Mutex
+	stopped := false
+	var timer *time.Timer
+	var check func()
+	check = func() {
+		mu.Lock()
+		if stopped {
+			mu.Unlock()
+			return
+		}
+		if idle := time.Since(conn.LastRead()); idle < r.lookupTimeout {
+			timer = time.AfterFunc(r.lookupTimeout-idle, check)
+			mu.Unlock()
+			return
+		}
+		stopped = true
+		mu.Unlock()
+		r.drop(conn)
+	}
+	mu.Lock()
+	timer = time.AfterFunc(r.lookupTimeout, check)
+	mu.Unlock()
+	return func() {
+		mu.Lock()
+		defer mu.Unlock()
+		stopped = true
+		timer.Stop()
+	}
+}
+
 // drop closes conn and, when it is still the host's connection, forgets it,
 // so the next request connects again.
 func (r *Remote) drop(conn RemoteConn) {
@@ -177,9 +219,10 @@ func (r *Remote) drop(conn RemoteConn) {
 	_ = conn.Close()
 }
 
-// keepAlive pings conn while it is the host's connection, and drops it once
-// the host does not answer: a stopped sshd or a dropped network leaves the
-// connection open, but no request on it would ever be answered.
+// keepAlive pings conn while it is the host's connection and nothing has
+// arrived on it for an interval, and drops it once a ping is not answered
+// and nothing else arrived meanwhile: a stopped sshd or a dropped network
+// leaves the connection open, but no request on it would ever be answered.
 func (r *Remote) keepAlive(conn RemoteConn) {
 	ticker := time.NewTicker(r.keepaliveInterval)
 	defer ticker.Stop()
@@ -195,10 +238,14 @@ func (r *Remote) keepAlive(conn RemoteConn) {
 		if !current {
 			return
 		}
+		if time.Since(conn.LastRead()) < r.keepaliveInterval {
+			continue
+		}
+		start := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), r.keepaliveTimeout)
 		err := conn.Ping(ctx)
 		cancel()
-		if err != nil {
+		if err != nil && !conn.LastRead().After(start) {
 			r.drop(conn)
 			return
 		}
@@ -246,8 +293,9 @@ func (r *Remote) files() (*sftp.Client, error) {
 }
 
 // withFiles runs lookup, a request's lookups on the host, over its SFTP
-// client, bounded by lookupTimeout: a host that does not answer in time
-// has its connection closed, which ends the lookup. A failure that is not
+// client, bounded by lookupTimeout of nothing arriving (see watch): a host
+// that sends nothing for that long has its connection closed, which ends
+// the lookup. A failure that is not
 // about a file — the connection or its SFTP subsystem is gone — drops the
 // connection, and lookup runs once more over a new one, so a tab is served
 // again as soon as the host is.
@@ -258,9 +306,9 @@ func (r *Remote) withFiles(lookup func(*sftp.Client) error) error {
 		if conn, err = r.get(); err != nil {
 			return err
 		}
-		timer := time.AfterFunc(r.lookupTimeout, func() { r.drop(conn) })
+		stop := r.watch(conn)
 		err = lookup(conn.SFTP())
-		timer.Stop()
+		stop()
 		if err == nil || isFileError(err) {
 			return err
 		}

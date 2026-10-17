@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 func startPreviewTestSSHServer(
@@ -20,7 +22,7 @@ func startPreviewTestSSHServer(
 	transport.mu.Lock()
 	transport.sftp = sftp
 	transport.mu.Unlock()
-	conn, err := newPreviewConn(client, nil)
+	conn, err := newPreviewConn(client, nil, newReadActivity())
 	return conn, transport, rec, err
 }
 
@@ -60,7 +62,7 @@ func TestPreviewConnReportsAFailedDial(t *testing.T) {
 	transport.mu.Lock()
 	transport.sftp = true
 	transport.mu.Unlock()
-	conn, err := newPreviewConn(client, nil)
+	conn, err := newPreviewConn(client, nil, newReadActivity())
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -142,4 +144,58 @@ func TestPreviewConnPingAnswersWhileTheHostDoes(t *testing.T) {
 	canceled, stop := context.WithCancel(context.Background())
 	stop()
 	require.ErrorIs(t, conn.Ping(canceled), context.Canceled)
+}
+
+// startTrackedPreviewConn is a PreviewConn over a transport whose reads are
+// recorded, as DialPreviewConn's is.
+func startTrackedPreviewConn(t *testing.T) *PreviewConn {
+	t.Helper()
+	client, transport := startTestSSHTransport(t, nil, "", &forwardRecorder{})
+	transport.mu.Lock()
+	transport.sftp = true
+	transport.mu.Unlock()
+	raw, err := net.Dial("tcp", client.RemoteAddr().String())
+	require.NoError(t, err)
+	activity := newReadActivity()
+	sshConn, chans, reqs, err := ssh.NewClientConn(activity.wrap(raw), "test", &ssh.ClientConfig{
+		User:            "tester",
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // ephemeral in-process test server
+	})
+	require.NoError(t, err)
+	conn, err := newPreviewConn(ssh.NewClient(sshConn, chans, reqs), nil, activity)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
+
+func TestPreviewConnLastReadFollowsWhatArrives(t *testing.T) {
+	conn := startTrackedPreviewConn(t)
+	before := conn.LastRead()
+	require.False(t, before.IsZero(), "the handshake's answers count")
+
+	time.Sleep(20 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, conn.Ping(ctx))
+	after := conn.LastRead()
+	assert.True(t, after.After(before), "a keepalive reply is something arriving")
+
+	time.Sleep(20 * time.Millisecond)
+	_, err := conn.SFTP().Getwd()
+	require.NoError(t, err)
+	assert.True(t, conn.LastRead().After(after), "and so is an SFTP answer")
+}
+
+func TestReadActivityCountsOnlyBytesRead(t *testing.T) {
+	activity := newReadActivity()
+	start := activity.last()
+	client, server := net.Pipe()
+	tracked := activity.wrap(client)
+	defer tracked.Close()
+
+	time.Sleep(5 * time.Millisecond)
+	go func() { _ = server.Close() }()
+	_, err := tracked.Read(make([]byte, 1))
+	require.Error(t, err)
+	assert.Equal(t, start, activity.last(), "a read that brings nothing is not activity")
 }

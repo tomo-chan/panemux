@@ -153,14 +153,18 @@ func resolveKnownHostsFile(knownHostsFile string) (string, error) {
 // and ProxyCommand. Returns (client, jumpClient, error). jumpClient is non-nil only when
 // a ProxyJump is used; the caller must close jumpClient after closing client.
 func dialSSHClient(cfg SSHConfig) (*ssh.Client, *ssh.Client, error) {
-	return dialSSHClientUntil(cfg, nowFn().Add(dialRetryBudget))
+	return dialSSHClientUntil(cfg, nowFn().Add(dialRetryBudget), nil)
 }
 
 // dialSSHClientUntil is dialSSHClient with an explicit retry deadline. A
 // ProxyJump hop shares the outer call's deadline (see dialThroughJump) rather
 // than starting a fresh dialRetryBudget window, so a multi-hop chain's total
 // retry time stays bounded by a single budget instead of multiplying per hop.
-func dialSSHClientUntil(cfg SSHConfig, deadline time.Time) (*ssh.Client, *ssh.Client, error) {
+// wrap, when given, wraps the transport to cfg's host before the handshake
+// (the preview records what arrives on it); a ProxyJump hop is not wrapped.
+func dialSSHClientUntil(
+	cfg SSHConfig, deadline time.Time, wrap func(net.Conn) net.Conn,
+) (*ssh.Client, *ssh.Client, error) {
 	authMethods, err := buildAuthMethods(cfg)
 	if err != nil {
 		return nil, nil, err
@@ -195,6 +199,9 @@ func dialSSHClientUntil(cfg SSHConfig, deadline time.Time) (*ssh.Client, *ssh.Cl
 	conn, jumpClient, err := dialTransportWithRetry(cfg, addr, port, deadline)
 	if err != nil {
 		return nil, nil, err
+	}
+	if wrap != nil {
+		conn = wrap(conn)
 	}
 
 	// The handshake shares the dial's budget rather than opening a window of
@@ -407,7 +414,7 @@ func dialTransportWithRetry(cfg SSHConfig, addr string, port int, deadline time.
 // hop reuses the caller's deadline rather than a fresh retry budget, so a
 // multi-hop chain's worst-case retry time doesn't multiply per hop.
 func dialThroughJump(jumpCfg SSHConfig, targetAddr string, deadline time.Time) (net.Conn, *ssh.Client, error) {
-	jumpClient, nestedJump, err := dialSSHClientUntil(jumpCfg, deadline)
+	jumpClient, nestedJump, err := dialSSHClientUntil(jumpCfg, deadline, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial jump host: %w", err)
 	}

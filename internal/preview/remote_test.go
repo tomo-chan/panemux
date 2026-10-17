@@ -26,17 +26,66 @@ import (
 // served by pkg/sftp's server over an in-memory pipe, reading this
 // machine's filesystem, and loopback dials sent to the addresses in loopback.
 // stall makes the host stop answering, as a stopped sshd or a dropped
-// network does, without the connection ending.
+// network does, without the connection ending. LastRead follows what the
+// SFTP client reads, and flow stands in for relay data arriving on the same
+// connection, as it does on a slow link while a page streams a bundle.
 type fakeRemoteConn struct {
-	files    *sftp.Client
-	loopback map[string]string
-	done     chan struct{}
-	server   *stallingConn
-	pipe     net.Conn
-	closed   bool
-	stalled  bool
-	pings    int
-	mu       sync.Mutex
+	files     *sftp.Client
+	loopback  map[string]string
+	done      chan struct{}
+	server    *stallingConn
+	pipe      net.Conn
+	lastRead  atomic.Int64
+	closed    bool
+	stalled   bool
+	slowPings bool
+	pings     int
+	mu        sync.Mutex
+}
+
+func (c *fakeRemoteConn) LastRead() time.Time { return time.Unix(0, c.lastRead.Load()) }
+
+// flow keeps data arriving on the connection until the returned func is
+// called.
+func (c *fakeRemoteConn) flow() (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				c.lastRead.Store(time.Now().UnixNano())
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }
+}
+
+// slowPing makes keepalive replies wait behind data, as they do when the
+// link is slower than what is being sent over it: a ping is never answered
+// within its timeout, while data keeps arriving if flow says so.
+func (c *fakeRemoteConn) slowPing() {
+	c.mu.Lock()
+	c.slowPings = true
+	c.mu.Unlock()
+}
+
+// readTracker records when the SFTP client last read from its pipe.
+type readTracker struct {
+	net.Conn
+	conn *fakeRemoteConn
+}
+
+func (r readTracker) Read(p []byte) (int, error) {
+	n, err := r.Conn.Read(p)
+	if n > 0 {
+		r.conn.lastRead.Store(time.Now().UnixNano())
+	}
+	return n, err
 }
 
 func (c *fakeRemoteConn) Dial(ctx context.Context, addr string) (net.Conn, error) {
@@ -61,7 +110,7 @@ func (c *fakeRemoteConn) Done() <-chan struct{} { return c.done }
 func (c *fakeRemoteConn) Ping(ctx context.Context) error {
 	c.mu.Lock()
 	c.pings++
-	stalled := c.stalled
+	stalled := c.stalled || c.slowPings
 	c.mu.Unlock()
 	if stalled {
 		<-ctx.Done()
@@ -126,6 +175,16 @@ func (c *stallingConn) stall() {
 	c.mu.Unlock()
 }
 
+func (c *stallingConn) resume() {
+	c.mu.Lock()
+	select {
+	case <-c.gate:
+	default:
+		close(c.gate)
+	}
+	c.mu.Unlock()
+}
+
 func (c *stallingConn) Read(p []byte) (int, error) {
 	c.mu.Lock()
 	gate := c.gate
@@ -151,11 +210,11 @@ func newFakeRemoteConn(t *testing.T, loopback map[string]string) *fakeRemoteConn
 	require.NoError(t, err)
 	go func() { _ = server.Serve() }()
 	t.Cleanup(func() { _ = serverSide.Close() })
-	client, err := sftp.NewClientPipe(clientSide, clientSide)
+	conn := &fakeRemoteConn{loopback: loopback, done: make(chan struct{}), server: serverSide, pipe: clientSide}
+	conn.lastRead.Store(time.Now().UnixNano())
+	client, err := sftp.NewClientPipe(readTracker{Conn: clientSide, conn: conn}, clientSide)
 	require.NoError(t, err)
-	conn := &fakeRemoteConn{
-		files: client, loopback: loopback, done: make(chan struct{}), server: serverSide, pipe: clientSide,
-	}
+	conn.files = client
 	t.Cleanup(func() { _ = conn.Close() })
 	return conn
 }
@@ -720,4 +779,54 @@ func TestRemoteDialKeepsAConnectionTheHostAnswersOn(t *testing.T) {
 	_, err = remote.Dial(context.Background(), "localhost:5173")
 	require.ErrorAs(t, err, &refused)
 	assert.Len(t, remote.conns(), 2)
+}
+
+// A slow link is not a dead one (issue #387's review): keepalive replies and
+// SFTP answers wait behind relay data on the same connection, so on a link
+// slower than what a page streams they take longer than any fixed bound.
+// Data still arriving proves the host answers, so a busy connection is kept;
+// one that receives nothing is still closed (the two tests above).
+
+func TestRemoteKeepsABusyConnectionWhosePingsAreSlow(t *testing.T) {
+	f := newResolveFixture(t)
+	remote := newFakeRemote(t, nil)
+	remote.keepaliveInterval = 20 * time.Millisecond
+	remote.keepaliveTimeout = 50 * time.Millisecond
+	_, err := ResolveRemote(remote.Remote, "mockups/index.html", []string{f.cwd})
+	require.NoError(t, err)
+	conn := remote.conns()[0]
+	stop := conn.flow()
+	conn.slowPing()
+
+	time.Sleep(400 * time.Millisecond)
+	assert.False(t, conn.isClosed(), "a connection data keeps arriving on is kept")
+
+	stop()
+	require.Eventually(t, conn.isClosed, 5*time.Second, 10*time.Millisecond,
+		"once nothing arrives, a ping that is not answered still ends it")
+}
+
+func TestRemoteLookupWaitsWhileDataArrives(t *testing.T) {
+	f := newResolveFixture(t)
+	remote := newFakeRemote(t, nil)
+	remote.lookupTimeout = 100 * time.Millisecond
+	r := NewRegistry()
+	url, err := r.OpenRemote(remote.Remote, f.cwd, filepath.Join(f.cwd, "mockups", "index.html"))
+	require.NoError(t, err)
+	conn := remote.conns()[0]
+
+	// The SFTP answer is held up behind other data for four times the
+	// lookup's bound, and arrives.
+	conn.server.stall()
+	stop := conn.flow()
+	defer stop()
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		conn.server.resume()
+	}()
+
+	rec := serveRemote(t, r, url)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.False(t, conn.isClosed(), "the busy connection was not closed")
+	assert.Len(t, remote.conns(), 1, "and no other was made")
 }

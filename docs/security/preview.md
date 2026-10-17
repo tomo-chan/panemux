@@ -176,9 +176,13 @@ session's host and can relay a localhost URL of that host (issue #387,
   **SFTP subsystem is required**: a host without one cannot show files, and no other reading method
   (`scp`, `cat` over exec) is used in its place.
 - Sessions dialed with the same `SSHConfig` share one `preview.Remote`, which is made again, to that
-  same configuration, when its connection ends, stops answering a keepalive (`keepalive@openssh.com`
-  every 15 s, 15 s to answer), lets a request's lookups run past 15 s, or fails with anything but an
-  SFTP status about a file (its SFTP subsystem is gone): what was opened on a host stays on it. The
+  same configuration, when its connection ends, receives nothing for 15 s while a keepalive
+  (`keepalive@openssh.com`, sent after 15 s with nothing received) or a request's lookups wait on it,
+  or fails with anything but an SFTP status about a file (its SFTP subsystem is gone): what was
+  opened on a host stays on it. Liveness is anything read on the transport
+  (`session.PreviewConn.LastRead`, recorded by a wrapper around the transport to the host), as
+  OpenSSH's `ServerAliveInterval` counts it: a reply queued behind relay data on a slow link is late,
+  and a fixed bound on it alone would close a connection that is busy, not dead. The
   SSH connection is closed before its SFTP client, whose `Close` would otherwise wait behind a
   request stalled on the host. All are closed when the server shuts down, and `Close` never waits
   for a connection being made, which is closed once it is.
