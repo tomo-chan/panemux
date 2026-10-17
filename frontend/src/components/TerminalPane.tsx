@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useRef, useState } from 'rea
 import { DisplayConfig, PaneConfig } from '../types'
 import { useTerminal } from '../hooks/useTerminal'
 import { useGitInfo } from '../hooks/useGitInfo'
-import { usePaneUrlOpen } from '../hooks/usePaneUrlOpen'
+import { usePaneUrlOpen, type UrlOpenSource } from '../hooks/usePaneUrlOpen'
 import { usePreview } from '../hooks/usePreview'
 import { paneSplitKey } from '../utils/preview'
 import type { PaneEdge } from '../utils/layoutTree'
@@ -39,26 +39,38 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const gitInfoEnabled = !ctx?.maximizedPaneId || ctx.maximizedPaneId === pane.id
 
   const { gitInfo, refreshIfStale, refreshNow } = useGitInfo(pane.id, gitInfoEnabled)
-  const urlOpen = usePaneUrlOpen(pane.id)
-
-  // Paths in a pane on the panemux host open in the split preview (issue
-  // #385). usePreview needs the terminal's connection, so the terminal is
-  // handed a stable callback that reaches it through a ref.
-  const previewOpenRef = useRef<((path: string) => void) | null>(null)
+  // Paths and localhost URLs in a pane on the panemux host open in the split
+  // preview (issues #385 and #386). usePreview needs the terminal's
+  // connection, so the terminal and the URL opener are handed stable
+  // callbacks that reach it through a ref.
+  const previewRef = useRef<{ open: (path: string) => void; openUrl: (url: string) => void } | null>(null)
   const previewable = pane.type === 'local' || pane.type === 'tmux'
-  const openPreviewPath = useCallback((path: string) => previewOpenRef.current?.(path), [])
+  const openPreviewPath = useCallback((path: string) => previewRef.current?.open(path), [])
+  const openPreviewUrl = useCallback((url: string) => previewRef.current?.openUrl(url), [])
+  // The URL opener needs the terminal's connection too, so the terminal's
+  // URL callbacks reach it through a ref as well.
+  const urlOpenRef = useRef<ReturnType<typeof usePaneUrlOpen> | null>(null)
+  const openLink = useCallback((url: string) => urlOpenRef.current?.openUrl(url), [])
+  const requestOpen = useCallback(
+    (url: string, source?: UrlOpenSource) => urlOpenRef.current?.requestOpen(url, source),
+    [],
+  )
 
   const { handleResize, connected, dims, sessionState, reconnectFailed, restartSession } = useTerminal({
     sessionId: pane.id,
     container: containerEl,
     repoURL: gitInfo.repo_url,
     onInteraction: refreshIfStale,
-    onLinkActivate: urlOpen.openUrl,
-    onBrowserOpenRequest: urlOpen.requestOpen,
+    onLinkActivate: openLink,
+    onBrowserOpenRequest: requestOpen,
     onPreviewPath: previewable ? openPreviewPath : undefined,
   })
-  const preview = usePreview(pane.id, connected && sessionState === 'running')
-  previewOpenRef.current = preview.open
+  const terminalLive = connected && sessionState === 'running'
+  const preview = usePreview(pane.id, terminalLive)
+  previewRef.current = preview
+  // Preview is offered only while the preview can open.
+  const urlOpen = usePaneUrlOpen(pane.id, { previewUrl: previewable && terminalLive ? openPreviewUrl : undefined })
+  urlOpenRef.current = urlOpen
 
   // Observe resize events for this pane
   useEffect(() => {
@@ -216,17 +228,25 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         <PreviewSplit
           splitKey={paneSplitKey(pane.id)}
           view={preview.view}
-          terminal={<div ref={setRef} style={{ overflow: 'hidden', padding: '4px' }} />}
+          terminal={
+            <>
+              <div ref={setRef} style={{ overflow: 'hidden', padding: '4px' }} />
+              {/* Over the terminal only, so an open preview's header stays in view. */}
+              <PaneUrlOpenNotice
+                pendingUrl={urlOpen.pendingUrl}
+                source={urlOpen.pendingSource}
+                canPreview={urlOpen.canPreview}
+                error={urlOpen.error}
+                onPreview={urlOpen.previewPendingOpen}
+                onConfirm={urlOpen.confirmPendingOpen}
+                onDismiss={urlOpen.dismissPendingOpen}
+                onDismissError={urlOpen.dismissError}
+              />
+            </>
+          }
           onChoose={preview.open}
           onReload={preview.reload}
           onClose={preview.close}
-        />
-        <PaneUrlOpenNotice
-          pendingUrl={urlOpen.pendingUrl}
-          error={urlOpen.error}
-          onConfirm={urlOpen.confirmPendingOpen}
-          onDismiss={urlOpen.dismissPendingOpen}
-          onDismissError={urlOpen.dismissError}
         />
         {dragActive && !isDragSource && hoverEdge && (
           <div

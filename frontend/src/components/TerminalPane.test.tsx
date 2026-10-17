@@ -1,5 +1,5 @@
 import { act, fireEvent, render } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Records every observer the component creates so a test can fire the callback
 // the real browser would fire on a layout change, and can assert the cleanup.
@@ -35,6 +35,125 @@ vi.mock('../hooks/useGitInfo', () => ({
 }))
 import { dropZoneStyle, PANE_DROP_ZONE_RATIO, resolvePaneDropEdge, TerminalPane } from './TerminalPane'
 import { LayoutActionsContext, type LayoutActionsContextValue } from './SplitContainer'
+import { localhostFrameDocument } from '../utils/preview'
+
+// Issue #386: a localhost URL in a pane on the panemux host, whether a
+// clicked link, an OSC 8 link or a browser shim request, can open beside the
+// terminal.
+describe('TerminalPane localhost preview', () => {
+  const running = {
+    handleResize: vi.fn(),
+    connected: true,
+    dims: null,
+    sessionState: 'running',
+    reconnectFailed: false,
+    restartSession: vi.fn(),
+  }
+
+  beforeEach(() => {
+    mockUseTerminal.mockReturnValue(running)
+    mockUseGitInfo.mockReturnValue({ gitInfo: { is_git: false }, refreshIfStale: vi.fn(), refreshNow: vi.fn() })
+    window.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: 'x', forwarded: false })))
+    window.localStorage.clear()
+  })
+
+  // The spy on window.open is this block's; later blocks assign their own.
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function terminalOptions() {
+    return mockUseTerminal.mock.calls[mockUseTerminal.mock.calls.length - 1][0] as {
+      onLinkActivate: (url: string) => void
+      onBrowserOpenRequest: (url: string, source?: 'program' | 'link') => void
+    }
+  }
+
+  it('previews a clicked localhost link in a local pane, without a tab', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    open.mockClear()
+    const { findByTitle } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+
+    act(() => terminalOptions().onLinkActivate('http://localhost:5173/'))
+
+    const frame = await findByTitle('Preview of http://localhost:5173/')
+    expect(frame).toHaveAttribute('srcdoc', localhostFrameDocument('http://localhost:5173/'))
+    expect(open).not.toHaveBeenCalled()
+    expect(window.fetch).not.toHaveBeenCalled()
+  })
+
+  it('offers Preview, Open and Ignore for a localhost request, and Preview shows it', async () => {
+    // A remote pane's localhost is another host: no Preview there.
+    const remote = render(<TerminalPane pane={{ id: 'p2', type: 'ssh' }} />)
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/'))
+    expect(remote.getByRole('button', { name: 'Open' })).toBeInTheDocument()
+    expect(remote.queryByRole('button', { name: 'Preview' })).toBeNull()
+    remote.unmount()
+
+    const { findByTitle, getByRole, queryByRole } = render(<TerminalPane pane={{ id: 'p1', type: 'tmux' }} />)
+
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/'))
+    expect(getByRole('button', { name: 'Open' })).toBeInTheDocument()
+    expect(getByRole('button', { name: 'Ignore' })).toBeInTheDocument()
+    fireEvent.click(getByRole('button', { name: 'Preview' }))
+
+    await findByTitle('Preview of http://localhost:5173/')
+    expect(queryByRole('button', { name: 'Preview' })).toBeNull()
+  })
+
+  it('asks before previewing an OSC 8 link, naming its target', () => {
+    const { getByRole, getByText } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/', 'link'))
+
+    expect(getByText('This link goes to')).toBeInTheDocument()
+    expect(getByRole('button', { name: 'Preview' })).toBeInTheDocument()
+  })
+
+  it('hides a localhost preview when the terminal disconnects', async () => {
+    const { findByTitle, queryByRole, rerender } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    act(() => terminalOptions().onLinkActivate('http://localhost:5173/'))
+    await findByTitle(/^Preview of/)
+
+    mockUseTerminal.mockReturnValue({ ...running, connected: false })
+    rerender(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    expect(queryByRole('region', { name: 'Preview' })).toBeNull()
+  })
+
+  // A preview cannot open while the terminal is not connected, so it is not
+  // offered: Preview would only drop the request, and a click would do nothing.
+  it('offers no Preview while the terminal is not connected, and opens the link in a tab instead', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    open.mockClear()
+    const { getByRole, queryByRole, rerender } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/'))
+    expect(getByRole('button', { name: 'Preview' })).toBeInTheDocument()
+    mockUseTerminal.mockReturnValue({ ...running, sessionState: 'exited' })
+    rerender(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    expect(getByRole('button', { name: 'Open' })).toBeInTheDocument()
+    expect(queryByRole('button', { name: 'Preview' })).toBeNull()
+
+    act(() => terminalOptions().onLinkActivate('http://localhost:5173/'))
+    expect(open).toHaveBeenCalledWith('about:blank', '_blank')
+    expect(queryByRole('region', { name: 'Preview' })).toBeNull()
+  })
+
+  // The strip asks about another URL while a preview is open: it stays over
+  // the terminal, so the preview's header and its controls stay in view.
+  it('keeps the approval strip on the terminal side while a preview is open', async () => {
+    const { container, findByTitle } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    act(() => terminalOptions().onLinkActivate('http://localhost:5173/first'))
+    await findByTitle('Preview of http://localhost:5173/first')
+
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/second'))
+
+    const strip = container.querySelector('[data-pane-url-request="true"]') as HTMLElement
+    expect(strip).not.toBeNull()
+    expect(strip.closest('.pm-preview-terminal')).not.toBeNull()
+    expect(strip.closest('.pm-preview')).toBeNull()
+  })
+})
 
 describe('TerminalPane drop zones', () => {
   beforeEach(() => {

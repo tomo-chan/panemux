@@ -7,7 +7,7 @@
 The split preview ([behavior](../behavior/preview.md)) shows HTML and Markdown from the panemux
 host's filesystem in the dashboard. An HTML mock is untrusted content: an agent wrote it, and its
 scripts run. Read this section before changing `internal/preview`, `PostSessionPreview` /
-`ServePreview` in `internal/api/preview.go`, or `PreviewSplit`.
+`ServePreview` in `internal/api/preview.go`, `PreviewSplit`, or `usePreview`.
 
 ### Isolation from the dashboard's origin
 
@@ -41,6 +41,49 @@ dashboard can frame them; `frame-ancestors 'self'` still refuses every other sit
 
 **Do not add `allow-same-origin` to either sandbox.** With it, the page's scripts would run in the
 dashboard's origin and could call every unauthenticated route, including those that start processes.
+
+### Localhost pages
+
+A localhost URL on the panemux host ([behavior](../behavior/preview.md#opening-a-localhost-url)) is
+not served by panemux: `PreviewSplit` frames the URL itself, and panemux makes no request to it.
+The page is the operator's own development server, the same page a tab would show, so it keeps its
+server's origin — its module scripts, hot reload socket and storage depend on it.
+
+The page is not framed directly. `PreviewSplit` frames a document of panemux's own
+(`localhostFrameDocument` in `utils/preview.ts`, given as `srcdoc`) that holds one frame of the page,
+and that document's `Content-Security-Policy` is `default-src 'none'; style-src 'unsafe-inline';
+frame-src` followed by `http`/`https` on any port for `localhost`, `127.0.0.1` and the IPv4 loopback
+address the URL names. A browser enforces `frame-src` on every navigation of that frame, a redirect
+or one the page starts itself, so a localhost page that leads to an external site — a `302`, an
+open redirect, a login bounced to an external identity provider, `location.href` — is refused in
+the frame rather than shown under the localhost URL; #359 opens external sites in a tab. Navigation
+between loopback addresses stays allowed. The document runs no script of its own (`default-src
+'none'`), and the URL reaches it only as an escaped attribute value.
+
+A policy cannot name an IPv6 address, so an `[::1]` URL is framed as `localhost` on the same port,
+path, query and fragment, which the browser resolves to `::1` as well. That page's origin is then
+`http://localhost:<port>`, not `http://[::1]:<port>`: its cookies and storage are localhost's, not
+those a tab on the `[::1]` URL would use. Open in new tab opens the `[::1]` URL itself.
+
+Both frames' `sandbox` is `allow-scripts allow-same-origin allow-forms allow-modals allow-popups`
+(the inner frame's flags can only narrow the outer's):
+
+- `allow-same-origin` here leaves the page in **its own** origin (`http://localhost:<port>`), never
+  the dashboard's. It is not the `allow-same-origin` forbidden above, which would apply to pages the
+  dashboard's origin serves. The `srcdoc` document is in the dashboard's origin, which is why it
+  holds no script and why its policy forbids any; the page inside it is cross-origin to it and can
+  neither read it nor, being sandboxed, navigate it. A URL naming the dashboard's own origin cannot be used to get there:
+  every dashboard response carries `X-Frame-Options: DENY`, and `/preview/` responses carry their own
+  `sandbox` policy, which the browser applies together with the frame's.
+- Another loopback port is another origin, and the
+  [shared browser request guard](auth.md#shared-browser-request-guard) refuses its requests to
+  `/api/*` and `/ws/*`, as it would from that page in a tab.
+- Without `allow-top-navigation` or `allow-popups-to-escape-sandbox` it cannot navigate the dashboard,
+  and a window it opens stays sandboxed.
+- Only loopback `http`/`https` URLs, and only in a terminal on the panemux host, are opened in the
+  frame (`usePreview.openUrl` checks again), and the policy above keeps the frame on loopback after
+  that; a request from terminal output is framed only after the operator presses Preview
+  ([url-open.md](url-open.md#browser-open-interception)).
 
 ### Markdown rendering
 

@@ -1,8 +1,8 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PreviewSplit } from './PreviewSplit'
 import type { PreviewView } from '../hooks/usePreview'
-import { loadPreviewSplit, paneSplitKey, savePreviewSplit } from '../utils/preview'
+import { loadPreviewSplit, localhostFrameDocument, paneSplitKey, savePreviewSplit } from '../utils/preview'
 
 // jsdom has no PointerEvent, so fireEvent.pointer* would drop pointerId,
 // pointerType and clientX.
@@ -54,6 +54,71 @@ function mockWidth(container: HTMLElement, width: number) {
     left: 100, top: 0, width, height: 400, right: 100 + width, bottom: 400, x: 100, y: 0, toJSON: () => ({}),
   })
 }
+
+// Issue #386: a localhost URL on the panemux host, such as a development
+// server, is framed as it is served.
+describe('PreviewSplit with a localhost page', () => {
+  const page: PreviewView = {
+    kind: 'page', url: 'http://localhost:5173/app', frameUrl: 'http://localhost:5173/app', generation: 0,
+  }
+
+  it('frames the page in its own origin, without letting it navigate the dashboard or leave loopback', () => {
+    renderSplit(page)
+
+    const frame = screen.getByTitle('Preview of http://localhost:5173/app') as HTMLIFrameElement
+    // The page is framed inside a document of panemux's own, whose policy
+    // keeps the page's frame on loopback.
+    expect(frame.getAttribute('src')).toBeNull()
+    expect(frame.getAttribute('srcdoc')).toBe(localhostFrameDocument('http://localhost:5173/app'))
+    const sandbox = (frame.getAttribute('sandbox') ?? '').split(' ')
+    expect(sandbox).toEqual(expect.arrayContaining(['allow-scripts', 'allow-same-origin', 'allow-forms']))
+    expect(sandbox).not.toContain('allow-top-navigation')
+    expect(sandbox).not.toContain('allow-top-navigation-by-user-activation')
+    expect(sandbox).not.toContain('allow-popups-to-escape-sandbox')
+    const region = screen.getByRole('region', { name: 'Preview' })
+    expect(region).toHaveTextContent('local')
+    expect(region).toHaveTextContent('http://localhost:5173/app')
+  })
+
+  it('explains what a frame cannot show, and opens the page in a new tab', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const { props } = renderSplit(page)
+
+    const note = screen.getByText(/refuses to be shown in a frame/)
+    expect(note).toHaveTextContent('hot reload')
+    expect(note).toHaveTextContent('Open in new tab')
+    fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }))
+    expect(open).toHaveBeenCalledWith('http://localhost:5173/app', '_blank', 'noopener,noreferrer')
+    fireEvent.click(screen.getByRole('button', { name: 'Reload preview' }))
+    expect(props.onReload).toHaveBeenCalled()
+
+    // A file panemux serves needs no such note.
+    cleanup()
+    renderSplit(ready)
+    expect(screen.queryByText(/refuses to be shown in a frame/)).toBeNull()
+  })
+
+  // An [::1] page is framed as localhost: the header names what is shown,
+  // and a new tab opens the URL that was asked for.
+  it('names the localhost URL it frames for an [::1] page, and opens the [::1] URL in a tab', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    renderSplit({ kind: 'page', url: 'http://[::1]:5173/app', frameUrl: 'http://localhost:5173/app', generation: 0 })
+
+    const frame = screen.getByTitle('Preview of http://localhost:5173/app')
+    expect(frame.getAttribute('srcdoc')).toBe(localhostFrameDocument('http://localhost:5173/app'))
+    expect(screen.getByRole('region', { name: 'Preview' }).querySelector('.pm-preview-target'))
+      .toHaveTextContent('local · http://localhost:5173/app')
+    fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }))
+    expect(open).toHaveBeenCalledWith('http://[::1]:5173/app', '_blank', 'noopener,noreferrer')
+  })
+
+  it("reloads the page's frame when the generation changes", () => {
+    const { rerender, props } = renderSplit(page)
+    const before = screen.getByTitle(/^Preview of/)
+    rerender(<PreviewSplit {...props} view={{ ...page, generation: 1 }} />)
+    expect(screen.getByTitle(/^Preview of/)).not.toBe(before)
+  })
+})
 
 describe('PreviewSplit', () => {
   it('gives the whole body to the terminal while nothing is previewed', () => {

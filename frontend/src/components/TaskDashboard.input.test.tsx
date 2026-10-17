@@ -6,6 +6,7 @@ import type { TasksState, TaskActionResult } from '../hooks/useTasks'
 import type { SSHConnectionsState } from '../hooks/useSSHConnections'
 import type { Task, TaskAttach, TasksResponse, Workspace } from '../schemas'
 import type { TaskTerminalStatus } from './TaskTerminal'
+import { localhostFrameDocument } from '../utils/preview'
 
 // Issue #284: the dashboard's Type in pane popup. The terminal itself is
 // TaskTerminal's (tested on its own); here it is a stub whose status the test
@@ -16,17 +17,23 @@ const { terminals } = vi.hoisted(() => ({
     mounts: [] as string[],
     onStatus: null as ((status: TaskTerminalStatus) => void) | null,
     onPreviewPath: undefined as ((path: string) => void) | undefined,
+    onLinkActivate: undefined as ((url: string) => void) | undefined,
+    onBrowserOpenRequest: undefined as ((url: string, source?: 'program' | 'link') => void) | undefined,
   },
 }))
 
 vi.mock('./TaskTerminal', () => ({
-  TaskTerminal: ({ sessionId, onStatus, onPreviewPath }: {
+  TaskTerminal: ({ sessionId, onStatus, onPreviewPath, onLinkActivate, onBrowserOpenRequest }: {
     sessionId: string
     onStatus: (status: TaskTerminalStatus) => void
     onPreviewPath?: (path: string) => void
+    onLinkActivate?: (url: string) => void
+    onBrowserOpenRequest?: (url: string, source?: 'program' | 'link') => void
   }) => {
     terminals.onStatus = onStatus
     terminals.onPreviewPath = onPreviewPath
+    terminals.onLinkActivate = onLinkActivate
+    terminals.onBrowserOpenRequest = onBrowserOpenRequest
     useEffect(() => {
       terminals.mounts.push(sessionId)
     }, [sessionId])
@@ -199,6 +206,108 @@ beforeEach(() => {
 
 afterEach(() => {
   window.localStorage.clear()
+})
+
+// Issue #386: the popup opens a localhost URL as a pane does — a clicked link
+// beside the terminal, a request or an OSC 8 link after Preview — and no
+// forward is asked for its attach.
+describe('TaskDashboard Type in pane: localhost preview', () => {
+  let open: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('{}'))
+    open = vi.spyOn(window, 'open').mockReturnValue(null)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('previews a clicked localhost link beside the terminal', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+
+    act(() => terminals.onLinkActivate!('http://localhost:5173/'))
+
+    const frame = within(dialog()).getByTitle('Preview of http://localhost:5173/')
+    expect(frame).toHaveAttribute('srcdoc', localhostFrameDocument('http://localhost:5173/'))
+    expect(open).not.toHaveBeenCalled()
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(expect.stringContaining('/open-url'), expect.anything())
+  })
+
+  it('asks before opening a requested localhost URL, with Preview, Open and Ignore', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/'))
+    expect(within(dialog()).getByText('http://localhost:5173/')).toBeInTheDocument()
+    expect(within(dialog()).getByRole('button', { name: 'Ignore' })).toBeInTheDocument()
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Open' }))
+
+    expect(open).toHaveBeenCalledWith('http://localhost:5173/', '_blank', 'noopener,noreferrer')
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(within(dialog()).queryByRole('button', { name: 'Ignore' })).toBeNull()
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/', 'link'))
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Preview' }))
+    expect(within(dialog()).getByTitle('Preview of http://localhost:5173/')).toBeInTheDocument()
+  })
+
+  it('opens a clicked localhost link in a tab for a task on another host', async () => {
+    renderDashboard()
+    await openPopup('idle-1')
+    setStatus('connected')
+
+    act(() => terminals.onLinkActivate!('http://localhost:5173/'))
+    expect(open).toHaveBeenCalledWith('http://localhost:5173/', '_blank', 'noopener,noreferrer')
+    expect(within(dialog()).queryByRole('region', { name: 'Preview' })).toBeNull()
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/'))
+    expect(within(dialog()).queryByRole('button', { name: 'Preview' })).toBeNull()
+  })
+
+  // Not connected, the preview cannot open, so it is not offered; a request
+  // raised by the attach that ended is gone once Reconnect replaces it.
+  it('offers no Preview while disconnected, and drops a request when the attach is replaced', async () => {
+    const state = tasksState({
+      attach: vi.fn()
+        .mockResolvedValueOnce(attached('board-0000000000000001'))
+        .mockResolvedValueOnce(attached('board-0000000000000001')),
+    })
+    renderDashboard(state)
+    await openPopup()
+    setStatus('connected')
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/'))
+    expect(within(dialog()).getByRole('button', { name: 'Preview' })).toBeInTheDocument()
+    setStatus('disconnected')
+    expect(within(dialog()).queryByRole('button', { name: 'Preview' })).toBeNull()
+    expect(within(dialog()).getByRole('button', { name: 'Ignore' })).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Reconnect' }))
+    })
+    setStatus('connected')
+    expect(within(dialog()).queryByRole('button', { name: 'Ignore' })).toBeNull()
+  })
+
+  // The strip asks about another URL while a preview is open: it stays over
+  // the terminal, so the preview's header and its controls stay in view.
+  it('keeps the approval strip on the terminal side while a preview is open', async () => {
+    renderDashboard()
+    await openPopup()
+    setStatus('connected')
+    act(() => terminals.onLinkActivate!('http://localhost:5173/first'))
+
+    act(() => terminals.onBrowserOpenRequest!('http://localhost:5173/second'))
+
+    const strip = dialog().querySelector('[data-pane-url-request="true"]') as HTMLElement
+    expect(strip).not.toBeNull()
+    expect(strip.closest('.pm-preview-terminal')).not.toBeNull()
+    expect(strip.closest('.pm-preview')).toBeNull()
+  })
 })
 
 describe('TaskDashboard Type in pane: entry', () => {

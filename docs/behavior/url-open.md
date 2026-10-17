@@ -48,7 +48,10 @@ without panemux. When the shim cannot be installed (a read-only home directory, 
 pane still starts, just without interception.
 
 A URL requested this way is never opened automatically. The pane shows a strip naming the URL with
-`Open` and `Ignore`; only `Open` opens the tab and prepares the forward. The request is a live event:
+`Open` and `Ignore`; only `Open` opens the tab and prepares the forward. For a localhost URL in a
+terminal on the panemux host the strip also offers `Preview`, which shows the page beside the
+terminal instead ([the split preview](preview.md#opening-a-localhost-url)). Each button acts once on
+the request it was shown for, so a second press opens nothing more. The request is a live event:
 a sequence that arrives in replayed scrollback is ignored, so reconnecting a pane never re-raises a
 request that was already opened or dismissed. Terminal output is
 untrusted — see [security.md](../security.md) — and the browser also requires a user gesture to open a
@@ -99,8 +102,19 @@ process launched inside tmux cannot wrap those panes' notifications for an unrel
 
 ### Clicked links
 
-Links in the terminal are opened by the frontend in a new tab. A link that is itself a loopback URL
+Printed links, OSC 8 hyperlinks and the browser shim all go through the same opener in the pane (and
+in the task dashboard's Type in pane popup).
+
+A printed link, whose text is the URL, opens when clicked. In a terminal on the panemux host a
+localhost link opens in [the split preview](preview.md#opening-a-localhost-url) instead of a tab.
+An OSC 8 hyperlink's target is chosen by the program's output and need not match its text, so a
+click on one shows the approval strip above, saying `This link goes to` and naming the target, with
+the same `Preview`, `Open` and `Ignore`. OSC 8 links are `http` and `https` only. Clicking a URL that
+a strip is still asking about removes the request, so it is not opened twice.
+
+Links in the terminal are otherwise opened by the frontend in a new tab. A link that is itself a loopback URL
 is opened into a blank tab that is navigated once the forward is ready, because the browser would
 otherwise reach the port before it exists; every other URL opens immediately and the forward is
 prepared alongside it, since its callback only fires after the operator has logged in. A forward
-that fails is reported in the pane rather than silently swallowed.
+that fails is reported in the pane rather than silently swallowed. The Type in pane popup's attach is
+not a pane and has no forwards: its links and approved requests open their tab directly.

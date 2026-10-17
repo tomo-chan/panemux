@@ -320,6 +320,15 @@ rules.
 - Loading, the reason a path cannot be opened, and the choice between files a relative path names
   are shown in the preview's own area, so the terminal is never covered and keeps taking keys.
 - The preview's page is white like a browser page, framed by the dark panemux chrome.
+- A localhost URL (issue #386) opens in the same split. Above its page, a one-line note in the same
+  style as the keys note says that a page refusing to be framed stays blank and that hot reload,
+  sign-in or storage can differ in a frame, pointing at `Open in new tab`: a frame cannot report
+  either, so the note is always shown for a localhost page rather than guessed at.
+- The pane's URL strip adds `Preview` before `Open` and `Ignore` when the URL is a localhost page on
+  the panemux host, and says `This link goes to` instead of `This pane wants to open` for a clicked
+  OSC 8 link. The strip covers the terminal side only — the whole body when no preview is open — so
+an open preview's header stays visible while another URL is asked about. The Type in pane popup
+draws the same strip over its terminal.
 
 ---
 

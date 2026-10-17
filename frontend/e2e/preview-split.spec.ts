@@ -1,3 +1,5 @@
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
 // The split preview (issue #385) in a real browser: what jsdom cannot lay
@@ -48,6 +50,137 @@ test('hides the preview when the shell in the pane exits', async ({ page }) => {
   await expect(pane.locator('.pm-preview')).toHaveCount(0)
   await expect(pane.locator('.pm-preview-terminal')).toBeVisible()
 })
+
+// Issue #386: a localhost URL on the panemux host — here a server this test
+// starts, as a development server would be — opens beside the terminal from
+// the browser shim, an OSC 8 link and a printed link alike. Its page runs its
+// scripts in its own origin, which is what a development server's modules and
+// hot reload need.
+test.describe('a localhost page', () => {
+  let server: Server
+  let origin: string
+
+  test.beforeAll(async () => {
+    server = createServer((req, res) => {
+      // Elsewhere: a host the preview's frame may not reach. *.localhost
+      // resolves to this machine in Chromium, so without the guard the page
+      // would show, and the test needs no network to tell.
+      const elsewhere = `http://pm386.localhost:${(server.address() as AddressInfo).port}/`
+      if (req.url === '/redirect') {
+        res.writeHead(302, { Location: elsewhere })
+        res.end()
+        return
+      }
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      if (req.url === '/navigate') {
+        res.end(`<script>location.href = ${JSON.stringify(elsewhere)}</script>`)
+        return
+      }
+      res.end('<p id="o">static</p><script>document.getElementById("o").textContent = "served " + location.origin</script>')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  })
+
+  test.afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+
+  test('previews a page the browser shim asks to open, after Preview', async ({ page }) => {
+    const pane = await openPane(page, 'preview-left')
+
+    await writeToSession(page, 'preview-left', `"$BROWSER" ${origin}/\n`)
+    const strip = pane.locator('[data-pane-url-request="true"]')
+    await expect(strip.getByRole('button', { name: 'Open' })).toBeVisible()
+    await expect(strip.getByRole('button', { name: 'Ignore' })).toBeVisible()
+    await strip.getByRole('button', { name: 'Preview' }).click()
+
+    await expect(strip).toHaveCount(0)
+    await expectPage(pane, origin)
+
+    // Another request while the preview is open: the strip stays over the
+    // terminal, clear of the preview's header.
+    await writeToSession(page, 'preview-left', `"$BROWSER" ${origin}/second\n`)
+    await expect(strip.getByRole('button', { name: 'Preview' })).toBeVisible()
+    const stripBox = (await strip.boundingBox())!
+    const previewBox = (await pane.locator('.pm-preview').boundingBox())!
+    expect(stripBox.x + stripBox.width).toBeLessThanOrEqual(previewBox.x + 0.5)
+    await expect(pane.locator('.pm-preview-target')).toBeVisible()
+    await strip.getByRole('button', { name: 'Ignore' }).click()
+    await pane.getByRole('button', { name: 'Close preview' }).click()
+  })
+
+  // A localhost page that redirects, or sends itself, to another host does
+  // not take the preview there: #359 opens other sites in a tab.
+  for (const path of ['/redirect', '/navigate']) {
+    test(`keeps the preview off another host the page leads to (${path})`, async ({ page }) => {
+      const pane = await openPane(page, 'preview-left')
+
+      await writeToSession(page, 'preview-left', `clear && echo ${origin}${path}\n`)
+      await clickRow(page, pane, new RegExp(`^${escapeRegExp(`${origin}${path}`)}\\s*$`))
+
+      await expect(pane.locator('.pm-preview-target')).toContainText(`local · ${origin}${path}`)
+      // The frame is refused rather than shown.
+      await expect.poll(() => page.frames().map((f) => f.url()).some((u) => u.startsWith('chrome-error:'))).toBe(true)
+      expect(page.frames().map((f) => f.url()).filter((u) => u.includes('pm386.localhost'))).toEqual([])
+      await pane.getByRole('button', { name: 'Close preview' }).click()
+    })
+  }
+
+  test('asks before previewing an OSC 8 link, which opens once', async ({ page }) => {
+    const pane = await openPane(page, 'preview-left')
+
+    await writeToSession(page, 'preview-left', `clear && printf '\\033]8;;${origin}/\\033\\\\pm386-osc8\\033]8;;\\033\\\\\\n'\n`)
+    await clickRow(page, pane, /^pm386-osc8\s*$/)
+    const strip = pane.locator('[data-pane-url-request="true"]')
+    await expect(strip).toContainText('This link goes to')
+    await strip.getByRole('button', { name: 'Preview' }).click()
+
+    await expectPage(pane, origin)
+    await expect(strip).toHaveCount(0)
+    await pane.getByRole('button', { name: 'Close preview' }).click()
+  })
+
+  test('previews a printed localhost link when it is clicked', async ({ page }) => {
+    const pane = await openPane(page, 'preview-left')
+
+    await writeToSession(page, 'preview-left', `clear && echo ${origin}/\n`)
+    await clickRow(page, pane, new RegExp(`^${escapeRegExp(`${origin}/`)}\\s*$`))
+
+    await expectPage(pane, origin)
+    await expect(pane.locator('[data-pane-url-request="true"]')).toHaveCount(0)
+    await pane.getByRole('button', { name: 'Close preview' }).click()
+  })
+})
+
+// Every character a regular expression gives a meaning to, so the row is
+// matched as the literal text it shows.
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+async function openPane(page: Page, paneId: string): Promise<Locator> {
+  await page.goto('/')
+  const pane = page.locator(`[data-pane-id="${paneId}"]`)
+  await expect.poll(async () => (await pane.locator('.xterm-rows').textContent()) ?? '').toMatch(/\S/)
+  return pane
+}
+
+async function clickRow(page: Page, pane: Locator, text: RegExp) {
+  const row = pane.locator('.xterm-rows > div').filter({ hasText: text })
+  await expect(row).toHaveCount(1)
+  const box = (await row.boundingBox())!
+  await page.mouse.move(box.x + 4, box.y + box.height / 2)
+  await page.mouse.click(box.x + 4, box.y + box.height / 2)
+}
+
+async function expectPage(pane: Locator, origin: string) {
+  await expect(pane.locator('.pm-preview')).toBeVisible()
+  await expect(pane.locator('.pm-preview-target')).toContainText(`local · ${origin}/`)
+  await expect(pane.getByText(/refuses to be shown in a frame/)).toBeVisible()
+  // The page is framed inside a document of panemux's own (utils/preview).
+  await expect(pane.frameLocator('.pm-preview-frame').frameLocator('iframe').locator('#o')).toHaveText(`served ${origin}`)
+}
 
 async function terminalWidth(pane: Locator): Promise<number> {
   return (await pane.locator('.pm-preview-terminal').boundingBox())!.width

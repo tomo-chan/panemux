@@ -4,8 +4,9 @@
 
 ## Split Preview
 
-A workspace pane and the task dashboard's Type in pane popup can show an HTML or Markdown file beside
-their terminal: the terminal on the left, the preview on the right (issue #385). It is how a mock or a
+A workspace pane and the task dashboard's Type in pane popup can show an HTML or Markdown file, or a
+localhost page, beside their terminal: the terminal on the left, the preview on the right (issues
+#385 and #386). It is how a mock or a
 design note an agent wrote is checked while the agent is still being instructed in the same terminal.
 The isolation that keeps the previewed page away from panemux's own API is in
 [security/preview.md](../security/preview.md).
@@ -42,6 +43,57 @@ spelled: through a symbolic link in its prefix (macOS's `/tmp` for the `/private
 directory is reported as, or a link to a directory inside it) or, on a case-insensitive filesystem, in another letter case. When the
 working directory and the worktrees are all unknown, no path opens.
 
+### Opening a localhost URL
+
+A `localhost`, `127.x.x.x` or `[::1]` `http`/`https` URL in a terminal on the panemux host — a `local`
+or `tmux` pane, or the Type in pane popup of a task on the panemux host — opens in the same split
+(issue #386), typically a development server the agent started. It reaches the preview three ways,
+all handled by the one URL opener the pane already uses
+([opening URLs from a pane](url-open.md)):
+
+- **A printed link**, clicked: it opens in the preview at once. Its text is the URL, so the operator
+  sees what they click.
+- **The browser shim**: a program in the pane opening a browser (`vite --open`, `xdg-open`) shows the
+  approval strip with **Preview**, **Open** and **Ignore**. Preview shows the page beside the
+  terminal; Open opens it in a tab exactly as before, including the OAuth callback forward;
+  Ignore drops it.
+- **An OSC 8 hyperlink**, clicked: its target is chosen by the program's output and need not be its
+  text, so it shows the same strip, saying **This link goes to** and naming the target.
+
+Each request opens at most once. The strip's buttons act on the request they were shown for and
+then remove it, so a second press, or Preview followed by Open, opens nothing more; clicking the same
+URL as a link while its request is showing removes the request. A request is a live event: one that
+arrives in replayed scrollback after a reconnect is not raised again.
+
+Any other URL — an external site, or a localhost URL in an `ssh` or `ssh_tmux` pane or a remote
+task, whose `localhost` is another host — opens in a tab as before, with no Preview. While the
+terminal is not connected (its WebSocket dropped, or its session ended) the preview cannot open, so
+Preview is not offered either: the strip keeps Open and Ignore, and a clicked localhost link opens in
+a tab.
+
+The strip is drawn over the terminal side of the split, so while a preview is open its header —
+the URL it shows, Reload, Open in new tab and Close — stays in view. In the Type in pane popup a
+request belongs to the attach that raised it: Retry or Reconnect replaces the terminal, and a request
+still waiting is dropped with it.
+
+The page is framed as its server serves it, in the server's own origin, with its scripts running,
+so a development server's modules, hot reload and storage work as they do in a tab. Under the
+header the preview says what a frame cannot always show: a page that refuses to be framed
+(`X-Frame-Options` or `frame-ancestors`) stays blank, and hot reload, sign-in or storage can behave
+differently than in a tab of its own, for which **Open in new tab** is the way to see it as a normal
+page. Reload loads the URL again, and the header names the host (`local`) and the URL.
+
+The preview stays on this host's loopback: a page that redirects, or sends itself, to another site
+— an external login, an open redirect — shows the browser's refusal in the frame instead of that
+site, and the header keeps naming the localhost URL. External sites open in a tab. Moving between
+`localhost` and `127.0.0.1` addresses is allowed.
+
+An `[::1]` URL is shown as `localhost` with the same port, path, query and fragment, since the frame
+cannot be limited to an IPv6 address; the browser reaches the same server through `localhost`. The
+header names the `localhost` URL shown, and **Open in new tab** opens the `[::1]` URL. The page's
+origin is then `localhost`'s, so its cookies and storage in the preview are not those of a tab on
+the `[::1]` URL.
+
 ### What is shown
 
 - **HTML** is shown as written, with its scripts running, and loads the stylesheets, scripts and
@@ -61,9 +113,10 @@ The files it loads beside it are not bounded.
 
 ### The preview header
 
-The header names the host (`local` for the panemux host) and the file's absolute path, and carries:
+The header names the host (`local` for the panemux host) and the file's absolute path, or the URL
+of a localhost page, and carries:
 
-- **Reload**: loads the file again as it is now on disk.
+- **Reload**: loads the file again as it is now on disk, or the localhost URL again.
 - **Open in new tab**: opens the same page in a browser tab. A tab opened this way is the browser's
   own: closing the preview, the popup, the pane or the terminal session does not close it, and it
   keeps working for as long as panemux runs. It is how a page is seen larger; the preview has no
@@ -115,4 +168,5 @@ focus. This holds in a workspace pane as in the popup.
 
 The preview inside a pane or the popup is hidden when its terminal is not connected — its WebSocket
 drops, or the session ends — and stays hidden after a reconnect; clicking the path again reopens it.
-A tab opened with **Open in new tab** is not affected by any of this.
+A tab opened with **Open in new tab** is not affected by any of this. A localhost page follows
+the same rule as a file.
