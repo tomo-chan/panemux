@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"panemux/internal/agent"
 	"panemux/internal/session"
 )
 
@@ -43,32 +44,38 @@ type LaunchError struct {
 }
 
 // The words the launch script refuses with, one per way a host can refuse.
+// An adapter's fragment may add its own (launchAdapter.refusals).
 const (
-	RefusedNoTmux   = "no-tmux"
-	RefusedNoCWD    = "no-cwd"
+	RefusedNoTmux = "no-tmux"
+	RefusedNoCWD  = "no-cwd"
+	// RefusedNoClaude and RefusedNoCodex are refusedNoAgent of each: the
+	// script found no binary of the agent.
 	RefusedNoClaude = "no-claude"
 	RefusedNoCodex  = "no-codex"
 	// RefusedCodexTooOld is a codex whose help lists no --no-daemon
-	// (codex-cli 0.142.2 has none, and exits 2 on it).
+	// (codex-cli 0.142.2 has none, and exits 2 on it); codexLaunch declares it.
 	RefusedCodexTooOld = "codex-too-old"
 	RefusedTmuxExists  = "tmux-exists"
 	RefusedTmuxFailed  = "tmux-failed"
 	RefusedPromptFile  = "prompt-file"
+	// RefusedUnsupported is an agent and mode no adapter has a command for.
+	// Launch and Resume refuse those before anything runs.
+	RefusedUnsupported = "unsupported"
 )
 
+// launchErrorMessages are the messages of the template's own refusals.
+// composeLaunch adds each agent's no-<agent> and its adapters' refusals.
 var launchErrorMessages = map[string]string{
 	RefusedNoTmux:      "tmux is not installed on the host",
 	RefusedNoCWD:       "the working directory does not exist on the host",
-	RefusedNoClaude:    "claude was not found on the host",
-	RefusedNoCodex:     "codex was not found on the host",
-	RefusedCodexTooOld: "codex on the host is too old: it has no --no-daemon option",
 	RefusedTmuxExists:  "a tmux session with the task's name already exists on the host",
 	RefusedTmuxFailed:  "tmux could not start the session on the host",
 	RefusedPromptFile:  "the prompt could not be written to a temporary file on the host",
+	RefusedUnsupported: "panemux cannot start the agent that way",
 }
 
 func (e *LaunchError) Error() string {
-	if msg, ok := launchErrorMessages[e.Code]; ok {
+	if msg, ok := launchPlan.messages[e.Code]; ok {
 		return msg
 	}
 	return fmt.Sprintf("the host refused the launch (%q)", e.Code)
@@ -126,7 +133,7 @@ type launchParams struct {
 	reuseSession bool
 }
 
-// launchScriptTemplate starts claude or codex in a detached tmux session. It
+// launchScriptTemplate starts an agent in a detached tmux session. It
 // answers with one "::panemux-launch ok" or "::panemux-launch error <code>"
 // line and always exits 0, so a refusal is told apart from a broken
 // connection.
@@ -134,6 +141,9 @@ type launchParams struct {
 //   - The agent is looked up on PATH, then through the user's login shell,
 //     because an SSH exec channel's PATH rarely holds a per-user install
 //     (~/.local/bin). Only an absolute path to an executable is run.
+//   - What runs is the command of the agent's launch or resume adapter,
+//     a fixed fragment composeLaunch puts in the case of its agent and mode
+//     ({{AGENT_COMMANDS}}). It sets run or resume, and may refuse first.
 //   - codex runs with its own directory last on PATH: an npm install's
 //     codex is a `#!/usr/bin/env node` script, and node sits next to it
 //     there, but not on the PATH of a tmux server an exec channel started.
@@ -187,18 +197,7 @@ case $bin in
 *) say "error no-$agent"; exit 0 ;;
 esac
 [ -f "$bin" ] && [ -x "$bin" ] || { say "error no-$agent"; exit 0; }
-if [ "$agent" = codex ]; then
-  PATH=$PATH:${bin%/*} "$bin" --help </dev/null 2>/dev/null | grep -q -e '--no-daemon' ||
-    { say 'error codex-too-old'; exit 0; }
-fi
-if [ "$agent" = codex ]; then
-  codex='PATH=$PATH:${2%/*}; export PATH; exec "$2" --no-daemon -c check_for_update_on_startup=false'
-  resume='cd -- "$1" || exit 1; '"$codex"' resume -- "$3"'
-  run='p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; '"$codex"' -- "$p"'
-else
-  resume='cd -- "$1" || exit 1; exec "$2" "--resume=$3"'
-  run='p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; exec "$2" "--session-id=$3" -- "$p"'
-fi
+{{AGENT_COMMANDS}}
 if tmux has-session -t "=$name" 2>/dev/null; then
   if [ "$mode" = resume ] && [ "$reuse" = yes ]; then
     tmux new-window -t "=$name:" -- sh -c "$resume" sh "$cwd" "$bin" "$sid" 2>/dev/null ||
@@ -263,22 +262,31 @@ func buildLaunchScript(p launchParams) (string, error) {
 		"{{TAG}}", p.tag,
 		"{{CWD}}", p.cwd,
 		"{{PROMPT}}", p.prompt,
-	).Replace(launchScriptTemplate), nil
+	).Replace(launchPlan.script), nil
 }
 
-// checkLaunchSessionID checks the agent, and the session ID it is given: the
-// minted UUID of a new claude task, the listed UUID of a resumed task, and
-// none for a new codex task, whose ID codex picks.
+// checkLaunchSessionID checks the agent, and the session ID it is given,
+// against the agent's adapter: what its newSession mints for a new task —
+// the UUID of a new claude task, none for a new codex task, whose ID codex
+// picks — and what its resume accepts.
 func checkLaunchSessionID(p launchParams) error {
-	switch {
-	case p.agent != AgentClaude && p.agent != AgentCodex:
-		return fmt.Errorf("%w: agent %q", ErrInvalidLaunch, p.agent)
-	case p.agent == AgentCodex && p.mode == launchNew:
-		if p.sessionID != "" {
-			return fmt.Errorf("%w: a new codex task is not given a session ID", ErrInvalidLaunch)
+	id := agent.ID(p.agent)
+	if p.mode == launchNew {
+		a, ok := launchPlan.launch[id]
+		switch {
+		case !ok:
+			return fmt.Errorf("%w: agent %q cannot be launched", ErrInvalidLaunch, p.agent)
+		case !a.validNewSessionID(p.sessionID):
+			return fmt.Errorf("%w: session ID %q is not one a new %s task is given", ErrInvalidLaunch, p.sessionID, p.agent)
 		}
-	case !validUUID.MatchString(p.sessionID):
-		return fmt.Errorf("%w: session ID %q is not a UUID", ErrInvalidLaunch, p.sessionID)
+		return nil
+	}
+	a, ok := launchPlan.resume[id]
+	switch {
+	case !ok:
+		return fmt.Errorf("%w: agent %q cannot be resumed", ErrInvalidLaunch, p.agent)
+	case !a.validSessionID(p.sessionID):
+		return fmt.Errorf("%w: session ID %q is not one %s resumes", ErrInvalidLaunch, p.sessionID, p.agent)
 	}
 	return nil
 }
@@ -343,14 +351,6 @@ func tmuxSessionForCodex(sessionID string) string {
 	return "task-" + sessionID[len(sessionID)-8:]
 }
 
-// tmuxSessionForResume is the tmux session a resume of agent's session uses.
-func tmuxSessionForResume(agent, sessionID string) string {
-	if agent == AgentCodex {
-		return tmuxSessionForCodex(sessionID)
-	}
-	return tmuxSessionForTask(sessionID)
-}
-
 // newCodexTmuxSession names a new codex task's tmux session: "task-" and
 // eight random hex digits, since codex has no session ID yet.
 func newCodexTmuxSession(r io.Reader) (string, error) {
@@ -391,45 +391,41 @@ func taskID(host, agent, key string) string {
 	return prefix + ":" + agent + ":" + key
 }
 
-// Launch starts a new claude or codex task on a host.
+// Launch starts a new task of an agent that declares launch on a host.
 func (s *Service) Launch(ctx context.Context, req LaunchRequest) (Launched, error) {
-	agent := req.Agent
-	if agent == "" {
-		agent = AgentClaude
+	id := req.Agent
+	if id == "" {
+		id = AgentClaude
 	}
-	if agent != AgentClaude && agent != AgentCodex {
-		return Launched{}, fmt.Errorf("%w: agent %q", ErrInvalidLaunch, agent)
+	adapter, ok := launchPlan.launch[agent.ID(id)]
+	if !ok {
+		return Launched{}, fmt.Errorf("%w: agent %q cannot be launched", ErrInvalidLaunch, id)
 	}
 	if err := s.checkHost(req.Host); err != nil {
 		return Launched{}, err
 	}
-	p := launchParams{agent: agent, mode: launchNew, cwd: req.CWD, prompt: normalizePrompt(req.Prompt)}
+	p := launchParams{agent: id, mode: launchNew, cwd: req.CWD, prompt: normalizePrompt(req.Prompt)}
 	var err error
-	if agent == AgentCodex {
-		p.tmuxSession, err = newCodexTmuxSession(s.opts.Rand)
-	} else {
-		p.sessionID, err = newSessionID(s.opts.Rand)
-	}
+	p.sessionID, p.tmuxSession, err = adapter.newSession(s.opts.Rand)
 	if err != nil {
 		return Launched{}, err
-	}
-	if p.sessionID != "" {
-		p.tmuxSession = tmuxSessionForTask(p.sessionID)
 	}
 	return s.launch(ctx, req.Host, p)
 }
 
-// Resume runs `claude --resume` or `codex resume` for a stopped task, in the
-// working directory its conversation log or rollout records. The session
+// Resume reopens a stopped task of an agent that declares resume — `claude
+// --resume`, `codex resume` — in the working directory its conversation log
+// or rollout records. The session
 // must be listed as a stopped task of that agent on the host right now: the
 // host is collected again first, so an ID the dashboard did not list is
 // never passed to the agent.
-func (s *Service) Resume(ctx context.Context, host, agent, sessionID string) (Launched, error) {
-	if agent != AgentClaude && agent != AgentCodex {
-		return Launched{}, fmt.Errorf("%w: agent %q", ErrInvalidLaunch, agent)
+func (s *Service) Resume(ctx context.Context, host, agentName, sessionID string) (Launched, error) {
+	adapter, ok := launchPlan.resume[agent.ID(agentName)]
+	if !ok {
+		return Launched{}, fmt.Errorf("%w: agent %q cannot be resumed", ErrInvalidLaunch, agentName)
 	}
-	if !validUUID.MatchString(sessionID) {
-		return Launched{}, fmt.Errorf("%w: session ID %q is not a UUID", ErrInvalidLaunch, sessionID)
+	if !adapter.validSessionID(sessionID) {
+		return Launched{}, fmt.Errorf("%w: session ID %q is not one %s resumes", ErrInvalidLaunch, sessionID, agentName)
 	}
 	if err := s.checkHost(host); err != nil {
 		return Launched{}, err
@@ -438,7 +434,7 @@ func (s *Service) Resume(ctx context.Context, host, agent, sessionID string) (La
 	// collection, so a second resume of the same session must not collect
 	// until the first has launched: both would find the session free and
 	// start claude twice on one conversation.
-	unlock, err := s.lockResume(ctx, host, agent+"\x00"+sessionID)
+	unlock, err := s.lockResume(ctx, host, agentName+"\x00"+sessionID)
 	if err != nil {
 		return Launched{}, err
 	}
@@ -448,15 +444,15 @@ func (s *Service) Resume(ctx context.Context, host, agent, sessionID string) (La
 		return Launched{}, fmt.Errorf("collect %s before resuming: %s", hostName(host), resultError(result))
 	}
 	for _, task := range list {
-		if task.Agent != agent || task.SessionID != sessionID || task.State != StateStop {
+		if task.Agent != agentName || task.SessionID != sessionID || task.State != StateStop {
 			continue
 		}
 		if task.CWD == "" {
 			return Launched{}, fmt.Errorf("%w: the session's working directory is not recorded", ErrInvalidLaunch)
 		}
-		name := tmuxSessionForResume(agent, sessionID)
+		name := adapter.tmuxSessionFor(sessionID)
 		return s.launch(ctx, host, launchParams{
-			agent: agent, mode: launchResume, sessionID: sessionID, cwd: task.CWD, tmuxSession: name,
+			agent: agentName, mode: launchResume, sessionID: sessionID, cwd: task.CWD, tmuxSession: name,
 			reuseSession: !agentRunsInTmuxSession(list, name),
 		})
 	}
