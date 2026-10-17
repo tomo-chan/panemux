@@ -200,9 +200,12 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
           key={approvalWaits[0].wait_id}
           waits={approvalWaits.length}
           onInputGiven={async () => {
+            const clicked = document.activeElement
             const failure = await approval.inputGiven(approvalWaits[0])
-            // The strip goes, and its button with the focus: the terminal takes the keys again.
-            if (!failure) bodyRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()
+            // The strip goes, and its button with the focus: the terminal takes
+            // the keys again, unless the person went elsewhere meanwhile.
+            const stayed = document.activeElement === clicked || document.activeElement === document.body
+            if (!failure && stayed) bodyRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()
             return failure
           }}
           onReview={() => approval.review(approvalWaits[0].id)}

@@ -135,6 +135,34 @@ describe('TerminalPane codex permission wait', () => {
     })
     expect(document.activeElement).toBe(terminalInput)
   })
+
+  it('leaves the focus where it went while the input was being given', async () => {
+    let answer: (failure: string | null) => void = () => {}
+    const approval = {
+      waits: vi.fn(() => [permissionTask('a')]),
+      inputGiven: vi.fn(() => new Promise<string | null>((resolve) => { answer = resolve })),
+      review: vi.fn(),
+    }
+    const { container } = render(
+      <LayoutActionsContext.Provider value={makeCtx({ approval })}>
+        <TerminalPane pane={{ id: 'pane-1', type: 'local', title: 'Pane 1' }} />
+      </LayoutActionsContext.Provider>,
+    )
+    const terminalInput = document.createElement('textarea')
+    terminalInput.className = 'xterm-helper-textarea'
+    container.querySelector('[data-pane-body]')!.appendChild(terminalInput)
+    const otherPaneInput = document.createElement('textarea')
+    container.appendChild(otherPaneInput)
+    const button = screen.getByRole('button', { name: 'Input given' })
+    button.focus()
+
+    fireEvent.click(button)
+    otherPaneInput.focus()
+    await act(async () => {
+      answer(null)
+    })
+    expect(document.activeElement).toBe(otherPaneInput)
+  })
 })
 
 describe('TerminalPane localhost preview', () => {

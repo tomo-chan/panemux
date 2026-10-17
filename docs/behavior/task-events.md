@@ -271,7 +271,8 @@ pane or selecting its workspace leaves it, and closing the popup does not mark t
 over, the task leaves `wait` or its host stops being `ok`), while the stream is lost (the store is
 gone, so no wait is known), or when `Input given` on it succeeds, after which neither the panes nor
 the dashboard of this tab show that `wait_id` as a wait again, whichever of them marked it, and the
-terminal of the pane or popup takes the focus back. A pane matching more than one such task
+terminal of the pane or popup takes the focus back — in a pane only while the focus is still where the
+click left it, so moving to another pane before the answer keeps the keys there. A pane matching more than one such task
 offers `Review in Tasks` instead, which opens the dashboard on the first of them. A question
 (`request_user_input`) gives no strip.
 
