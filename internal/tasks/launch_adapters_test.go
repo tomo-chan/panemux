@@ -95,6 +95,13 @@ var launchRegMismatches = []struct {
 	{func(g *launchRegs) { g.l[0].adapter = fakeLaunch{command: "{ say 'error too-new'; exit 0; }\nrun='x'"} },
 		"command refuses with an undeclared code",
 		`launch adapter "third": its command refuses with "too-new", which it does not declare`},
+	{func(g *launchRegs) {
+		g.l[0].adapter = fakeLaunch{
+			command: "{ say 'error too-old'; exit 0; }\n{ say 'error too-new'; exit 0; }\nrun='x'",
+			refused: map[string]string{"too-old": "m"},
+		}
+	}, "a later refusal with an undeclared code",
+		`launch adapter "third": its command refuses with "too-new", which it does not declare`},
 	{func(g *launchRegs) { g.l[0].adapter = refusing(map[string]string{"Too New": "m"}) },
 		"refusal code not a word", `launch adapter "third": invalid refusal code "Too New"`},
 	{func(g *launchRegs) { g.l[0].adapter = refusing(map[string]string{RefusedNoTmux: "m"}) },
@@ -111,6 +118,8 @@ func TestValidateLaunchAdapters_RejectsAMismatchedRegistration(t *testing.T) {
 	}
 	g := validLaunchRegs()
 	require.NoError(t, validateLaunchAdapters(defs, g.l, g.r), "a launch without a resume is a valid registration")
+	g.l[0].adapter = fakeLaunch{command: "{ say 'error no-third'; exit 0; }\nrun='x'"}
+	require.NoError(t, validateLaunchAdapters(defs, g.l, g.r), "an adapter may refuse with its own no-<agent>")
 	_, err := composeLaunch(defs, g.l[:1], g.r)
 	require.EqualError(t, err, `agent "fourth" declares launch but has no launch adapter`, "nothing is composed")
 

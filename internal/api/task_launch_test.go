@@ -231,7 +231,7 @@ func TestPostTaskResume_ResumesAStoppedTask(t *testing.T) {
 	assert.Contains(t, host.scripts[0], "mode='resume'")
 }
 
-//efficacy:exempt the added case pins that an agent declaring no resume was already refused with 400; this branch only derived the refusal from the registry
+//efficacy:exempt pins the 400 an agent declaring no resume already got; only its source moved
 func TestPostTaskResume_Refusals(t *testing.T) {
 	tests := []struct {
 		headers    map[string]string
