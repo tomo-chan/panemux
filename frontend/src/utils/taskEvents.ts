@@ -1,5 +1,5 @@
 import { TaskEventFrameSchema, type Task, type TaskEventFrame, type TaskEventHost, type TaskEventTask } from '../schemas'
-import { hostLabel, type TaskPaneRef } from './taskBoard'
+import { hostLabel, isPermissionWait, type TaskPaneRef } from './taskBoard'
 
 // The browser's side of the task event stream (issue #279,
 // docs/behavior/task-events.md#receiver). Everything here is pure: the hook
@@ -105,6 +105,21 @@ export function attentionFromStore(store: TaskEventStore, cleared: Pick<Readonly
     flags.set(task.id, task)
   }
   return flags
+}
+
+/**
+ * The tasks waiting on a codex permission request (issue #404) on a host that
+ * is ok, which a pane running one offers Input given for, unless this tab
+ * marked that wait given already. Unlike the attention, clearing it by hand
+ * keeps them: only Input given or the end of the wait takes one away.
+ */
+export function permissionWaitsFromStore(store: TaskEventStore, given: Pick<ReadonlySet<string>, 'has'>): TaskEventTask[] {
+  return [...store.tasks.values()].filter((task) =>
+    isHostOk(store, task.host) &&
+    // A wait panemux only observed (e1-…) has no signature to mark given.
+    isPermissionWait({ ...task, wait_signature: task.wait_id?.startsWith('w1-') ? task.wait_id : undefined }) &&
+    !given.has(task.wait_id ?? ''),
+  )
 }
 
 /** At most this many wait IDs are remembered per record. */

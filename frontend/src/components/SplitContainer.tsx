@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useRef } from 'react'
 import { DisplayConfig, LayoutChild, LayoutNode } from '../types'
+import type { TaskEventTask } from '../schemas'
 import type { PaneEdge } from '../utils/layoutTree'
 import { SplitDivider } from './SplitDivider'
 import { TerminalPane } from './TerminalPane'
@@ -25,6 +26,17 @@ export interface LayoutActionsContextValue {
   hasPaneAttention: (paneId: string) => boolean
   activePaneId: string | null
   setActivePaneId: (paneId: string | null) => void
+  /** The codex permission waits panes show (issue #404); without it, none. */
+  approval?: PaneApprovalActions
+}
+
+export interface PaneApprovalActions {
+  /** The tasks of a pane waiting on a codex permission request. */
+  waits: (paneId: string) => TaskEventTask[]
+  /** Marks a task's codex permission request answered, answering why it failed or null. */
+  inputGiven: (task: TaskEventTask) => Promise<string | null>
+  /** Opens the task dashboard on a task. */
+  review: (taskId: string) => void
 }
 
 export const LayoutActionsContext = React.createContext<LayoutActionsContextValue | null>(null)

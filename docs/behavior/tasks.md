@@ -387,7 +387,9 @@ review there.
   other turn, ignores the record: the wait clears by itself when the turn is over.
 - **`Input given`.** The detail panel of such a task offers `Input given`, which
   [`POST /api/tasks/input-given`](#post-apitasksinput-given) sends. panemux keeps the answered
-  requests in memory only; the next request in the same turn waits again.
+  requests in memory only; the next request in the same turn waits again. The pane running the task
+  and the Type in pane popup on it offer the same button, on a strip below their header
+  ([Codex permission requests in a pane](task-events.md#codex-permission-requests-in-a-pane)).
 - **Known limits.** Codex runs the hook before it approves a request on its own too, so a request
   that needed no person can show as a wait until its turn ends or `Input given` is pressed. Codex
   records nothing when the person answers in the pane, so the wait stays until one of those.

@@ -28,9 +28,11 @@ import {
   createWaitIdRecord,
   isWaitVisible,
   overlayTaskEvents,
+  permissionWaitsFromStore,
   taskWaitNotification,
   taskWaitStarts,
 } from './utils/taskEvents'
+import { postInputGiven } from './utils/inputGiven'
 import {
   DEFAULT_TASK_DASHBOARD_SHORTCUT,
   findTaskPane,
@@ -43,6 +45,7 @@ import {
 import type { TaskOpenAction } from './utils/taskBoard'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
+const NO_APPROVAL_WAITS: TaskEventTask[] = []
 
 // The two layers of issue #252: the task dashboard, and the workspaces with
 // their panes. The workspaces stay mounted while the dashboard is shown, so
@@ -129,6 +132,15 @@ export const App: React.FC = () => {
     }
     return paneIds
   }, [attentionTasks, workspaces?.items])
+  // The codex permission waits a pane of this tab marked Input given (issue
+  // #404); with those the dashboard marked, see answeredWaits.
+  const [givenWaits, setGivenWaits] = useState<ReadonlySet<string>>(() => new Set())
+  const markInputGiven = useCallback(async (task: TaskEventTask) => {
+    const signature = task.wait_id ?? ''
+    const failure = await postInputGiven(signature)
+    if (!failure) setGivenWaits((current) => new Set(current).add(signature))
+    return failure
+  }, [])
   const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell, browseDirectories } =
     usePaneSettings(layout, updateSizes)
 
@@ -363,14 +375,33 @@ export const App: React.FC = () => {
 
   const taskEvents = useTaskEvents(handleTaskEvent)
 
+  // The codex permission waits marked Input given in this tab, from a pane or
+  // from the dashboard, so neither offers or shows one the other answered.
+  const dashboardGivenWaits = tasksState.inputGivenWaits
+  const answeredWaits = useMemo<ReadonlySet<string>>(
+    () => new Set([...givenWaits, ...(dashboardGivenWaits ?? [])]),
+    [dashboardGivenWaits, givenWaits],
+  )
+  // A pane shows each other permission wait of a task it runs until the wait
+  // ends, and none while the stream is lost and no wait is known.
+  const approvalWaitsByPane = useMemo(() => {
+    const byPane = new Map<string, TaskEventTask[]>()
+    if (!taskEvents.store) return byPane
+    for (const task of permissionWaitsFromStore(taskEvents.store, answeredWaits)) {
+      const pane = findTaskPane(task, workspaces?.items ?? [])
+      if (pane) byPane.set(pane.paneId, [...(byPane.get(pane.paneId) ?? []), task])
+    }
+    return byPane
+  }, [answeredWaits, taskEvents.store, workspaces?.items])
+
   // The dashboard's state column comes from the stream for every task the
   // stream has, so a change shows as soon as it is published; the rest of a
   // task, and the stopped ones, come from the dashboard's own collection.
   const dashboardTasksState = useMemo(() => {
     const { store } = taskEvents
     if (taskEvents.status !== 'live' || !store || !tasksState.data) return tasksState
-    return { ...tasksState, data: { ...tasksState.data, tasks: overlayTaskEvents(tasksState.data.tasks, store.tasks, tasksState.inputGivenWaits) } }
-  }, [tasksState, taskEvents])
+    return { ...tasksState, data: { ...tasksState.data, tasks: overlayTaskEvents(tasksState.data.tasks, store.tasks, answeredWaits) } }
+  }, [answeredWaits, tasksState, taskEvents])
   const tasksWaiting = waitingCount(dashboardTasksState.data?.tasks ?? [])
   const handleListedTasksChange = useCallback((taskIds: ReadonlySet<string>) => {
     dashboardTaskIdsRef.current = taskIds
@@ -638,6 +669,11 @@ export const App: React.FC = () => {
       displayConfig: displayConfig ?? DEFAULT_DISPLAY,
       clearPaneAttention,
       hasPaneAttention: (paneId: string) => attentionPaneIds.has(paneId),
+      approval: {
+        waits: (paneId: string) => approvalWaitsByPane.get(paneId) ?? NO_APPROVAL_WAITS,
+        inputGiven: markInputGiven,
+        review: revealTask,
+      },
       activePaneId,
       setActivePaneId,
     }}>

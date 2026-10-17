@@ -8,6 +8,7 @@ import { paneSplitKey } from '../utils/preview'
 import type { PaneEdge } from '../utils/layoutTree'
 import { PaneHeader } from './PaneHeader'
 import { PaneStatusBar } from './PaneStatusBar'
+import { PaneApprovalNotice } from './PaneApprovalNotice'
 import { PaneUrlOpenNotice } from './PaneUrlOpenNotice'
 import { PreviewSplit } from './PreviewSplit'
 import { LayoutActionsContext } from './SplitContainer'
@@ -33,6 +34,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const ctx = useContext(LayoutActionsContext)
   const displayConfig = ctx?.displayConfig ?? DEFAULT_DISPLAY
   const hasAttention = ctx?.hasPaneAttention(pane.id) ?? false
+  const approval = ctx?.approval
+  const approvalWaits = approval?.waits(pane.id) ?? []
   const isActivePane = ctx?.activePaneId === pane.id
   const isDragSource = ctx?.dragSourcePaneId === pane.id
   const dragActive = Boolean(ctx?.dragSourcePaneId)
@@ -193,6 +196,23 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         onOpenVSCode={handleOpenVSCode}
         moveHandleProps={{ onDragStart: handleDragStart, onDragEnd: handleDragEnd, onMouseDown: handleMoveHandleMouseDown }}
       />
+      {approval && approvalWaits.length > 0 && (
+        <PaneApprovalNotice
+          // A new wait starts with no failure shown.
+          key={approvalWaits[0].wait_id}
+          waits={approvalWaits.length}
+          onInputGiven={async () => {
+            const clicked = document.activeElement
+            const failure = await approval.inputGiven(approvalWaits[0])
+            // The strip goes, and its button with the focus: the terminal takes
+            // the keys again, unless the person went elsewhere meanwhile.
+            const stayed = document.activeElement === clicked || document.activeElement === document.body
+            if (!failure && stayed) bodyRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()
+            return failure
+          }}
+          onReview={() => approval.review(approvalWaits[0].id)}
+        />
+      )}
       <div
         ref={bodyRef}
         data-pane-body=""

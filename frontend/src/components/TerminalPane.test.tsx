@@ -1,4 +1,4 @@
-import { act, fireEvent, render } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Records every observer the component creates so a test can fire the callback
@@ -36,10 +36,135 @@ vi.mock('../hooks/useGitInfo', () => ({
 import { dropZoneStyle, PANE_DROP_ZONE_RATIO, resolvePaneDropEdge, TerminalPane } from './TerminalPane'
 import { LayoutActionsContext, type LayoutActionsContextValue } from './SplitContainer'
 import { localhostFrameDocument } from '../utils/preview'
+import type { TaskEventTask } from '../schemas'
 
-// Issue #386: a localhost URL in a pane on the panemux host, whether a
-// clicked link, an OSC 8 link or a browser shim request, can open beside the
-// terminal.
+// Issue #404: a pane whose task waits on a codex permission request shows it
+// between its header and the terminal.
+describe('TerminalPane codex permission wait', () => {
+  beforeEach(() => {
+    mockUseTerminal.mockReturnValue({
+      handleResize: vi.fn(),
+      connected: true,
+      dims: null,
+      sessionState: 'running',
+      reconnectFailed: false,
+      restartSession: vi.fn(),
+    })
+    mockUseGitInfo.mockReturnValue({ gitInfo: { is_git: false }, refreshIfStale: vi.fn(), refreshNow: vi.fn() })
+  })
+
+  function permissionTask(id: string): TaskEventTask {
+    return {
+      id, host: '', agent: 'codex', state: 'wait', waiting_for: 'a permission request from codex', wait_id: `w1-${id}`,
+      location: { kind: 'outside', pane_id: 'pane-1', attachable: false },
+    }
+  }
+
+  function renderPane(waits: TaskEventTask[]) {
+    const approval = {
+      waits: vi.fn(() => waits),
+      inputGiven: vi.fn(async () => null),
+      review: vi.fn(),
+    }
+    const utils = render(
+      <LayoutActionsContext.Provider value={makeCtx({ approval })}>
+        <TerminalPane pane={{ id: 'pane-1', type: 'local', title: 'Pane 1' }} />
+      </LayoutActionsContext.Provider>,
+    )
+    return { ...utils, approval }
+  }
+
+  it('shows nothing while no task of the pane waits on one', () => {
+    const { approval } = renderPane([])
+    expect(approval.waits).toHaveBeenCalledWith('pane-1')
+    expect(screen.queryByRole('status', { name: 'Codex permission request' })).not.toBeInTheDocument()
+  })
+
+  it('offers Input given for its one task, below the header', async () => {
+    const task = permissionTask('a')
+    const { approval, container } = renderPane([task])
+
+    const notice = screen.getByRole('status', { name: 'Codex permission request' })
+    expect(notice).toHaveTextContent('Waiting for input: a permission request from codex')
+    const body = container.querySelector('[data-pane-body]') as HTMLElement
+    expect(notice.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(body.contains(notice)).toBe(false)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Input given' }))
+    })
+    expect(approval.inputGiven).toHaveBeenCalledWith(task)
+  })
+
+  it('offers Review in Tasks on the first of several tasks', () => {
+    const { approval } = renderPane([permissionTask('a'), permissionTask('b')])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review in Tasks' }))
+    expect(approval.review).toHaveBeenCalledWith('a')
+  })
+
+  it('drops the failure of one wait when the next starts', async () => {
+    let waits = [permissionTask('a')]
+    const approval = { waits: vi.fn(() => waits), inputGiven: vi.fn(async () => 'boom'), review: vi.fn() }
+    const pane = () => (
+      <LayoutActionsContext.Provider value={makeCtx({ approval })}>
+        <TerminalPane pane={{ id: 'pane-1', type: 'local', title: 'Pane 1' }} />
+      </LayoutActionsContext.Provider>
+    )
+    const { rerender } = render(pane())
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Input given' }))
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not mark the input given: boom')
+
+    waits = [permissionTask('b')]
+    rerender(pane())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('gives the terminal the keys back once the input is given', async () => {
+    const { container } = renderPane([permissionTask('a')])
+    const terminalInput = document.createElement('textarea')
+    terminalInput.className = 'xterm-helper-textarea'
+    container.querySelector('[data-pane-body]')!.appendChild(terminalInput)
+    const button = screen.getByRole('button', { name: 'Input given' })
+    button.focus()
+
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(document.activeElement).toBe(terminalInput)
+  })
+
+  it('leaves the focus where it went while the input was being given', async () => {
+    let answer: (failure: string | null) => void = () => {}
+    const approval = {
+      waits: vi.fn(() => [permissionTask('a')]),
+      inputGiven: vi.fn(() => new Promise<string | null>((resolve) => { answer = resolve })),
+      review: vi.fn(),
+    }
+    const { container } = render(
+      <LayoutActionsContext.Provider value={makeCtx({ approval })}>
+        <TerminalPane pane={{ id: 'pane-1', type: 'local', title: 'Pane 1' }} />
+      </LayoutActionsContext.Provider>,
+    )
+    const terminalInput = document.createElement('textarea')
+    terminalInput.className = 'xterm-helper-textarea'
+    container.querySelector('[data-pane-body]')!.appendChild(terminalInput)
+    const otherPaneInput = document.createElement('textarea')
+    container.appendChild(otherPaneInput)
+    const button = screen.getByRole('button', { name: 'Input given' })
+    button.focus()
+
+    fireEvent.click(button)
+    otherPaneInput.focus()
+    await act(async () => {
+      answer(null)
+    })
+    expect(document.activeElement).toBe(otherPaneInput)
+  })
+})
+
 describe('TerminalPane localhost preview', () => {
   const running = {
     handleResize: vi.fn(),

@@ -22,6 +22,7 @@ import {
 } from '../schemas'
 import { mergeKnownLabels } from '../utils/labelSuggestions'
 import { applyTaskRecord } from '../utils/taskBoard'
+import { postInputGiven } from '../utils/inputGiven'
 
 // How often the dashboard re-collects while it is on screen. Collection runs
 // a script on every host, so it happens only while the dashboard is shown and
@@ -299,16 +300,8 @@ export function useTasks(enabled: boolean): TasksState {
   const inputGiven = useCallback(async (task: Task) => {
     const signature = task.wait_signature
     if (!signature) return 'This task is not waiting'
-    try {
-      const res = await fetch('/api/tasks/input-given', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wait_signature: signature }),
-      })
-      if (!res.ok) return (await res.text()).trim() || `HTTP ${res.status}`
-    } catch (err) {
-      return err instanceof Error ? err.message : 'Failed to mark the input given'
-    }
+    const failure = await postInputGiven(signature)
+    if (failure) return failure
     setInputGivenWaits((current) => new Set(current).add(signature))
     await refreshAfterAction()
     return null
