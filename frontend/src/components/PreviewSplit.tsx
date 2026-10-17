@@ -4,8 +4,10 @@ import {
   PREVIEW_SIDE_MIN_PX,
   PREVIEW_SPLIT_DEFAULT,
   PREVIEW_SPLIT_STEP,
+  LOCALHOST_PAGE_SANDBOX,
   clampPreviewSplit,
   loadPreviewSplit,
+  localhostFrameDocument,
   previewHostLabel,
   previewSplitBounds,
   savePreviewSplit,
@@ -140,7 +142,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
   const ready = view.kind === 'ready' || view.kind === 'page' ? view : null
   const frameRef = useRef<HTMLIFrameElement>(null)
   const pageFocused = usePageFocus(frameRef, view)
-  const target = view.kind === 'ready' ? view.path : view.kind === 'page' ? view.url : view.request
+  // A localhost page is named by the URL its frame shows.
+  const target = view.kind === 'ready' ? view.path : view.kind === 'page' ? view.frameUrl : view.request
   // A localhost page is on the panemux host, as a file is.
   const host =
     view.kind === 'ready' || view.kind === 'choose' ? previewHostLabel(view.host) : view.kind === 'page' ? previewHostLabel('') : null
@@ -210,14 +213,13 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
             ref={frameRef}
             key={view.generation}
             className="pm-preview-frame"
-            src={view.url}
-            title={`Preview of ${view.url}`}
-            // A development server's page needs its own origin — its module
-            // scripts, hot reload socket and storage — so it keeps it. That
-            // origin is the server's, never the dashboard's (whose responses
-            // refuse framing, and whose previews are sandboxed by their own
-            // policy). It still cannot navigate the dashboard.
-            sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
+            // The page is framed inside a document of panemux's own whose
+            // policy keeps it on loopback (utils/preview). The page keeps its
+            // server's origin, never the dashboard's; that document holds no
+            // script. Neither can navigate the dashboard.
+            srcDoc={localhostFrameDocument(view.frameUrl)}
+            title={`Preview of ${view.frameUrl}`}
+            sandbox={LOCALHOST_PAGE_SANDBOX}
             referrerPolicy="no-referrer"
           />
         )}

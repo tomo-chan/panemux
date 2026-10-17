@@ -35,6 +35,7 @@ vi.mock('../hooks/useGitInfo', () => ({
 }))
 import { dropZoneStyle, PANE_DROP_ZONE_RATIO, resolvePaneDropEdge, TerminalPane } from './TerminalPane'
 import { LayoutActionsContext, type LayoutActionsContextValue } from './SplitContainer'
+import { localhostFrameDocument } from '../utils/preview'
 
 // Issue #386: a localhost URL in a pane on the panemux host, whether a
 // clicked link, an OSC 8 link or a browser shim request, can open beside the
@@ -76,7 +77,7 @@ describe('TerminalPane localhost preview', () => {
     act(() => terminalOptions().onLinkActivate('http://localhost:5173/'))
 
     const frame = await findByTitle('Preview of http://localhost:5173/')
-    expect(frame).toHaveAttribute('src', 'http://localhost:5173/')
+    expect(frame).toHaveAttribute('srcdoc', localhostFrameDocument('http://localhost:5173/'))
     expect(open).not.toHaveBeenCalled()
     expect(window.fetch).not.toHaveBeenCalled()
   })

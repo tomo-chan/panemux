@@ -6,6 +6,7 @@ import type { TasksState, TaskActionResult } from '../hooks/useTasks'
 import type { SSHConnectionsState } from '../hooks/useSSHConnections'
 import type { Task, TaskAttach, TasksResponse, Workspace } from '../schemas'
 import type { TaskTerminalStatus } from './TaskTerminal'
+import { localhostFrameDocument } from '../utils/preview'
 
 // Issue #284: the dashboard's Type in pane popup. The terminal itself is
 // TaskTerminal's (tested on its own); here it is a stub whose status the test
@@ -230,7 +231,7 @@ describe('TaskDashboard Type in pane: localhost preview', () => {
     act(() => terminals.onLinkActivate!('http://localhost:5173/'))
 
     const frame = within(dialog()).getByTitle('Preview of http://localhost:5173/')
-    expect(frame).toHaveAttribute('src', 'http://localhost:5173/')
+    expect(frame).toHaveAttribute('srcdoc', localhostFrameDocument('http://localhost:5173/'))
     expect(open).not.toHaveBeenCalled()
     expect(globalThis.fetch).not.toHaveBeenCalledWith(expect.stringContaining('/open-url'), expect.anything())
   })

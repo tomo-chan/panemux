@@ -1422,6 +1422,16 @@ development server's, the request guard already refuses another loopback port, a
 own responses refuse framing. The browser running on the panemux host is the assumption URL opening
 already documents.
 
+Framed directly, the page could lead the frame anywhere: review of #397 showed a `302` or
+`location.href` to an external site displayed inside the preview under the localhost URL. The
+suggested dashboard-wide `frame-src` would have had to list every loopback host up front, and CSP
+cannot name `[::1]` or the rest of `127/8` with a wildcard. The page is instead framed inside a
+`srcdoc` document whose own policy names `localhost`, `127.0.0.1` and the URL's IPv4 address, so
+other `127.x` addresses keep working. `[::1]`, which no policy can name, is framed as `localhost` on
+the same port, path, query and fragment; the operator chose this over dropping Preview for `[::1]`
+(a restriction #359 does not have) or leaving `[::1]` unguarded, accepting that its cookies and
+storage in the preview are localhost's.
+
 Whether a frame was refused (`X-Frame-Options`, `frame-ancestors`) or hot reload works cannot be read
 from a cross-origin frame. Probing the URL from the server would have added a request panemux makes
 on the page's behalf; instead the preview always says what a frame may not show and points at Open

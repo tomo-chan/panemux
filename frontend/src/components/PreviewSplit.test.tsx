@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PreviewSplit } from './PreviewSplit'
 import type { PreviewView } from '../hooks/usePreview'
-import { loadPreviewSplit, paneSplitKey, savePreviewSplit } from '../utils/preview'
+import { loadPreviewSplit, localhostFrameDocument, paneSplitKey, savePreviewSplit } from '../utils/preview'
 
 // jsdom has no PointerEvent, so fireEvent.pointer* would drop pointerId,
 // pointerType and clientX.
@@ -58,13 +58,18 @@ function mockWidth(container: HTMLElement, width: number) {
 // Issue #386: a localhost URL on the panemux host, such as a development
 // server, is framed as it is served.
 describe('PreviewSplit with a localhost page', () => {
-  const page: PreviewView = { kind: 'page', url: 'http://localhost:5173/app', generation: 0 }
+  const page: PreviewView = {
+    kind: 'page', url: 'http://localhost:5173/app', frameUrl: 'http://localhost:5173/app', generation: 0,
+  }
 
-  it('frames the page in its own origin, without letting it navigate the dashboard', () => {
+  it('frames the page in its own origin, without letting it navigate the dashboard or leave loopback', () => {
     renderSplit(page)
 
     const frame = screen.getByTitle('Preview of http://localhost:5173/app') as HTMLIFrameElement
-    expect(frame.getAttribute('src')).toBe('http://localhost:5173/app')
+    // The page is framed inside a document of panemux's own, whose policy
+    // keeps the page's frame on loopback.
+    expect(frame.getAttribute('src')).toBeNull()
+    expect(frame.getAttribute('srcdoc')).toBe(localhostFrameDocument('http://localhost:5173/app'))
     const sandbox = (frame.getAttribute('sandbox') ?? '').split(' ')
     expect(sandbox).toEqual(expect.arrayContaining(['allow-scripts', 'allow-same-origin', 'allow-forms']))
     expect(sandbox).not.toContain('allow-top-navigation')
@@ -91,6 +96,20 @@ describe('PreviewSplit with a localhost page', () => {
     cleanup()
     renderSplit(ready)
     expect(screen.queryByText(/refuses to be shown in a frame/)).toBeNull()
+  })
+
+  // An [::1] page is framed as localhost: the header names what is shown,
+  // and a new tab opens the URL that was asked for.
+  it('names the localhost URL it frames for an [::1] page, and opens the [::1] URL in a tab', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    renderSplit({ kind: 'page', url: 'http://[::1]:5173/app', frameUrl: 'http://localhost:5173/app', generation: 0 })
+
+    const frame = screen.getByTitle('Preview of http://localhost:5173/app')
+    expect(frame.getAttribute('srcdoc')).toBe(localhostFrameDocument('http://localhost:5173/app'))
+    expect(screen.getByRole('region', { name: 'Preview' }).querySelector('.pm-preview-target'))
+      .toHaveTextContent('local · http://localhost:5173/app')
+    fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }))
+    expect(open).toHaveBeenCalledWith('http://[::1]:5173/app', '_blank', 'noopener,noreferrer')
   })
 
   it("reloads the page's frame when the generation changes", () => {

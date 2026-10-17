@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { isLoopbackUrl, isOpenableUrl } from '../utils/paneUrlOpen'
-import { requestPreview } from '../utils/preview'
+import { localhostFrameUrl, requestPreview } from '../utils/preview'
 
 /** What the preview side of a split shows. */
 export type PreviewView =
@@ -11,9 +11,11 @@ export type PreviewView =
   | { kind: 'ready'; url: string; path: string; host: string; generation: number }
   /**
    * A localhost URL on the panemux host (issue #386), framed as it is served:
-   * a development server, not a file panemux serves.
+   * a development server, not a file panemux serves. url is the URL asked
+   * for, which a new tab opens; frameUrl is what the frame shows, the same
+   * but for [::1], which is framed as localhost.
    */
-  | { kind: 'page'; url: string; generation: number }
+  | { kind: 'page'; url: string; frameUrl: string; generation: number }
 
 export interface UsePreviewResult {
   /** null while no preview is shown, and the terminal takes the whole body. */
@@ -57,7 +59,7 @@ export function usePreview(sessionId: string, connected: boolean): UsePreviewRes
   const openUrl = useCallback((url: string) => {
     if (!connected || !isOpenableUrl(url) || !isLoopbackUrl(url)) return
     requestRef.current++
-    setView({ kind: 'page', url, generation: 0 })
+    setView({ kind: 'page', url, frameUrl: localhostFrameUrl(url), generation: 0 })
   }, [connected])
 
   const reload = useCallback(() => {

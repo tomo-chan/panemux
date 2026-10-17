@@ -182,7 +182,7 @@ A path the terminal shows as an HTML or Markdown link is sent to
 `/preview/<token>/…` address. `PreviewSplit` frames that address beside the terminal; Open in new tab
 opens the same address. A localhost URL on the panemux host needs no server step: `usePaneUrlOpen`,
 the one opener for printed links, OSC 8 links and browser-shim requests, hands it to `usePreview`,
-and `PreviewSplit` frames the URL itself in its own origin. Behavior is in
+and `PreviewSplit` frames the URL in its own origin, inside a `srcdoc` document whose policy keeps the frame on loopback. Behavior is in
 [the split preview](behavior/preview.md), and the isolation in [preview security](security/preview.md).
 
 ## Trust boundaries

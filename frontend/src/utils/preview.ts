@@ -79,6 +79,56 @@ export function savePreviewSplit(key: string, value: number) {
   }
 }
 
+/**
+ * The sandbox of a localhost page (issue #386), and of the frame holding the
+ * document it is framed inside: the page keeps its server's origin — its
+ * module scripts, hot reload socket and storage depend on it — and cannot
+ * navigate the dashboard.
+ */
+export const LOCALHOST_PAGE_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-modals allow-popups'
+
+/**
+ * The URL a localhost page is framed at. A frame policy cannot name an IPv6
+ * address, so an [::1] page is reached as localhost, which the browser
+ * resolves to ::1 too; the page's origin is then localhost's.
+ */
+export function localhostFrameUrl(url: string): string {
+  const parsed = new URL(url)
+  if (parsed.hostname !== '[::1]') return url
+  parsed.hostname = 'localhost'
+  return parsed.href
+}
+
+/**
+ * The document a localhost page is framed inside. Its policy lets the frame
+ * reach loopback only — localhost, 127.0.0.1 and the address the URL names —
+ * so a redirect or a script cannot take the frame to an external site, which
+ * #359 opens in a tab instead. It runs no script of its own.
+ */
+export function localhostFrameDocument(frameUrl: string): string {
+  const host = new URL(frameUrl).hostname
+  const hosts = ['localhost', '127.0.0.1']
+  if (!hosts.includes(host)) hosts.push(host)
+  const frameSrc = hosts.flatMap((h) => [`http://${h}:*`, `https://${h}:*`]).join(' ')
+  const policy = `default-src 'none'; style-src 'unsafe-inline'; frame-src ${frameSrc}`
+  return (
+    '<!doctype html><meta charset="utf-8">' +
+    `<meta http-equiv="Content-Security-Policy" content="${escapeAttribute(policy)}">` +
+    '<style>html,body{margin:0;height:100%;background:#fff}iframe{display:block;width:100%;height:100%;border:0}</style>' +
+    `<iframe src="${escapeAttribute(frameUrl)}" title="${escapeAttribute(frameUrl)}"` +
+    ` sandbox="${LOCALHOST_PAGE_SANDBOX}" referrerpolicy="no-referrer"></iframe>`
+  )
+}
+
+function escapeAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 export function previewHostLabel(host: string): string {
   return host === '' ? 'local' : host
 }

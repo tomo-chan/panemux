@@ -27,7 +27,9 @@ describe('usePreview with a localhost page', () => {
 
     act(() => result.current.openUrl('http://localhost:5173/app?x=1'))
 
-    expect(result.current.view).toEqual({ kind: 'page', url: 'http://localhost:5173/app?x=1', generation: 0 })
+    expect(result.current.view).toEqual({
+      kind: 'page', url: 'http://localhost:5173/app?x=1', frameUrl: 'http://localhost:5173/app?x=1', generation: 0,
+    })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -37,6 +39,15 @@ describe('usePreview with a localhost page', () => {
       act(() => result.current.openUrl(url))
       expect(result.current.view).toMatchObject({ kind: 'page', url })
     }
+  })
+
+  // The frame reaches [::1] as localhost; the URL asked for is kept for a tab.
+  it('frames an [::1] page as localhost, keeping the URL asked for', () => {
+    const { result } = renderHook(() => usePreview('pane-1', true))
+    act(() => result.current.openUrl('http://[::1]:5173/app'))
+    expect(result.current.view).toEqual({
+      kind: 'page', url: 'http://[::1]:5173/app', frameUrl: 'http://localhost:5173/app', generation: 0,
+    })
   })
 
   it('shows nothing for a URL that is not a loopback http(s) page', () => {
@@ -52,7 +63,9 @@ describe('usePreview with a localhost page', () => {
     act(() => result.current.openUrl('http://localhost:5173/'))
 
     act(() => result.current.reload())
-    expect(result.current.view).toEqual({ kind: 'page', url: 'http://localhost:5173/', generation: 1 })
+    expect(result.current.view).toEqual({
+      kind: 'page', url: 'http://localhost:5173/', frameUrl: 'http://localhost:5173/', generation: 1,
+    })
   })
 
   it('replaces a file still being resolved, whose answer is then dropped', async () => {

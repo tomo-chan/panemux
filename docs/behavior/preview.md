@@ -83,6 +83,17 @@ header the preview says what a frame cannot always show: a page that refuses to 
 differently than in a tab of its own, for which **Open in new tab** is the way to see it as a normal
 page. Reload loads the URL again, and the header names the host (`local`) and the URL.
 
+The preview stays on this host's loopback: a page that redirects, or sends itself, to another site
+— an external login, an open redirect — shows the browser's refusal in the frame instead of that
+site, and the header keeps naming the localhost URL. External sites open in a tab. Moving between
+`localhost` and `127.0.0.1` addresses is allowed.
+
+An `[::1]` URL is shown as `localhost` with the same port, path, query and fragment, since the frame
+cannot be limited to an IPv6 address; the browser reaches the same server through `localhost`. The
+header names the `localhost` URL shown, and **Open in new tab** opens the `[::1]` URL. The page's
+origin is then `localhost`'s, so its cookies and storage in the preview are not those of a tab on
+the `[::1]` URL.
+
 ### What is shown
 
 - **HTML** is shown as written, with its scripts running, and loads the stylesheets, scripts and
