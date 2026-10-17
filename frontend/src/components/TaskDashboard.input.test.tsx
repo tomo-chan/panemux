@@ -430,6 +430,35 @@ describe('TaskDashboard Type in pane: opening', () => {
   })
 })
 
+// Issue #404: a task waiting on a codex permission request can be marked
+// answered from the popup, between its header and the terminal.
+describe('TaskDashboard Type in pane: codex permission wait', () => {
+  const permission = task({ id: 'perm-1', agent: 'codex', state: 'wait', waiting_for: 'a permission request from codex',
+    wait_signature: 'w1-perm', cwd: '/workspace/user/approve', location: { kind: 'tmux', tmux_session: 'approve', attachable: true } })
+
+  it('offers Input given for the task, between the header and the terminal', async () => {
+    const state = tasksState({}, [permission, waiting])
+    renderDashboard(state)
+    await openPopup('perm-1')
+
+    const notice = within(dialog()).getByRole('status', { name: 'Codex permission request' })
+    expect(notice).toHaveTextContent('Waiting for input: a permission request from codex')
+    expect(within(dialog()).getByTestId('task-input-header').compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(notice.compareDocumentPosition(within(dialog()).getByTestId('task-terminal')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    await act(async () => {
+      fireEvent.click(within(notice).getByRole('button', { name: 'Input given' }))
+    })
+    expect(state.inputGiven).toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-1', wait_signature: 'w1-perm' }))
+  })
+
+  it('shows nothing for a task waiting on anything else', async () => {
+    renderDashboard()
+    await openPopup('wait-1')
+    expect(within(dialog()).queryByRole('status', { name: 'Codex permission request' })).not.toBeInTheDocument()
+  })
+})
+
 describe('TaskDashboard Type in pane: closing', () => {
   it('ends only the attach, keeps the selection and filter, and returns focus to the button it was opened from', async () => {
     const { state } = renderDashboard()

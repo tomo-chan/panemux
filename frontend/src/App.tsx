@@ -28,9 +28,12 @@ import {
   createWaitIdRecord,
   isWaitVisible,
   overlayTaskEvents,
+  permissionWaitsFromStore,
   taskWaitNotification,
   taskWaitStarts,
+  type TaskEventStore,
 } from './utils/taskEvents'
+import { postInputGiven } from './utils/inputGiven'
 import {
   DEFAULT_TASK_DASHBOARD_SHORTCUT,
   findTaskPane,
@@ -43,6 +46,7 @@ import {
 import type { TaskOpenAction } from './utils/taskBoard'
 
 const DEFAULT_DISPLAY: DisplayConfig = { show_header: true, show_status_bar: true }
+const NO_APPROVAL_WAITS: TaskEventTask[] = []
 
 // The two layers of issue #252: the task dashboard, and the workspaces with
 // their panes. The workspaces stay mounted while the dashboard is shown, so
@@ -129,6 +133,26 @@ export const App: React.FC = () => {
     }
     return paneIds
   }, [attentionTasks, workspaces?.items])
+  // The store as of the last frame, and the codex permission waits this tab
+  // marked Input given (issue #404): a pane shows each other permission wait
+  // of a task it runs until the wait ends.
+  const [taskStore, setTaskStore] = useState<TaskEventStore | null>(null)
+  const [givenWaits, setGivenWaits] = useState<ReadonlySet<string>>(() => new Set())
+  const approvalWaitsByPane = useMemo(() => {
+    const byPane = new Map<string, TaskEventTask[]>()
+    if (!taskStore) return byPane
+    for (const task of permissionWaitsFromStore(taskStore, givenWaits)) {
+      const pane = findTaskPane(task, workspaces?.items ?? [])
+      if (pane) byPane.set(pane.paneId, [...(byPane.get(pane.paneId) ?? []), task])
+    }
+    return byPane
+  }, [givenWaits, taskStore, workspaces?.items])
+  const markInputGiven = useCallback(async (task: TaskEventTask) => {
+    const signature = task.wait_id ?? ''
+    const failure = await postInputGiven(signature)
+    if (!failure) setGivenWaits((current) => new Set(current).add(signature))
+    return failure
+  }, [])
   const { isOpen, currentPane, sshConnectionNames, saveError, isSaving, openSettings, closeSettings, saveSettings, addSSHConfigHost, detectShell, browseDirectories } =
     usePaneSettings(layout, updateSizes)
 
@@ -332,6 +356,7 @@ export const App: React.FC = () => {
     attentionTasksRef.current = flags
     setAttentionTasks(flags)
     taskStoreRef.current = after
+    setTaskStore(after)
 
     const screen = screenRef.current
     // Until the workspaces are loaded nothing can tell whether a wait is on
@@ -638,6 +663,9 @@ export const App: React.FC = () => {
       displayConfig: displayConfig ?? DEFAULT_DISPLAY,
       clearPaneAttention,
       hasPaneAttention: (paneId: string) => attentionPaneIds.has(paneId),
+      approvalWaits: (paneId: string) => approvalWaitsByPane.get(paneId) ?? NO_APPROVAL_WAITS,
+      onInputGiven: markInputGiven,
+      onReviewTask: revealTask,
       activePaneId,
       setActivePaneId,
     }}>

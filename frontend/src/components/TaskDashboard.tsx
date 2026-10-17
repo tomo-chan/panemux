@@ -27,6 +27,7 @@ import {
   filterTasks,
   findLaunchedTask,
   findTaskPane,
+  isPermissionWait,
   formatElapsed,
   groupIntoLanes,
   hostLabel,
@@ -645,6 +646,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
               input.close()
               open(task)
             }}
+            onInputGiven={inputGiven}
             stateStyle={stateStyle(shownInputTask.state)}
           />
         </div>
@@ -1426,15 +1428,6 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
     </aside>
   )
 }
-
-// Whether a task waits on a codex permission request its hook recorded
-// (issue #384), the one wait Input given clears. The reason is the server's
-// codexWaitingForPermission.
-function isPermissionWait(task: Task): boolean {
-  return task.state === 'wait' && task.agent === 'codex' && task.waiting_for === CODEX_PERMISSION_WAIT && !!task.wait_signature
-}
-
-const CODEX_PERMISSION_WAIT = 'a permission request from codex'
 
 // What Mark done asks, saying where the task will be afterwards: a running
 // task stays where it is until it stops, and a stopped one leaves the board

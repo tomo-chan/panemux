@@ -351,6 +351,16 @@ popup or another terminal leaves nothing flashing. A browser notification leads 
 pane, focused and briefly outlined, or — for a task no pane shows — the task selected and highlighted
 on the task dashboard.
 
+A codex permission request is answered in the codex pane itself, so a pane whose task waits on one
+also carries a thin gold strip between its header and its terminal — `Waiting for input: a permission
+request from codex`, the Tasks detail's own words, and the detail's `Input given` — so the wait can
+be marked answered without opening the dashboard. The Type in pane popup shows the same strip between
+its header and its terminal. A pane running several such tasks says how many and offers
+`Review in Tasks` instead. The strip is buttons only: it takes no key, so Tab, Escape and everything
+else typed in the pane stay the terminal's, and it is not the attention: focusing or clicking the pane
+or closing the popup does not take it away, and only `Input given` or the end of the wait removes it
+([behavior](behavior/task-events.md#codex-permission-requests-in-a-pane)).
+
 ---
 
 ## Task Dashboard

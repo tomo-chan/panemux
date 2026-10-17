@@ -3,6 +3,7 @@ import type { Task } from '../schemas'
 import {
   TASK_STATE_LABELS,
   hostLabel,
+  isPermissionWait,
   taskOpenAction,
   taskTitle,
 } from '../utils/taskBoard'
@@ -12,6 +13,7 @@ import { useTerminalPopupKeyboard } from '../hooks/useTerminalPopupKeyboard'
 import { usePreview } from '../hooks/usePreview'
 import { usePaneUrlOpen } from '../hooks/usePaneUrlOpen'
 import { taskSplitKey } from '../utils/preview'
+import { PaneApprovalNotice } from './PaneApprovalNotice'
 import { PaneUrlOpenNotice } from './PaneUrlOpenNotice'
 import { PreviewSplit } from './PreviewSplit'
 import type { TaskTerminalStatus } from './TaskTerminal'
@@ -76,6 +78,8 @@ export interface TaskInputPopupProps {
   onClose: () => void
   onRetry: () => void
   onOpenTask: (task: Task) => void
+  /** Marks the codex permission request the task waits on answered (issue #404), answering why it failed or null. */
+  onInputGiven: (task: Task) => Promise<string | null>
   /** The state pill's colors, as the dashboard's cards use them. */
   stateStyle: React.CSSProperties
 }
@@ -96,6 +100,7 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
   onClose,
   onRetry,
   onOpenTask,
+  onInputGiven,
   stateStyle,
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -250,6 +255,13 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
           </div>
         </header>
 
+        {isPermissionWait(task) && (
+          <PaneApprovalNotice
+            key={task.wait_signature}
+            waits={1}
+            onInputGiven={() => onInputGiven(task)}
+          />
+        )}
         {notice && (
           <div role="status" className="td-input-note">
             {notice}

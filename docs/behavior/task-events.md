@@ -260,6 +260,19 @@ it from that store.
 - The `wait_id`s whose attention a person cleared are kept in the tab's session storage, under the
   same rules as the notified ones below, which is what keeps a reload from showing them again.
 
+#### Codex permission requests in a pane
+
+A matched pane whose task waits on a codex permission request
+([Codex permission requests](tasks.md#codex-permission-requests): `agent` `codex`, `waiting_for`
+"a permission request from codex", a `w1-` `wait_id`) on a host that is `ok` shows a one-line strip
+between its header and its terminal, as the Type in pane popup does for its own task. It is read from
+the store like the attention, but clearing the attention does not touch it: focusing or clicking the
+pane or selecting its workspace leaves it, and closing the popup does not mark the request answered. It goes when the wait ends — the turn is
+over, the task leaves `wait` or its host stops being `ok` — or when `Input given` on it succeeds,
+after which this tab does not show that `wait_id` again. A pane matching more than one such task
+offers `Review in Tasks` instead, which opens the dashboard on the first of them. A question
+(`request_user_input`) gives no strip.
+
 #### Browser notifications
 
 - A wait the user cannot currently see is notified once per `wait_id`, under the conditions in

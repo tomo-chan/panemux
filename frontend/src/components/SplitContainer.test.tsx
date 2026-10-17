@@ -86,6 +86,9 @@ function makeCtx(maximizedPaneId: string | null): LayoutActionsContextValue {
     hasPaneAttention: vi.fn(() => false),
     activePaneId: null,
     setActivePaneId: vi.fn(),
+    approvalWaits: vi.fn(() => []),
+    onInputGiven: vi.fn(async () => null),
+    onReviewTask: vi.fn(),
   }
 }
 

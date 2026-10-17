@@ -8,6 +8,7 @@ import { paneSplitKey } from '../utils/preview'
 import type { PaneEdge } from '../utils/layoutTree'
 import { PaneHeader } from './PaneHeader'
 import { PaneStatusBar } from './PaneStatusBar'
+import { PaneApprovalNotice } from './PaneApprovalNotice'
 import { PaneUrlOpenNotice } from './PaneUrlOpenNotice'
 import { PreviewSplit } from './PreviewSplit'
 import { LayoutActionsContext } from './SplitContainer'
@@ -33,6 +34,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
   const ctx = useContext(LayoutActionsContext)
   const displayConfig = ctx?.displayConfig ?? DEFAULT_DISPLAY
   const hasAttention = ctx?.hasPaneAttention(pane.id) ?? false
+  const approvalWaits = ctx?.approvalWaits(pane.id) ?? []
   const isActivePane = ctx?.activePaneId === pane.id
   const isDragSource = ctx?.dragSourcePaneId === pane.id
   const dragActive = Boolean(ctx?.dragSourcePaneId)
@@ -191,6 +193,15 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({ pane }) => {
         onOpenVSCode={handleOpenVSCode}
         moveHandleProps={{ onDragStart: handleDragStart, onDragEnd: handleDragEnd, onMouseDown: handleMoveHandleMouseDown }}
       />
+      {ctx && approvalWaits.length > 0 && (
+        <PaneApprovalNotice
+          // A new wait starts with no failure shown.
+          key={approvalWaits[0].wait_id}
+          waits={approvalWaits.length}
+          onInputGiven={() => ctx.onInputGiven(approvalWaits[0])}
+          onReview={() => ctx.onReviewTask(approvalWaits[0].id)}
+        />
+      )}
       <div
         ref={bodyRef}
         data-pane-body=""
