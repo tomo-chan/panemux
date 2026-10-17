@@ -396,6 +396,26 @@ var contractFixtures = map[string]contractFixture{
 		return captureBoardSession(t, e, "/api/tasks/attach", `{"id":"local:claude:7c21e0a4"}`), nil
 	}},
 
+	// The panemux host's codex permission hook (issue #396), with a
+	// hooks.json it will not rewrite, so the reason is in the capture.
+	"task-codex-hook": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		require.NoError(t, os.Mkdir(filepath.Join(e.home, ".codex"), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(e.home, ".codex", "hooks.json"), []byte(`{"hooks":[]}`), 0o600))
+
+		rr := e.do(t, http.MethodGet, "/api/tasks/codex-hook?host=", "")
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		return rr.Body.Bytes(), nil
+	}},
+
+	// Updating a host's codex hook by itself turned on (issue #402).
+	"task-codex-hook-auto-update": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		rr := e.do(t, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"","enabled":true}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		return rr.Body.Bytes(), nil
+	}},
+
 	// A host's tmux session name (issue #314). Its random suffix is stood in
 	// for.
 	"host-session-name": {capture: func(t *testing.T) ([]byte, map[string]string) {

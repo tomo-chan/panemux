@@ -695,6 +695,58 @@ describe('useTasks host terminals (issue #314)', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/hosts/session-name', post({ connection: 'gpu-box' }))
   })
 
+  it("reads and installs a host's codex hook, refusing an unknown status (issue #396)", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce(ok({ status: 'missing' }))
+      .mockResolvedValueOnce(ok({ status: 'trusted' }))
+      .mockResolvedValueOnce(ok({ status: 'installed' }))
+      .mockResolvedValueOnce(refused(502, '~/.codex/hooks.json is not valid JSON'))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    const outcomes: unknown[] = []
+    await act(async () => {
+      outcomes.push(await result.current.codexHook(''))
+      outcomes.push(await result.current.codexHook('gpu box'))
+      outcomes.push(await result.current.installCodexHook('gpu-box'))
+      outcomes.push(await result.current.installCodexHook(''))
+    })
+
+    expect(outcomes).toEqual([
+      { ok: true, launched: { status: 'missing' } },
+      { ok: false, error: 'Unexpected response from /api/tasks/codex-hook?host=gpu%20box' },
+      { ok: true, launched: { status: 'installed' } },
+      { ok: false, error: '~/.codex/hooks.json is not valid JSON' },
+    ])
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/codex-hook?host=', undefined)
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/tasks/codex-hook', post({ host: 'gpu-box' }))
+  })
+
+  it("turns updating a host's codex hook by itself on and off (issue #402)", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(ok(payload))
+      .mockResolvedValueOnce(ok({ auto_update: true }))
+      .mockResolvedValueOnce(refused(500, 'parsing codex hook settings file'))
+    window.fetch = fetchMock
+    const { result } = renderHook(() => useTasks(true))
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    const outcomes: unknown[] = []
+    await act(async () => {
+      outcomes.push(await result.current.setCodexHookAuto('gpu-box', true))
+      outcomes.push(await result.current.setCodexHookAuto('', false))
+    })
+
+    expect(outcomes).toEqual([
+      { ok: true, launched: { auto_update: true } },
+      { ok: false, error: 'parsing codex hook settings file' },
+    ])
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/codex-hook/auto-update', post({ host: 'gpu-box', enabled: true }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/tasks/codex-hook/auto-update', post({ host: '', enabled: false }))
+  })
+
   async function opensAHostTerminal(
     type: 'ssh' | 'ssh_tmux',
     tmuxSession: string | undefined,

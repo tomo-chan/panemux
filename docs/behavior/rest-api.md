@@ -259,7 +259,7 @@ symbolic links leading outside the root answer `404`; an HTML or Markdown file o
 `413`. Markdown is answered rendered as HTML. Headers and policies are in
 [security/preview.md](../security/preview.md).
 
-### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume`, `POST /api/tasks/summary`, `POST /api/tasks/input-given` and `POST`/`DELETE /api/tasks/attach`
+### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume`, `POST /api/tasks/summary`, `POST /api/tasks/input-given`, `GET`/`POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update` and `POST`/`DELETE /api/tasks/attach`
 
 The task dashboard's collection, its per-host reconnect, the done and label records (and the labels
 used before, `known_labels` on `GET /api/tasks`), starting
@@ -270,7 +270,8 @@ starting and resuming are in [Starting a task](tasks.md#starting-a-task),
 [Resuming a task](tasks.md#resuming-a-task), [`POST /api/tasks`](tasks.md#post-apitasks) and
 [`POST /api/tasks/resume`](tasks.md#post-apitasksresume); summaries are in [Summaries](tasks.md#summaries)
 and [`POST /api/tasks/summary`](tasks.md#post-apitaskssummary); marking a codex permission request
-answered is in [`POST /api/tasks/input-given`](tasks.md#post-apitasksinput-given); the board's temporary tmux attach is in
+answered is in [`POST /api/tasks/input-given`](tasks.md#post-apitasksinput-given); a host's codex permission hook
+and updating it by itself are in [`GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`](tasks.md#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update); the board's temporary tmux attach is in
 [`POST /api/tasks/attach`](tasks.md#post-apitasksattach).
 
 ### `POST /api/hosts/session-name` and `POST`/`DELETE /api/hosts/terminal`

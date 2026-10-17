@@ -381,8 +381,9 @@ terminal that had focus cannot receive what is typed into the dashboard.
   line, the actions wrap to the next line as a whole, flush right, rather than one by one; only a
   screen too narrow for the group on a line of its own wraps it inside, so no action is cut off.
 - **Host connection menu.** The chip of a remote host whose collection succeeded is a button
-  (`aria-haspopup="dialog"`, `aria-expanded`) with a small terminal icon; the panemux host's chip and
-  a `connecting`, failed or not-yet-collected chip are plain text
+  (`aria-haspopup="dialog"`, `aria-expanded`) with a small terminal icon; the panemux host's chip
+  opens only its Codex input notifications (below), and a `connecting`, failed or not-yet-collected
+  chip is plain text
   ([behavior](behavior/tasks.md#opening-a-host)). Pressing it opens a small popover dialog anchored
   under the chip, titled after the host: a `Connection` group of `ssh` / `ssh_tmux` radios (`ssh`
   checked), the tmux session name the server generated in the monospace face once `ssh_tmux` is
@@ -390,6 +391,17 @@ terminal that had focus cannot receive what is typed into the dashboard.
   in the interactive blue, labelled `Open: <host>` and `Type in pane: <host>` like a task's
   buttons. A press outside it closes it; focus returns to the chip. A host that stops being
   reachable takes its menu with it, and focus goes to its `Reconnect`.
+- **Codex input notifications.** Below the menu's actions, separated by a rule, a row reads
+  `Codex input notifications` with a small `Install` or `Update` button at its end, or `Installed`
+  in the Working green, and a muted line under it (`Not installed`, `Not checked: …`); a
+  `hooks.json` panemux will not rewrite reads `Cannot install: …` in red, with no button. After an
+  install, a muted line says to trust the hook in codex's `/hooks`. A host without codex shows no row.
+  Under the status, an `Update automatically` checkbox, off until turned on; a muted line says the
+  hook was updated automatically and to trust it, and a red one why that failed, the setting could
+  not be read (the checkbox is then disabled), or it was not saved. The checkbox and the
+  `Install`/`Update` button are each disabled while the other's request runs.
+  The panemux host's chip is a button too, with no terminal icon: its menu holds this row and
+  `Close` alone ([behavior](behavior/tasks.md#codex-permission-requests)).
 - **Unreadable state.** The warning is amber, one for every host together, and never beside a host
   chip, where it would crowd them as hosts are added. It opens a modal anchored below the top bar at
   the right and kept within the screen's height, titled "Unreadable session state · <n> files on <m> hosts": a table with one row per

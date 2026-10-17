@@ -73,6 +73,9 @@ func (h *Handler) Mount(r chi.Router, boardAuth func(http.Handler) http.Handler)
 		r.Delete("/hosts/terminal/{id}", h.DeleteHostTerminal)
 		r.Post("/tasks/summary", h.PostTaskSummary)
 		r.Post("/tasks/input-given", h.PostTaskInputGiven)
+		r.Get("/tasks/codex-hook", h.GetTaskCodexHook)
+		r.Post("/tasks/codex-hook", h.PostTaskCodexHook)
+		r.Post("/tasks/codex-hook/auto-update", h.PostTaskCodexHookAutoUpdate)
 		r.Put("/tasks/records", h.PutTaskRecord)
 		// Deliberately NOT placed under /board/ — chi routes any path
 		// starting with /api/board/ into the BoardRoutePrefix sub-router

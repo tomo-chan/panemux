@@ -225,7 +225,8 @@ func taskServiceOptions(h *Handler) tasks.Options {
 			//coverage:exempt a connection needs a reachable SSH server; internal/session tests CommandConn against one
 			return conn, nil
 		},
-		SummaryStore: tasks.NewSummaryStore(""),
+		SummaryStore:  tasks.NewSummaryStore(""),
+		CodexHookAuto: tasks.NewCodexHookAutoStore(""),
 	}
 }
 
