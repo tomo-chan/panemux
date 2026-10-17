@@ -92,7 +92,9 @@ func TestPendingLabels_RecordedUnderTheAgentTheyWereHeldFor(t *testing.T) {
 	third := codexInTmux("build-box", "task-0a1b2c3d", codexSessionB)
 	third.Agent = "third"
 	p.Apply(pendingSnapshot(okHosts, codex, third), log.put)
-	assert.Equal(t, []Record{{Host: "build-box", Agent: "third", SessionID: codexSessionB, Labels: []string{"x"}}}, log.puts)
+	assert.Equal(t, []Record{
+		{Host: "build-box", Agent: "third", SessionID: codexSessionB, Labels: []string{"x"}},
+	}, log.puts)
 }
 
 // Two sessions of the agent in the tmux session cannot tell which one the

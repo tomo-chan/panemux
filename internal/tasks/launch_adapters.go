@@ -89,7 +89,7 @@ var launchPlan = mustComposeLaunch(agent.All(), launchAdapters(), resumeAdapters
 
 func mustComposeLaunch(defs []agent.Definition, launches []registeredLaunch, resumes []registeredResume) launchPlanned {
 	plan, err := composeLaunch(defs, launches, resumes)
-	//coverage:exempt runs only if the registered adapters break their own contract, which TestLaunchAdapters_MatchTheRegistry fails first
+	//coverage:exempt runs only if launchAdapters disagrees with the registry, which a test forbids
 	if err != nil {
 		panic("tasks: " + err.Error())
 	}
@@ -102,7 +102,9 @@ const launchScriptCases = "{{AGENT_COMMANDS}}\n"
 
 // composeLaunch checks the adapters against the registry and puts each
 // command in the case of its agent and mode, in registry order.
-func composeLaunch(defs []agent.Definition, launches []registeredLaunch, resumes []registeredResume) (launchPlanned, error) {
+func composeLaunch(
+	defs []agent.Definition, launches []registeredLaunch, resumes []registeredResume,
+) (launchPlanned, error) {
 	if err := validateLaunchAdapters(defs, launches, resumes); err != nil {
 		return launchPlanned{}, err
 	}
@@ -201,7 +203,9 @@ func validateLaunchAdapters(defs []agent.Definition, launches []registeredLaunch
 	return nil
 }
 
-func checkRegistration(kind string, c agent.Capability, id agent.ID, known map[agent.ID]agent.Definition, seen map[agent.ID]bool) error {
+func checkRegistration(
+	kind string, c agent.Capability, id agent.ID, known map[agent.ID]agent.Definition, seen map[agent.ID]bool,
+) error {
 	d, ok := known[id]
 	switch {
 	case !ok:

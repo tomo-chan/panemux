@@ -33,8 +33,8 @@ func TestLaunchAdapters_MatchTheRegistry(t *testing.T) {
 }
 
 type fakeLaunch struct {
-	command string
 	refused map[string]string
+	command string
 }
 
 func (f fakeLaunch) newSession(io.Reader) (string, string, error) { return "", "task-0a1b2c3d", nil }
@@ -45,80 +45,78 @@ func (f fakeLaunch) tmuxSessionFor(id string) string              { return tmuxS
 func (f fakeLaunch) resumeCommand() string                        { return f.command }
 func (f fakeLaunch) refusals() map[string]string                  { return f.refused }
 
-func TestValidateLaunchAdapters_RejectsAMismatchedRegistration(t *testing.T) {
-	both := agent.Definition{ID: "third", Capabilities: []agent.Capability{agent.Detect, agent.Launch, agent.Resume}}
-	launchOnly := agent.Definition{ID: "fourth", Capabilities: []agent.Capability{agent.Detect, agent.Launch}}
-	detectsOnly := agent.Definition{ID: "fifth", Capabilities: []agent.Capability{agent.Detect}}
-	defs := []agent.Definition{both, launchOnly, detectsOnly}
-	newRun := fakeLaunch{command: `run='exec "$2" -- "$p"'`}
-	resume := fakeLaunch{command: `resume='exec "$2" "$3"'`}
-	ok := func() ([]registeredLaunch, []registeredResume) {
-		return []registeredLaunch{{id: "third", adapter: newRun}, {id: "fourth", adapter: newRun}},
-			[]registeredResume{{id: "third", adapter: resume}}
-	}
-	l, r := ok()
-	require.NoError(t, validateLaunchAdapters(defs, l, r), "a launch without a resume is a valid registration")
+// launchRegs is a registration under test: the launch and resume lists.
+type launchRegs struct {
+	l []registeredLaunch
+	r []registeredResume
+}
 
-	tests := []struct {
-		name   string
-		mutate func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume)
-		want   string
-	}{
-		{"unregistered agent", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			return append(l, registeredLaunch{id: "sixth", adapter: newRun}), r
-		}, `launch adapter "sixth" is not registered in the agent registry`},
-		{"launch not declared", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			return append(l, registeredLaunch{id: "fifth", adapter: newRun}), r
-		}, `launch adapter "fifth" does not declare launch in the agent registry`},
-		{"resume not declared", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			return l, append(r, registeredResume{id: "fourth", adapter: resume})
-		}, `resume adapter "fourth" does not declare resume in the agent registry`},
-		{"launch twice", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			return append(l, l[0]), r
-		}, `launch adapter "third" is registered twice`},
-		{"declared launch without adapter", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			return l[:1], r
-		}, `agent "fourth" declares launch but has no launch adapter`},
-		{"declared resume without adapter", func(l []registeredLaunch, _ []registeredResume) ([]registeredLaunch, []registeredResume) {
-			return l, nil
-		}, `agent "third" declares resume but has no resume adapter`},
-		{"new command does not set run", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			l[0].adapter = fakeLaunch{command: `exec "$2"`}
-			return l, r
-		}, `launch adapter "third": its command does not set run`},
-		{"resume command does not set resume", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			r[0].adapter = fakeLaunch{command: `run='exec "$2"'`}
-			return l, r
-		}, `resume adapter "third": its command does not set resume`},
-		{"command holds a placeholder", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			l[0].adapter = fakeLaunch{command: `run='exec "$2" {{PROMPT}}'`}
-			return l, r
-		}, `launch adapter "third": its command holds "{{"`},
-		{"command closes the case", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			r[0].adapter = fakeLaunch{command: "resume='x' ;;\nesac"}
-			return l, r
-		}, `resume adapter "third": its command holds ";;"`},
-		{"command refuses with an undeclared code", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			l[0].adapter = fakeLaunch{command: "{ say 'error too-new'; exit 0; }\nrun='x'"}
-			return l, r
-		}, `launch adapter "third": its command refuses with "too-new", which it does not declare`},
-		{"refusal code not a word", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			l[0].adapter = fakeLaunch{command: "run='x'", refused: map[string]string{"Too New": "m"}}
-			return l, r
-		}, `launch adapter "third": invalid refusal code "Too New"`},
-		{"refusal code taken by the script", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			l[0].adapter = fakeLaunch{command: "run='x'", refused: map[string]string{RefusedNoTmux: "m"}}
-			return l, r
-		}, `launch adapter "third": refusal code "no-tmux" is the launch script's own`},
-		{"refusal without message", func(l []registeredLaunch, r []registeredResume) ([]registeredLaunch, []registeredResume) {
-			l[0].adapter = fakeLaunch{command: "run='x'", refused: map[string]string{"too-new": ""}}
-			return l, r
-		}, `launch adapter "third": refusal code "too-new" has no message`},
+var (
+	fakeRun    = fakeLaunch{command: `run='exec "$2" -- "$p"'`}
+	fakeResume = fakeLaunch{command: `resume='exec "$2" "$3"'`}
+)
+
+func validLaunchRegs() *launchRegs {
+	return &launchRegs{
+		l: []registeredLaunch{{id: "third", adapter: fakeRun}, {id: "fourth", adapter: fakeRun}},
+		r: []registeredResume{{id: "third", adapter: fakeResume}},
 	}
-	for _, tt := range tests {
+}
+
+func refusing(refused map[string]string) fakeLaunch {
+	return fakeLaunch{command: "run='x'", refused: refused}
+}
+
+var launchRegMismatches = []struct {
+	mutate func(g *launchRegs)
+	name   string
+	want   string
+}{
+	{func(g *launchRegs) { g.l = append(g.l, registeredLaunch{id: "sixth", adapter: fakeRun}) },
+		"unregistered agent", `launch adapter "sixth" is not registered in the agent registry`},
+	{func(g *launchRegs) { g.l = append(g.l, registeredLaunch{id: "fifth", adapter: fakeRun}) },
+		"launch not declared", `launch adapter "fifth" does not declare launch in the agent registry`},
+	{func(g *launchRegs) { g.r = append(g.r, registeredResume{id: "fourth", adapter: fakeResume}) },
+		"resume not declared", `resume adapter "fourth" does not declare resume in the agent registry`},
+	{func(g *launchRegs) { g.l = append(g.l, g.l[0]) },
+		"launch twice", `launch adapter "third" is registered twice`},
+	{func(g *launchRegs) { g.l = g.l[:1] },
+		"declared launch without adapter", `agent "fourth" declares launch but has no launch adapter`},
+	{func(g *launchRegs) { g.r = nil },
+		"declared resume without adapter", `agent "third" declares resume but has no resume adapter`},
+	{func(g *launchRegs) { g.l[0].adapter = fakeLaunch{command: `exec "$2"`} },
+		"new command does not set run", `launch adapter "third": its command does not set run`},
+	{func(g *launchRegs) { g.r[0].adapter = fakeLaunch{command: `run='exec "$2"'`} },
+		"resume command does not set resume", `resume adapter "third": its command does not set resume`},
+	{func(g *launchRegs) { g.l[0].adapter = fakeLaunch{command: `run='exec "$2" {{PROMPT}}'`} },
+		"command holds a placeholder", `launch adapter "third": its command holds "{{"`},
+	{func(g *launchRegs) { g.r[0].adapter = fakeLaunch{command: "resume='x' ;;\nesac"} },
+		"command closes the case", `resume adapter "third": its command holds ";;"`},
+	{func(g *launchRegs) { g.l[0].adapter = fakeLaunch{command: "{ say 'error too-new'; exit 0; }\nrun='x'"} },
+		"command refuses with an undeclared code",
+		`launch adapter "third": its command refuses with "too-new", which it does not declare`},
+	{func(g *launchRegs) { g.l[0].adapter = refusing(map[string]string{"Too New": "m"}) },
+		"refusal code not a word", `launch adapter "third": invalid refusal code "Too New"`},
+	{func(g *launchRegs) { g.l[0].adapter = refusing(map[string]string{RefusedNoTmux: "m"}) },
+		"refusal code taken by the script", `launch adapter "third": refusal code "no-tmux" is the launch script's own`},
+	{func(g *launchRegs) { g.l[0].adapter = refusing(map[string]string{"too-new": ""}) },
+		"refusal without message", `launch adapter "third": refusal code "too-new" has no message`},
+}
+
+func TestValidateLaunchAdapters_RejectsAMismatchedRegistration(t *testing.T) {
+	defs := []agent.Definition{
+		{ID: "third", Capabilities: []agent.Capability{agent.Detect, agent.Launch, agent.Resume}},
+		{ID: "fourth", Capabilities: []agent.Capability{agent.Detect, agent.Launch}},
+		{ID: "fifth", Capabilities: []agent.Capability{agent.Detect}},
+	}
+	g := validLaunchRegs()
+	require.NoError(t, validateLaunchAdapters(defs, g.l, g.r), "a launch without a resume is a valid registration")
+
+	for _, tt := range launchRegMismatches {
 		t.Run(tt.name, func(t *testing.T) {
-			l, r := tt.mutate(ok())
-			assert.EqualError(t, validateLaunchAdapters(defs, l, r), tt.want)
+			g := validLaunchRegs()
+			tt.mutate(g)
+			assert.EqualError(t, validateLaunchAdapters(defs, g.l, g.r), tt.want)
 		})
 	}
 }
@@ -238,9 +236,9 @@ func TestLaunchAndResume_ACLIMissingOnTheHostIsRefusedBeforeAnythingRuns(t *test
 // the probe failed, the launch script finds out for itself.
 func TestLaunch_AnUnknownCLIIsLeftToTheLaunchScript(t *testing.T) {
 	for _, tt := range []struct {
+		err     error
 		name    string
 		collect bool
-		err     error
 	}{
 		{name: "not probed"},
 		{name: "probe failed", collect: true, err: errors.New("exit 1")},

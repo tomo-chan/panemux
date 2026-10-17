@@ -97,8 +97,9 @@ func (h *Handler) PostTask(w http.ResponseWriter, r *http.Request) {
 }
 
 // PostTaskResume reopens a stopped task of an agent that declares resume
-// (`claude --resume`, `codex resume`) in a new detached tmux session. The task keeps its session ID, so its record — done
-// and labels — carries over unchanged.
+// (`claude --resume`, `codex resume`) in a new detached tmux session. The
+// task keeps its session ID, so its record — done and labels — carries over
+// unchanged.
 func (h *Handler) PostTaskResume(w http.ResponseWriter, r *http.Request) {
 	if refuseCrossSite(w, r) {
 		return

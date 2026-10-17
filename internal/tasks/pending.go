@@ -125,6 +125,7 @@ func sessionsIn(tasks []Task, key pendingLabelsKey) ([]string, bool) {
 	for _, task := range tasks {
 		if task.Host != key.host || task.Agent != key.agent ||
 			task.Location.Kind != LocationTmux || task.Location.TmuxSession != key.tmuxSession {
+
 			continue
 		}
 		occupied = true
