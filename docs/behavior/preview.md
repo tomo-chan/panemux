@@ -132,9 +132,12 @@ A `localhost`, `127.x.x.x` or `[::1]` URL (http or https) in an `ssh` or `ssh_tm
 popup of a task on an SSH host, opens in the preview the ways
 [Opening a localhost URL](#opening-a-localhost-url) lists — a printed link at once, a shim request
 or an OSC 8 link from the strip's **Preview** — typically the development server an agent started
-there (`http://localhost:5173/`). The strip's **Open** is unchanged: a tab on the URL itself, with
-the same-port OAuth callback forward of [opening URLs from a pane](url-open.md), so a flow whose
-callback must reach its own port number is opened with Open.
+there (`http://localhost:5173/`). A printed link is not offered the strip: clicking it previews it
+through the relay, and prepares no same-port forward. The strip's **Open** is unchanged: in a pane,
+a tab on the URL itself with the same-port OAuth callback forward of
+[opening URLs from a pane](url-open.md), so a flow whose callback must reach its own port number is
+opened from the strip with Open; in the Type in pane popup, which is not a pane and has no forwards,
+a tab on the URL.
 
 panemux relays the host's address and port to a port of its own on `127.0.0.1` of the panemux host,
 chosen free by the system, and shows the page there. The relayed URL keeps the path, query and

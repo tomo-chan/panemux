@@ -53,7 +53,7 @@ strip also offers `Preview`, while the terminal is connected, which shows the pa
 terminal instead ([the split preview](preview.md#opening-a-localhost-url)) — for a terminal on an SSH
 host, that host's page through its relay
 ([Localhost URLs of an SSH host](preview.md#localhost-urls-of-an-ssh-host)), with `Open` keeping the
-tab and the same-port forward. Each button acts once on
+tab and, in a pane, the same-port forward. Each button acts once on
 the request it was shown for, so a second press opens nothing more. The request is a live event:
 a sequence that arrives in replayed scrollback is ignored, so reconnecting a pane never re-raises a
 request that was already opened or dismissed. Terminal output is
@@ -112,9 +112,11 @@ A printed link, whose text is the URL, opens when clicked. A localhost link open
 [the split preview](preview.md#opening-a-localhost-url) instead of a tab: in a terminal on the
 panemux host as it is, and in an `ssh` or `ssh_tmux` pane, or the popup of a task on an SSH host,
 that host's URL through a relay of its own rather than a forward
-([Localhost URLs of an SSH host](preview.md#localhost-urls-of-an-ssh-host)). The strip's `Open`
-keeps the tab and the callback forward everywhere, so an OAuth flow whose callback must arrive at
-its own port number is opened with `Open`.
+([Localhost URLs of an SSH host](preview.md#localhost-urls-of-an-ssh-host)); clicking a printed
+localhost link prepares no forward. In a pane the strip's `Open` keeps the tab and the callback
+forward, on an SSH host as everywhere, so an OAuth flow whose callback must arrive at its own port
+number is opened from the strip with `Open`. The Type in pane popup is not a pane and has no
+forwards; its `Open` opens the tab only.
 An OSC 8 hyperlink's target is chosen by the program's output and need not match its text, so a
 click on one shows the approval strip above, saying `This link goes to` and naming the target, with
 the same `Preview`, `Open` and `Ignore`. OSC 8 links are `http` and `https` only. Clicking a URL that
