@@ -1410,6 +1410,41 @@ now compared by the identity of the directories above it, each resolved and look
 resolved form of each working directory instead would have missed the logical form the shell prints,
 which cannot be derived from the resolved one.
 
+## 2026-10-16: Localhost pages in the split preview, and one URL opener (#386)
+
+A localhost URL on the panemux host is framed directly, not proxied through panemux. A development
+server's pages use root-absolute paths (`/@vite/client`, `/src/main.ts`) and open their hot reload
+socket on their own host and port, so serving them under `/preview/<token>/` would have broken them,
+and a proxy on another port would have been a new listener to choose, bind and close for a page the
+browser can already reach. The frame keeps the page's own origin (`allow-same-origin`), because a
+sandboxed opaque origin makes Vite refuse its module scripts as cross-origin; that origin is the
+development server's, the request guard already refuses another loopback port, and the dashboard's
+own responses refuse framing. The browser running on the panemux host is the assumption URL opening
+already documents.
+
+Framed directly, the page could lead the frame anywhere: review of #397 showed a `302` or
+`location.href` to an external site displayed inside the preview under the localhost URL. The
+suggested dashboard-wide `frame-src` would have had to list every loopback host up front, and CSP
+cannot name `[::1]` or the rest of `127/8` with a wildcard. The page is instead framed inside a
+`srcdoc` document whose own policy names `localhost`, `127.0.0.1` and the URL's IPv4 address, so
+other `127.x` addresses keep working. `[::1]`, which no policy can name, is framed as `localhost` on
+the same port, path, query and fragment; the operator chose this over dropping Preview for `[::1]`
+(a restriction #359 does not have) or leaving `[::1]` unguarded, accepting that its cookies and
+storage in the preview are localhost's.
+
+Whether a frame was refused (`X-Frame-Options`, `frame-ancestors`) or hot reload works cannot be read
+from a cross-origin frame. Probing the URL from the server would have added a request panemux makes
+on the page's behalf; instead the preview always says what a frame may not show and points at Open
+in new tab.
+
+Printed links, OSC 8 links and the browser shim now go through one opener (`usePaneUrlOpen`).
+OSC 8 links used to bypass it through xterm's default handler: a `confirm()` dialog and a tab, with
+no forward and no preview. They now wait in the shim's approval strip, since their target is chosen
+by the terminal output as the shim's is. Printed links stay one click, their text being the URL.
+"Double launch" is answered by each approval taking its request as it acts and a click removing a
+request for the same URL; "replay re-issue" by the existing rule that a request in replayed
+scrollback is ignored, which OSC 8 links never needed, as they open only on a click.
+
 ## Agent registry
 
 ### One registry declares agents; capabilities are ports in their consumers (2026-10-12, issue #372)

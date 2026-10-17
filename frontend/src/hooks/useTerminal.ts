@@ -4,7 +4,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import { bufferRangeFor, createUrlLinkProvider, readLineCells } from '../utils/terminalLinks'
 import { useWebSocket } from './useWebSocket'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
-import { BROWSER_OPEN_OSC_IDENT, openUrlTab, parseBrowserOpenOsc } from '../utils/paneUrlOpen'
+import { BROWSER_OPEN_OSC_IDENT, isOpenableUrl, openUrlTab, parseBrowserOpenOsc } from '../utils/paneUrlOpen'
+import type { UrlOpenSource } from './usePaneUrlOpen'
 import { PREVIEW_PATH_REGEX } from '../utils/preview'
 import type { SessionState } from '../schemas'
 
@@ -53,8 +54,9 @@ interface UseTerminalOptions {
   // open directly in a new tab and no port forward is prepared for them.
   onLinkActivate?: (url: string) => void
   // Called when a program inside the pane asks panemux to open a URL (see the
-  // browser shim in internal/session/browseropen.go).
-  onBrowserOpenRequest?: (url: string) => void
+  // browser shim in internal/session/browseropen.go), or when the operator
+  // activates an OSC 8 hyperlink, whose target the terminal output chose.
+  onBrowserOpenRequest?: (url: string, source?: UrlOpenSource) => void
   // Called when the operator activates an HTML or Markdown path in this
   // terminal (issue #385). Without it, paths are not links.
   onPreviewPath?: (path: string) => void
@@ -83,7 +85,7 @@ interface TerminalEntry {
   awaitingReplayEnd: boolean
   repoURL: string | null
   onLinkActivate: ((url: string) => void) | null
-  onBrowserOpen: ((url: string) => void) | null
+  onBrowserOpen: ((url: string, source?: UrlOpenSource) => void) | null
   onPreviewPath: ((path: string) => void) | null
 }
 
@@ -114,7 +116,7 @@ export function useTerminal({
   const sendRef = useRef<((data: string | ArrayBuffer | Uint8Array) => void) | null>(null)
   const entryRef = useRef<TerminalEntry | null>(null)
   const onLinkActivateRef = useRef<((url: string) => void) | null>(null)
-  const onBrowserOpenRef = useRef<((url: string) => void) | null>(null)
+  const onBrowserOpenRef = useRef<((url: string, source?: UrlOpenSource) => void) | null>(null)
   const onPreviewPathRef = useRef<((path: string) => void) | null>(null)
   const pendingMessagesRef = useRef<PendingTerminalMessage[]>([])
   const reconnectingAfterDisconnectRef = useRef(false)
@@ -444,6 +446,23 @@ function getOrCreateTerminalEntry(sessionId: string): TerminalEntry {
       brightWhite: '#ffffff',
     },
     allowProposedApi: true,
+    // OSC 8 hyperlinks (http and https only, xterm's default). Their target
+    // is chosen by the terminal output, not shown by the text clicked, so
+    // they wait for the operator's approval as the browser shim's requests
+    // do — the same strip, and the same Preview, Open and Ignore.
+    linkHandler: {
+      activate: (_event, uri) => {
+        if (!isOpenableUrl(uri)) return
+        if (entry.onBrowserOpen) {
+          entry.onBrowserOpen(uri, 'link')
+          return
+        }
+        // xterm's own default, kept for a terminal with no strip to ask in.
+        if (window.confirm(`Do you want to navigate to ${uri}?\n\nWARNING: This link could potentially be dangerous`)) {
+          openUrlTab(uri)
+        }
+      },
+    },
   })
 
   const fitAddon = new FitAddon()

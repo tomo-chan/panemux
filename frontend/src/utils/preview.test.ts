@@ -6,6 +6,8 @@ import {
   PREVIEW_SPLIT_MIN,
   clampPreviewSplit,
   loadPreviewSplit,
+  localhostFrameDocument,
+  localhostFrameUrl,
   paneSplitKey,
   previewHostLabel,
   previewSplitBounds,
@@ -23,6 +25,63 @@ function paths(text: string): string[] {
   const pattern = new RegExp(PREVIEW_PATH_REGEX.source, PREVIEW_PATH_REGEX.flags + 'g')
   return Array.from(text.matchAll(pattern), (m) => m[0])
 }
+
+// Issue #386: a localhost page is framed inside a document of panemux's own
+// whose policy lets the frame reach loopback only, so a redirect or a script
+// cannot take it to an external site.
+describe('localhostFrameUrl', () => {
+  it('frames a localhost or IPv4 loopback URL as it is', () => {
+    for (const url of ['http://localhost:5173/a?b=1#c', 'https://127.0.0.1:8443/', 'http://127.0.0.5:3000/x']) {
+      expect(localhostFrameUrl(url)).toBe(url)
+    }
+  })
+
+  // A policy cannot name an IPv6 address, so [::1] is reached as localhost,
+  // which the browser resolves to ::1 as well.
+  it('frames an [::1] URL as localhost, keeping its port, path, query and fragment', () => {
+    expect(localhostFrameUrl('http://[::1]:5173/app/?q=1#top')).toBe('http://localhost:5173/app/?q=1#top')
+    expect(localhostFrameUrl('https://[::1]/')).toBe('https://localhost/')
+  })
+})
+
+describe('localhostFrameDocument', () => {
+  function parse(html: string) {
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const policy = doc.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') ?? ''
+    const frame = doc.querySelector('iframe')
+    const directive = (name: string) =>
+      policy.split(';').map((d) => d.trim().split(/\s+/)).find(([n]) => n === name)?.slice(1) ?? null
+    return { doc, policy, frame, directive }
+  }
+
+  it('frames the page, letting it navigate to loopback only and run no script of its own', () => {
+    const { frame, directive } = parse(localhostFrameDocument('http://localhost:5173/app'))
+
+    expect(frame?.getAttribute('src')).toBe('http://localhost:5173/app')
+    expect(directive('frame-src')?.sort()).toEqual(
+      ['http://127.0.0.1:*', 'http://localhost:*', 'https://127.0.0.1:*', 'https://localhost:*'].sort(),
+    )
+    expect(directive('default-src')).toEqual(["'none'"])
+    expect(directive('script-src')).toBeNull()
+    const sandbox = (frame?.getAttribute('sandbox') ?? '').split(' ')
+    expect(sandbox).toEqual(expect.arrayContaining(['allow-scripts', 'allow-same-origin', 'allow-forms']))
+    expect(sandbox).not.toContain('allow-top-navigation')
+    expect(sandbox).not.toContain('allow-popups-to-escape-sandbox')
+  })
+
+  it('lets the frame reach the IPv4 loopback address it names', () => {
+    const { directive } = parse(localhostFrameDocument('http://127.0.0.5:3000/'))
+    expect(directive('frame-src')).toEqual(expect.arrayContaining(['http://127.0.0.5:*', 'https://127.0.0.5:*']))
+  })
+
+  it('keeps the URL an attribute value, whatever it holds', () => {
+    const url = 'http://localhost:5173/a"b<c>&d=\'e\''
+    const { frame, doc } = parse(localhostFrameDocument(url))
+    expect(frame?.getAttribute('src')).toBe(url)
+    expect(doc.querySelectorAll('iframe')).toHaveLength(1)
+    expect(doc.querySelector('script')).toBeNull()
+  })
+})
 
 describe('PREVIEW_PATH_REGEX', () => {
   it.each([

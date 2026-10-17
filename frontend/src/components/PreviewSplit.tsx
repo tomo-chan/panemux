@@ -4,8 +4,10 @@ import {
   PREVIEW_SIDE_MIN_PX,
   PREVIEW_SPLIT_DEFAULT,
   PREVIEW_SPLIT_STEP,
+  LOCALHOST_PAGE_SANDBOX,
   clampPreviewSplit,
   loadPreviewSplit,
+  localhostFrameDocument,
   previewHostLabel,
   previewSplitBounds,
   savePreviewSplit,
@@ -137,11 +139,19 @@ interface PreviewPanelProps {
 }
 
 const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, onReload, onClose }) => {
-  const ready = view.kind === 'ready' ? view : null
+  const ready = view.kind === 'ready' || view.kind === 'page' ? view : null
   const frameRef = useRef<HTMLIFrameElement>(null)
   const pageFocused = usePageFocus(frameRef, view)
-  const target = view.kind === 'ready' ? view.path : view.request
-  const host = view.kind === 'ready' || view.kind === 'choose' ? previewHostLabel(view.host) : null
+  // A localhost page is named by the URL its frame shows, or, relayed from
+  // an SSH host (issue #387), by the URL as it was clicked there.
+  const target =
+    view.kind === 'ready' ? view.path : view.kind === 'page' ? (view.shown ?? view.frameUrl) : view.request
+  // A localhost page is on the panemux host, as a file is, unless it was
+  // relayed from an SSH host.
+  const host =
+    view.kind === 'ready' || view.kind === 'choose'
+      ? previewHostLabel(view.host)
+      : view.kind === 'page' ? previewHostLabel(view.host ?? '') : null
 
   return (
     <section className="pm-preview" aria-label="Preview" style={{ minWidth }}>
@@ -178,6 +188,12 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
           </button>
         </div>
       </header>
+      {view.kind === 'page' && (
+        <p className="pm-preview-frame-note">
+          A page that refuses to be shown in a frame stays blank here, and hot reload, sign-in or storage can
+          behave differently than in a tab of its own. Use Open in new tab to see it as a normal page.
+        </p>
+      )}
       {pageFocused && (
         <p role="status" className="pm-preview-keys">
           Keys go to the page. Click the terminal to use panemux&apos;s shortcuts.
@@ -191,7 +207,24 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
             className="pm-preview-frame"
             src={view.url}
             title={`Preview of ${view.path}`}
-            sandbox={frameSandbox(view.source)}
+            // The server's policy sandboxes the page too; this keeps it out of
+            // the dashboard's origin even if that header were lost.
+            sandbox="allow-scripts"
+            referrerPolicy="no-referrer"
+          />
+        )}
+        {view.kind === 'page' && (
+          <iframe
+            ref={frameRef}
+            key={view.generation}
+            className="pm-preview-frame"
+            // The page is framed inside a document of panemux's own whose
+            // policy keeps it on loopback (utils/preview). The page keeps its
+            // server's origin, never the dashboard's; that document holds no
+            // script. Neither can navigate the dashboard.
+            srcDoc={localhostFrameDocument(view.frameUrl)}
+            title={`Preview of ${view.shown ?? view.frameUrl}`}
+            sandbox={LOCALHOST_PAGE_SANDBOX}
             referrerPolicy="no-referrer"
           />
         )}
@@ -218,16 +251,6 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ view, minWidth, onChoose, o
       </div>
     </section>
   )
-}
-
-// A file is served from the dashboard's own origin, so its frame keeps it in
-// an opaque origin of its own: the server's policy sandboxes it too, and this
-// keeps it out of the dashboard's origin even if that header were lost. A
-// relayed localhost URL (issue #387) is already in an origin of its own, its
-// relay's port on 127.0.0.1, and keeps it: a development server's module
-// scripts, storage and HMR WebSocket need the page's own origin.
-export function frameSandbox(source: 'file' | 'url'): string {
-  return source === 'url' ? 'allow-scripts allow-same-origin allow-forms' : 'allow-scripts'
 }
 
 // Whether the previewed page holds the keyboard. Its keys never reach this

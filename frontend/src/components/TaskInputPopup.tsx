@@ -10,7 +10,9 @@ import type { TaskPaneRef } from '../utils/taskBoard'
 import { TaskTerminal } from './TaskTerminal'
 import { useTerminalPopupKeyboard } from '../hooks/useTerminalPopupKeyboard'
 import { usePreview } from '../hooks/usePreview'
+import { usePaneUrlOpen } from '../hooks/usePaneUrlOpen'
 import { taskSplitKey } from '../utils/preview'
+import { PaneUrlOpenNotice } from './PaneUrlOpenNotice'
 import { PreviewSplit } from './PreviewSplit'
 import type { TaskTerminalStatus } from './TaskTerminal'
 
@@ -107,7 +109,18 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
   // when it is an SSH host, and a localhost URL of a task on an SSH host
   // opens there through its relay (issue #387); the preview is hidden
   // whenever the terminal is not connected.
-  const preview = usePreview(attach.phase === 'ready' ? attach.sessionId : '', chip === 'connected')
+  const preview = usePreview(attach.phase === 'ready' ? attach.sessionId : '', chip === 'connected', task.host !== '')
+  // URLs open as in a pane (issue #386): a localhost URL beside the
+  // terminal — on an SSH host, through its relay (issue #387). The attach is not a pane, so no
+  // forward is asked for it, and the opener is keyed by the terminal itself
+  // — each Retry or Reconnect is a new one, even on the same attach — so a
+  // request raised by the terminal that was replaced is dropped with it.
+  const terminalKey = attach.phase === 'ready' ? `${attach.sessionId}:${attempt}` : ''
+  const urlOpen = usePaneUrlOpen(terminalKey, {
+    forward: false,
+    // Offered only while the preview can open.
+    previewUrl: chip === 'connected' ? preview.openUrl : undefined,
+  })
 
   useTerminalPopupKeyboard({
     dialogRef,
@@ -148,11 +161,12 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
     <div ref={bodyRef} className="td-input-body" data-input={chip === 'connected' ? 'on' : 'off'}>
       {attach.phase === 'ready' ? (
         <TaskTerminal
-          key={`${attach.sessionId}:${attempt}`}
+          key={terminalKey}
           sessionId={attach.sessionId}
           onStatus={onTerminalStatus}
           onPreviewPath={preview.open}
-          onPreviewUrl={task.host === '' ? undefined : preview.openUrl}
+          onLinkActivate={urlOpen.openUrl}
+          onBrowserOpenRequest={urlOpen.requestOpen}
         />
       ) : (
         <div className="td-input-blank">
@@ -262,7 +276,22 @@ export const TaskInputPopup: React.FC<TaskInputPopupProps> = ({
           <PreviewSplit
             splitKey={taskSplitKey(task.id)}
             view={preview.view}
-            terminal={terminalBody}
+            terminal={
+              <>
+                {terminalBody}
+                {/* Over the terminal only, so an open preview's header stays in view. */}
+                <PaneUrlOpenNotice
+                  pendingUrl={urlOpen.pendingUrl}
+                  source={urlOpen.pendingSource}
+                  canPreview={urlOpen.canPreview}
+                  error={urlOpen.error}
+                  onPreview={urlOpen.previewPendingOpen}
+                  onConfirm={urlOpen.confirmPendingOpen}
+                  onDismiss={urlOpen.dismissPendingOpen}
+                  onDismissError={urlOpen.dismissError}
+                />
+              </>
+            }
             onChoose={preview.open}
             onReload={preview.reload}
             onClose={preview.close}

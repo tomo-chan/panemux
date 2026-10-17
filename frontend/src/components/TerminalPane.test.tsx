@@ -1,5 +1,5 @@
 import { act, fireEvent, render } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Records every observer the component creates so a test can fire the callback
 // the real browser would fire on a layout change, and can assert the cleanup.
@@ -35,6 +35,149 @@ vi.mock('../hooks/useGitInfo', () => ({
 }))
 import { dropZoneStyle, PANE_DROP_ZONE_RATIO, resolvePaneDropEdge, TerminalPane } from './TerminalPane'
 import { LayoutActionsContext, type LayoutActionsContextValue } from './SplitContainer'
+import { localhostFrameDocument } from '../utils/preview'
+
+// Issue #386: a localhost URL in a pane on the panemux host, whether a
+// clicked link, an OSC 8 link or a browser shim request, can open beside the
+// terminal.
+describe('TerminalPane localhost preview', () => {
+  const running = {
+    handleResize: vi.fn(),
+    connected: true,
+    dims: null,
+    sessionState: 'running',
+    reconnectFailed: false,
+    restartSession: vi.fn(),
+  }
+
+  beforeEach(() => {
+    mockUseTerminal.mockReturnValue(running)
+    mockUseGitInfo.mockReturnValue({ gitInfo: { is_git: false }, refreshIfStale: vi.fn(), refreshNow: vi.fn() })
+    window.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: 'x', forwarded: false })))
+    window.localStorage.clear()
+  })
+
+  // The spy on window.open is this block's; later blocks assign their own.
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function terminalOptions() {
+    return mockUseTerminal.mock.calls[mockUseTerminal.mock.calls.length - 1][0] as {
+      onLinkActivate: (url: string) => void
+      onBrowserOpenRequest: (url: string, source?: 'program' | 'link') => void
+    }
+  }
+
+  it('previews a clicked localhost link in a local pane, without a tab', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    open.mockClear()
+    const { findByTitle } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+
+    act(() => terminalOptions().onLinkActivate('http://localhost:5173/'))
+
+    const frame = await findByTitle('Preview of http://localhost:5173/')
+    expect(frame).toHaveAttribute('srcdoc', localhostFrameDocument('http://localhost:5173/'))
+    expect(open).not.toHaveBeenCalled()
+    expect(window.fetch).not.toHaveBeenCalled()
+  })
+
+  it('offers Preview, Open and Ignore for a localhost request, and Preview shows it', async () => {
+    const { findByTitle, getByRole, queryByRole } = render(<TerminalPane pane={{ id: 'p1', type: 'tmux' }} />)
+
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/'))
+    expect(getByRole('button', { name: 'Open' })).toBeInTheDocument()
+    expect(getByRole('button', { name: 'Ignore' })).toBeInTheDocument()
+    fireEvent.click(getByRole('button', { name: 'Preview' }))
+
+    await findByTitle('Preview of http://localhost:5173/')
+    expect(queryByRole('button', { name: 'Preview' })).toBeNull()
+  })
+
+
+  it('on an SSH pane, Preview relays the request and Open keeps the tab and its forward (issue #387)', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/preview')) {
+        return new Response(JSON.stringify({
+          status: 'ready', kind: 'url', url: 'http://127.0.0.1:49152/', path: 'http://localhost:5173/', host: 'devbox',
+        }))
+      }
+      return new Response(JSON.stringify({ url: 'http://localhost:5173/', forwarded: true, port: 5173 }))
+    })
+    window.fetch = fetchMock as unknown as typeof window.fetch
+    const tab = { location: { href: '' }, close: vi.fn() }
+    window.open = vi.fn().mockReturnValue(tab) as unknown as typeof window.open
+    const { findByTitle, getByRole } = render(<TerminalPane pane={{ id: 'p-ssh', type: 'ssh' }} />)
+
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/'))
+    fireEvent.click(getByRole('button', { name: 'Preview' }))
+    const frame = await findByTitle('Preview of http://localhost:5173/')
+    expect(frame).toHaveAttribute('srcdoc', localhostFrameDocument('http://127.0.0.1:49152/'))
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/p-ssh/preview', expect.objectContaining({
+      body: JSON.stringify({ url: 'http://localhost:5173/' }),
+    }))
+
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/'))
+    fireEvent.click(getByRole('button', { name: 'Open' }))
+    expect(window.open).toHaveBeenCalled()
+    await act(async () => {})
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/p-ssh/open-url', expect.anything())
+    expect(tab.location.href).toBe('http://localhost:5173/')
+  })
+  it('asks before previewing an OSC 8 link, naming its target', () => {
+    const { getByRole, getByText } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/', 'link'))
+
+    expect(getByText('This link goes to')).toBeInTheDocument()
+    expect(getByRole('button', { name: 'Preview' })).toBeInTheDocument()
+  })
+
+  it('hides a localhost preview when the terminal disconnects', async () => {
+    const { findByTitle, queryByRole, rerender } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    act(() => terminalOptions().onLinkActivate('http://localhost:5173/'))
+    await findByTitle(/^Preview of/)
+
+    mockUseTerminal.mockReturnValue({ ...running, connected: false })
+    rerender(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    expect(queryByRole('region', { name: 'Preview' })).toBeNull()
+  })
+
+  // A preview cannot open while the terminal is not connected, so it is not
+  // offered: Preview would only drop the request, and a click would do nothing.
+  it('offers no Preview while the terminal is not connected, and opens the link in a tab instead', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    open.mockClear()
+    const { getByRole, queryByRole, rerender } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/'))
+    expect(getByRole('button', { name: 'Preview' })).toBeInTheDocument()
+    mockUseTerminal.mockReturnValue({ ...running, sessionState: 'exited' })
+    rerender(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    expect(getByRole('button', { name: 'Open' })).toBeInTheDocument()
+    expect(queryByRole('button', { name: 'Preview' })).toBeNull()
+
+    act(() => terminalOptions().onLinkActivate('http://localhost:5173/'))
+    expect(open).toHaveBeenCalledWith('about:blank', '_blank')
+    expect(queryByRole('region', { name: 'Preview' })).toBeNull()
+  })
+
+  // The strip asks about another URL while a preview is open: it stays over
+  // the terminal, so the preview's header and its controls stay in view.
+  it('keeps the approval strip on the terminal side while a preview is open', async () => {
+    const { container, findByTitle } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    act(() => terminalOptions().onLinkActivate('http://localhost:5173/first'))
+    await findByTitle('Preview of http://localhost:5173/first')
+
+    act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/second'))
+
+    const strip = container.querySelector('[data-pane-url-request="true"]') as HTMLElement
+    expect(strip).not.toBeNull()
+    expect(strip.closest('.pm-preview-terminal')).not.toBeNull()
+    expect(strip.closest('.pm-preview')).toBeNull()
+  })
+})
 
 describe('TerminalPane drop zones', () => {
   beforeEach(() => {
@@ -311,7 +454,7 @@ describe('TerminalPane preview', () => {
     activateLink('http://localhost:5173/app')
 
     const frame = await findByTitle('Preview of http://localhost:5173/app')
-    expect(frame).toHaveAttribute('src', 'http://127.0.0.1:49152/app')
+    expect(frame).toHaveAttribute('srcdoc', localhostFrameDocument('http://127.0.0.1:49152/app'))
     expect(window.fetch).toHaveBeenCalledWith('/api/sessions/p-ssh/preview', expect.objectContaining({
       body: JSON.stringify({ url: 'http://localhost:5173/app' }),
     }))
@@ -322,24 +465,19 @@ describe('TerminalPane preview', () => {
 
   it('opens a clicked localhost URL of an ssh_tmux pane through its relay', () => expectRelayedPreview('ssh_tmux'))
 
-  // efficacy:exempt pins the link behavior #387 keeps for every other URL and for local panes
-  it('opens other URLs of an SSH pane, and every URL of a local pane, as before', () => {
+  // efficacy:exempt pins the link behavior #387 keeps for every URL that is not a localhost one
+  it('opens other URLs of an SSH pane in a tab with their callback forward, as before', () => {
     const openSpy = vi.fn().mockReturnValue(null)
     window.open = openSpy as unknown as typeof window.open
     window.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: 'x', forwarded: false })))
 
-    const { unmount } = render(<TerminalPane pane={{ id: 'p-ssh', type: 'ssh' }} />)
+    render(<TerminalPane pane={{ id: 'p-ssh', type: 'ssh' }} />)
     activateLink('https://example.com/login?redirect_uri=http%3A%2F%2Flocalhost%3A8085%2F')
     expect(openSpy).toHaveBeenCalledWith(
       'https://example.com/login?redirect_uri=http%3A%2F%2Flocalhost%3A8085%2F', '_blank', 'noopener,noreferrer',
     )
     expect(window.fetch).toHaveBeenCalledWith('/api/sessions/p-ssh/open-url', expect.anything())
-    unmount()
-
-    render(<TerminalPane pane={{ id: 'p-local', type: 'local' }} />)
-    activateLink('http://localhost:5173/')
-    expect(window.fetch).not.toHaveBeenCalledWith('/api/sessions/p-local/preview', expect.anything())
-    expect(window.fetch).toHaveBeenCalledWith('/api/sessions/p-local/open-url', expect.anything())
+    expect(window.fetch).not.toHaveBeenCalledWith('/api/sessions/p-ssh/preview', expect.anything())
   })
 
   it('opens a clicked path beside the terminal, keeping the terminal in place', async () => {

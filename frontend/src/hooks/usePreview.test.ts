@@ -19,6 +19,83 @@ function respond(...bodies: Array<{ status: number; body: unknown }>) {
 const ready = { status: 'ready', kind: 'file', url: '/preview/ab/index.html', path: '/w/index.html', host: '' }
 const relayed = { status: 'ready', kind: 'url', url: 'http://127.0.0.1:49152/', path: 'http://localhost:5173/', host: 'devbox' }
 
+// Issue #386: a localhost URL on the panemux host is shown as it is served,
+// with nothing to resolve on the server.
+describe('usePreview with a localhost page', () => {
+  it('shows the page itself, without asking the server', () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    const { result } = renderHook(() => usePreview('pane-1', true))
+
+    act(() => result.current.openUrl('http://localhost:5173/app?x=1'))
+
+    expect(result.current.view).toEqual({
+      kind: 'page', url: 'http://localhost:5173/app?x=1', frameUrl: 'http://localhost:5173/app?x=1', generation: 0,
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts every loopback spelling', () => {
+    const { result } = renderHook(() => usePreview('pane-1', true))
+    for (const url of ['http://127.0.0.1:3000/', 'https://[::1]:8443/', 'http://LOCALHOST:8080/']) {
+      act(() => result.current.openUrl(url))
+      expect(result.current.view).toMatchObject({ kind: 'page', url })
+    }
+  })
+
+  // The frame reaches [::1] as localhost; the URL asked for is kept for a tab.
+  it('frames an [::1] page as localhost, keeping the URL asked for', () => {
+    const { result } = renderHook(() => usePreview('pane-1', true))
+    act(() => result.current.openUrl('http://[::1]:5173/app'))
+    expect(result.current.view).toEqual({
+      kind: 'page', url: 'http://[::1]:5173/app', frameUrl: 'http://localhost:5173/app', generation: 0,
+    })
+  })
+
+  it('shows nothing for a URL that is not a loopback http(s) page', () => {
+    const { result } = renderHook(() => usePreview('pane-1', true))
+    for (const url of ['https://example.com/', 'file:///etc/passwd', 'javascript:alert(1)', 'not a url']) {
+      act(() => result.current.openUrl(url))
+      expect(result.current.view).toBeNull()
+    }
+  })
+
+  it('reloads the page', () => {
+    const { result } = renderHook(() => usePreview('pane-1', true))
+    act(() => result.current.openUrl('http://localhost:5173/'))
+
+    act(() => result.current.reload())
+    expect(result.current.view).toEqual({
+      kind: 'page', url: 'http://localhost:5173/', frameUrl: 'http://localhost:5173/', generation: 1,
+    })
+  })
+
+  it('replaces a file still being resolved, whose answer is then dropped', async () => {
+    let resolve: (r: Response) => void = () => {}
+    vi.spyOn(globalThis, 'fetch').mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    const { result } = renderHook(() => usePreview('pane-1', true))
+
+    act(() => result.current.open('./index.html'))
+    act(() => result.current.openUrl('http://localhost:5173/'))
+    await act(async () => resolve(new Response(JSON.stringify(ready))))
+
+    expect(result.current.view).toMatchObject({ kind: 'page', url: 'http://localhost:5173/' })
+  })
+
+  it('opens nothing while the terminal is disconnected, and is hidden when it disconnects', () => {
+    const { result, rerender } = renderHook(({ connected }) => usePreview('pane-1', connected), {
+      initialProps: { connected: false },
+    })
+    act(() => result.current.openUrl('http://localhost:5173/'))
+    expect(result.current.view).toBeNull()
+
+    rerender({ connected: true })
+    act(() => result.current.openUrl('http://localhost:5173/'))
+    expect(result.current.view?.kind).toBe('page')
+    rerender({ connected: false })
+    expect(result.current.view).toBeNull()
+  })
+})
+
 describe('usePreview', () => {
   it('starts closed', () => {
     const { result } = renderHook(() => usePreview('pane-1', true))
@@ -34,20 +111,21 @@ describe('usePreview', () => {
 
     await waitFor(() => expect(result.current.view?.kind).toBe('ready'))
     expect(result.current.view).toEqual({
-      kind: 'ready', source: 'file', url: '/preview/ab/index.html', path: '/w/index.html', host: '', generation: 0,
+      kind: 'ready', url: '/preview/ab/index.html', path: '/w/index.html', host: '', generation: 0,
     })
   })
 
   it('opens a localhost URL through its relay (issue #387)', async () => {
     const fetchMock = respond({ status: 200, body: relayed })
-    const { result } = renderHook(() => usePreview('pane-ssh', true))
+    const { result } = renderHook(() => usePreview('pane-ssh', true, true))
 
     act(() => result.current.openUrl('http://localhost:5173/'))
     expect(result.current.view).toEqual({ kind: 'loading', request: 'http://localhost:5173/' })
 
-    await waitFor(() => expect(result.current.view?.kind).toBe('ready'))
+    await waitFor(() => expect(result.current.view?.kind).toBe('page'))
     expect(result.current.view).toEqual({
-      kind: 'ready', source: 'url', url: 'http://127.0.0.1:49152/', path: 'http://localhost:5173/', host: 'devbox', generation: 0,
+      kind: 'page', url: 'http://127.0.0.1:49152/', frameUrl: 'http://127.0.0.1:49152/', generation: 0,
+      host: 'devbox', shown: 'http://localhost:5173/',
     })
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions/pane-ssh/preview', expect.objectContaining({
       body: JSON.stringify({ url: 'http://localhost:5173/' }),
@@ -56,7 +134,7 @@ describe('usePreview', () => {
 
   it("shows why a localhost URL could not be relayed", async () => {
     respond({ status: 502, body: 'nothing answers on the SSH host: localhost:5173 on devbox' })
-    const { result } = renderHook(() => usePreview('pane-ssh', true))
+    const { result } = renderHook(() => usePreview('pane-ssh', true, true))
 
     act(() => result.current.openUrl('http://localhost:5173/'))
     await waitFor(() => expect(result.current.view?.kind).toBe('error'))
@@ -67,7 +145,7 @@ describe('usePreview', () => {
 
   it('does not open a URL while the terminal is not connected', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
-    const { result } = renderHook(() => usePreview('pane-ssh', false))
+    const { result } = renderHook(() => usePreview('pane-ssh', false, true))
     act(() => result.current.openUrl('http://localhost:5173/'))
     expect(result.current.view).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()

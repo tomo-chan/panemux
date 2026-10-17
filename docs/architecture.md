@@ -54,8 +54,8 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `useLayout` | Own the normalized recursive layout tree, optimistic edits, and persistence requests. |
 | `TerminalPane` and `useTerminal` | Own xterm.js setup, fitting, addons, pane input, replay sequencing and suppression, pending terminal messages, and terminal lifecycle. |
 | `useWebSocket` | Own the pane connection, reconnect behavior, send-if-open transport, and validation of structured text control frames. |
-| `PreviewSplit` and `usePreview` | Split a workspace pane's or the Type in pane popup's body into the terminal and a preview of a clicked HTML or Markdown path (`utils/preview`), own the divider and its per-pane / per-task ratio, and hide the preview when the terminal disconnects. |
-| `usePaneUrlOpen` | Receive validated URL-open events and coordinate browser navigation/callback forwarding. |
+| `PreviewSplit` and `usePreview` | Split a workspace pane's or the Type in pane popup's body into the terminal and a preview of a clicked HTML or Markdown path (`utils/preview`) or a localhost URL, own the divider and its per-pane / per-task ratio, and hide the preview when the terminal disconnects. |
+| `usePaneUrlOpen` | The one opener for a terminal's printed links, OSC 8 links and browser-shim requests: hold the ones from terminal output for approval, and open each once — in a tab with its callback forward, or a localhost URL on the panemux host in the preview. |
 | task event store (`useTaskEvents`, `utils/taskEvents`) | Hold one `/ws/tasks/events` connection per tab and the tasks and hosts it reports, validated and in `seq` order; reconnect from a fresh snapshot on any gap or close, 2 to 30 seconds apart with no limit. |
 | attention and notifications (`App`, `utils/taskEvents`) | Project the task event store and visibility changes into pane/workspace indicators, browser notifications and the task dashboard's state column, matching tasks to panes with `utils/taskBoard` and recording the `wait_id`s each tab notified, and those whose attention a person cleared, in its session storage. |
 | Agent Board hooks and panels | Poll status/message APIs, stream command-center output, and present dashboard, palette, and history overlays. |
@@ -180,12 +180,15 @@ SSH pane; existing sessions and the tmux server's environment are not reconfigur
 A path the terminal shows as an HTML or Markdown link is sent to
 `POST /api/sessions/{id}/preview`, which resolves it on the session's host and returns a
 `/preview/<token>/…` address. `PreviewSplit` frames that address beside the terminal; Open in new tab
-opens the same address. For an `ssh` or `ssh_tmux` session the API's `previewHosts` keeps one
-`preview.Remote` per connection a session was dialed with (`session.PreviewTarget`), connected with
-`session.DialPreviewConn` — the pane dialer, its own connection — and files are read over its SFTP
-subsystem. A localhost URL clicked in such a session is sent as `url`; `preview.Relays` gives the
-host's address and port a listener on `127.0.0.1:0` and returns that address, which `PreviewSplit`
-frames in the page's own origin. Behavior is in [the split preview](behavior/preview.md), and the isolation in
+opens the same address. A localhost URL on the panemux host needs no server step: `usePaneUrlOpen`,
+the one opener for printed links, OSC 8 links and browser-shim requests, hands it to `usePreview`,
+and `PreviewSplit` frames the URL in its own origin, inside a `srcdoc` document whose policy keeps the frame on loopback.
+For an `ssh` or `ssh_tmux` session the API's `previewHosts` keeps one `preview.Remote` per connection
+a session was dialed with (`session.PreviewTarget`), connected with `session.DialPreviewConn` — the
+pane dialer, its own connection — and files are read over its SFTP subsystem. A localhost URL
+`usePreview` is handed for such a session is sent as `url`; `preview.Relays` gives the host's address
+and port a listener on `127.0.0.1:0` and returns that address, which `PreviewSplit` frames as it
+frames a localhost page. Behavior is in [the split preview](behavior/preview.md), and the isolation in
 [preview security](security/preview.md).
 
 ## Trust boundaries
