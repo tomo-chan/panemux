@@ -208,6 +208,10 @@ describe('codex permission waits in a pane', () => {
   }
 
   beforeEach(() => {
+    mockUseBrowserNotificationPermission.mockImplementation(() => {})
+    mockUseSessionsOverview.mockReturnValue({})
+    mockUseGitInfoSnapshotMap.mockReturnValue({})
+    mockUseBoardSessionToken.mockReturnValue({ token: '', commandCenterEnabled: false, agentBoardEnabled: false })
     mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => {
       const ctx = useContext(LayoutActionsContext)
       const waits = ctx?.approvalWaits(pane.id) ?? []
@@ -222,6 +226,12 @@ describe('codex permission waits in a pane', () => {
   })
 
   afterEach(() => {
+    mockUseBrowserNotificationPermission.mockReset()
+    mockUseSessionsOverview.mockReset()
+    mockUseGitInfoSnapshotMap.mockReset()
+    mockUseBoardSessionToken.mockReset()
+    mockTerminalPane.mockReset()
+    mockTerminalPane.mockImplementation(({ pane }: { pane: { id: string } }) => <div data-pane-id={pane.id} />)
     vi.unstubAllGlobals()
   })
 
