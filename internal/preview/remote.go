@@ -176,36 +176,35 @@ func (r *Remote) liveLocked() RemoteConn {
 
 // watch drops conn once nothing has arrived on it for lookupTimeout, until
 // the returned func is called. While data arrives — an answer held up
-// behind relay data on a slow link — it waits on.
+// behind relay data on a slow link — it waits on, a lookupTimeout at a time.
 func (r *Remote) watch(conn RemoteConn) (stop func()) {
-	var mu sync.Mutex
-	stopped := false
-	var timer *time.Timer
-	var check func()
-	check = func() {
-		mu.Lock()
-		if stopped {
-			mu.Unlock()
-			return
+	done := make(chan struct{})
+	go func() {
+		timer := time.NewTimer(r.lookupTimeout)
+		defer timer.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-timer.C:
+			}
+			if !answered(conn, r.lookupTimeout) {
+				r.drop(conn)
+				return
+			}
+			timer.Reset(r.lookupTimeout)
 		}
-		if idle := time.Since(conn.LastRead()); idle < r.lookupTimeout {
-			timer = time.AfterFunc(r.lookupTimeout-idle, check)
-			mu.Unlock()
-			return
-		}
-		stopped = true
-		mu.Unlock()
-		r.drop(conn)
-	}
-	mu.Lock()
-	timer = time.AfterFunc(r.lookupTimeout, check)
-	mu.Unlock()
-	return func() {
-		mu.Lock()
-		defer mu.Unlock()
-		stopped = true
-		timer.Stop()
-	}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }
+}
+
+// answered reports whether anything arrived on conn within the last d.
+func answered(conn RemoteConn, d time.Duration) bool {
+	// Only an arrival exactly d ago tells < from <=, and no test or link can
+	// time one to the nanosecond.
+	//mutation:exempt[CONDITIONALS_BOUNDARY] EQUIVALENT: an arrival exactly d ago cannot be produced or told apart
+	return time.Since(conn.LastRead()) < d
 }
 
 // drop closes conn and, when it is still the host's connection, forgets it,
@@ -238,7 +237,7 @@ func (r *Remote) keepAlive(conn RemoteConn) {
 		if !current {
 			return
 		}
-		if time.Since(conn.LastRead()) < r.keepaliveInterval {
+		if answered(conn, r.keepaliveInterval) {
 			continue
 		}
 		start := time.Now()
