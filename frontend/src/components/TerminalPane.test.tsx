@@ -125,10 +125,12 @@ describe('TerminalPane localhost preview', () => {
   it('offers no Preview while the terminal is not connected, and opens the link in a tab instead', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     open.mockClear()
-    mockUseTerminal.mockReturnValue({ ...running, sessionState: 'exited' })
-    const { getByRole, queryByRole } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
+    const { getByRole, queryByRole, rerender } = render(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
 
     act(() => terminalOptions().onBrowserOpenRequest('http://localhost:5173/'))
+    expect(getByRole('button', { name: 'Preview' })).toBeInTheDocument()
+    mockUseTerminal.mockReturnValue({ ...running, sessionState: 'exited' })
+    rerender(<TerminalPane pane={{ id: 'p1', type: 'local' }} />)
     expect(getByRole('button', { name: 'Open' })).toBeInTheDocument()
     expect(queryByRole('button', { name: 'Preview' })).toBeNull()
 
