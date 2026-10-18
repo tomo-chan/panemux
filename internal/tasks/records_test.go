@@ -183,6 +183,20 @@ func TestRecordStore_UnreadableFileIsReportedAndNotOverwritten(t *testing.T) {
 			content: `{"version":1,"records":[{"agent":"claude","session_id":"s"},{"agent":"claude","session_id":"s"}]}`,
 			wantErr: "duplicate task record",
 		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { assertUnreadableAndNotOverwritten(t, tc.content, tc.wantErr) })
+	}
+}
+
+// A record the store would keep rather than serve is checked as strictly as
+// any other: its agent must have the shape of an ID.
+func TestRecordStore_AnInvalidRecordOfAnyAgentMakesTheFileUnreadable(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		wantErr string
+	}{
 		{
 			name:    "agent that is not an ID",
 			content: `{"version":1,"records":[{"agent":"Claude Code","session_id":"s","done":true}]}`,
@@ -211,23 +225,26 @@ func TestRecordStore_UnreadableFileIsReportedAndNotOverwritten(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			path := recordsPath(t)
-			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
-			require.NoError(t, os.WriteFile(path, []byte(tc.content), 0o600))
-			store := NewRecordStore(path)
-
-			_, err := store.Records()
-			require.ErrorContains(t, err, tc.wantErr)
-
-			_, err = store.Put(Record{Agent: "claude", SessionID: "s1", Done: true})
-			require.ErrorContains(t, err, tc.wantErr)
-
-			data, err := os.ReadFile(path)
-			require.NoError(t, err)
-			assert.Equal(t, tc.content, string(data))
-		})
+		t.Run(tc.name, func(t *testing.T) { assertUnreadableAndNotOverwritten(t, tc.content, tc.wantErr) })
 	}
+}
+
+func assertUnreadableAndNotOverwritten(t *testing.T, content, wantErr string) {
+	t.Helper()
+	path := recordsPath(t)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	store := NewRecordStore(path)
+
+	_, err := store.Records()
+	require.ErrorContains(t, err, wantErr)
+
+	_, err = store.Put(Record{Agent: "claude", SessionID: "s1", Done: true})
+	require.ErrorContains(t, err, wantErr)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, content, string(data))
 }
 
 // A load that failed is tried again on the next access, so fixing the file
