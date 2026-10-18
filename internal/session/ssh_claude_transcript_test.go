@@ -412,3 +412,24 @@ func TestActiveRemoteWorkdir_ProbeFindsTheDerivedDirectory_IsNotAnEncodingChange
 		"the same directory must not be re-read under an absolute spelling of itself")
 	assert.NotContains(t, runner.commands, absRead)
 }
+
+// A subagent listing that fails is logged, and one that works is not; either
+// way the caller gets what the host answered.
+func TestRemoteWorkdirHost_ClaudeSubagentLogsLogsAFailedListing(t *testing.T) {
+	logged := captureRemoteLog(t)
+	failing := remoteWorkdirHost{logScope: "test", run: func(string) ([]byte, error) {
+		return nil, errors.New("channel closed")
+	}}
+	_, err := failing.claudeSubagentLogs("dir/s/subagents")
+	require.Error(t, err)
+	assert.Contains(t, logged.String(), "listing claude subagent transcripts failed")
+
+	logged.Reset()
+	working := remoteWorkdirHost{logScope: "test", run: func(string) ([]byte, error) {
+		return []byte("b.jsonl\na.jsonl\nnotes.txt\n"), nil
+	}}
+	names, err := working.claudeSubagentLogs("dir/s/subagents")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a.jsonl", "b.jsonl"}, names)
+	assert.NotContains(t, logged.String(), "failed")
+}
