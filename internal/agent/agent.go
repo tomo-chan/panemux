@@ -97,17 +97,15 @@ func (d Definition) Has(c Capability) bool {
 	return false
 }
 
-// Detection holds an agent's process rules. They are separate because each
-// consumer has always matched a little differently, and moving them here
-// changed none of them.
+// Detection holds an agent's process rules: Agent Board's, which mirrors
+// agmsg's own detection, and the Task rule the task board and the pane header
+// share.
 type Detection struct {
 	// Board finds the agent in a pane for Agent Board, mirroring agmsg's own
 	// type.conf detect_proc.
 	Board *ProcessRule
-	// Workdir finds the agent in a pane to resolve its working directory.
-	Workdir *ProcessRule
 	// Task finds the agent's processes in a host's `ps` output for the task
-	// board.
+	// board, and the agent's session in a pane (MatchInteractiveSession).
 	Task *TaskRule
 }
 
@@ -252,7 +250,7 @@ func validateDefinition(d Definition) error {
 		seen[c] = true
 	}
 	det := d.Detection
-	hasRule := det.Board != nil || det.Workdir != nil || det.Task != nil
+	hasRule := det.Board != nil || det.Task != nil
 	pairs := []struct {
 		what     string
 		declared bool
@@ -261,19 +259,16 @@ func validateDefinition(d Definition) error {
 		{"detect needs a rule", seen[Detect], hasRule},
 		{"board needs an agmsg type", seen[Board], d.AgmsgType != ""},
 		{"board needs a board rule", seen[Board], det.Board != nil},
-		{"collect needs a task rule", seen[Collect], det.Task != nil},
-		{"workdir needs a workdir rule", seen[Workdir], det.Workdir != nil},
+		{"a task rule needs collect or workdir", seen[Collect] || seen[Workdir], det.Task != nil},
 	}
 	for _, p := range pairs {
 		if p.declared != p.present {
 			return fmt.Errorf("declaration and rule disagree: %s", p.what)
 		}
 	}
-	for _, r := range []*ProcessRule{det.Board, det.Workdir} {
-		if r != nil {
-			if err := validateProcessRule(*r); err != nil {
-				return err
-			}
+	if det.Board != nil {
+		if err := validateProcessRule(*det.Board); err != nil {
+			return err
 		}
 	}
 	if t := det.Task; t != nil {

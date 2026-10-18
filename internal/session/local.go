@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"log"
 	"os"
 	"os/exec"
@@ -450,119 +451,25 @@ func interactiveAgentSessionCWDs(processes []processInfo, agentPID int) ([]strin
 	if !ok {
 		return nil, nil
 	}
-	switch {
-	case isCodexCommand(proc.Command):
-		cwd, err := codexSessionCWD(processes, agentPID)
-		if err != nil || cwd == "" {
-			return nil, err
-		}
-		return []string{cwd}, nil
-	case isClaudeCommand(proc.Command):
-		return claudeSessionCWDs(agentPID)
-	default:
+	d, ok := agent.MatchInteractiveSession(proc.Command)
+	if !ok {
 		return nil, nil
 	}
+	return resolveSessionWorkdirs(localWorkdirHost{}, d.ID, agentPID)
 }
 
-func codexSessionCWD(processes []processInfo, agentPID int) (string, error) {
-	proc, ok := processByPID(processes, agentPID)
-	if !ok || !isCodexCommand(proc.Command) {
-		return "", nil
-	}
+// localWorkdirHost reads the panemux host's own files.
+type localWorkdirHost struct{}
 
-	paths, err := openFilePathsForPIDFn(agentPID)
-	if err != nil {
-		return "", err
-	}
+func (localWorkdirHost) hostKey() string { return "" }
 
-	sessionPath, ok := codexSessionPath(paths)
-	if !ok {
-		return "", nil
-	}
-
-	return readCodexSessionCWD(sessionPath)
-}
-
-type claudeSessionMeta struct {
-	SessionID string `json:"sessionId"`
-	CWD       string `json:"cwd"`
-	PID       int    `json:"pid"`
-}
-
-// claudeSessionCWDs returns every distinct workdir found across the Claude
-// session's own transcript and any Task subagent transcripts recorded
-// alongside it. Claude Code records delegated subagent activity in separate
-// per-agent transcript files under a "subagents" directory next to the
-// parent transcript; a subagent that does worktree-relative work there
-// never touches the parent transcript's own recorded cwd, so panemux must
-// read those files too or the pane header silently falls back to the base
-// working directory (see docs/behavior.md "Pane Git and PR metadata").
-func claudeSessionCWDs(agentPID int) ([]string, error) {
+// claudeStateFiles are every file under ~/.claude/sessions: Claude Code names
+// them <pid>.json, but the pid inside is what is matched.
+func (localWorkdirHost) claudeStateFiles(int) ([]claudeStateFile, error) {
 	homeDir, err := homedir.Dir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve home dir for claude session: %w", err)
 	}
-
-	sessionMeta, err := findClaudeSessionMeta(homeDir, agentPID)
-	if err != nil {
-		return nil, err
-	}
-	if sessionMeta == nil || sessionMeta.SessionID == "" || sessionMeta.CWD == "" {
-		return nil, nil
-	}
-	if !validClaudeSessionID.MatchString(sessionMeta.SessionID) {
-		return nil, nil
-	}
-
-	projectPath := resolveClaudeTranscriptPath(
-		filepath.Join(homeDir, ".claude", "projects"),
-		sessionMeta.CWD,
-		sessionMeta.SessionID,
-	)
-
-	cwds := make([]string, 0, 1)
-	seen := make(map[string]bool)
-	for _, path := range claudeTranscriptPaths(projectPath) {
-		cwd, err := readClaudeProjectCWD(path)
-		if err != nil || cwd == "" || seen[cwd] {
-			continue
-		}
-		seen[cwd] = true
-		cwds = append(cwds, cwd)
-	}
-	return cwds, nil
-}
-
-// claudeTranscriptPaths returns the parent transcript path followed by every
-// sibling Task subagent transcript path, sorted by filename for a
-// deterministic order. Older sessions without a "subagents" directory yield
-// just the parent path.
-func claudeTranscriptPaths(projectPath string) []string {
-	paths := []string{projectPath}
-
-	sessionDir := strings.TrimSuffix(projectPath, ".jsonl")
-	subagentsDir := filepath.Join(sessionDir, "subagents")
-	entries, err := os.ReadDir(subagentsDir)
-	if err != nil {
-		return paths
-	}
-
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
-			continue
-		}
-		names = append(names, entry.Name())
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
-		paths = append(paths, filepath.Join(subagentsDir, name))
-	}
-	return paths
-}
-
-func findClaudeSessionMeta(homeDir string, agentPID int) (*claudeSessionMeta, error) {
 	sessionsDir := filepath.Join(homeDir, ".claude", "sessions")
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
@@ -572,28 +479,56 @@ func findClaudeSessionMeta(homeDir string, agentPID int) (*claudeSessionMeta, er
 		return nil, fmt.Errorf("read claude sessions dir %q: %w", sessionsDir, err)
 	}
 
+	var files []claudeStateFile
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-
-		path := filepath.Join(sessionsDir, entry.Name())
-		data, err := readFileFn(path)
+		data, err := readFileFn(filepath.Join(sessionsDir, entry.Name()))
 		if err != nil {
 			continue
 		}
+		files = append(files, claudeStateFile{name: entry.Name(), data: data})
+	}
+	return files, nil
+}
 
-		var meta claudeSessionMeta
-		if err := json.Unmarshal(data, &meta); err != nil {
+// claudeProjectDirs is the one directory resolveClaudeTranscriptPath picks:
+// the derived one, or the one a scan found the transcript in.
+func (localWorkdirHost) claudeProjectDirs(sessionID, cwd string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		homeDir, err := homedir.Dir()
+		if err != nil {
+			return
+		}
+		projects := filepath.Join(homeDir, ".claude", "projects")
+		yield(filepath.Dir(resolveClaudeTranscriptPath(projects, cwd, sessionID)))
+	}
+}
+
+// claudeSubagentLogs lists dir's transcripts; a session older than the
+// "subagents" directory has none.
+func (localWorkdirHost) claudeSubagentLogs(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		entries = nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
 			continue
 		}
-		if meta.PID == agentPID {
-			return &meta, nil
-		}
+		names = append(names, entry.Name())
 	}
-
-	return nil, nil
+	sort.Strings(names)
+	return names, nil
 }
+
+func (localWorkdirHost) claudeLogCWD(path string) (string, error) { return readClaudeProjectCWD(path) }
+
+func (localWorkdirHost) agentOpenFiles(pid int) ([]string, error) { return openFilePathsForPIDFn(pid) }
+
+func (localWorkdirHost) codexLogCWD(path string) (string, error) { return readCodexSessionCWD(path) }
 
 func processByPID(processes []processInfo, pid int) (processInfo, bool) {
 	for _, proc := range processes {
@@ -604,22 +539,11 @@ func processByPID(processes []processInfo, pid int) (processInfo, bool) {
 	return processInfo{}, false
 }
 
-// isInteractiveAgentCommand reports whether command is a claude or codex
-// session by the registry's Workdir rules.
+// isInteractiveAgentCommand reports whether command is the session of an
+// agent that declares workdir, by the Task rule the task board uses.
 func isInteractiveAgentCommand(command string) bool {
-	_, ok := agent.MatchWorkdirProcess(command)
+	_, ok := agent.MatchInteractiveSession(command)
 	return ok
-}
-
-func isCodexCommand(command string) bool { return workdirRuleMatchesBinary(agent.Codex, command) }
-
-func isClaudeCommand(command string) bool { return workdirRuleMatchesBinary(agent.Claude, command) }
-
-// workdirRuleMatchesBinary reports whether command runs the program of id's
-// Workdir rule, headless or not.
-func workdirRuleMatchesBinary(id agent.ID, command string) bool {
-	d, ok := agent.Lookup(id)
-	return ok && d.Detection.Workdir != nil && d.Detection.Workdir.MatchBinary(command)
 }
 
 func openFilePathsForPID(pid int) ([]string, error) {

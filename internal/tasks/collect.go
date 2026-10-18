@@ -121,7 +121,7 @@ func commonSections(prefilter string) []collectSection {
 		{name: sectionTmux, script: `tmux list-panes -a -F '#{pane_pid} #{session_name}' 2>/dev/null
 `},
 		{name: sectionCWD, script: `agents=$(ps -U "$uid" -o pid=,command= 2>/dev/null |
-	awk '($2 " " $3) ~ /` + prefilter + `/ { print $1 }')
+	awk 'tolower($2 " " $3) ~ /` + prefilter + `/ { print $1 }')
 for pid in $agents; do
 	c=$(readlink "/proc/$pid/cwd" 2>/dev/null ||
 		lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | awk '/^n/ { print substr($0, 2); exit }')

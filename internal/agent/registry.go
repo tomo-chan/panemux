@@ -39,8 +39,7 @@ func registered() []Definition {
 					Patterns: []string{string(Claude), claudeCodeName, string(Claude) + "-*"}, ExcludeTokens: claudeHeadless,
 					VerifiedWith: agmsgVerified, UnknownArgs: Accept,
 				},
-				Workdir: &ProcessRule{Patterns: []string{string(Claude)}, ExcludeTokens: claudeHeadless, UnknownArgs: Accept},
-				Task:    &TaskRule{Process: IsClaudeProcess, Interactive: IsInteractiveClaude, UnknownArgs: Accept},
+				Task: &TaskRule{Process: IsClaudeProcess, Interactive: IsInteractiveClaude, UnknownArgs: Accept},
 			},
 		},
 		{
@@ -51,7 +50,6 @@ func registered() []Definition {
 					Patterns: []string{string(Codex), string(Codex) + "-*"}, ExcludeTokens: codexHeadless,
 					VerifiedWith: agmsgVerified, UnknownArgs: Accept,
 				},
-				Workdir: &ProcessRule{Patterns: []string{string(Codex)}, ExcludeTokens: codexHeadless, UnknownArgs: Accept},
 				Task: &TaskRule{
 					Process: IsCodexProgram, Interactive: IsInteractiveCodex,
 					VerifiedWith: codexVerified, UnknownArgs: Accept,
@@ -144,10 +142,25 @@ func MatchBoardProcess(command string) (Definition, bool) {
 	return matchRule(command, func(d Detection) *ProcessRule { return d.Board })
 }
 
-// MatchWorkdirProcess returns the first agent whose Workdir rule matches
-// command.
-func MatchWorkdirProcess(command string) (Definition, bool) {
-	return matchRule(command, func(d Detection) *ProcessRule { return d.Workdir })
+// MatchInteractiveSession returns the agent whose session command is, by the
+// Task rule the task board lists sessions with, among the agents that declare
+// workdir: a pane finds its agent this way.
+func MatchInteractiveSession(command string) (Definition, bool) {
+	return defaultRegistry.matchInteractiveSession(command)
+}
+
+func (r *registry) matchInteractiveSession(command string) (Definition, bool) {
+	for _, d := range r.defs {
+		// As in match, the first agent whose program matches decides: a
+		// headless run of it is no agent's session.
+		if t := d.Detection.Task; t != nil && d.Has(Workdir) && t.Process(command) {
+			if !t.IsInteractive(command) {
+				return Definition{}, false
+			}
+			return d.clone(), true
+		}
+	}
+	return Definition{}, false
 }
 
 func matchRule(command string, rule func(Detection) *ProcessRule) (Definition, bool) {
@@ -174,7 +187,6 @@ func (d Definition) clone() Definition {
 	d.Aliases = append([]string(nil), d.Aliases...)
 	d.Capabilities = append([]Capability(nil), d.Capabilities...)
 	d.Detection.Board = d.Detection.Board.clone()
-	d.Detection.Workdir = d.Detection.Workdir.clone()
 	if d.Detection.Task != nil {
 		task := *d.Detection.Task
 		d.Detection.Task = &task

@@ -105,11 +105,18 @@ func IsInteractiveCodex(command string) bool {
 	return !codexNonInteractiveCommands[firstCodexPositional(fields[1:])]
 }
 
+// codexMultiValueOptions take every argument up to the next option as their
+// values (`-i, --image <FILE>...`; confirmed against codex-cli 0.160.0 in the
+// PR #418 review), so `codex -i a.png review` is a session with an image, not
+// a review. An attached value (`--image=a.png`, `-ia.png`) is read as one
+// value: whether codex takes more after it is unverified.
+var codexMultiValueOptions = map[string]bool{"-i": true, "--image": true}
+
 // firstCodexPositional is codex's first positional argument — its
 // subcommand, or a prompt — with the values of options skipped; "" when
 // there is none or it follows "--".
 func firstCodexPositional(args []string) string {
-	skipValue := false
+	skipValue, skipValues := false, false
 	for _, arg := range args {
 		switch {
 		case skipValue:
@@ -118,6 +125,8 @@ func firstCodexPositional(args []string) string {
 			return ""
 		case strings.HasPrefix(arg, "-"):
 			skipValue = codexValueOptions[arg]
+			skipValues = codexMultiValueOptions[arg]
+		case skipValues:
 		default:
 			return arg
 		}

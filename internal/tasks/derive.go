@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"panemux/internal/agent"
+	"panemux/internal/session"
 )
 
 // State is a task's column on the dashboard.
@@ -80,6 +81,17 @@ type Task struct {
 	PID           int      `json:"pid,omitempty"`
 }
 
+// WorkdirSession is the session the task names, for internal/session's
+// Workdir capability to resolve every working directory of. The log is left
+// for the agent's adapter to find: LogVersion carries a rollout's name, not
+// where it is.
+func (t Task) WorkdirSession() session.WorkdirSession {
+	return session.WorkdirSession{
+		Key: agent.SessionKey{Host: t.Host, Agent: agent.ID(t.Agent), SessionID: t.SessionID},
+		PID: t.PID, CWD: t.CWD,
+	}
+}
+
 // LogVersion is one state of a conversation log, as the collection saw it:
 // its modification time on the host's clock (Unix seconds) and its size.
 // A log that has not changed keeps both, so a summary made from it is still
@@ -114,21 +126,8 @@ var validTmuxSessionName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 var validPaneID = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 
 // claudeState is the part of ~/.claude/sessions/<pid>.json the dashboard
-// reads. Claude Code writes this file itself; it is not a published format
-// (see docs/DECISIONLOG.md), so every field is optional here.
-type claudeState struct {
-	SessionID  string `json:"sessionId"`
-	CWD        string `json:"cwd"`
-	Status     string `json:"status"`
-	WaitingFor string `json:"waitingFor"`
-	// Version is the Claude Code version that wrote the file. It is
-	// recorded, never checked.
-	Version         string `json:"version"`
-	PID             int    `json:"pid"`
-	StatusUpdatedAt int64  `json:"statusUpdatedAt"`
-	UpdatedAt       int64  `json:"updatedAt"`
-	StartedAt       int64  `json:"startedAt"`
-}
+// reads, as internal/session's one parser reads it.
+type claudeState = session.ClaudeSessionState
 
 // UnreadableReason is why a Claude Code state file could not be read.
 type UnreadableReason string
@@ -136,9 +135,9 @@ type UnreadableReason string
 // Unreadable reasons: the file is not a JSON object, its pid is missing or
 // not a positive integer, or its sessionId is missing or not a session ID.
 const (
-	UnreadableNotJSON          UnreadableReason = "not_json"
-	UnreadableInvalidPID       UnreadableReason = "invalid_pid"
-	UnreadableInvalidSessionID UnreadableReason = "invalid_session_id"
+	UnreadableNotJSON          = UnreadableReason(session.ClaudeStateNotJSON)
+	UnreadableInvalidPID       = UnreadableReason(session.ClaudeStateInvalidPID)
+	UnreadableInvalidSessionID = UnreadableReason(session.ClaudeStateInvalidSessionID)
 )
 
 // Bounds, in runes, on the host-supplied text an unreadable state file

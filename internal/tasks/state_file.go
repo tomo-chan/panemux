@@ -1,18 +1,11 @@
 package tasks
 
 import (
-	"encoding/json"
-	"errors"
 	"strings"
 	"unicode"
 	"unicode/utf8"
-)
 
-// Details that name no value from the file: one with no pid at all, and
-// JSON that is not an object (an array, a scalar or null).
-const (
-	detailPIDMissing = "pid is missing"
-	detailNotObject  = "not a JSON object"
+	"panemux/internal/session"
 )
 
 // readState is one state file as read: the fields the dashboard uses, or
@@ -24,50 +17,11 @@ type readState struct {
 	st     claudeState
 }
 
-// readStateFile reads a ~/.claude/sessions file. Only pid and sessionId
-// decide whether it can be read; every other field is optional (issue #252),
-// so one of an unexpected type is read as absent (issue #313).
+// readStateFile reads a ~/.claude/sessions file with the parser the pane
+// header uses too, keeping why it could not be read.
 func readStateFile(file stateFile) readState {
-	state := readState{name: file.Name}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(file.Data, &fields); err != nil {
-		state.reason, state.detail = UnreadableNotJSON, err.Error()
-		var typeErr *json.UnmarshalTypeError
-		if errors.As(err, &typeErr) {
-			state.detail = detailNotObject
-		}
-		return state
-	}
-	if fields == nil { // the JSON literal null
-		state.reason, state.detail = UnreadableNotJSON, detailNotObject
-		return state
-	}
-
-	st := &state.st
-	for name, dst := range map[string]any{
-		"cwd":             &st.CWD,
-		"status":          &st.Status,
-		"waitingFor":      &st.WaitingFor,
-		"statusUpdatedAt": &st.StatusUpdatedAt,
-		"updatedAt":       &st.UpdatedAt,
-		"startedAt":       &st.StartedAt,
-		"version":         &st.Version,
-	} {
-		if raw, ok := fields[name]; ok {
-			_ = json.Unmarshal(raw, dst) // a value of another type leaves the field empty
-		}
-	}
-
-	if raw, ok := fields["pid"]; !ok {
-		state.reason, state.detail = UnreadableInvalidPID, detailPIDMissing
-	} else if json.Unmarshal(raw, &st.PID) != nil || st.PID <= 0 {
-		state.reason, state.detail = UnreadableInvalidPID, "pid: "+string(raw)
-	} else if raw, ok := fields["sessionId"]; !ok {
-		state.reason, state.detail = UnreadableInvalidSessionID, "sessionId is missing"
-	} else if json.Unmarshal(raw, &st.SessionID) != nil || !validSessionID.MatchString(st.SessionID) {
-		state.reason, state.detail = UnreadableInvalidSessionID, "sessionId: "+string(raw)
-	}
-	return state
+	st, problem, detail := session.ParseClaudeSessionState(file.Data)
+	return readState{name: file.Name, reason: UnreadableReason(problem), detail: detail, st: st}
 }
 
 // boundedText is host-supplied text made safe to show and log: valid UTF-8,

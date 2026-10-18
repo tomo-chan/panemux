@@ -68,7 +68,7 @@ func (codexCollect) newCollected() agentCollected { return &codexCollected{} }
 // the UUID in the file name — is put into the query.
 const codexOpenScript = `db="$HOME/.codex/thread_history_1.sqlite"
 ps -U "$uid" -o pid=,etime=,command= 2>/dev/null |
-awk '{ n = $3; sub(/.*\//, "", n); if (n == "` + codexProgram + `") print $1, $2 }' |
+awk '{ n = tolower($3); sub(/.*\//, "", n); if (n == "` + codexProgram + `") print $1, $2 }' |
 while read -r pid et; do
 	printf '%s\t%s\n' "$pid" "$et"
 	if [ -d "/proc/$pid/fd" ]; then

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -86,7 +87,7 @@ func TestByAgmsgType(t *testing.T) {
 func validDef(id ID) Definition {
 	return Definition{
 		ID: id, DisplayName: string(id), Capabilities: []Capability{Detect, Workdir},
-		Detection: Detection{Workdir: &ProcessRule{Patterns: []string{string(id)}, UnknownArgs: Accept}},
+		Detection: Detection{Task: &TaskRule{Process: named(string(id)), UnknownArgs: Accept}},
 	}
 }
 
@@ -109,6 +110,11 @@ func aliased(id ID, aliases ...string) Definition {
 }
 
 func anyProcess(string) bool { return true }
+
+// named matches a command whose program is exactly name.
+func named(name string) func(string) bool {
+	return func(command string) bool { return strings.Fields(command + " ")[0] == name }
+}
 
 func assertAllRejected(t *testing.T, cases map[string][]Definition) {
 	t.Helper()
@@ -160,10 +166,14 @@ func TestValidateRejectsCapabilities(t *testing.T) {
 		"detect without rule":   {modDef("a", func(d *Definition) { d.Detection = Detection{} })},
 		"rule without detect":   {modDef("a", func(d *Definition) { d.Capabilities = []Capability{Workdir, Launch} })},
 		"collect without task": {modDef("a", func(d *Definition) {
-			d.Capabilities = []Capability{Detect, Workdir, Collect}
+			d.Capabilities = []Capability{Detect, Collect, Board}
+			d.AgmsgType = "a"
+			d.Detection = Detection{Board: &ProcessRule{Patterns: []string{"a"}, UnknownArgs: Accept}}
 		})},
 		"task rule undeclared": {modDef("a", func(d *Definition) {
-			d.Detection.Task = &TaskRule{Process: anyProcess, UnknownArgs: Accept}
+			d.Capabilities = []Capability{Detect, Board}
+			d.AgmsgType = "a"
+			d.Detection.Board = &ProcessRule{Patterns: []string{"a"}, UnknownArgs: Accept}
 		})},
 		"workdir without rule": {modDef("a", func(d *Definition) {
 			d.Capabilities = []Capability{Detect, Workdir, Board}
@@ -175,7 +185,14 @@ func TestValidateRejectsCapabilities(t *testing.T) {
 
 func TestValidateRejectsRules(t *testing.T) {
 	withPatterns := func(patterns ...string) Definition {
-		return modDef("a", func(d *Definition) { d.Detection.Workdir.Patterns = patterns })
+		d := boardDef("a", "a")
+		d.Detection.Board.Patterns = patterns
+		return d
+	}
+	withBoard := func(f func(*ProcessRule)) Definition {
+		d := boardDef("a", "a")
+		f(d.Detection.Board)
+		return d
 	}
 	withTask := func(rule TaskRule) Definition {
 		return modDef("a", func(d *Definition) {
@@ -184,17 +201,15 @@ func TestValidateRejectsRules(t *testing.T) {
 		})
 	}
 	assertAllRejected(t, map[string][]Definition{
-		"empty patterns":       {withPatterns()},
-		"uppercase pattern":    {withPatterns("A")},
-		"inner wildcard":       {withPatterns("a*b")},
-		"bare wildcard":        {withPatterns("*")},
-		"dash-only wildcard":   {withPatterns("-*")},
-		"double-dash wildcard": {withPatterns("a--*")},
-		"empty exclude token": {modDef("a", func(d *Definition) {
-			d.Detection.Workdir.ExcludeTokens = []string{""}
-		})},
-		"unknown args policy":         {modDef("a", func(d *Definition) { d.Detection.Workdir.UnknownArgs = "maybe" })},
-		"missing args policy":         {modDef("a", func(d *Definition) { d.Detection.Workdir.UnknownArgs = "" })},
+		"empty patterns":              {withPatterns()},
+		"uppercase pattern":           {withPatterns("A")},
+		"inner wildcard":              {withPatterns("a*b")},
+		"bare wildcard":               {withPatterns("*")},
+		"dash-only wildcard":          {withPatterns("-*")},
+		"double-dash wildcard":        {withPatterns("a--*")},
+		"empty exclude token":         {withBoard(func(r *ProcessRule) { r.ExcludeTokens = []string{""} })},
+		"unknown args policy":         {withBoard(func(r *ProcessRule) { r.UnknownArgs = "maybe" })},
+		"missing args policy":         {withBoard(func(r *ProcessRule) { r.UnknownArgs = "" })},
 		"task rule no process":        {withTask(TaskRule{UnknownArgs: Accept})},
 		"unknown task policy":         {withTask(TaskRule{Process: anyProcess, UnknownArgs: "maybe"})},
 		"interactive without process": {withTask(TaskRule{Interactive: anyProcess, UnknownArgs: Accept})},
@@ -228,23 +243,38 @@ func TestMatchStopsAtFirstMatchingProgram(t *testing.T) {
 	first := boardDef("a", "a")
 	first.Detection.Board.Patterns = []string{"a-*"}
 	first.Detection.Board.ExcludeTokens = []string{"-p"}
-	first.Detection.Workdir.Patterns = []string{"a-x"}
-	first.Detection.Workdir.ExcludeTokens = []string{"-p"}
 	second := boardDef("b", "b")
 	second.Detection.Board.Patterns = []string{"a-*"}
-	second.Detection.Workdir.Patterns = []string{"a-x"}
 	r := newRegistry([]Definition{first, second})
 
-	for _, rule := range []func(Detection) *ProcessRule{
-		func(d Detection) *ProcessRule { return d.Board },
-		func(d Detection) *ProcessRule { return d.Workdir },
-	} {
-		_, ok := r.match("a-x -p", rule)
-		assert.False(t, ok, "excluded by the first matching program's rule")
-		d, ok := r.match("a-x", rule)
-		assert.True(t, ok)
-		assert.Equal(t, ID("a"), d.ID)
-	}
+	_, ok := r.match("a-x -p", func(d Detection) *ProcessRule { return d.Board })
+	assert.False(t, ok, "excluded by the first matching program's rule")
+	d, ok := r.match("a-x", func(d Detection) *ProcessRule { return d.Board })
+	assert.True(t, ok)
+	assert.Equal(t, ID("a"), d.ID)
+}
+
+// The same holds for the Task rule a pane's session is found by: a headless
+// run of the first agent whose program matches is no agent's session.
+func TestMatchInteractiveSessionStopsAtFirstMatchingProgram(t *testing.T) {
+	notC := func(command string) bool { return !named("c")(command) }
+	first := validDef("a")
+	first.Detection.Task.Process = notC
+	first.Detection.Task.Interactive = func(command string) bool { return !strings.Contains(command, "-p") }
+	second := validDef("b")
+	second.Detection.Task.Process = notC
+	taskOnly := validDef("c")
+	taskOnly.Capabilities = []Capability{Detect, Collect}
+	taskOnly.Detection.Task.Process = named("c")
+	r := newRegistry([]Definition{taskOnly, first, second})
+
+	_, ok := r.matchInteractiveSession("x -p")
+	assert.False(t, ok, "headless by the first matching program's rule")
+	d, ok := r.matchInteractiveSession("x")
+	require.True(t, ok)
+	assert.Equal(t, ID("a"), d.ID)
+	_, ok = r.matchInteractiveSession("c")
+	assert.False(t, ok, "an agent that declares no workdir has no pane session")
 }
 
 // What All and Lookup return shares nothing with the registry, rules
@@ -253,7 +283,6 @@ func TestDefinitionsAreDeepCopies(t *testing.T) {
 	for _, d := range []Definition{All()[0], must(Lookup(Claude)), must(ByAgmsgType("claude-code"))} {
 		d.Detection.Board.Patterns[0] = "mutated"
 		d.Detection.Board.ExcludeTokens[0] = "mutated"
-		d.Detection.Workdir.Patterns[0] = "mutated"
 		d.Detection.Task.Process = func(string) bool { return false }
 		d.Detection.Board = nil
 	}
@@ -262,7 +291,7 @@ func TestDefinitionsAreDeepCopies(t *testing.T) {
 	d, ok = MatchBoardProcess("claude")
 	require.True(t, ok)
 	assert.Equal(t, Claude, d.ID)
-	_, ok = MatchWorkdirProcess("claude")
+	_, ok = MatchInteractiveSession("claude")
 	assert.True(t, ok)
 	claude := must(Lookup(Claude))
 	assert.True(t, claude.Detection.Task.Process("claude"))

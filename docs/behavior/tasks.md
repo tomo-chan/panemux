@@ -27,7 +27,8 @@ A task is one agent session:
   no rollout yet (see [Codex sessions](#codex-sessions)) is a task identified by its pid. A process
   is interactive when its first positional argument is absent, a prompt, `resume` or `fork`; every
   other codex-cli subcommand (`exec`, `review`, `app-server`, `mcp`, `login` and the rest listed by
-  `codex --help` of codex-cli 0.157.0) is not a task. Options that take a value are skipped with it.
+  `codex --help` of codex-cli 0.157.0) is not a task. Options that take a value are skipped with it,
+  and `-i/--image` with every argument up to the next option, so `codex -i a.png review` is a task.
 
 A task carries its host, agent, session ID, working directory, state, the time it entered that
 state, the reason it is waiting, its start time, its pid, where it runs, and the repository, branch
@@ -164,7 +165,8 @@ ends before its terminating marker — a connection dropped mid-run — fails th
 
 ### Unreadable state files
 
-A state file under `~/.claude/sessions` can be read when it is a JSON object with a positive integer
+The pane header reads these files with the same parser (`session.ParseClaudeSessionState`), so what
+can be read is the same for both. A state file under `~/.claude/sessions` can be read when it is a JSON object with a positive integer
 `pid` and a `sessionId` made of letters, digits, `-` and `_`. Every other field is optional: one that
 is absent or of another type (a `cwd` that is a number, say) is read as absent, and the file is read.
 A file that fails is unreadable for one of three reasons, checked in this order:

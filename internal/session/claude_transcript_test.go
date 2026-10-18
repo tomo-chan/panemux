@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/agent"
 	"panemux/internal/homedir"
 )
 
@@ -194,7 +195,7 @@ func TestClaudeSessionCWDs_ReadsATranscriptFromAnUnexpectedProjectDir(t *testing
 			`"message":{"content":[{"type":"text","text":"ok"}]}}`+"\n",
 	), 0600))
 
-	cwds, err := claudeSessionCWDs(220)
+	cwds, err := resolveSessionWorkdirs(localWorkdirHost{}, agent.Claude, 220)
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"/workspace/user/my.project/worktree"}, cwds)
