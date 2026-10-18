@@ -27,7 +27,8 @@ write.
 Panemux writes one instruction asking the agent to:
 
 1. join the shared team with the pane ID as its agmsg identity;
-2. for `claude-code`, claim that identity for the current session and restrict monitor delivery to
+2. for `claude-code`, whose board adapter alone claims an identity
+   ([agmsg integration](agmsg-integration.md)), claim that identity for the current session and restrict monitor delivery to
    it;
 3. send every board message directly through `send.sh --force`;
 4. report status to `_system` using the schema in [Message flow](message-flow.md#status-self-report-and-message-flow);

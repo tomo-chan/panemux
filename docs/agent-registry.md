@@ -85,8 +85,18 @@ with codes the script or its adapter declares. A launch that names no session ID
 until a collection finds exactly one session of that agent in its tmux session
 ([Starting a task](behavior/tasks.md#starting-a-task)). An agent that declares neither is refused,
 and so is one whose CLI the host's probe found missing ([agent availability](behavior/tasks.md#agent-availability)).
-The other capabilities are still in `internal/tasks` and `internal/session`, which branch on the
+`workdir` and `summary` are still in `internal/session` and `internal/tasks`, which branch on the
 claude and codex IDs and read those IDs and their process rules from the registry.
+
+`board` is implemented by a board adapter per agent, which the root package defines in its own types
+and lists explicitly by ID in `boardAdapters` (`board_adapters.go`), checked against the registry when
+panemux starts. The onboarding instruction's shared steps — joining, sending, the status report and
+the delivery mode — are the same for every agent; an adapter supplies what differs, which today is
+only Claude Code's identity claim and its watcher replacement
+([agmsg integration](agent-board/agmsg-integration.md)). The capability is a contract with an external
+tool: it needs agmsg on the pane's host, which the bootstrap watcher checks before writing anything,
+and its agents are found by the Board rules, which mirror agmsg's own detection and stay apart from
+the other rules.
 
 Which agents can be given a done or label record (`internal/tasks`'s `recordable`) is read from the
 `collect` declarations; a stored record of any other agent is kept and written back unchanged

@@ -1597,6 +1597,13 @@ Stage D of #348, first half. Agreed on #375:
   still makes the file unreadable — loosening the shape check too was rejected, since it would accept
   what no build could have written. Kept records are not served, so the API and the labels offered
   are unchanged. An alias is not rewritten to its ID: two records could then collide.
+- **Joining Agent Board goes through board adapters in the consumer.** The onboarding builder in
+  `bootstrap.go` compared the agmsg type with `claude-code` to add the identity claim. Each agent that
+  declares `board` now has an adapter in `boardAdapters`, checked against the registry at startup;
+  Claude Code's writes the claim and the watcher replacement, the other five share one that writes
+  nothing. The instruction text for all six types in every mode is fixed by a golden test and did not
+  change. codex's `CODEX_THREAD_ID` stays unused: it is unverified. Board detection stays separate
+  from the other rule sets, since it mirrors agmsg's.
 
 ## 2026-10-17: Updating the codex permission hook by itself (#294, #402)
 

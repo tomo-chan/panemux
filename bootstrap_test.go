@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/agent"
 	"panemux/internal/session"
 )
 
@@ -665,4 +667,105 @@ func TestBootstrapWatcherReadsModeLive(t *testing.T) {
 	modes["api"] = boardModeBoth
 	assert.Equal(t, boardModeBoth, b.modeFor("api"),
 		"a mode changed after startup must reach the next bootstrap instruction")
+}
+
+// The onboarding instruction every Board agent is sent, in every mode, is
+// fixed in testdata/bootstrap-instructions: moving the per-agent steps into
+// board adapters (issue #375) changed none of them. Set
+// PANEMUX_UPDATE_BOOTSTRAP_GOLDEN=1 to rewrite the files after a deliberate
+// change, and read the diff.
+//
+//efficacy:exempt characterizes the instruction text the board-adapter refactor must not change
+func TestBuildBootstrapInstruction_Golden(t *testing.T) {
+	update := os.Getenv("PANEMUX_UPDATE_BOOTSTRAP_GOLDEN") == "1"
+	for _, d := range agent.All() {
+		if !d.Has(agent.Board) {
+			continue
+		}
+		for _, mode := range []string{"", boardModeMonitor, boardModeTurn, boardModeBoth, "off"} {
+			name := d.AgmsgType + "-" + cmp.Or(mode, "default") + ".txt"
+			t.Run(name, func(t *testing.T) {
+				got := buildBootstrapInstruction("/opt/agmsg", "panemux", "pane-a", d.AgmsgType, mode)
+				path := filepath.Join("testdata", "bootstrap-instructions", name)
+				if update {
+					require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+					require.NoError(t, os.WriteFile(path, []byte(got), 0o600))
+				}
+				want, err := os.ReadFile(path)
+				require.NoError(t, err)
+				assert.Equal(t, string(want), got)
+			})
+		}
+	}
+}
+
+// Every agent that declares board has exactly one board adapter, and no
+// other agent has one.
+func TestBoardAdapters_MatchTheRegistry(t *testing.T) {
+	require.NoError(t, validateBoardAdapters(agent.All(), boardAdapters()))
+
+	var ids []agent.ID
+	for _, r := range boardAdapters() {
+		ids = append(ids, r.id)
+	}
+	var want []agent.ID
+	for _, d := range agent.All() {
+		if d.Has(agent.Board) {
+			want = append(want, d.ID)
+		}
+	}
+	assert.ElementsMatch(t, want, ids)
+}
+
+func TestValidateBoardAdapters_RefusesASetThatDoesNotMatch(t *testing.T) {
+	defs := []agent.Definition{
+		{ID: "one", AgmsgType: "one", Capabilities: []agent.Capability{agent.Detect, agent.Board}},
+		{ID: "two", AgmsgType: "two", Capabilities: []agent.Capability{agent.Detect}},
+	}
+	cases := []struct {
+		name     string
+		wantErr  string
+		adapters []registeredBoard
+	}{
+		{
+			name:     "an agent that is not registered",
+			adapters: []registeredBoard{{id: "one", adapter: plainBoard{}}, {id: "three", adapter: plainBoard{}}},
+			wantErr:  `board adapter "three" is not registered in the agent registry`,
+		},
+		{
+			name:     "an agent that does not declare board",
+			adapters: []registeredBoard{{id: "one", adapter: plainBoard{}}, {id: "two", adapter: plainBoard{}}},
+			wantErr:  `board adapter "two" does not declare board in the agent registry`,
+		},
+		{
+			name:     "an agent registered twice",
+			adapters: []registeredBoard{{id: "one", adapter: plainBoard{}}, {id: "one", adapter: plainBoard{}}},
+			wantErr:  `board adapter "one" is registered twice`,
+		},
+		{
+			name:    "an agent with no adapter",
+			wantErr: `agent "one" declares board but has no board adapter`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.EqualError(t, validateBoardAdapters(defs, tc.adapters), tc.wantErr)
+		})
+	}
+	assert.NoError(t, validateBoardAdapters(defs, []registeredBoard{{id: "one", adapter: plainBoard{}}}))
+}
+
+// Which agent claims its identity is the adapter's to say: only Claude
+// Code's session-id source is verified.
+func TestBoardAdapters_OnlyClaudeClaimsItsIdentity(t *testing.T) {
+	for _, r := range boardAdapters() {
+		_, claims := r.adapter.(claudeBoard)
+		assert.Equal(t, r.id == agent.Claude, claims, "agent %s", r.id)
+	}
+}
+
+// A type no adapter is registered for gets the shared steps and no claim.
+func TestBoardAdapterFor_AnUnregisteredTypeClaimsNothing(t *testing.T) {
+	assert.Equal(t, plainBoard{}, boardAdapterFor("not-a-type"))
+	assert.Equal(t, claudeBoard{}, boardAdapterFor("claude-code"))
 }
