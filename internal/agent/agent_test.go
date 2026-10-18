@@ -109,6 +109,19 @@ func TestMatchInteractiveSession(t *testing.T) {
 		"codex fix the exec bug": Codex,
 		"codex resume exec":      Codex,
 		"codex -- exec":          Codex,
+		// (5) -i/--image takes every value up to the next option, so what
+		// follows its files is no subcommand (PR #418 review).
+		"codex -i a.png review":             Codex,
+		"codex -i a.png apply":              Codex,
+		"codex -i a.png exec":               Codex,
+		"codex --image a.png b.png exec":    Codex,
+		"codex -i a.png -- exec":            Codex,
+		"codex -i a.png -m x exec":          "",
+		"codex -i a.png --full-auto review": "",
+		// An attached value is one value; whether codex reads more after it
+		// is unverified, so these keep the Task rule's answer.
+		"codex --image=a.png exec": "",
+		"codex -ia.png review":     "",
 		// A path component named claude makes the program Claude Code's,
 		// as it does for the task board.
 		"/opt/claude/bin/codex":             Claude,

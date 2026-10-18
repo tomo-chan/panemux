@@ -152,7 +152,8 @@ is not interactive) it is no agent's, even if a later agent's rule would also ma
 The Board exclude tokens are `-p` and `--print` for Claude Code and `exec` for codex. agmsg documents
 no headless invocation for the other four agents, so their Board rules have none. The Task rule reads
 codex's arguments as codex does: options that take a value (`-m`, `-c`, `-p`/`--profile`, `-C`, …)
-are skipped with their value, so `codex -m x exec` is headless and `codex -p exec` is not. Because a
+are skipped with their value, so `codex -m x exec` is headless and `codex -p exec` is not; `-i/--image`
+takes every argument up to the next option, so `codex -i a.png review` is a session. Because a
 path component of the program decides for Claude Code, a program such as `/opt/claude/bin/codex` is
 Claude Code's.
 

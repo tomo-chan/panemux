@@ -82,10 +82,11 @@ func (claudeWorkdir) locate(h workdirHost, pid int) (WorkdirSession, bool, error
 	}
 	for _, file := range files {
 		state, problem, _ := ParseClaudeSessionState(file.data)
-		if problem != "" || state.PID != pid {
+		// The first file whose pid is the process's decides, usable or not.
+		if problem == ClaudeStateNotJSON || problem == ClaudeStateInvalidPID || state.PID != pid {
 			continue
 		}
-		if state.CWD == "" {
+		if problem != "" || state.CWD == "" {
 			return WorkdirSession{}, false, nil
 		}
 		return WorkdirSession{

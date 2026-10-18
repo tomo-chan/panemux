@@ -119,6 +119,25 @@ func TestClaudeWorkdir_LocateReadsTheStateFileForThePID(t *testing.T) {
 	}, got)
 }
 
+// The first file whose pid is the process's decides, as before the parsers
+// were merged: an unusable one is not passed over for another file that
+// names the same pid.
+func TestClaudeWorkdir_LocateStopsAtTheFirstFileForThePID(t *testing.T) {
+	h := &fakeWorkdirHost{stateFiles: []claudeStateFile{
+		{name: "41.json", data: []byte(`{"pid":"42","sessionId":"s-0","cwd":"/x"}`)},
+		{name: "42.json", data: []byte(`{"pid":42,"sessionId":"a/b","cwd":"/repo"}`)},
+		{name: "old.json", data: []byte(`{"pid":42,"sessionId":"s-1","cwd":"/repo"}`)},
+	}}
+	_, ok, err := claudeWorkdir{}.locate(h, 42)
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	h.stateFiles[1].data = []byte(`{"pid":42,"sessionId":"s-2"}`)
+	_, ok, err = claudeWorkdir{}.locate(h, 42)
+	require.NoError(t, err)
+	assert.False(t, ok, "a file with no cwd decides too")
+}
+
 func TestClaudeWorkdir_LocateFindsNothingUnusable(t *testing.T) {
 	cases := map[string]*fakeWorkdirHost{
 		"no file":        {},

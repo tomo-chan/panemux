@@ -27,7 +27,8 @@ A task is one agent session:
   no rollout yet (see [Codex sessions](#codex-sessions)) is a task identified by its pid. A process
   is interactive when its first positional argument is absent, a prompt, `resume` or `fork`; every
   other codex-cli subcommand (`exec`, `review`, `app-server`, `mcp`, `login` and the rest listed by
-  `codex --help` of codex-cli 0.157.0) is not a task. Options that take a value are skipped with it.
+  `codex --help` of codex-cli 0.157.0) is not a task. Options that take a value are skipped with it,
+  and `-i/--image` with every argument up to the next option, so `codex -i a.png review` is a task.
 
 A task carries its host, agent, session ID, working directory, state, the time it entered that
 state, the reason it is waiting, its start time, its pid, where it runs, and the repository, branch
