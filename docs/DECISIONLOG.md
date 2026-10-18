@@ -1509,9 +1509,9 @@ agent's sections and their reading into a collect adapter, without changing what
   need `internal/tasks`'s types exported and would import it back.
 - **The prefilter follows the adapters.** The `cwd`/`env` sections probe only processes whose first
   two command fields contain an adapter's process hint (`claude|codex`). A test checks that every
-  sample command a Task rule lists passes it. The prefilter is case-sensitive while the Task rules
-  compare base names case-insensitively; matching the two is left to the change that merges the
-  rule sets (#375), since it changes which processes are probed.
+  sample command a Task rule lists passes it. The prefilter was case-sensitive while the Task rules
+  compare base names case-insensitively; matching the two was left to the change that merges the
+  rule sets (#375, below), since it changes which processes are probed.
 - **Codex's approval records are a codex section.** The records the PermissionRequest hook writes
   (#384, below) are read as the codex adapter's live section `codex/permission`. It is an adapter
   section added, so the protocol stays v2; a host without the hook prints the heading with no rows.
@@ -1606,6 +1606,39 @@ Stage D of #348, first half. Agreed on #375:
   nothing. The instruction text for all six types in every mode is fixed by a golden test and did not
   change. codex's `CODEX_THREAD_ID` stays unused: it is unverified. Board detection stays separate
   from the other rule sets, since it mirrors agmsg's.
+
+### Pane workdirs per session, on the Task rule (2026-10-18, issue #375)
+
+Stage D of #348, second half. Agreed on #375:
+
+- **One rule set for sessions.** The pane header found its agent by a Workdir rule (base name exactly
+  `claude` or `codex`, `-p`/`--print`/`exec` anywhere excluded); the task board by the Task rule. The
+  Workdir rule is gone and the pane uses the Task rule, among the agents that declare `workdir`. Four
+  things change, all accepted: claude run by `node`/`bun`/`deno` gets a header; codex's
+  non-interactive subcommands (`review`, `login`, `mcp-server`, `app-server`, `e`, `apply`, …) no
+  longer do; Claude Code not named `claude` (`claude-code`, `.../claude/versions/<ver>`) does; and
+  codex with `exec` other than as its first positional argument (`codex -p exec`, a word of the
+  prompt) does. A headless `codex exec` stays out however options precede it, since the Task rule
+  skips option values as codex parses them. Two boundaries follow and were accepted when asked:
+  a program with a path component named `claude` (`/opt/claude/bin/codex`) is Claude Code's, as the
+  task board already counted it, and a state file whose optional field has another type is read by
+  the header too. Board detection stays separate: it mirrors agmsg's.
+- **The Workdir capability is per session, in `internal/session`.** `internal/tasks` imports
+  `internal/session`, so the capability could not live in `tasks`. `locate` turns an agent process
+  into a `WorkdirSession` (`SessionKey`, PID, cwd, log) and `workdirs` resolves it; the local and
+  SSH reads differ only in a host abstraction that fetches, so their remote commands are unchanged.
+  The descendant-cwd fallback stays the pane's own. The task board's call and its display are stage
+  E: they change the API.
+- **One `~/.claude/sessions` parser.** The header and the task board each parsed the file; both now
+  use `session.ParseClaudeSessionState`, and the task board maps its problems to the unreadable-file
+  reasons it reports.
+- **The prefilters lower-case the program.** Stage B left the collection's `cwd`/`env` prefilter
+  case-sensitive while the Task rules are not. It now matches `tolower($2 " " $3)`, probing slightly
+  more processes. codex/open's own filter had the same difference and lower-cases the base name too.
+- **Not one observation per host.** Sharing a single per-host snapshot between the header and the
+  task board was rejected for failure isolation (a collection failure would blank the header),
+  freshness and migration risk; what is shared is the rule, the parser and the session model. The
+  gaps left are in #415.
 
 ## 2026-10-17: Updating the codex permission hook by itself (#294, #402)
 

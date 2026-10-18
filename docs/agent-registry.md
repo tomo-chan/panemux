@@ -59,10 +59,10 @@ collection could not read.
 | Capability | Meaning | Rule the registry checks |
 |---|---|---|
 | `detect` | Its processes are recognized | at least one detection rule |
-| `collect` | Its sessions and their state are listed on the task board | a Task rule |
+| `collect` | Its sessions and their state are listed on the task board | a Task rule (a Task rule needs `collect` or `workdir`) |
 | `launch` | panemux can start a new session | — |
 | `resume` | panemux can reopen one of its sessions | — |
-| `workdir` | Its working directory and conversation log can be resolved | a Workdir rule |
+| `workdir` | Its working directory and conversation log can be resolved | a Task rule |
 | `summary` | Its sessions can be summarized | — |
 | `usage` | Its usage limits and spend can be read; declared by no agent yet (#345) | — |
 | `board` | It can join Agent Board through agmsg | an agmsg type and a Board rule |
@@ -85,8 +85,17 @@ with codes the script or its adapter declares. A launch that names no session ID
 until a collection finds exactly one session of that agent in its tmux session
 ([Starting a task](behavior/tasks.md#starting-a-task)). An agent that declares neither is refused,
 and so is one whose CLI the host's probe found missing ([agent availability](behavior/tasks.md#agent-availability)).
-`workdir` and `summary` are still in `internal/session` and `internal/tasks`, which branch on the
-claude and codex IDs and read those IDs and their process rules from the registry.
+`workdir` is implemented by a workdir adapter per agent, which `internal/session` defines in its own
+types and lists explicitly by ID in `workdirAdapters` (`internal/session/workdir.go`); a test checks
+the list against the registry's `workdir` declarations. It works per session, not per pane: `locate`
+turns an agent process into a `WorkdirSession` — its `SessionKey`, PID, recorded cwd and log — and
+`workdirs` lists every working directory of that session, its subagents' transcripts included. Where
+the session runs, the panemux host or an SSH host, is a host abstraction that only fetches; what the
+files mean is decided once, in the adapter. A pane finds its agent with `agent.MatchInteractiveSession`
+and calls both; a task names its session with `Task.WorkdirSession`, which the task board's caller
+(stage E, #376) hands to `workdirs`. Claude Code's `~/.claude/sessions` files are read by one parser,
+`session.ParseClaudeSessionState`, which the task board wraps to keep its unreadable-file reasons.
+`summary` is still in `internal/tasks`, which branches on the claude and codex IDs.
 
 `board` is implemented by a board adapter per agent, which the root package defines in its own types
 and lists explicitly by ID in `boardAdapters` (`board_adapters.go`), checked against the registry when
@@ -129,19 +138,23 @@ and makes that agent's `collect` `degraded` / `unknown_format` on that host
 
 ## Detection rules
 
-Three rule sets exist because each consumer has always matched slightly differently; the registry
-keeps each exactly. Within one rule set the agents are tried in registration order, and the first
-whose patterns match the program decides: when one of its exclude tokens is among the arguments the
-process is no agent's, even if a later agent's patterns would also match the program.
+Two rule sets exist: the Board rules mirror agmsg's own detection, an external contract, and the Task
+rules are panemux's own, shared by the task board and the pane header. Within one rule set the agents
+are tried in registration order, and the first whose program matches decides: when the process is a
+headless run of that agent (a Board exclude token among the arguments, or a Task rule's process that
+is not interactive) it is no agent's, even if a later agent's rule would also match the program.
 
 | Rule | Used by | Matches |
 |---|---|---|
 | Board | Agent Board's agent-type polling (`AgentTypeDetector`) | Program base name against patterns (a trailing `*` matches any suffix), no exclude token among the arguments. Mirrors agmsg's own `type.conf` `detect_proc`. |
-| Workdir | A pane's active working directory (`ActiveWorkdirGetter`) | Program base name exactly `claude` or `codex`, no exclude token among the arguments. |
-| Task | The task board's collection | Claude Code: a path component of the program, or of the script a `node`, `bun` or `deno` interpreter runs, is `claude` or `claude-code`, and it is not `-p`/`--print`. codex: base name `codex`, and its first positional argument is not a non-interactive subcommand. |
+| Task | The task board's collection, and a pane's active working directory (`ActiveWorkdirGetter`, through `MatchInteractiveSession` among the agents that declare `workdir`) | Claude Code: a path component of the program, or of the script a `node`, `bun` or `deno` interpreter runs, is `claude` or `claude-code`, and it is not `-p`/`--print`. codex: base name `codex`, and its first positional argument is not a non-interactive subcommand. |
 
-The exclude tokens are `-p` and `--print` for Claude Code and `exec` for codex. agmsg documents no
-headless invocation for the other four agents, so their Board rules have none.
+The Board exclude tokens are `-p` and `--print` for Claude Code and `exec` for codex. agmsg documents
+no headless invocation for the other four agents, so their Board rules have none. The Task rule reads
+codex's arguments as codex does: options that take a value (`-m`, `-c`, `-p`/`--profile`, `-C`, …)
+are skipped with their value, so `codex -m x exec` is headless and `codex -p exec` is not. Because a
+path component of the program decides for Claude Code, a program such as `/opt/claude/bin/codex` is
+Claude Code's.
 
 agmsg itself does no process detection for antigravity, copilot or hermes, and agmsg-app is the
 desktop app's own user, so none of them is registered; an operator on one of them joins agmsg by

@@ -164,7 +164,8 @@ ends before its terminating marker — a connection dropped mid-run — fails th
 
 ### Unreadable state files
 
-A state file under `~/.claude/sessions` can be read when it is a JSON object with a positive integer
+The pane header reads these files with the same parser (`session.ParseClaudeSessionState`), so what
+can be read is the same for both. A state file under `~/.claude/sessions` can be read when it is a JSON object with a positive integer
 `pid` and a `sessionId` made of letters, digits, `-` and `_`. Every other field is optional: one that
 is absent or of another type (a `cwd` that is a number, say) is read as absent, and the file is read.
 A file that fails is unreadable for one of three reasons, checked in this order:
