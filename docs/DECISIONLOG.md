@@ -1624,7 +1624,8 @@ Stage D of #348, second half. Agreed on #375:
   task board already counted it, and the header's state-file keys are matched in their exact case,
   as the task board's are (Go's struct decoding had also accepted `"PID"` and the like; Claude Code
   writes them in lower case). The first file whose pid is the process's still decides, usable or
-  not, as before. A review of the PR found a fifth change, also accepted when asked: codex's
+  not, as before — unless its `cwd` or `sessionId` is of another type, which Go's struct decoding
+  failed on and passed over, so the header passes over it too. A review of the PR found a fifth change, also accepted when asked: codex's
   `-i/--image <FILE>...` takes every argument up to the next option, so `codex -i a.png review` and
   `codex -i a.png exec` are sessions with images, for the header and the task board alike; an
   attached value (`--image=a.png`) is read as one value, since what codex does after it could not be

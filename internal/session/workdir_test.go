@@ -138,6 +138,24 @@ func TestClaudeWorkdir_LocateStopsAtTheFirstFileForThePID(t *testing.T) {
 	assert.False(t, ok, "a file with no cwd decides too")
 }
 
+// A file whose cwd or sessionId is of another type is passed over, as Go's
+// struct decoding passed over it before the parsers were merged.
+func TestClaudeWorkdir_LocatePassesOverAMistypedFile(t *testing.T) {
+	for _, first := range []string{
+		`{"pid":42,"sessionId":"s-1","cwd":5}`,
+		`{"pid":42,"sessionId":7,"cwd":"/x"}`,
+	} {
+		h := &fakeWorkdirHost{stateFiles: []claudeStateFile{
+			{name: "42.json", data: []byte(first)},
+			{name: "old.json", data: []byte(`{"pid":42,"sessionId":"s-2","cwd":"/repo"}`)},
+		}}
+		got, ok, err := claudeWorkdir{}.locate(h, 42)
+		require.NoError(t, err, first)
+		require.True(t, ok, first)
+		assert.Equal(t, "s-2", got.Key.SessionID, first)
+	}
+}
+
 func TestClaudeWorkdir_LocateFindsNothingUnusable(t *testing.T) {
 	cases := map[string]*fakeWorkdirHost{
 		"no file":        {},

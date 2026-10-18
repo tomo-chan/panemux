@@ -55,16 +55,26 @@ type claudeStateFile struct {
 // read as absent (issue #313). detail is what was found when it could not be
 // read: the JSON error, or the offending field as written, unbounded.
 func ParseClaudeSessionState(data []byte) (state ClaudeSessionState, problem ClaudeStateProblem, detail string) {
+	state, problem, detail, _ = parseClaudeState(data)
+	return state, problem, detail
+}
+
+// parseClaudeState is ParseClaudeSessionState that also reports whether the
+// file's cwd or sessionId is of another type, which the pane header passes
+// over (claudeWorkdir.locate).
+func parseClaudeState(data []byte) (
+	state ClaudeSessionState, problem ClaudeStateProblem, detail string, mistyped bool,
+) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		var typeErr *json.UnmarshalTypeError
 		if errors.As(err, &typeErr) {
-			return state, ClaudeStateNotJSON, detailNotObject
+			return state, ClaudeStateNotJSON, detailNotObject, mistyped
 		}
-		return state, ClaudeStateNotJSON, err.Error()
+		return state, ClaudeStateNotJSON, err.Error(), mistyped
 	}
 	if fields == nil { // the JSON literal null
-		return state, ClaudeStateNotJSON, detailNotObject
+		return state, ClaudeStateNotJSON, detailNotObject, mistyped
 	}
 
 	for name, dst := range map[string]any{
@@ -76,20 +86,24 @@ func ParseClaudeSessionState(data []byte) (state ClaudeSessionState, problem Cla
 		"startedAt":       &state.StartedAt,
 		"version":         &state.Version,
 	} {
-		if raw, ok := fields[name]; ok {
-			_ = json.Unmarshal(raw, dst) // a value of another type leaves the field empty
+		if raw, ok := fields[name]; ok && json.Unmarshal(raw, dst) != nil {
+			// A value of another type leaves the field empty.
+			mistyped = mistyped || name == "cwd"
 		}
 	}
 
 	if raw, ok := fields["pid"]; !ok {
-		return state, ClaudeStateInvalidPID, detailPIDMissing
+		return state, ClaudeStateInvalidPID, detailPIDMissing, mistyped
 	} else if json.Unmarshal(raw, &state.PID) != nil || state.PID <= 0 {
-		return state, ClaudeStateInvalidPID, "pid: " + string(raw)
+		return state, ClaudeStateInvalidPID, "pid: " + string(raw), mistyped
 	}
-	if raw, ok := fields["sessionId"]; !ok {
-		return state, ClaudeStateInvalidSessionID, "sessionId is missing"
-	} else if json.Unmarshal(raw, &state.SessionID) != nil || !validClaudeSessionID.MatchString(state.SessionID) {
-		return state, ClaudeStateInvalidSessionID, "sessionId: " + string(raw)
+	raw, ok := fields["sessionId"]
+	if !ok {
+		return state, ClaudeStateInvalidSessionID, "sessionId is missing", mistyped
 	}
-	return state, "", ""
+	err := json.Unmarshal(raw, &state.SessionID)
+	if err != nil || !validClaudeSessionID.MatchString(state.SessionID) {
+		return state, ClaudeStateInvalidSessionID, "sessionId: " + string(raw), mistyped || err != nil
+	}
+	return state, "", "", mistyped
 }
