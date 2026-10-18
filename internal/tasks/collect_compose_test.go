@@ -144,12 +144,29 @@ var taskRuleSampleCommands = []string{
 	"codex", "/usr/local/bin/codex --yolo", "codex exec 'fix it'", "codex app-server --listen unix://",
 	"/opt/homebrew/bin/codex resume 01a0e2b9-d054-7cc2-9278-000000000001", "codex -c model=o3 review",
 	"codex-helper", "/usr/local/bin/codexx", "node /opt/codex/cli.js",
+	// The Task rules compare base names in lower case, so the prefilter does
+	// too (issue #375).
+	"/Applications/Claude.app/Contents/MacOS/CLAUDE", "/opt/Claude-Code/bin/x", "NODE /x/Claude/cli.js",
+	"/usr/local/bin/CODEX", "Codex resume",
 }
 
 func TestCollectPrefilter_CoversEveryTaskRule(t *testing.T) {
 	assert.Equal(t, "claude|codex", collectPlan.prefilter)
-	assert.Contains(t, collectScript, `awk '($2 " " $3) ~ /claude|codex/ { print $1 }'`)
-	prefilter := regexp.MustCompile(collectPlan.prefilter)
+	prefilter := regexp.MustCompile(`awk '(tolower\(\$2 " " \$3\) ~ /claude\|codex/ \{ print \$1 \})'`)
+	m := prefilter.FindStringSubmatch(collectScript)
+	require.NotNil(t, m, "the cwd section's prefilter")
+	var rows []string
+	for i, command := range taskRuleSampleCommands {
+		rows = append(rows, "  "+strconv.Itoa(1000+i)+" "+command)
+	}
+	cmd := exec.Command("awk", m[1]) //nolint:gosec // the program is collectScript's own constant
+	cmd.Stdin = strings.NewReader(strings.Join(rows, "\n") + "\n")
+	out, err := cmd.Output()
+	require.NoError(t, err)
+	passed := map[string]bool{}
+	for _, pid := range strings.Fields(string(out)) {
+		passed[pid] = true
+	}
 
 	for _, d := range agent.All() {
 		if d.Detection.Task == nil {
@@ -161,12 +178,7 @@ func TestCollectPrefilter_CoversEveryTaskRule(t *testing.T) {
 				continue
 			}
 			matched++
-			fields := strings.Fields(command)
-			firstTwo := fields[0]
-			if len(fields) > 1 {
-				firstTwo += " " + fields[1]
-			}
-			assert.True(t, prefilter.MatchString(firstTwo), "%s: %q", d.ID, command)
+			assert.True(t, passed[strconv.Itoa(1000+slices.Index(taskRuleSampleCommands, command))], "%s: %q", d.ID, command)
 		}
 		assert.Positive(t, matched, "%s matched none of the sample commands", d.ID)
 	}
