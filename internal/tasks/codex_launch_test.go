@@ -183,6 +183,12 @@ func TestBuildLaunchScript_AgentRules(t *testing.T) {
 	p.agent = "aider"
 	_, err = buildLaunchScript(p)
 	assert.ErrorIs(t, err, ErrInvalidLaunch)
+
+	p = codexParams(t, launchResume, "/workspace/user/project", "")
+	p.agent = "cursor"
+	_, err = buildLaunchScript(p)
+	assert.ErrorIs(t, err, ErrInvalidLaunch)
+	assert.ErrorContains(t, err, `agent "cursor" cannot be resumed`)
 }
 
 func TestTmuxSessionForCodex(t *testing.T) {

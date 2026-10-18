@@ -217,8 +217,8 @@ How to fix one:
 
 Whether each agent's capabilities can be used on a host is kept per host inside `internal/tasks`
 (`Service.Availability`, issue [#373](https://github.com/tomo-chan/panemux/issues/373)). It is not in
-`GET /api/tasks` or the dashboard yet, and nothing refuses a launch or resume on it yet; the server log
-carries what changes. Each entry is an agent, a capability (`collect`, `launch`, `resume`), a status
+`GET /api/tasks` or the dashboard yet; the server log carries what changes. A launch or resume is
+refused on it as described below the table. Each entry is an agent, a capability (`collect`, `launch`, `resume`), a status
 (`available`, `degraded`, `unavailable`, `unknown`), a reason, a detail and the version the agent's
 newest session recorded.
 
@@ -232,6 +232,15 @@ newest session recorded.
 | `collect` | `degraded` / `unknown_format` | The last full collection found something of the agent's in a format this build does not know (below) |
 
 `auth_missing` and `session_info_missing` are defined and reported by nothing yet.
+
+**A launch or resume of an agent that is `unavailable` / `cli_missing`** over the host's current
+connection is refused before anything runs — a resume before the host is collected again — with the
+`409` and fixed message the launch script itself gives ("claude was not found on the host"), and the
+host is probed again at once, whatever the age of its last probe, so a CLI installed since is found
+on the next try. `not_probed` and `probe_failed` refuse nothing: the launch script looks for the CLI
+itself. A `collect` that is `degraded` refuses nothing either. Unknown input is rejected rather than
+guessed for a resume: a session whose state is in a format this build does not know is `unknown`,
+never `stop`, so it is not resumed, and its session ID must be one the agent's resume accepts.
 
 **The probe** is a fixed script of its own ([Task agent probe](../security/command-execution.md#task-agent-probe)),
 started over the host's collection connection (or locally) after a full collection of the host that
@@ -619,7 +628,7 @@ set.
 
 ### Starting a task
 
-`New task` starts one claude or codex session on a host, in a detached tmux session of its own. No
+`New task` starts one session of an agent that declares `launch` — claude or codex — on a host, in a detached tmux session of its own. No
 pane is created: the task is opened from the dashboard like any other, when someone wants to watch
 it.
 
@@ -704,12 +713,17 @@ A **codex** task starts the same way, with these differences:
   Until they are answered the task shows as `run` in its tmux session with no session
   ([Codex sessions](#codex-sessions)), and the detail panel says to open the pane.
 - **The labels are recorded once codex's session is known.** They are checked before anything
-  starts, held in panemux's memory under the host and the tmux session, and recorded — added to any
-  labels the session already has — by the first `GET /api/tasks` that finds a codex session in that
-  tmux session. They are dropped when panemux restarts before then, when the host is removed from
-  `ssh_connections`, or when, a minute or more after the start, a collection of the host finds no
-  task in that tmux session (codex quit at a start-up screen, or the session was killed). A record
-  file that cannot be written keeps them for the next collection.
+  starts, held in panemux's memory under the host, the agent and the tmux session, and recorded —
+  added to any labels the session already has — by the first `GET /api/tasks` that finds exactly one
+  codex session on that host in that tmux session. A codex there with no session yet keeps them
+  waiting, even beside one with a session, since which of the two they were meant for is not known
+  yet; a task of another agent there neither claims them nor keeps them waiting. They are
+  dropped when panemux restarts before then, when the host is removed from `ssh_connections`, when
+  two codex sessions are found in that tmux session (which one they were meant for cannot be told;
+  the server log says so), or when, a minute or more after the start, a collection of the host finds
+  no codex task in that tmux session (codex quit at a start-up screen, or the session was killed). A
+  record file that cannot be written keeps them for the next collection. This is the lifecycle of
+  any agent whose launch leaves the session ID to the agent; codex is the only one now.
 - **The dashboard selects the task in its tmux session**: as its process while it has no session,
   and again as its session once it has one.
 
@@ -1171,7 +1185,8 @@ Starts a task:
 { "host": "", "agent": "claude", "cwd": "/workspace/user/project", "prompt": "Fix the flaky test", "labels": ["payment"] }
 ```
 
-- Every field but `labels` is required in effect: `agent` must be `claude` or `codex`, and `cwd` and
+- Every field but `labels` is required in effect: `agent` must be an agent that declares `launch`
+  (`claude` or `codex`; otherwise `agent must be one of: claude, codex`), and `cwd` and
   `prompt` follow [Starting a task](#starting-a-task). An unknown field is refused.
 - Answers `201`:
 
@@ -1188,22 +1203,24 @@ Starts a task:
   { "tmux_session": "task-0a1b2c3d", "pending_labels": ["payment"] }
   ```
 - `400` for a body, agent, label, directory or instruction that is not valid, `404` for a `host`
-  that is not an `ssh_connections` key, `409` when the host refused — tmux or the agent missing, a codex
+  that is not an `ssh_connections` key, `409` when the host refused — tmux or the agent missing (the
+  agent's also when the host's probe found its CLI missing, before anything runs; see
+  [Agent availability](#agent-availability)), a codex
   without `--no-daemon`, the directory missing, a tmux session of that name existing, tmux failing, the temporary file not
   written, each with a fixed message — `502` when the host could not be reached or did not answer,
   and `403` for a cross-site request as for `GET /api/tasks`.
 
 ### `POST /api/tasks/resume`
 
-Resumes a stopped claude or codex task:
+Resumes a stopped task of an agent that declares `resume` (claude or codex):
 
 ```json
 { "host": "", "agent": "codex", "session_id": "01a0e2b9-d054-7cc2-9278-a5e25ebcc524" }
 ```
 
-- `agent` is `claude` (the default when it is omitted) or `codex`.
+- `agent` is `claude` (the default when it is omitted) or `codex`, the agents that declare `resume`.
 - Answers `200` with `id`, `session_id` and `tmux_session` as above.
-- `400` for a body that is not valid, an agent that is neither, or a `session_id` that is not a UUID,
+- `400` for a body that is not valid, an agent that does not resume, or a `session_id` the agent's resume does not accept (a UUID for both),
   or a stopped session whose working directory is unknown or refused; `404` for an unknown `host`;
   `409` when the session is not a stopped task of that agent on the host, or the host refused as above; `502` when the host could not be
   collected or reached; `403` for a cross-site request.

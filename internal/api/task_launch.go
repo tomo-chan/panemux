@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"panemux/internal/tasks"
 )
@@ -23,8 +24,9 @@ type taskLaunchRequest struct {
 
 // taskLaunchResponse is a started task. Labels are the labels recorded for
 // it; RecordsError is why they could not be, in which case the task was
-// still started. PendingLabels are a codex task's labels, held until a
-// collection finds its session (tasks.PendingLabels).
+// still started. PendingLabels are the labels of a task whose agent picks
+// its session ID itself (codex), held until a collection finds its session
+// (tasks.PendingLabels).
 type taskLaunchResponse struct {
 	tasks.Launched
 	RecordsError  string   `json:"records_error,omitempty"`
@@ -40,10 +42,11 @@ type taskResumeRequest struct {
 	SessionID string `json:"session_id"`
 }
 
-// PostTask starts a new claude or codex task on a host, in a detached tmux
-// session of its own, and records the labels it was given (issues #257 and
-// #264). No pane is created: the dashboard attaches one when the task is
-// opened.
+// PostTask starts a new task of an agent that declares launch on a host, in
+// a detached tmux session of its own, and records the labels it was given
+// (issues #257 and #264): at once when the launch named the session ID,
+// otherwise once a collection finds the session. No pane is created: the
+// dashboard attaches one when the task is opened.
 func (h *Handler) PostTask(w http.ResponseWriter, r *http.Request) {
 	if refuseCrossSite(w, r) {
 		return
@@ -52,8 +55,8 @@ func (h *Handler) PostTask(w http.ResponseWriter, r *http.Request) {
 	if !decodeStrict(w, r, taskLaunchBodyLimit, &req) {
 		return
 	}
-	if req.Agent != tasks.AgentClaude && req.Agent != tasks.AgentCodex {
-		http.Error(w, "agent must be claude or codex", http.StatusBadRequest)
+	if !tasks.CanLaunch(req.Agent) {
+		http.Error(w, "agent must be one of: "+strings.Join(tasks.LaunchAgents(), ", "), http.StatusBadRequest)
 		return
 	}
 	// Labels are checked before anything starts, so a label that would be
@@ -75,12 +78,12 @@ func (h *Handler) PostTask(w http.ResponseWriter, r *http.Request) {
 	resp := taskLaunchResponse{Launched: launched}
 	switch {
 	case len(labels) == 0:
-	case req.Agent == tasks.AgentCodex:
-		h.pendingTaskLabels.Add(req.Host, launched.TmuxSession, labels)
+	case launched.SessionID == "":
+		h.pendingTaskLabels.Add(req.Host, req.Agent, launched.TmuxSession, labels)
 		resp.PendingLabels = labels
 	default:
 		saved, err := h.taskRecords.Put(tasks.Record{
-			Host: req.Host, Agent: tasks.AgentClaude, SessionID: launched.SessionID, Labels: labels,
+			Host: req.Host, Agent: req.Agent, SessionID: launched.SessionID, Labels: labels,
 		})
 		if err != nil {
 			resp.RecordsError = err.Error()
@@ -93,9 +96,10 @@ func (h *Handler) PostTask(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// PostTaskResume runs `claude --resume` or `codex resume` for a stopped task
-// in a new detached tmux session. The task keeps its session ID, so its record — done
-// and labels — carries over unchanged.
+// PostTaskResume reopens a stopped task of an agent that declares resume
+// (`claude --resume`, `codex resume`) in a new detached tmux session. The
+// task keeps its session ID, so its record — done and labels — carries over
+// unchanged.
 func (h *Handler) PostTaskResume(w http.ResponseWriter, r *http.Request) {
 	if refuseCrossSite(w, r) {
 		return

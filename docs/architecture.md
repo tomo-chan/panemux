@@ -127,11 +127,15 @@ with a fresh collection of its host (`tasks.Service.FindTask`), registers an att
 Type in pane popup (`TaskInputPopup`) reads it through `TaskTerminal`, which uses the same
 `useTerminal` as a pane but asks for no `/api/sessions/{id}/restart` on a disconnect: it opens the
 attach again instead. `POST /api/tasks` and `POST /api/tasks/resume`
-run a second fixed script the same way — `sh -s` with the script on stdin — which starts claude or
-codex in a detached tmux session; a resume first collects the host again to confirm the session is
-stopped there, and a start records its labels in `tasks.RecordStore` — for codex, whose session ID
-is not known until it has started, `tasks.PendingLabels` holds them in memory and the first
-`GET /api/tasks` that finds codex's session in the task's tmux session records them. When
+run a second fixed script the same way — `sh -s` with the script on stdin — which starts the agent
+in a detached tmux session. The script is composed at startup from a launch and a resume adapter per
+agent (`internal/tasks/launch_adapters.go`), each a fixed fragment under the case of its agent and
+mode; an agent that declares neither is refused before anything runs, and so is one whose CLI the
+host's probe found missing. A resume first collects the host again to confirm the session is stopped
+there, and a start records its labels in `tasks.RecordStore` — when the launch names no session ID
+(codex picks its own once started), `tasks.PendingLabels` holds them in memory under the host, the
+agent and the tmux session, and the first `GET /api/tasks` that finds exactly one session of that
+agent in that tmux session records them. When
 `task_dashboard.summary.enabled` is set, `GET /api/tasks` also attaches each task's summary and starts
 the ones that are due, in the background and at most two at a time: a third fixed script reads the
 task's conversation log on its host, and the matching agent CLI on the panemux host summarizes the conversation

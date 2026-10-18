@@ -182,6 +182,8 @@ func TestPostTask_Refusals(t *testing.T) {
 		{name: "unknown agent", body: `{"host":"","agent":"aider","cwd":"/w","prompt":"go"}`,
 			wantStatus: http.StatusBadRequest, wantBody: "agent"},
 		{name: "missing agent", body: `{"host":"","cwd":"/w","prompt":"go"}`, wantStatus: http.StatusBadRequest},
+		{name: "an agent that does not launch", body: `{"host":"","agent":"cursor","cwd":"/w","prompt":"go"}`,
+			wantStatus: http.StatusBadRequest, wantBody: "agent must be one of: claude, codex"},
 		{name: "invalid label", body: `{"host":"","agent":"claude","cwd":"/w","prompt":"go","labels":["a\u0007"]}`,
 			wantStatus: http.StatusBadRequest},
 		{name: "relative directory", body: `{"host":"","agent":"claude","cwd":"w","prompt":"go"}`,
@@ -229,6 +231,7 @@ func TestPostTaskResume_ResumesAStoppedTask(t *testing.T) {
 	assert.Contains(t, host.scripts[0], "mode='resume'")
 }
 
+//efficacy:exempt pins the 400 an agent declaring no resume already got; only its source moved
 func TestPostTaskResume_Refusals(t *testing.T) {
 	tests := []struct {
 		headers    map[string]string
@@ -251,6 +254,8 @@ func TestPostTaskResume_Refusals(t *testing.T) {
 		{name: "a codex session resumed as claude", body: `{"host":"","session_id":"` + resumeCodexSessionID + `"}`,
 			wantStatus: http.StatusConflict},
 		{name: "unknown agent", body: `{"host":"","agent":"aider","session_id":"` + resumeSessionID + `"}`,
+			wantStatus: http.StatusBadRequest},
+		{name: "an agent that does not resume", body: `{"host":"","agent":"cursor","session_id":"` + resumeSessionID + `"}`,
 			wantStatus: http.StatusBadRequest},
 		{name: "host refuses", body: `{"host":"","session_id":"` + resumeSessionID + `"}`,
 			answer: "::panemux-launch error tmux-exists\n", wantStatus: http.StatusConflict},

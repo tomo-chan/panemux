@@ -403,7 +403,7 @@ characters by `boundedText`, at most 3 of each, and never reach a command.
 ### Task launch and resume
 
 `POST /api/tasks` and `POST /api/tasks/resume` ([behavior](../behavior/tasks.md#starting-a-task))
-start a claude or codex process on the panemux host or an `ssh_connections` host, from values a
+start an agent's process — claude or codex, the agents with a launch or resume adapter — on the panemux host or an `ssh_connections` host, from values a
 request supplies: a host, an agent, a working directory, a first instruction and a session ID. Unlike the command
 center, which hands `exec.CommandContext` an argv, a remote start has to cross the remote login
 shell, and tmux runs what it is given as its own child. The design keeps every request value out of
@@ -412,14 +412,20 @@ anything a shell parses, rather than escaping it.
 **One fixed script, run as `sh -s`.** `launchScriptTemplate` in `internal/tasks/launch.go` runs
 exactly as the collection script does: locally `exec.CommandContext(ctx, "sh", "-s")`, remotely an
 exec request whose command is the literal `sh -s`, the script on stdin in both cases. The remote
-login shell parses only `sh -s`. The template is a compile-time constant; `buildLaunchScript` fills
-seven placeholders, each of which is checked first and refused rather than escaped:
+login shell parses only `sh -s`. The template is a compile-time constant, and so is what the agents'
+launch and resume adapters add to it (`internal/tasks/launch_adapters.go`): each adapter's fragment —
+the command that starts the agent, and for codex the `--no-daemon` check — is a Go constant composed
+once, at startup, under the `case` of its agent and mode, and checked there to set only its own
+variable, to stay inside its case (no `;;`, `esac` or `{{`) and to refuse only with a code the script
+or the adapter declares, each with a fixed message. No request value reaches a fragment.
+`buildLaunchScript` fills seven placeholders, each of which is checked first and refused rather
+than escaped:
 
 | Placeholder | Source | Check |
 |---|---|---|
-| agent | `claude` or `codex`, a Go constant chosen from the request's value | one of the two (`checkLaunchSessionID`) |
+| agent | a registry ID with a launch (new) or resume adapter, chosen from the request's value | the adapter exists (`checkLaunchSessionID`); a registry ID has no quote |
 | mode | `new` or `resume`, a Go constant | — |
-| session ID | minted by panemux (`newSessionID`, crypto/rand) for a new claude task; none for a new codex task, whose ID codex picks; for a resume, the request's value | A UUID (`validUUID`); empty for a new codex task |
+| session ID | minted by panemux (`newSessionID`, crypto/rand) for a new claude task; none for a new codex task, whose ID codex picks; for a resume, the request's value | what the agent's adapter accepts: a UUID (`validUUID`) for both resumes and a new claude task; empty for a new codex task |
 | tmux session name | `task-` and the session ID's first eight characters (claude), its last eight (a codex resume), or eight hex digits from crypto/rand (a new codex task) | `validTmuxSessionName` |
 | heredoc tag | 32 hex characters from crypto/rand | `^[0-9a-f]{32}$` |
 | working directory | the request, or for a resume the host's conversation log | `session.ValidateRemotePath`, the guard a pane's remote `cwd` passes |

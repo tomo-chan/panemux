@@ -191,14 +191,21 @@ type probeEntry struct {
 // wait for it: until it answers, the previous result of the same
 // connection is reported, or nothing. A failure is kept as long as a
 // result, so a slow login shell is not run every collection.
-func (s *Service) startProbe(name string) {
+func (s *Service) startProbe(name string) { s.beginProbe(name, false) }
+
+// reprobe starts probing a host whatever the age of its last probe, unless
+// one is already running: a launch refused because the probe found no CLI
+// asks again, so a CLI installed since is found for the next try.
+func (s *Service) reprobe(name string) { s.beginProbe(name, true) }
+
+func (s *Service) beginProbe(name string, force bool) {
 	conn := s.currentConn(name)
 	now := s.opts.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.probes[name]
 	if s.closed || s.probing[name] || name != "" && conn == nil ||
-		ok && entry.conn == conn && now.Sub(entry.at) < probeTTL {
+		!force && ok && entry.conn == conn && now.Sub(entry.at) < probeTTL {
 
 		return
 	}
@@ -312,6 +319,33 @@ func (s *Service) Availability(host string) []Availability {
 		}
 	}
 	return list
+}
+
+// cliMissing reports whether the probe of a host's current connection
+// answered that the agent's CLI is not there: launch and resume are
+// unavailable / cli_missing. A host not probed yet, or whose probe failed,
+// is not known to miss it.
+func (s *Service) cliMissing(host string, id agent.ID) bool {
+	conn := s.currentConn(host)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.probes[host]
+	if !ok || entry.conn != conn || entry.err != nil {
+		return false
+	}
+	found, asked := entry.found[id]
+	return asked && !found
+}
+
+// refuseMissingCLI refuses, as the launch script would, a launch or resume
+// of an agent whose CLI the host's probe did not find, and probes the host
+// again.
+func (s *Service) refuseMissingCLI(host string, id agent.ID) error {
+	if !s.cliMissing(host, id) {
+		return nil
+	}
+	s.reprobe(host)
+	return &LaunchError{Code: refusedNoAgent(id)}
 }
 
 func notProbed(id agent.ID, c agent.Capability) Availability {

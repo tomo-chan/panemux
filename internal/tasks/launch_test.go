@@ -624,6 +624,26 @@ func TestResume_Refusals(t *testing.T) {
 	}
 }
 
+// Resume rejects unknown input (#373, #374): a session whose state is in a
+// format this build does not know is listed as unknown, never as stopped, so
+// it is not resumed.
+//
+//efficacy:exempt pins the reject policy the resume already had; this branch moved it, not changed it
+func TestResume_ASessionInAnUnknownFormatIsNotResumed(t *testing.T) {
+	runningID := "11111111-2222-4333-8444-555555555555"
+	out := strings.Replace(string(stoppedOutput(testSessionID, "/w", runningID)),
+		`"status":"busy"`, `"status":"paused"`, 1)
+	checkResumeRefusal(t, resumeRefusal{
+		sessionID: runningID, wantIs: ErrNoStoppedTask,
+		runLocal: func(_ context.Context, script string) ([]byte, error) {
+			if script != collectScript {
+				t.Fatalf("launched a session whose state is unknown")
+			}
+			return []byte(out), nil
+		},
+	})
+}
+
 func checkResumeRefusal(t *testing.T, tt resumeRefusal) {
 	t.Helper()
 	svc := New(Options{
