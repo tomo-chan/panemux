@@ -10,6 +10,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/agent"
+	"panemux/internal/session"
 )
 
 // collectedAt is panemux's own clock at collection time; hostNow is the
@@ -201,13 +204,13 @@ func TestBuildTasks_UnreadableStateFilesAreReportedWithTheirReason(t *testing.T)
 		{"garbage", "x", UnreadableNotJSON, "invalid character 'x' looking for beginning of value"},
 		{"an array", "[5]", UnreadableNotJSON, "not a JSON object"},
 		{"null", "null", UnreadableNotJSON, "not a JSON object"},
-		{"no pid", `{"sessionId":"abc"}`, UnreadableInvalidPID, detailPIDMissing},
+		{"no pid", `{"sessionId":"abc"}`, UnreadableInvalidPID, "pid is missing"},
 		{"pid zero", `{"pid":0,"sessionId":"abc"}`, UnreadableInvalidPID, "pid: 0"},
 		{"pid negative", `{"pid":-3,"sessionId":"abc"}`, UnreadableInvalidPID, "pid: -3"},
 		{"pid null", `{"pid":null,"sessionId":"abc"}`, UnreadableInvalidPID, "pid: null"},
 		{"pid a string", `{"pid":"5","sessionId":"abc"}`, UnreadableInvalidPID, `pid: "5"`},
 		{"pid a fraction", `{"pid":5.5,"sessionId":"abc"}`, UnreadableInvalidPID, "pid: 5.5"},
-		{"both bad reports the pid", `{"sessionId":"../x"}`, UnreadableInvalidPID, detailPIDMissing},
+		{"both bad reports the pid", `{"sessionId":"../x"}`, UnreadableInvalidPID, "pid is missing"},
 		{"no session id", `{"pid":5}`, UnreadableInvalidSessionID, "sessionId is missing"},
 		{"empty session id", `{"pid":5,"sessionId":""}`, UnreadableInvalidSessionID, `sessionId: ""`},
 		{"session id a path", `{"pid":5,"sessionId":"../x"}`, UnreadableInvalidSessionID, `sessionId: "../x"`},
@@ -815,4 +818,20 @@ func TestBuildTasks_LogVersionOfEqualTimesIsTheFirstListed(t *testing.T) {
 	task := findTask(t, buildTasks("", raw, collectedAt), "local:claude:dup")
 	assert.Equal(t, "/first", task.CWD)
 	assert.Equal(t, &LogVersion{ModTime: hostNow - 60, Size: 100}, task.Log)
+}
+
+// A task names the session the Workdir capability resolves (issue #375):
+// the task board's caller, in a later stage, needs nothing else.
+func TestTask_WorkdirSession(t *testing.T) {
+	claude := Task{Host: "devbox", Agent: string(agent.Claude), SessionID: "s-1", PID: 42, CWD: "/workspace/user/project"}
+	assert.Equal(t, session.WorkdirSession{
+		Key: agent.SessionKey{Host: "devbox", Agent: agent.Claude, SessionID: "s-1"},
+		PID: 42, CWD: "/workspace/user/project",
+	}, claude.WorkdirSession())
+
+	codex := Task{Agent: string(agent.Codex), SessionID: "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b", PID: 7, CWD: "/repo"}
+	assert.Equal(t, session.WorkdirSession{
+		Key: agent.SessionKey{Agent: agent.Codex, SessionID: "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"},
+		PID: 7, CWD: "/repo",
+	}, codex.WorkdirSession())
 }

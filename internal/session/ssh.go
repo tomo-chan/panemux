@@ -7,10 +7,10 @@ import (
 	"crypto/hmac"
 	"crypto/sha1" //nolint:gosec // G505: OpenSSH hashed known_hosts entries use HMAC-SHA1
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"log"
 	"net"
 	"os"
@@ -26,6 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
+	"panemux/internal/agent"
 	"panemux/internal/homedir"
 )
 
@@ -1217,12 +1218,7 @@ func activeRemoteWorkdirsWithOutput(
 		log.Printf("%s selected interactive agent pid=%d command=%q", logScope, agentPID, proc.Command)
 	}
 
-	sessionCWDs, sessionErr := remoteInteractiveAgentSessionCWDs(
-		run,
-		logScope,
-		processes,
-		agentPID,
-	)
+	sessionCWDs, sessionErr := remoteInteractiveAgentSessionCWDs(run, logScope, processes, agentPID)
 	if sessionErr == nil && len(sessionCWDs) > 0 {
 		log.Printf("%s resolved active workdirs from interactive agent session data: %q", logScope, sessionCWDs)
 		return sessionCWDs, nil
@@ -1301,40 +1297,6 @@ func remotePIDCWD(run remoteOutputFunc, pid int) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func remoteCodexSessionCWD(
-	run remoteOutputFunc,
-	logScope string,
-	processes []processInfo,
-	agentPID int,
-) (string, error) {
-	proc, ok := processByPID(processes, agentPID)
-	if !ok || !isCodexCommand(proc.Command) {
-		return "", nil
-	}
-
-	paths, err := remoteOpenFiles(run, agentPID)
-	if err != nil {
-		log.Printf("%s open files lookup failed pid=%d: %v", logScope, agentPID, err)
-		return "", err
-	}
-	sessionPath, ok := codexSessionPath(paths)
-	if !ok {
-		log.Printf("%s no codex session log found for pid=%d", logScope, agentPID)
-		return "", nil
-	}
-	log.Printf("%s found codex session log for pid=%d path=%q", logScope, agentPID, sessionPath)
-
-	return remoteCachedAgentLogCWD(
-		run,
-		"ssh:"+logScope+":codex:"+sessionPath,
-		logScope,
-		sessionPath,
-		shellQuotePath(sessionPath),
-		"codex session log",
-		parseCodexSessionCWD,
-	)
-}
-
 func remoteInteractiveAgentSessionCWDs(
 	run remoteOutputFunc,
 	logScope string,
@@ -1345,122 +1307,106 @@ func remoteInteractiveAgentSessionCWDs(
 	if !ok {
 		return nil, nil
 	}
-
-	switch {
-	case isCodexCommand(proc.Command):
-		cwd, err := remoteCodexSessionCWD(run, logScope, processes, agentPID)
-		if err != nil || cwd == "" {
-			return nil, err
-		}
-		return []string{cwd}, nil
-	case isClaudeCommand(proc.Command):
-		return remoteClaudeSessionCWDs(run, logScope, processes, agentPID)
-	default:
+	d, ok := agent.MatchInteractiveSession(proc.Command)
+	if !ok {
 		return nil, nil
 	}
+	return resolveSessionWorkdirs(remoteWorkdirHost{run: run, logScope: logScope}, d.ID, agentPID)
 }
 
-// remoteClaudeSessionCWDs returns every distinct workdir found across the
-// Claude session's own remote transcript and any Task subagent transcripts
-// recorded alongside it under a remote "subagents" directory. See
-// claudeSessionCWDs (local.go) for why subagent transcripts matter: a
-// delegated subagent's worktree-relative work is otherwise invisible because
-// it is never reflected in the parent transcript.
-func remoteClaudeSessionCWDs(
-	run remoteOutputFunc,
-	logScope string,
-	processes []processInfo,
-	agentPID int,
-) ([]string, error) {
-	proc, ok := processByPID(processes, agentPID)
-	if !ok || !isClaudeCommand(proc.Command) {
-		return nil, nil
-	}
+// remoteWorkdirHost reads an SSH host's files through fixed shell commands.
+// See claudeWorkdir.workdirs for why subagent transcripts matter.
+type remoteWorkdirHost struct {
+	run      remoteOutputFunc
+	logScope string
+	// host is the ssh_connections key; a pane, which reads no session key,
+	// leaves it empty.
+	host string
+}
 
-	sessionMeta, err := remoteClaudeSessionMeta(run, logScope, agentPID)
+func (h remoteWorkdirHost) hostKey() string { return h.host }
+
+// claudeStateFiles is ~/.claude/sessions/<pid>.json, the name Claude Code
+// gives the file.
+func (h remoteWorkdirHost) claudeStateFiles(pid int) ([]claudeStateFile, error) {
+	sessionPath := fmt.Sprintf("~/.claude/sessions/%d.json", pid)
+	out, err := h.run("cat " + sessionPath)
 	if err != nil {
+		log.Printf("%s reading claude session metadata failed path=%q: %v", h.logScope, sessionPath, err)
 		return nil, err
 	}
-	if sessionMeta == nil || sessionMeta.SessionID == "" || sessionMeta.CWD == "" {
-		return nil, nil
-	}
-	if !validClaudeSessionID.MatchString(sessionMeta.SessionID) {
-		return nil, nil
-	}
-
-	// The directory Claude stores this session under, which panemux derives
-	// from the session's cwd — an encoding that is observed behavior of Claude
-	// Code, not a documented interface (see claudeProjectDirName). The remote
-	// resolver falls back the same way the local one does when that derivation
-	// is wrong, because the pane loses its worktree either way and panes here
-	// are reached over SSH just as often (issue #119).
-	dir := remoteClaudeProjectDir(logScope, sessionMeta)
-
-	cwds := remoteClaudeCWDsUnder(run, logScope, sessionMeta, dir)
-	if len(cwds) > 0 {
-		return cwds, nil
-	}
-
-	// Nothing under the directory panemux expected. Ask the host where this
-	// session's transcript actually is — once per session, not once per
-	// metadata refresh, since this is the state a Claude session that has not
-	// written anything yet is also in.
-	probed, ok := probeRemoteClaudeProjectDir(run, logScope, sessionMeta, dir)
-	if !ok || probed == dir {
-		return cwds, nil
-	}
-
-	return remoteClaudeCWDsUnder(run, logScope, sessionMeta, probed), nil
+	return []claudeStateFile{{name: fmt.Sprintf("%d.json", pid), data: out}}, nil
 }
 
-// remoteClaudeCWDsUnder reads the session's own transcript and every subagent
-// transcript beside it, under the given project directory.
-//
-// dir is either the derived name, relative to ~/.claude/projects, or an
-// absolute path a probe resolved; remoteClaudeTranscriptShellPath tells them
-// apart so the caller does not have to.
-func remoteClaudeCWDsUnder(
-	run remoteOutputFunc,
-	logScope string,
-	meta *claudeSessionMeta,
-	dir string,
-) []string {
-	cwds := make([]string, 0, 1)
-	seen := make(map[string]bool)
-	addCandidate := func(displayPath, shellPath string) {
-		cwd, lookupErr := remoteCachedAgentLogCWD(
-			run,
-			"ssh:"+logScope+":claude:"+displayPath,
-			logScope,
-			displayPath,
-			shellPath,
-			"claude transcript",
-			parseClaudeProjectCWD,
-		)
-		if lookupErr != nil || cwd == "" || seen[cwd] {
+// claudeProjectDirs is the directory Claude stores the session under, which
+// panemux derives from the session's cwd — an encoding that is observed
+// behavior of Claude Code, not a documented interface (see
+// claudeProjectDirName) — and, when nothing resolves there, the directory the
+// host says the transcript is in. The host is asked once per session, not
+// once per metadata refresh, since a Claude session that has not written
+// anything yet is in the same state (issue #119).
+func (h remoteWorkdirHost) claudeProjectDirs(sessionID, cwd string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		session := &remoteClaudeSession{SessionID: sessionID, CWD: cwd}
+		dir := remoteClaudeProjectDir(h.logScope, session)
+		if !yield(dir) {
 			return
 		}
-		seen[cwd] = true
-		cwds = append(cwds, cwd)
+		probed, ok := probeRemoteClaudeProjectDir(h.run, h.logScope, session, dir)
+		if !ok || probed == dir {
+			return
+		}
+		yield(probed)
 	}
+}
 
-	transcript := filepath.Join(dir, meta.SessionID+".jsonl")
-	addCandidate(transcript, remoteClaudeTranscriptShellPath(dir, meta.SessionID+".jsonl"))
-
-	subagentDir := filepath.Join(dir, meta.SessionID, "subagents")
-	subagentNames, err := remoteClaudeSubagentTranscriptNames(run, logScope, subagentDir)
+func (h remoteWorkdirHost) claudeSubagentLogs(dir string) ([]string, error) {
+	names, err := remoteClaudeSubagentTranscriptNames(h.run, h.logScope, dir)
 	if err != nil {
-		log.Printf("%s listing claude subagent transcripts failed: %v", logScope, err)
-		return cwds
+		log.Printf("%s listing claude subagent transcripts failed: %v", h.logScope, err)
 	}
-	for _, name := range subagentNames {
-		addCandidate(
-			filepath.Join(subagentDir, name),
-			remoteClaudeTranscriptShellPath(subagentDir, name),
-		)
-	}
+	return names, err
+}
 
-	return cwds
+// claudeLogCWD reads a transcript under a project directory: an absolute
+// path a probe resolved, or a name relative to ~/.claude/projects.
+func (h remoteWorkdirHost) claudeLogCWD(path string) (string, error) {
+	return remoteCachedAgentLogCWD(
+		h.run,
+		"ssh:"+h.logScope+":claude:"+path,
+		h.logScope,
+		path,
+		remoteClaudeTranscriptShellPath(path, ""),
+		"claude transcript",
+		parseClaudeProjectCWD,
+	)
+}
+
+func (h remoteWorkdirHost) agentOpenFiles(pid int) ([]string, error) {
+	paths, err := remoteOpenFiles(h.run, pid)
+	if err != nil {
+		log.Printf("%s open files lookup failed pid=%d: %v", h.logScope, pid, err)
+	}
+	return paths, err
+}
+
+func (h remoteWorkdirHost) codexLogCWD(path string) (string, error) {
+	log.Printf("%s reading codex session log path=%q", h.logScope, path)
+	return remoteCachedAgentLogCWD(
+		h.run,
+		"ssh:"+h.logScope+":codex:"+path,
+		h.logScope,
+		path,
+		shellQuotePath(path),
+		"codex session log",
+		parseCodexSessionCWD,
+	)
+}
+
+// remoteClaudeSession is what the remote transcript lookup is keyed on.
+type remoteClaudeSession struct {
+	SessionID string
+	CWD       string
 }
 
 // remoteClaudeProbeTTL bounds how long a probe's answer is reused before the
@@ -1499,13 +1445,13 @@ type remoteClaudeProjectDirAnswer struct {
 	dir        string
 }
 
-func remoteClaudeProjectDirKey(logScope string, meta *claudeSessionMeta) string {
+func remoteClaudeProjectDirKey(logScope string, meta *remoteClaudeSession) string {
 	return logScope + "\x00" + meta.SessionID
 }
 
 // remoteClaudeProjectDir returns the directory to look under: whatever a probe
 // resolved for this session earlier, or the derived name.
-func remoteClaudeProjectDir(logScope string, meta *claudeSessionMeta) string {
+func remoteClaudeProjectDir(logScope string, meta *remoteClaudeSession) string {
 	remoteClaudeProjectDirs.mu.Lock()
 	defer remoteClaudeProjectDirs.mu.Unlock()
 
@@ -1524,7 +1470,7 @@ func remoteClaudeProjectDir(logScope string, meta *claudeSessionMeta) string {
 func probeRemoteClaudeProjectDir(
 	run remoteOutputFunc,
 	logScope string,
-	meta *claudeSessionMeta,
+	meta *remoteClaudeSession,
 	derived string,
 ) (string, bool) {
 	key := remoteClaudeProjectDirKey(logScope, meta)
@@ -1593,7 +1539,7 @@ func rememberRemoteClaudeProjectDir(key, dir string) {
 func runRemoteClaudeProjectProbe(
 	run remoteOutputFunc,
 	logScope string,
-	meta *claudeSessionMeta,
+	meta *remoteClaudeSession,
 ) (string, bool) {
 	out, err := run(remoteClaudeProjectProbeCmd(meta.SessionID))
 	if err != nil {
@@ -1670,25 +1616,6 @@ func remoteClaudeTranscriptShellPath(dir, name string) string {
 		return shellQuotePath(path)
 	}
 	return "~/.claude/projects/" + shellQuotePath(path)
-}
-
-func remoteClaudeSessionMeta(run remoteOutputFunc, logScope string, agentPID int) (*claudeSessionMeta, error) {
-	sessionPath := fmt.Sprintf("~/.claude/sessions/%d.json", agentPID)
-	out, err := run("cat " + sessionPath)
-	if err != nil {
-		log.Printf("%s reading claude session metadata failed path=%q: %v", logScope, sessionPath, err)
-		return nil, err
-	}
-
-	var meta claudeSessionMeta
-	if err := json.Unmarshal(out, &meta); err != nil {
-		log.Printf("%s parsing claude session metadata failed path=%q: %v", logScope, sessionPath, err)
-		return nil, err
-	}
-	if meta.PID != agentPID {
-		return nil, nil
-	}
-	return &meta, nil
 }
 
 func remoteFileFingerprintCmd(shellPath string) string {

@@ -61,22 +61,65 @@ func TestMatchBoardProcess(t *testing.T) {
 	}
 }
 
-func TestMatchWorkdirProcess(t *testing.T) {
+// MatchInteractiveSession is the pane header's rule, and it is the task
+// board's Task rule. The rows marked (1)-(4) are where it differs from the
+// Workdir rule it replaced (issue #375); the codex rows with options before
+// `exec` pin that a headless `codex exec` stays out however it is spelled.
+func TestMatchInteractiveSession(t *testing.T) {
 	cases := map[string]ID{
-		"codex":                           Codex,
-		"/usr/local/bin/codex --model g5": Codex,
-		"claude":                          Claude,
-		"codex exec":                      "",
-		"claude -p":                       "",
-		"claude --print":                  "",
-		"claude-code":                     "",
-		"codex-nightly":                   "",
-		"gemini":                          "",
-		"python worker.py":                "",
-		"":                                "",
+		"codex":                             Codex,
+		"/usr/local/bin/codex --model g5":   Codex,
+		"CODEX":                             Codex,
+		"codex resume":                      Codex,
+		"codex fork":                        Codex,
+		"claude":                            Claude,
+		"claude --model opus":               Claude,
+		"claude -p":                         "",
+		"claude --print":                    "",
+		"claude --model opus -p hi":         "",
+		"codex exec":                        "",
+		"codex exec fix it":                 "",
+		"codex --model x exec":              "",
+		"codex -m x exec":                   "",
+		"codex --model=x exec":              "",
+		"codex -c k=v exec":                 "",
+		"codex --config k=v exec":           "",
+		"codex -C /tmp/sample-project exec": "",
+		"codex --full-auto exec":            "",
+		"codex --search -m x -c k=v exec":   "",
+		// (1) claude run by a script interpreter.
+		"node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js": Claude,
+		"bun /opt/claude/cli.js": Claude,
+		"deno claude":            Claude,
+		"node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js -p": "",
+		// (2) codex subcommands that open no session.
+		"codex e":           "",
+		"codex review":      "",
+		"codex login":       "",
+		"codex mcp-server":  "",
+		"codex app-server":  "",
+		"codex apply":       "",
+		"codex -m x review": "",
+		// (3) Claude Code whose program is not named claude.
+		"claude-code": Claude,
+		"/home/u/.local/share/claude/versions/2.1.3": Claude,
+		// (4) exec that is not codex's first positional argument.
+		"codex -p exec":          Codex,
+		"codex --profile exec":   Codex,
+		"codex fix the exec bug": Codex,
+		"codex resume exec":      Codex,
+		"codex -- exec":          Codex,
+		// A path component named claude makes the program Claude Code's,
+		// as it does for the task board.
+		"/opt/claude/bin/codex":             Claude,
+		"codex-nightly":                     "",
+		"gemini":                            "",
+		"python worker.py":                  "",
+		"vim /home/u/.claude/settings.json": "",
+		"":                                  "",
 	}
 	for command, want := range cases {
-		d, ok := MatchWorkdirProcess(command)
+		d, ok := MatchInteractiveSession(command)
 		assert.Equal(t, want != "", ok, command)
 		assert.Equal(t, want, d.ID, command)
 	}
@@ -169,7 +212,6 @@ func TestTaskRules(t *testing.T) {
 	for _, id := range []ID{Cursor, Gemini, GrokBuild, OpenCode} {
 		d, _ := Lookup(id)
 		assert.Nil(t, d.Detection.Task, id)
-		assert.Nil(t, d.Detection.Workdir, id)
 	}
 }
 
@@ -177,10 +219,8 @@ func TestTaskRules(t *testing.T) {
 // forward-compatibility stance is declared rather than implied.
 func TestRegisteredUnknownArgsPolicies(t *testing.T) {
 	for _, d := range All() {
-		for _, r := range []*ProcessRule{d.Detection.Board, d.Detection.Workdir} {
-			if r != nil {
-				assert.Equal(t, Accept, r.UnknownArgs, d.ID)
-			}
+		if r := d.Detection.Board; r != nil {
+			assert.Equal(t, Accept, r.UnknownArgs, d.ID)
 		}
 		if d.Detection.Task != nil {
 			assert.Equal(t, Accept, d.Detection.Task.UnknownArgs, d.ID)
