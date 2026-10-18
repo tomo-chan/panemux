@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"panemux/internal/agent"
 	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 
@@ -334,4 +335,14 @@ func TestSummarizerVersion_FollowsTheAgentsInstruction(t *testing.T) {
 	assert.Equal(t, version(AgentClaude, summaryInstruction+"\x00"+summarySystemPrompt+"\x00"+summaryModel),
 		summarizerVersion(AgentClaude))
 	assert.Equal(t, version(AgentCodex, codexSummaryInstruction), summarizerVersion(AgentCodex))
+}
+
+// A summary can be stored only for an agent the registry declares summary
+// for, not every agent whose tasks are listed.
+func TestSummarizableAgentsAreTheSummaryAgents(t *testing.T) {
+	for _, d := range agent.All() {
+		assert.Equal(t, d.Has(agent.Summary), summarizable(string(d.ID)), "agent %s", d.ID)
+	}
+	assert.False(t, summarizable("vim"), "an unregistered agent")
+	assert.False(t, summarizable("claude-code"), "an alias is not the ID a summary carries")
 }

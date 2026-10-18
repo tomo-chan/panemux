@@ -78,7 +78,9 @@ Pane identity is always the pane ID, never the project path. Two same-type agent
 would otherwise be discovered by agmsg as the same subscription set and could receive each other's
 messages.
 
-For `claude-code`, bootstrap follows agmsg's act-as protocol:
+What differs per agent in onboarding is its board adapter's (`boardAdapters` in `board_adapters.go`,
+one per agent that declares `board` in the [agent registry](../agent-registry.md#capabilities)). For
+`claude-code`, the only adapter that claims an identity, bootstrap follows agmsg's act-as protocol:
 
 1. join with the pane ID;
 2. claim that identity with the current Claude session ID;
@@ -87,7 +89,8 @@ For `claude-code`, bootstrap follows agmsg's act-as protocol:
 If another live session holds the identity, onboarding stops and reports the conflict. The claim is
 still made for `turn` and `off`, but those modes do not start a watcher.
 
-This protection is currently verified only for `claude-code`; other agent types in the same project
+This protection is currently verified only for `claude-code`; the other five share an adapter that
+writes the common steps alone, and agent types in the same project
 directory can still cross-receive. Claims are made only during bootstrap, so restarting an agent
 inside the same unchanged pane does not automatically claim again. These bounds are documented in
 [Known limitations](limitations.md#known-limitations).

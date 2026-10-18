@@ -1586,6 +1586,27 @@ arguments, the session ID minted or not, the tmux session name and the codex `--
   a CLI installed in the meantime. `not_probed` and `probe_failed` refuse nothing: the script still
   looks for the CLI itself, and refusing on what is not known would be guessing.
 
+### Records keep agents this build does not list; Board joining through adapters (2026-10-18, issue #375)
+
+Stage D of #348, first half. Agreed on #375:
+
+- **The record file is open-world.** A file holding one record of an agent other than claude or
+  codex used to be unreadable as a whole, so every write failed until it was edited. Records are now
+  writable only for agents that declare `collect`, read from the registry; a record of any other
+  agent whose name has the shape of an ID is kept as read and written back. A malformed agent name
+  still makes the file unreadable — loosening the shape check too was rejected, since it would accept
+  what no build could have written. Kept records are not served, so the API and the labels offered
+  are unchanged. An alias is not rewritten to its ID: two records could then collide. A kept record
+  is held as the JSON it was read as, so fields a newer build wrote survive the next save. The summary
+  file follows its own capability: a summary is stored only for an agent that declares `summary`.
+- **Joining Agent Board goes through board adapters in the consumer.** The onboarding builder in
+  `bootstrap.go` compared the agmsg type with `claude-code` to add the identity claim. Each agent that
+  declares `board` now has an adapter in `boardAdapters`, checked against the registry at startup;
+  Claude Code's writes the claim and the watcher replacement, the other five share one that writes
+  nothing. The instruction text for all six types in every mode is fixed by a golden test and did not
+  change. codex's `CODEX_THREAD_ID` stays unused: it is unverified. Board detection stays separate
+  from the other rule sets, since it mirrors agmsg's.
+
 ## 2026-10-17: Updating the codex permission hook by itself (#294, #402)
 
 Stage 4 of #294 was to ship the hook as a binary for four targets and update it. Stage 3 had already

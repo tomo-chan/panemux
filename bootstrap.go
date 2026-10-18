@@ -485,18 +485,6 @@ func (b *bootstrapWatcher) persistBootstrapped() {
 	b.persist(ids)
 }
 
-// claudeCodeType is the one agmsg agent type whose session-id source
-// panemux has actually verified, so it is the only type the exclusivity
-// claim below is emitted for. agmsg's own per-type `type.conf` `detect` key
-// differs per type (CLAUDE_CODE_SESSION_ID here, CODEX_THREAD_ID for codex,
-// absent entirely for opencode and cursor), and guessing one wrong would
-// hand actas-claim.sh an empty session id.
-const claudeCodeType = "claude-code"
-
-// claudeCodeSessionIDVar is that type's own session-id environment
-// variable, taken from agmsg's type.conf rather than assumed.
-const claudeCodeSessionIDVar = "$CLAUDE_CODE_SESSION_ID"
-
 // runsAgmsgMonitor reports whether a Monitor-based watcher is running for a
 // pane in this mode, and therefore whether re-arming one is the right move.
 // turn delivers through a Stop hook with no watcher to replace, and off
@@ -521,8 +509,8 @@ func runsAgmsgMonitor(mode string) bool {
 // without any explicit delivery.sh call).
 //
 // Step numbers are generated rather than written literally because the
-// exclusivity step is conditional on the agent type — see
-// docs/agent-board.md's "Two panes in one project directory".
+// exclusivity step is the agent's board adapter's to write, and most write
+// none — see docs/agent-board.md's "Two panes in one project directory".
 func buildBootstrapInstruction(agmsgPath, team, paneID, agmsgType, mode string) string {
 	var b strings.Builder
 	step := 0
@@ -534,7 +522,9 @@ func buildBootstrapInstruction(agmsgPath, team, paneID, agmsgType, mode string) 
 	fmt.Fprintf(&b, "   %s/scripts/join.sh %q %q %q \"$(pwd)\" --force\n", agmsgPath, team, paneID, agmsgType)
 	b.WriteString("   Use exactly that agent_id — not a name of your own choosing — since every cross-pane\n")
 	b.WriteString("   and relay address in Agent Board assumes from/to values are pane IDs.\n")
-	writeIdentityClaim(&b, agmsgPath, paneID, agmsgType, mode, nextStep)
+	boardAdapterFor(agmsgType).writeIdentityClaim(&b, boardJoin{
+		agmsgPath: agmsgPath, paneID: paneID, agmsgType: agmsgType, mode: mode,
+	}, nextStep)
 	fmt.Fprintf(&b, "%d. From now on, send every board-related message (status reports and messages\n", nextStep())
 	b.WriteString("   to other panes) with:\n")
 	fmt.Fprintf(&b, "   %s/scripts/send.sh %q %q \"<to>\" \"<body>\" --force\n", agmsgPath, team, paneID)
@@ -557,45 +547,4 @@ func buildBootstrapInstruction(agmsgPath, team, paneID, agmsgType, mode string) 
 		b.WriteString("   it configures how you receive incoming board messages from now on.\n")
 	}
 	return b.String()
-}
-
-// writeIdentityClaim emits the step that makes this pane's agmsg identity
-// exclusive to this process, and (when a watcher is running) narrows that
-// watcher to it.
-//
-// Without it, two board-enabled panes whose agents run in the SAME project
-// directory each receive the other's messages. Verified in agmsg's own
-// source (v1.2.0, unchanged in v1.2.2): scripts/watch.sh resolves its
-// subscription through identities.sh <project> <type>, which returns every
-// (team, agent) pair registered for that project and type — both pane IDs.
-// Handed no 4th <agent> argument the watcher subscribes broadly, dropping
-// only pairs another live session already holds an actas lock on and
-// claiming none itself. agmsg's scripts/lib/actas-lock.sh states the same
-// failure in its own words, and its claude-code template calls
-// actas-claim.sh directly after join.sh for exactly this reason. The call
-// order and the argument shapes here are that template's, not invented.
-//
-// The claim also covers turn mode, where there is no watcher at all:
-// check-inbox.sh resolves its pairs through the same subscription helper.
-func writeIdentityClaim(b *strings.Builder, agmsgPath, paneID, agmsgType, mode string, nextStep func() int) {
-	if agmsgType != claudeCodeType {
-		return
-	}
-	fmt.Fprintf(b, "%d. Claim that identity for this process, so a second agent running in the same\n", nextStep())
-	b.WriteString("   directory does not also receive messages addressed to this pane:\n")
-	fmt.Fprintf(b, "   %s/scripts/actas-claim.sh \"$(pwd)\" %q %q %q\n",
-		agmsgPath, agmsgType, paneID, claudeCodeSessionIDVar)
-	b.WriteString("   Expect \"status=ok\". If it prints \"status=held\", another live session already owns\n")
-	b.WriteString("   this pane ID — say so and stop here; do not touch the running inbox stream.\n")
-	if !runsAgmsgMonitor(mode) {
-		return
-	}
-	b.WriteString("   Then replace your inbox stream so it only receives messages addressed to this\n")
-	b.WriteString("   pane, since the one already running was started without that restriction:\n")
-	b.WriteString("   - Run TaskList. If a task's description starts with \"agmsg inbox stream\",\n")
-	b.WriteString("     TaskStop it. If there is none, skip this — do not guess a task id.\n")
-	b.WriteString("   - Invoke the Monitor tool with persistent: true, description\n")
-	fmt.Fprintf(b, "     \"agmsg inbox stream (acting as %s)\", and command:\n", paneID)
-	fmt.Fprintf(b, "     %s/scripts/watch.sh %q \"$(pwd)\" %q %q\n",
-		agmsgPath, claudeCodeSessionIDVar, agmsgType, paneID)
 }

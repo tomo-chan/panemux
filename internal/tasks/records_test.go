@@ -2,8 +2,10 @@ package tasks
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/agent"
 	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
@@ -182,23 +185,81 @@ func TestRecordStore_UnreadableFileIsReportedAndNotOverwritten(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			path := recordsPath(t)
-			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
-			require.NoError(t, os.WriteFile(path, []byte(tc.content), 0o600))
-			store := NewRecordStore(path)
-
-			_, err := store.Records()
-			require.ErrorContains(t, err, tc.wantErr)
-
-			_, err = store.Put(Record{Agent: "claude", SessionID: "s1", Done: true})
-			require.ErrorContains(t, err, tc.wantErr)
-
-			data, err := os.ReadFile(path)
-			require.NoError(t, err)
-			assert.Equal(t, tc.content, string(data))
-		})
+		t.Run(tc.name, func(t *testing.T) { assertUnreadableAndNotOverwritten(t, tc.content, tc.wantErr) })
 	}
+}
+
+// A record the store would keep rather than serve is checked as strictly as
+// any other: its agent must have the shape of an ID.
+func TestRecordStore_AnInvalidRecordOfAnyAgentMakesTheFileUnreadable(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		wantErr string
+	}{
+		{
+			name:    "agent that is not an ID",
+			content: `{"version":1,"records":[{"agent":"Claude Code","session_id":"s","done":true}]}`,
+			wantErr: `invalid agent "Claude Code"`,
+		},
+		{
+			name:    "no agent",
+			content: `{"version":1,"records":[{"session_id":"s","done":true}]}`,
+			wantErr: `invalid agent ""`,
+		},
+		{
+			name:    "kept record with an invalid session ID",
+			content: `{"version":1,"records":[{"agent":"vim","session_id":"bad id","done":true}]}`,
+			wantErr: "invalid session ID",
+		},
+		{
+			name:    "kept record with an invalid label",
+			content: `{"version":1,"records":[{"agent":"vim","session_id":"s","labels":[" "]}]}`,
+			wantErr: "label is empty",
+		},
+		{
+			name:    "labels that are not a list",
+			content: `{"version":1,"records":[{"agent":"vim","session_id":"s","labels":"x"}]}`,
+			wantErr: "parsing task record file",
+		},
+		{
+			name:    "done that is not a boolean",
+			content: `{"version":1,"records":[{"agent":"claude","session_id":"s","done":"yes"}]}`,
+			wantErr: "parsing task record file",
+		},
+		{
+			name:    "a record that is not an object",
+			content: `{"version":1,"records":[1]}`,
+			wantErr: "parsing task record file",
+		},
+		{
+			name: "duplicate kept record",
+			content: `{"version":1,"records":[{"agent":"vim","session_id":"s","done":true},` +
+				`{"agent":"vim","session_id":"s","done":true}]}`,
+			wantErr: "duplicate task record",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { assertUnreadableAndNotOverwritten(t, tc.content, tc.wantErr) })
+	}
+}
+
+func assertUnreadableAndNotOverwritten(t *testing.T, content, wantErr string) {
+	t.Helper()
+	path := recordsPath(t)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	store := NewRecordStore(path)
+
+	_, err := store.Records()
+	require.ErrorContains(t, err, wantErr)
+
+	_, err = store.Put(Record{Agent: "claude", SessionID: "s1", Done: true})
+	require.ErrorContains(t, err, wantErr)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, content, string(data))
 }
 
 // A load that failed is tried again on the next access, so fixing the file
@@ -244,6 +305,11 @@ func TestRecordStore_PutValidates(t *testing.T) {
 		{name: "session ID with a slash", record: Record{Agent: "claude", SessionID: "../x"}, wantErr: "invalid session ID"},
 		{name: "unknown agent", record: Record{Agent: "vim", SessionID: "s"}, wantErr: `unknown agent "vim"`},
 		{name: "no agent", record: Record{SessionID: "s"}, wantErr: `unknown agent ""`},
+		{name: "alias", record: Record{Agent: "claude-code", SessionID: "s"}, wantErr: `unknown agent "claude-code"`},
+		{
+			name: "agent that lists no tasks", record: Record{Agent: "cursor", SessionID: "s", Done: true},
+			wantErr: `agent "cursor" lists no tasks`,
+		},
 		{
 			name: "bad label", record: Record{Agent: "claude", SessionID: "s", Labels: []string{" "}},
 			wantErr: "label is empty",
@@ -477,4 +543,69 @@ func TestRecordStore_AFileThatCannotBeCheckedIsReported(t *testing.T) {
 	require.ErrorContains(t, err, "reading task record file")
 	_, err = store.Put(Record{Agent: "claude", SessionID: "s", Done: true})
 	require.ErrorContains(t, err, "reading task record file")
+}
+
+// Only an agent the registry declares collect for has its tasks listed, so
+// only its records can be written.
+func TestRecordableAgentsAreTheCollectAgents(t *testing.T) {
+	for _, d := range agent.All() {
+		assert.Equal(t, d.Has(agent.Collect), recordable(string(d.ID)), "agent %s", d.ID)
+	}
+	assert.False(t, recordable("vim"), "an unregistered agent")
+	assert.False(t, recordable("claude-code"), "an alias is not the ID records carry")
+}
+
+// A record of an agent this build lists no tasks for — one it does not know,
+// one registered without collect, or one stored under an alias — is kept as
+// it is and written back with the rest, so a build that knows the agent finds
+// it again. It is not served: nothing here lists that agent's tasks.
+func TestRecordStore_KeepsRecordsOfAgentsItListsNoTasksFor(t *testing.T) {
+	path := recordsPath(t)
+	writeRecordsFile(t, path, `{"version":1,"records":[`+
+		`{"host":"h","agent":"vim","session_id":"s1","labels":["x"],"done":true},`+
+		`{"host":"","agent":"cursor","session_id":"s2","done":true},`+
+		`{"host":"","agent":"claude","session_id":"s0","done":true},`+
+		`{"host":"","agent":"claude-code","session_id":"s3","labels":["y"]}]}`, time.Hour)
+	store := NewRecordStore(path)
+
+	records, err := store.Records()
+	require.NoError(t, err)
+	assert.Equal(t, map[RecordKey]Record{
+		{Agent: "claude", SessionID: "s0"}: {Agent: "claude", SessionID: "s0", Done: true},
+	}, records)
+
+	_, err = store.Put(Record{Agent: "codex", SessionID: "s4", Done: true})
+	require.NoError(t, err)
+	_, err = store.Put(Record{Agent: "claude", SessionID: "s0"})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"version":1,"records":[`+
+		`{"host":"","agent":"claude-code","session_id":"s3","labels":["y"]},`+
+		`{"host":"","agent":"codex","session_id":"s4","done":true},`+
+		`{"host":"","agent":"cursor","session_id":"s2","done":true},`+
+		`{"host":"h","agent":"vim","session_id":"s1","labels":["x"],"done":true}]}`, string(data),
+		"kept records are written back in the same order as the rest")
+
+	again, err := NewRecordStore(path).Records()
+	require.NoError(t, err)
+	assert.Equal(t, []RecordKey{{Agent: "codex", SessionID: "s4"}}, slices.Collect(maps.Keys(again)))
+}
+
+// A kept record is written back byte for byte in meaning: fields this build
+// does not know, which a newer build may have written, are not dropped.
+func TestRecordStore_KeepsFieldsOfAKeptRecordItDoesNotKnow(t *testing.T) {
+	path := recordsPath(t)
+	kept := `{"host":"h","agent":"future-agent","session_id":"s1","done":true,"extra":{"a":[1,2]}}`
+	writeRecordsFile(t, path, `{"version":1,"records":[`+kept+`]}`, time.Hour)
+	store := NewRecordStore(path)
+
+	_, err := store.Put(Record{Agent: "claude", SessionID: "s0", Done: true})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"version":1,"records":[`+
+		`{"host":"","agent":"claude","session_id":"s0","done":true},`+kept+`]}`, string(data))
 }

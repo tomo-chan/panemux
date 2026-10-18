@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"panemux/internal/agent"
 	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
@@ -116,9 +117,16 @@ const (
 	maxStoredItemBytes = maxSummaryItemBytes + len(truncationMark)
 )
 
+// summarizable reports whether name is an agent the registry declares
+// summary for, by its ID.
+func summarizable(name string) bool {
+	d, ok := agent.Lookup(agent.ID(name))
+	return ok && d.Has(agent.Summary)
+}
+
 func (s storedSummary) validate() error {
 	switch {
-	case !recordAgents[s.Agent]:
+	case !summarizable(s.Agent):
 		return fmt.Errorf("unknown agent %q", s.Agent)
 	case !validSessionID.MatchString(s.SessionID) || (s.Agent == AgentCodex && !validUUID.MatchString(s.SessionID)):
 		return fmt.Errorf("invalid session ID %q", s.SessionID)

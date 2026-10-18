@@ -1,0 +1,38 @@
+Please set up Agent Board messaging for this session using agmsg's own scripts
+directly (not the /agmsg or $agmsg slash-command, since its exact prefix differs
+by agent type):
+1. Join the agmsg team "panemux" by running:
+   /opt/agmsg/scripts/join.sh "panemux" "pane-a" "claude-code" "$(pwd)" --force
+   Use exactly that agent_id — not a name of your own choosing — since every cross-pane
+   and relay address in Agent Board assumes from/to values are pane IDs.
+2. Claim that identity for this process, so a second agent running in the same
+   directory does not also receive messages addressed to this pane:
+   /opt/agmsg/scripts/actas-claim.sh "$(pwd)" "claude-code" "pane-a" "$CLAUDE_CODE_SESSION_ID"
+   Expect "status=ok". If it prints "status=held", another live session already owns
+   this pane ID — say so and stop here; do not touch the running inbox stream.
+   Then replace your inbox stream so it only receives messages addressed to this
+   pane, since the one already running was started without that restriction:
+   - Run TaskList. If a task's description starts with "agmsg inbox stream",
+     TaskStop it. If there is none, skip this — do not guess a task id.
+   - Invoke the Monitor tool with persistent: true, description
+     "agmsg inbox stream (acting as pane-a)", and command:
+     /opt/agmsg/scripts/watch.sh "$CLAUDE_CODE_SESSION_ID" "$(pwd)" "claude-code" "pane-a"
+3. From now on, send every board-related message (status reports and messages
+   to other panes) with:
+   /opt/agmsg/scripts/send.sh "panemux" "pane-a" "<to>" "<body>" --force
+4. Self-report your status to "_system" using that same send.sh invocation,
+   with a JSON body shaped exactly like:
+   {"kind":"board_status","state":"working|idle|waiting","cwd":"...","branch":"...",
+   "repo":"...","pr_url":"...","last_tool":"...","summary":"..."}
+   Omit fields you don't currently have.
+   "summary" is the field a person reads to tell your pane apart from every other
+   pane on the board, so always include it: one short sentence, in plain language,
+   saying what you are working on right now (e.g. "Fixing the flaky relay test").
+   Not your last tool call, not a summary of the whole session. When you are
+   blocked, say what you are blocked on.
+   Send an update when starting a new task, when finishing one, and whenever you
+   become blocked or go idle — not on a timer.
+5. Also run:
+   /opt/agmsg/scripts/delivery.sh set "both" "claude-code" "$(pwd)"
+   This prints an AGMSG-DIRECTIVE: block — read it and follow its instructions exactly;
+   it configures how you receive incoming board messages from now on.
