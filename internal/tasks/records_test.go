@@ -218,6 +218,21 @@ func TestRecordStore_AnInvalidRecordOfAnyAgentMakesTheFileUnreadable(t *testing.
 			wantErr: "label is empty",
 		},
 		{
+			name:    "labels that are not a list",
+			content: `{"version":1,"records":[{"agent":"vim","session_id":"s","labels":"x"}]}`,
+			wantErr: "parsing task record file",
+		},
+		{
+			name:    "done that is not a boolean",
+			content: `{"version":1,"records":[{"agent":"claude","session_id":"s","done":"yes"}]}`,
+			wantErr: "parsing task record file",
+		},
+		{
+			name:    "a record that is not an object",
+			content: `{"version":1,"records":[1]}`,
+			wantErr: "parsing task record file",
+		},
+		{
 			name: "duplicate kept record",
 			content: `{"version":1,"records":[{"agent":"vim","session_id":"s","done":true},` +
 				`{"agent":"vim","session_id":"s","done":true}]}`,
