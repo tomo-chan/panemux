@@ -577,3 +577,20 @@ func TestRecordStore_KeepsRecordsOfAgentsItListsNoTasksFor(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []RecordKey{{Agent: "codex", SessionID: "s4"}}, slices.Collect(maps.Keys(again)))
 }
+
+// A kept record is written back byte for byte in meaning: fields this build
+// does not know, which a newer build may have written, are not dropped.
+func TestRecordStore_KeepsFieldsOfAKeptRecordItDoesNotKnow(t *testing.T) {
+	path := recordsPath(t)
+	kept := `{"host":"h","agent":"future-agent","session_id":"s1","done":true,"extra":{"a":[1,2]}}`
+	writeRecordsFile(t, path, `{"version":1,"records":[`+kept+`]}`, time.Hour)
+	store := NewRecordStore(path)
+
+	_, err := store.Put(Record{Agent: "claude", SessionID: "s0", Done: true})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"version":1,"records":[`+
+		`{"host":"","agent":"claude","session_id":"s0","done":true},`+kept+`]}`, string(data))
+}

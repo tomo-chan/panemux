@@ -605,7 +605,7 @@ set.
   `collect` in the [agent registry](../agent-registry.md#capabilities) — claude or codex — can be
   given a record. A record in the file that names another agent — one this build does not register,
   one registered without `collect`, or one stored under an alias such as `claude-code` — is kept as it
-  was read and written back with the rest, so a build that knows the agent finds it again. It is
+  was read, fields this build does not know included, and written back with the rest, so a build that knows the agent finds it again. It is
   checked like any other (its agent must have the shape of an ID, its session ID and labels must be
   valid, and it must not repeat another), is not served, and its labels are not among the labels used
   before. An alias is never rewritten to its agent's ID.
@@ -888,7 +888,7 @@ or asking an agent.
   outdated and is made again, or found current by its hash, under the usual rules.
 - **When summaries are off** the file is neither read nor written, and is left as it is.
 - **A file that cannot be used** — not JSON, a format version other than `1`, or an entry panemux would
-  not have written, such as an empty summary — is renamed to `task-summaries.json.bad-<UTC time>`
+  not have written, such as an empty summary or one of an agent that does not declare `summary` — is renamed to `task-summaries.json.bad-<UTC time>`
   (with `-1`, `-2`, … added when an earlier file moved aside in the same second holds that name;
   once 100 names in one second are taken, the file is treated as one that cannot be moved aside),
   unchanged, the server log says so, and saving starts again from an empty file. Edits made to the file while panemux runs are

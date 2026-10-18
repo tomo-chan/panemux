@@ -93,9 +93,18 @@ func (r Record) clone() Record {
 	return r
 }
 
+// recordsFile is the file as read and written. Each record is kept as its
+// JSON so a kept record is written back with every field it had, those this
+// build does not know included.
 type recordsFile struct {
-	Records []Record `json:"records"`
-	Version int      `json:"version"`
+	Records []json.RawMessage `json:"records"`
+	Version int               `json:"version"`
+}
+
+// keptRecord is a record of an agent that is not recordable, as it was read.
+type keptRecord struct {
+	key RecordKey
+	raw json.RawMessage
 }
 
 // RecordStore reads and writes the task record file. It serves from memory
@@ -111,7 +120,7 @@ type recordsFile struct {
 type RecordStore struct {
 	records map[RecordKey]Record
 	// kept are the records of agents that are not recordable.
-	kept []Record
+	kept []keptRecord
 	path string
 	// seen is the file as it was when records was read or last written.
 	seen recordsFileStamp
@@ -231,10 +240,10 @@ func (s *RecordStore) loadLocked() error {
 }
 
 // readRecordsFile reads the records of recordable agents, normalized, and
-// the records of other agents as they are. Both are validated the same way:
+// the records of other agents as they are, every field included. Both are validated the same way:
 // an agent that is not an ID, a session ID or label that is invalid, or a
 // repeated record makes the whole file unreadable.
-func readRecordsFile(path string) (map[RecordKey]Record, []Record, error) {
+func readRecordsFile(path string) (map[RecordKey]Record, []keptRecord, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -250,9 +259,13 @@ func readRecordsFile(path string) (map[RecordKey]Record, []Record, error) {
 		return nil, nil, fmt.Errorf("unsupported task record file version %d", file.Version)
 	}
 	records := make(map[RecordKey]Record, len(file.Records))
-	var kept []Record
+	var kept []keptRecord
 	seen := make(map[RecordKey]bool, len(file.Records))
-	for _, rec := range file.Records {
+	for _, raw := range file.Records {
+		var rec Record
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			return nil, nil, fmt.Errorf("parsing task record file: %w", err)
+		}
 		if err := validateStoredRecordKey(rec.Key()); err != nil {
 			return nil, nil, fmt.Errorf("task record file: %w", err)
 		}
@@ -265,7 +278,7 @@ func readRecordsFile(path string) (map[RecordKey]Record, []Record, error) {
 			return nil, nil, fmt.Errorf("task record file: %w", err)
 		}
 		if !recordable(rec.Agent) {
-			kept = append(kept, rec)
+			kept = append(kept, keptRecord{key: rec.Key(), raw: raw})
 			continue
 		}
 		rec.Labels = labels
@@ -275,18 +288,28 @@ func readRecordsFile(path string) (map[RecordKey]Record, []Record, error) {
 }
 
 func (s *RecordStore) writeLocked(records map[RecordKey]Record) error {
-	file := recordsFile{Version: recordsFileVersion, Records: make([]Record, 0, len(records)+len(s.kept))}
+	entries := make([]keptRecord, 0, len(records)+len(s.kept))
 	for _, rec := range records {
-		file.Records = append(file.Records, rec)
+		raw, err := json.Marshal(rec)
+		//coverage:exempt a struct of strings, bools and string slices always marshals
+		if err != nil {
+			return fmt.Errorf("encoding task record file: %w", err)
+		}
+		entries = append(entries, keptRecord{key: rec.Key(), raw: raw})
 	}
-	file.Records = append(file.Records, s.kept...)
-	slices.SortFunc(file.Records, func(a, b Record) int {
+	entries = append(entries, s.kept...)
+	slices.SortFunc(entries, func(a, b keptRecord) int {
 		return cmp.Or(
-			strings.Compare(a.Host, b.Host), strings.Compare(a.Agent, b.Agent), strings.Compare(a.SessionID, b.SessionID),
+			strings.Compare(a.key.Host, b.key.Host), strings.Compare(a.key.Agent, b.key.Agent),
+			strings.Compare(a.key.SessionID, b.key.SessionID),
 		)
 	})
+	file := recordsFile{Version: recordsFileVersion, Records: make([]json.RawMessage, 0, len(entries))}
+	for _, e := range entries {
+		file.Records = append(file.Records, e.raw)
+	}
 	data, err := json.Marshal(file)
-	//coverage:exempt a struct of strings, bools and string slices always marshals
+	//coverage:exempt records already marshaled, and kept ones parsed, always marshal
 	if err != nil {
 		return fmt.Errorf("encoding task record file: %w", err)
 	}
