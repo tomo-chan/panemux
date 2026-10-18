@@ -88,6 +88,10 @@ and so is one whose CLI the host's probe found missing ([agent availability](beh
 The other capabilities are still in `internal/tasks` and `internal/session`, which branch on the
 claude and codex IDs and read those IDs and their process rules from the registry.
 
+Which agents can be given a done or label record (`internal/tasks`'s `recordable`) is read from the
+`collect` declarations; a stored record of any other agent is kept and written back unchanged
+([Done and labels](behavior/tasks.md#done-and-labels)).
+
 A running task carries what a later capability needs to find its working directories without
 collecting again: its session key (`Task.Key`), its pid, its working directory and, for codex, the
 rollout it was found from.

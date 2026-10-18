@@ -118,7 +118,7 @@ const (
 
 func (s storedSummary) validate() error {
 	switch {
-	case !recordAgents[s.Agent]:
+	case !recordable(s.Agent):
 		return fmt.Errorf("unknown agent %q", s.Agent)
 	case !validSessionID.MatchString(s.SessionID) || (s.Agent == AgentCodex && !validUUID.MatchString(s.SessionID)):
 		return fmt.Errorf("invalid session ID %q", s.SessionID)

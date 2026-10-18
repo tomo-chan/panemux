@@ -601,6 +601,14 @@ set.
   anywhere and applies again if the session is listed again. Such a record is cleared by editing the
   file, which can be done while panemux runs (below). A host removed from `ssh_connections` keeps
   its records too; `PUT /api/tasks/records` still clears them, but adds none.
+- **Records of an agent this build lists no tasks for are kept.** Only an agent that declares
+  `collect` in the [agent registry](../agent-registry.md#capabilities) — claude or codex — can be
+  given a record. A record in the file that names another agent — one this build does not register,
+  one registered without `collect`, or one stored under an alias such as `claude-code` — is kept as it
+  was read and written back with the rest, so a build that knows the agent finds it again. It is
+  checked like any other (its agent must have the shape of an ID, its session ID and labels must be
+  valid, and it must not repeat another), is not served, and its labels are not among the labels used
+  before. An alias is never rewritten to its agent's ID.
 - **A task marked done is in the Done column only while it is stopped.** One that runs again (a
   `/resume`, `claude --resume`, or the dashboard's `Resume`) shows the state it is in, still marked done, and returns to Done
   when it stops. The record is not cleared automatically; `Mark not done` clears it.
@@ -622,7 +630,7 @@ set.
   or wrote, and read again when they change, so an edit made by hand while panemux runs is seen by
   the next request and is not undone by the next save. An edit that keeps both the same (within the
   filesystem's timestamp resolution, at the same size) is not noticed. A file that cannot be read —
-  not JSON, another format version, an invalid entry — is reported by `GET /api/tasks` as
+  not JSON, another format version, an invalid entry (an agent that is not an ID shape among them) — is reported by `GET /api/tasks` as
   `records_error`, the tasks are listed without records, and every write fails until the file is
   fixed, so a file panemux does not understand is never replaced. A deleted file is no records.
 

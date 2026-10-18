@@ -15,6 +15,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"panemux/internal/agent"
 	"panemux/internal/fileops"
 	"panemux/internal/homedir"
 )
@@ -46,8 +47,13 @@ const (
 	MaxLabelLength = 32
 )
 
-// recordAgents are the agents the dashboard lists tasks for.
-var recordAgents = map[string]bool{AgentClaude: true, AgentCodex: true}
+// recordable reports whether name is an agent the dashboard lists tasks
+// for: one the registry declares collect for, by its ID. An alias is not the
+// ID a record carries.
+func recordable(name string) bool {
+	d, ok := agent.Lookup(agent.ID(name))
+	return ok && d.Has(agent.Collect)
+}
 
 // ErrInvalidRecord wraps every reason Put refuses a record for what it
 // contains rather than for failing to store it.
@@ -99,9 +105,14 @@ type recordsFile struct {
 // could not read is tried again on the next use, and until it is read every
 // write fails, so a file it does not understand is never replaced. A symlink
 // at the path is written through, not replaced.
+//
+// A record of an agent this build lists no tasks for is kept as it was read
+// and written back with the rest, but not served (issue #375).
 type RecordStore struct {
 	records map[RecordKey]Record
-	path    string
+	// kept are the records of agents that are not recordable.
+	kept []Record
+	path string
 	// seen is the file as it was when records was read or last written.
 	seen recordsFileStamp
 	mu   sync.Mutex
@@ -210,53 +221,65 @@ func (s *RecordStore) loadLocked() error {
 	if s.records != nil && stamp == s.seen {
 		return nil
 	}
-	records, err := readRecordsFile(path)
+	records, kept, err := readRecordsFile(path)
 	if err != nil {
-		s.records = nil
+		s.records, s.kept = nil, nil
 		return err
 	}
-	s.records, s.seen = records, stamp
+	s.records, s.kept, s.seen = records, kept, stamp
 	return nil
 }
 
-func readRecordsFile(path string) (map[RecordKey]Record, error) {
+// readRecordsFile reads the records of recordable agents, normalized, and
+// the records of other agents as they are. Both are validated the same way:
+// an agent that is not an ID, a session ID or label that is invalid, or a
+// repeated record makes the whole file unreadable.
+func readRecordsFile(path string) (map[RecordKey]Record, []Record, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return map[RecordKey]Record{}, nil
+			return map[RecordKey]Record{}, nil, nil
 		}
-		return nil, fmt.Errorf("reading task record file: %w", err)
+		return nil, nil, fmt.Errorf("reading task record file: %w", err)
 	}
 	var file recordsFile
 	if err := json.Unmarshal(data, &file); err != nil {
-		return nil, fmt.Errorf("parsing task record file: %w", err)
+		return nil, nil, fmt.Errorf("parsing task record file: %w", err)
 	}
 	if file.Version != recordsFileVersion {
-		return nil, fmt.Errorf("unsupported task record file version %d", file.Version)
+		return nil, nil, fmt.Errorf("unsupported task record file version %d", file.Version)
 	}
 	records := make(map[RecordKey]Record, len(file.Records))
+	var kept []Record
+	seen := make(map[RecordKey]bool, len(file.Records))
 	for _, rec := range file.Records {
-		if err := validateRecordKey(rec.Key()); err != nil {
-			return nil, fmt.Errorf("task record file: %w", err)
+		if err := validateStoredRecordKey(rec.Key()); err != nil {
+			return nil, nil, fmt.Errorf("task record file: %w", err)
 		}
-		if _, dup := records[rec.Key()]; dup {
-			return nil, fmt.Errorf("task record file: duplicate task record for %s session %s", rec.Agent, rec.SessionID)
+		if seen[rec.Key()] {
+			return nil, nil, fmt.Errorf("task record file: duplicate task record for %s session %s", rec.Agent, rec.SessionID)
 		}
+		seen[rec.Key()] = true
 		labels, err := NormalizeLabels(rec.Labels)
 		if err != nil {
-			return nil, fmt.Errorf("task record file: %w", err)
+			return nil, nil, fmt.Errorf("task record file: %w", err)
+		}
+		if !recordable(rec.Agent) {
+			kept = append(kept, rec)
+			continue
 		}
 		rec.Labels = labels
 		records[rec.Key()] = rec
 	}
-	return records, nil
+	return records, kept, nil
 }
 
 func (s *RecordStore) writeLocked(records map[RecordKey]Record) error {
-	file := recordsFile{Version: recordsFileVersion, Records: make([]Record, 0, len(records))}
+	file := recordsFile{Version: recordsFileVersion, Records: make([]Record, 0, len(records)+len(s.kept))}
 	for _, rec := range records {
 		file.Records = append(file.Records, rec)
 	}
+	file.Records = append(file.Records, s.kept...)
 	slices.SortFunc(file.Records, func(a, b Record) int {
 		return cmp.Or(
 			strings.Compare(a.Host, b.Host), strings.Compare(a.Agent, b.Agent), strings.Compare(a.SessionID, b.SessionID),
@@ -298,12 +321,30 @@ func resolveRecordsWriteTarget(path string) string {
 	return dest
 }
 
+// validateRecordKey checks a key a record is written under: its agent must
+// be recordable.
 func validateRecordKey(key RecordKey) error {
 	if !validSessionID.MatchString(key.SessionID) {
 		return fmt.Errorf("%w: invalid session ID %q", ErrInvalidRecord, key.SessionID)
 	}
-	if !recordAgents[key.Agent] {
+	if !recordable(key.Agent) {
+		if _, ok := agent.Lookup(agent.ID(key.Agent)); ok {
+			return fmt.Errorf("%w: agent %q lists no tasks", ErrInvalidRecord, key.Agent)
+		}
 		return fmt.Errorf("%w: unknown agent %q", ErrInvalidRecord, key.Agent)
+	}
+	return nil
+}
+
+// validateStoredRecordKey checks a key read from the file: its agent need
+// only have the shape of an ID, since a record may name an agent this build
+// does not know. Its session ID is held to the same shape as any other.
+func validateStoredRecordKey(key RecordKey) error {
+	if !validSessionID.MatchString(key.SessionID) {
+		return fmt.Errorf("%w: invalid session ID %q", ErrInvalidRecord, key.SessionID)
+	}
+	if !agent.ID(key.Agent).Valid() {
+		return fmt.Errorf("%w: invalid agent %q", ErrInvalidRecord, key.Agent)
 	}
 	return nil
 }
