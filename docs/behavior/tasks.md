@@ -233,6 +233,7 @@ newest session recorded.
 | `launch`, `resume` | `unknown` / `probe_failed` | The probe failed, timed out or printed something else; the detail says what |
 | `collect` | `available` | The last full collection read everything the agent wrote |
 | `collect` | `degraded` / `unknown_format` | The last full collection found something of the agent's in a format this build does not know (below) |
+| `collect` | `unknown` / `probe_failed` | The last full collection failed: the host could not be reached or its output could not be read. The detail is the host's `error`; what an earlier collection found is not reported until one succeeds again |
 
 `auth_missing` is defined and reported by nothing yet. `session_info_missing` is reported on a task's
 actions, below.
@@ -247,7 +248,7 @@ agent the registry does not know declares nothing — and `resume` is absent on 
 |---|---|---|
 | `resume` | `unavailable` / `session_info_missing` | The session ID is not one the agent's resume accepts, or the session's working directory is not recorded |
 | `resume` | as the host's `resume` above | Otherwise: `available`, `unavailable` / `cli_missing`, or `unknown` / `not_probed` or `probe_failed` |
-| `summary` | `unavailable` / `session_info_missing` | The task has no session ID a summary can name (a codex one is a UUID) |
+| `summary` | `unavailable` / `session_info_missing` | The task has no session ID a summary can name (a codex one is a UUID), or its conversation log has not been found, which `POST /api/tasks/summary` refuses with `404` |
 | `summary` | `available` | Otherwise. Whether summaries are on is `summaries_enabled`, not the action |
 
 `POST /api/tasks/resume` and `POST /api/tasks/summary` refuse what the actions leave out the same way,
@@ -1098,9 +1099,9 @@ Collects from every host and returns:
     {
       "name": "gpu-box", "status": "error", "error": "connect to gpu-box: dial tcp: i/o timeout",
       "availability": [
-        { "agent": "claude", "capability": "collect", "status": "unknown", "reason": "not_probed" },
-        { "agent": "codex", "capability": "launch", "status": "unavailable", "reason": "cli_missing",
-          "detail": "codex is not on PATH or in a login shell's PATH" }
+        { "agent": "claude", "capability": "collect", "status": "unknown", "reason": "probe_failed",
+          "detail": "connect to gpu-box: dial tcp: i/o timeout" },
+        { "agent": "codex", "capability": "launch", "status": "unknown", "reason": "not_probed" }
       ]
     }
   ],

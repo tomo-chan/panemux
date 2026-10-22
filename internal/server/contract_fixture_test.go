@@ -316,9 +316,11 @@ var contractFixtures = map[string]contractFixture{
 		require.Eventually(t, func() bool {
 			rr = e.do(t, http.MethodGet, "/api/tasks", "")
 			// Only gpu-box, which cannot be dialed, is not probed: its
-			// collect, launch and resume of claude and codex.
+			// launch and resume of claude and codex. Its failed collection
+			// makes its collect of both probe_failed.
 			return rr.Code == http.StatusOK && strings.Count(rr.Body.String(), `"state":"ready"`) == 3 &&
-				strings.Count(rr.Body.String(), `"reason":"not_probed"`) == 6
+				strings.Count(rr.Body.String(), `"reason":"not_probed"`) == 4 &&
+				strings.Count(rr.Body.String(), `"reason":"probe_failed"`) == 2
 		}, 10*time.Second, 20*time.Millisecond, "Claude and Codex summaries become ready and the hosts are probed")
 		return rr.Body.Bytes(), nil
 	}},

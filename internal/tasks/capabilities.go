@@ -60,8 +60,12 @@ func (s *Service) TaskActions(task Task) TaskActions {
 	}
 	if summarizable(task.Agent) {
 		action := &TaskAction{Status: Available}
-		if !validSummarySession(task.Agent, task.SessionID) {
+		switch {
+		case !validSummarySession(task.Agent, task.SessionID):
 			action = sessionInfoMissing("the task has no session ID yet")
+		case task.Log == nil:
+			// RequestAgentSummary accepts only a task listed with its log.
+			action = sessionInfoMissing("the conversation log has not been found")
 		}
 		actions.Summary = action
 	}

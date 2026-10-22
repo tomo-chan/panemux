@@ -187,7 +187,8 @@
         {
           "agent": "claude",
           "capability": "collect",
-          "reason": "not_probed",
+          "detail": "connect to gpu-box: dial tcp: i/o timeout",
+          "reason": "probe_failed",
           "status": "unknown"
         },
         {
@@ -205,7 +206,8 @@
         {
           "agent": "codex",
           "capability": "collect",
-          "reason": "not_probed",
+          "detail": "connect to gpu-box: dial tcp: i/o timeout",
+          "reason": "probe_failed",
           "status": "unknown"
         },
         {
@@ -275,7 +277,9 @@
     {
       "actions": {
         "summary": {
-          "status": "available"
+          "detail": "the conversation log has not been found",
+          "reason": "session_info_missing",
+          "status": "unavailable"
         }
       },
       "agent": "claude",
@@ -439,7 +443,9 @@
     {
       "actions": {
         "summary": {
-          "status": "available"
+          "detail": "the conversation log has not been found",
+          "reason": "session_info_missing",
+          "status": "unavailable"
         }
       },
       "agent": "claude",

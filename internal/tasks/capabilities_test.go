@@ -66,7 +66,8 @@ type taskActionCase struct {
 const actionSessionID = "019a1f2e-7c21-7e0a-8b3d-55f0c2b8e41a"
 
 func stoppedTask(agentName, sessionID, cwd string) Task {
-	return Task{Agent: agentName, SessionID: sessionID, CWD: cwd, State: StateStop}
+	return Task{Agent: agentName, SessionID: sessionID, CWD: cwd, State: StateStop,
+		Log: &LogVersion{ModTime: 990, Size: 17}}
 }
 
 func sessionInfoMissingAction(detail string) *TaskAction {
@@ -117,8 +118,14 @@ func resumeActionCases() []taskActionCase {
 		},
 		{
 			name: "a running task is not resumed", probe: probeAnswer("cli claude found", "cli codex found"),
-			task: Task{Agent: AgentClaude, SessionID: actionSessionID, CWD: "/workspace/user/project", State: StateBusy},
+			task: Task{Agent: AgentClaude, SessionID: actionSessionID, CWD: "/workspace/user/project", State: StateBusy,
+				Log: &LogVersion{ModTime: 990, Size: 17}},
 			want: TaskActions{Summary: availableAction},
+		},
+		{
+			name: "no conversation log yet", probe: probeAnswer("cli claude found", "cli codex found"),
+			task: Task{Agent: AgentClaude, SessionID: actionSessionID, CWD: "/workspace/user/project", State: StateBusy},
+			want: TaskActions{Summary: sessionInfoMissingAction("the conversation log has not been found")},
 		},
 		{
 			name: "a missing CLI makes resume unavailable", probe: probeAnswer("cli claude found", "cli codex missing"),
@@ -209,4 +216,42 @@ func TestRequestAgentSummary_RefusesAnAgentThatDoesNotSummarize(t *testing.T) {
 		_, err := svc.RequestAgentSummary("", name, "019a1f2e-7c21-7e0a-8b3d-55f0c2b8e41a")
 		assert.ErrorIs(t, err, ErrInvalidSummary, "%q", name)
 	}
+}
+
+// A summary action is reported available only for a task the summary
+// endpoint accepts: one listed with a conversation log. A task whose log has
+// not been found yet is refused there, so it is unavailable here.
+func TestTaskActions_SummaryIsAvailableOnlyWhereRequestAgentSummaryAcceptsIt(t *testing.T) {
+	host := &probeHost{collection: fullOutput(
+		"::panemux-tasks v2",
+		"::now 1000",
+		"::section claude/state",
+		"::file 7.json",
+		`{"pid":7,"sessionId":"logged","status":"busy","statusUpdatedAt":999000}`,
+		"::file 8.json",
+		`{"pid":8,"sessionId":"nolog","status":"busy","statusUpdatedAt":999000}`,
+		"::section ps",
+		"7 1 claude",
+		"8 1 claude",
+		"::section tmux",
+		"::section cwd",
+		"::section claude/transcripts",
+		"990\tlogged.jsonl\t\t17",
+		"::end",
+	), probe: probeAnswer("cli claude found", "cli codex found")}
+	svc := New(Options{RunLocal: host.run})
+	defer svc.Close()
+	snap := collectAndProbe(svc)
+	require.Len(t, snap.Tasks, 2)
+
+	seen := map[string]*TaskAction{}
+	for _, task := range snap.Tasks {
+		action := svc.TaskActions(task).Summary
+		require.NotNil(t, action, task.SessionID)
+		seen[task.SessionID] = action
+		_, err := svc.RequestAgentSummary(task.Host, task.Agent, task.SessionID)
+		assert.Equal(t, action.Status == Available, err == nil, "%s: %+v, %v", task.SessionID, action, err)
+	}
+	assert.Equal(t, availableAction, seen["logged"])
+	assert.Equal(t, sessionInfoMissingAction("the conversation log has not been found"), seen["nolog"])
 }

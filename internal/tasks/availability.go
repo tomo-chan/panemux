@@ -292,14 +292,16 @@ func (s *Service) currentConn(name string) Conn {
 }
 
 // Availability is what is known about using each agent on a host ("" is
-// the panemux host): collect from its last full collection, launch and
-// resume from the probe of its current connection. The agents are in
+// the panemux host): collect from its last full collection — unknown /
+// probe_failed while that collection failed — launch and resume from the
+// probe of its current connection. The agents are in
 // registry order, each with collect, launch and resume as it declares them.
 func (s *Service) Availability(host string) []Availability {
 	conn := s.currentConn(host)
 	s.mu.Lock()
 	entry, probed := s.probes[host]
 	collect := s.collectAvailability[host]
+	failure, failed := s.collectFailed[host]
 	s.mu.Unlock()
 	probed = probed && entry.conn == conn
 
@@ -307,7 +309,11 @@ func (s *Service) Availability(host string) []Availability {
 	for _, d := range agent.All() {
 		if d.Has(agent.Collect) {
 			a, ok := collect[d.ID]
-			if !ok {
+			switch {
+			case failed:
+				a = Availability{Agent: d.ID, Capability: agent.Collect, Status: AvailabilityUnknown,
+					Reason: ReasonProbeFailed, Detail: boundedText(failure, maxAvailabilityDetail)}
+			case !ok:
 				a = notProbed(d.ID, agent.Collect)
 			}
 			list = append(list, a)
@@ -383,6 +389,7 @@ func (s *Service) recordCollectAvailability(host string, formats map[agent.ID]fo
 	}
 	previous, known := s.collectAvailability[host]
 	s.collectAvailability[host] = current
+	delete(s.collectFailed, host)
 	s.mu.Unlock()
 
 	where := hostName(host)
@@ -395,6 +402,19 @@ func (s *Service) recordCollectAvailability(host string, formats map[agent.ID]fo
 			s.opts.Logf("task collection on %s: %s: collect available again", where, r.id)
 		}
 	}
+}
+
+// recordCollectFailure marks a host's collect availability unknown until its
+// next full collection succeeds: what the last good one found is not
+// reported as still holding. What it found is kept, so the change logged
+// after the next good one is measured from it.
+func (s *Service) recordCollectFailure(host, err string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.collectFailed == nil {
+		s.collectFailed = map[string]string{}
+	}
+	s.collectFailed[host] = err
 }
 
 func collectAvailabilityOf(id agent.ID, r formatReport) Availability {

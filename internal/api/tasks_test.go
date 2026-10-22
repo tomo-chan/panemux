@@ -1093,7 +1093,9 @@ func TestGetTasks_CarriesAgentsAvailabilityAndTaskActions(t *testing.T) {
 		Detail: "codex is not on PATH or in a login shell's PATH",
 	})
 	task := findTaskResponse(t, resp, "local:claude:s")
-	assert.Equal(t, tasks.TaskActions{Summary: &tasks.TaskAction{Status: tasks.Available}}, task.Actions)
+	assert.Equal(t, tasks.TaskActions{Summary: &tasks.TaskAction{Status: tasks.Unavailable,
+		Reason: tasks.ReasonSessionInfoMissing, Detail: "the conversation log has not been found"}}, task.Actions,
+		"the collection lists no transcript for the session, so the summary endpoint would refuse it")
 	assert.Empty(t, task.StateNote, "claude says nothing about a busy session")
 
 	rec := httptest.NewRecorder()
@@ -1108,7 +1110,8 @@ func TestGetTasks_CarriesAgentsAvailabilityAndTaskActions(t *testing.T) {
 		assert.Contains(t, raw.Agents[0], key)
 	}
 	assert.Contains(t, raw.Hosts[0], "availability")
-	assert.Equal(t, map[string]any{"summary": map[string]any{"status": "available"}}, raw.Tasks[0]["actions"])
+	assert.Equal(t, map[string]any{"summary": map[string]any{"status": "unavailable",
+		"reason": "session_info_missing", "detail": "the conversation log has not been found"}}, raw.Tasks[0]["actions"])
 }
 
 // A task's state note is its agent's adapter's, as it gives it.
