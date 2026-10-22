@@ -298,6 +298,10 @@ func TestAvailability_AHostRemovedFromTheConfigIsForgotten(t *testing.T) {
 	collectAndProbe(svc)
 	assert.Equal(t, ReasonProbeFailed, availabilityOf(svc.Availability("build-box"), agent.Claude, agent.Launch).Reason)
 	assert.Equal(t, Available, availabilityOf(svc.Availability("build-box"), agent.Claude, agent.Collect).Status)
+	conn.output = []byte("garbage\n")
+	collectAndProbe(svc)
+	assert.Equal(t, ReasonProbeFailed, availabilityOf(svc.Availability("build-box"), agent.Claude, agent.Collect).Reason,
+		"its failed collection is forgotten too")
 
 	hosts = nil
 	collectAndProbe(svc)
