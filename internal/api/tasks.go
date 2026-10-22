@@ -154,22 +154,22 @@ func isHTTPURL(raw string) bool {
 }
 
 type taskResponse struct {
-	Git *taskGitInfo `json:"git,omitempty"`
+	// Actions are the actions the task offers (issue #376).
+	Actions tasks.TaskActions `json:"actions"`
+	Git     *taskGitInfo      `json:"git,omitempty"`
 	// Summary is what `claude -p` made of the task's conversation log
 	// (issue #258), present only while summaries are enabled and once the
 	// task has one.
 	Summary *tasks.SummaryView `json:"summary,omitempty"`
+	// StateNote is what the task's agent says its state means
+	// (tasks.StateNote), absent when it says nothing.
+	StateNote string `json:"state_note,omitempty"`
 	// Labels and Done are what a person recorded about the task on the
 	// dashboard (tasks.RecordStore). Done does not change State: a task
 	// marked done that is running again reports the state it is in.
 	Labels []string `json:"labels,omitempty"`
-	// StateNote is what the task's agent says its state means
-	// (tasks.StateNote), absent when it says nothing.
-	StateNote string `json:"state_note,omitempty"`
 	tasks.Task
-	// Actions are the actions the task offers (issue #376).
-	Actions tasks.TaskActions `json:"actions"`
-	Done    bool              `json:"done,omitempty"`
+	Done bool `json:"done,omitempty"`
 }
 
 // taskHostResponse is a host's collection result with what is known about

@@ -9,8 +9,8 @@ import (
 type AgentInfo struct {
 	ID           agent.ID           `json:"id"`
 	DisplayName  string             `json:"display_name"`
-	Capabilities []agent.Capability `json:"capabilities"`
 	Notes        AgentNotes         `json:"notes"`
+	Capabilities []agent.Capability `json:"capabilities"`
 }
 
 // AgentNotes are fixed texts an agent's adapters give, shown as they are.

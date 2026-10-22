@@ -35,81 +35,7 @@ func TestAgents_ListsTheRegistryWithItsCapabilitiesAndNotes(t *testing.T) {
 // a task of an agent that summarizes, neither on an agent the registry does
 // not declare them for or does not know.
 func TestTaskActions(t *testing.T) {
-	const uuid = "019a1f2e-7c21-7e0a-8b3d-55f0c2b8e41a"
-	stopped := func(agentName, sessionID, cwd string) Task {
-		return Task{Agent: agentName, SessionID: sessionID, CWD: cwd, State: StateStop}
-	}
-	available := &TaskAction{Status: Available}
-	sessionInfoMissing := func(detail string) *TaskAction {
-		return &TaskAction{Status: Unavailable, Reason: ReasonSessionInfoMissing, Detail: detail}
-	}
-	tests := []struct {
-		name  string
-		probe []byte
-		task  Task
-		want  TaskActions
-	}{
-		{
-			name: "a stopped claude task resumes and summarizes", probe: probeAnswer("cli claude found", "cli codex found"),
-			task: stopped(AgentClaude, uuid, "/workspace/user/project"),
-			want: TaskActions{Resume: available, Summary: available},
-		},
-		{
-			name: "a stopped codex task resumes and summarizes", probe: probeAnswer("cli claude found", "cli codex found"),
-			task: stopped(AgentCodex, uuid, "/workspace/user/project"),
-			want: TaskActions{Resume: available, Summary: available},
-		},
-		{
-			name: "a running task is not resumed", probe: probeAnswer("cli claude found", "cli codex found"),
-			task: Task{Agent: AgentClaude, SessionID: uuid, CWD: "/workspace/user/project", State: StateBusy},
-			want: TaskActions{Summary: available},
-		},
-		{
-			name: "a missing CLI makes resume unavailable", probe: probeAnswer("cli claude found", "cli codex missing"),
-			task: stopped(AgentCodex, uuid, "/workspace/user/project"),
-			want: TaskActions{
-				Resume:  &TaskAction{Status: Unavailable, Reason: ReasonCLIMissing, Detail: "codex is not on PATH or in a login shell's PATH"},
-				Summary: available,
-			},
-		},
-		{
-			name: "a session ID the agent does not resume", probe: probeAnswer("cli claude found", "cli codex found"),
-			task: stopped(AgentClaude, "7c21e0a4", "/workspace/user/project"),
-			want: TaskActions{
-				Resume:  sessionInfoMissing("the session ID is not one claude resumes"),
-				Summary: available,
-			},
-		},
-		{
-			name: "no recorded working directory", probe: probeAnswer("cli claude found", "cli codex found"),
-			task: stopped(AgentClaude, uuid, ""),
-			want: TaskActions{
-				Resume:  sessionInfoMissing("the session's working directory is not recorded"),
-				Summary: available,
-			},
-		},
-		{
-			name: "no session ID", probe: probeAnswer("cli claude found", "cli codex found"),
-			task: Task{Agent: AgentCodex, State: StateRun},
-			want: TaskActions{Summary: sessionInfoMissing("the task has no session ID yet")},
-		},
-		{
-			name: "a failed probe leaves resume to the server", probe: []byte("not a probe\n"),
-			task: stopped(AgentClaude, uuid, "/workspace/user/project"),
-			want: TaskActions{Resume: &TaskAction{Status: AvailabilityUnknown, Reason: ReasonProbeFailed}, Summary: available},
-		},
-		{
-			name: "an agent that declares neither", probe: probeAnswer("cli claude found", "cli codex found"),
-			task: stopped("cursor", uuid, "/workspace/user/project"),
-			want: TaskActions{},
-		},
-		{
-			name: "an agent the registry does not know", probe: probeAnswer("cli claude found", "cli codex found"),
-			task: stopped("devin", uuid, "/workspace/user/project"),
-			want: TaskActions{},
-		},
-	}
-	for _, tt := range tests {
+	for _, tt := range taskActionCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			host := &probeHost{collection: minimalOutput("s"), probe: tt.probe}
 			svc := New(Options{RunLocal: host.run})
@@ -130,6 +56,98 @@ func TestTaskActions(t *testing.T) {
 	}
 }
 
+type taskActionCase struct {
+	want  TaskActions
+	name  string
+	probe []byte
+	task  Task
+}
+
+const actionSessionID = "019a1f2e-7c21-7e0a-8b3d-55f0c2b8e41a"
+
+func stoppedTask(agentName, sessionID, cwd string) Task {
+	return Task{Agent: agentName, SessionID: sessionID, CWD: cwd, State: StateStop}
+}
+
+func sessionInfoMissingAction(detail string) *TaskAction {
+	return &TaskAction{Status: Unavailable, Reason: ReasonSessionInfoMissing, Detail: detail}
+}
+
+var availableAction = &TaskAction{Status: Available}
+
+func taskActionCases() []taskActionCase {
+	return append(resumeActionCases(), []taskActionCase{
+		{
+			name: "no session ID", probe: probeAnswer("cli claude found", "cli codex found"),
+			task: Task{Agent: AgentCodex, State: StateRun},
+			want: TaskActions{Summary: sessionInfoMissingAction("the task has no session ID yet")},
+		},
+		{
+			name: "a failed probe leaves resume to the server", probe: []byte("not a probe\n"),
+			task: stoppedTask(AgentClaude, actionSessionID, "/workspace/user/project"),
+			want: TaskActions{
+				Resume:  &TaskAction{Status: AvailabilityUnknown, Reason: ReasonProbeFailed},
+				Summary: availableAction,
+			},
+		},
+		{
+			name: "an agent that declares neither", probe: probeAnswer("cli claude found", "cli codex found"),
+			task: stoppedTask("cursor", actionSessionID, "/workspace/user/project"),
+			want: TaskActions{},
+		},
+		{
+			name: "an agent the registry does not know", probe: probeAnswer("cli claude found", "cli codex found"),
+			task: stoppedTask("devin", actionSessionID, "/workspace/user/project"),
+			want: TaskActions{},
+		},
+	}...)
+}
+
+func resumeActionCases() []taskActionCase {
+	return []taskActionCase{
+		{
+			name: "a stopped claude task resumes and summarizes", probe: probeAnswer("cli claude found", "cli codex found"),
+			task: stoppedTask(AgentClaude, actionSessionID, "/workspace/user/project"),
+			want: TaskActions{Resume: availableAction, Summary: availableAction},
+		},
+		{
+			name: "a stopped codex task resumes and summarizes", probe: probeAnswer("cli claude found", "cli codex found"),
+			task: stoppedTask(AgentCodex, actionSessionID, "/workspace/user/project"),
+			want: TaskActions{Resume: availableAction, Summary: availableAction},
+		},
+		{
+			name: "a running task is not resumed", probe: probeAnswer("cli claude found", "cli codex found"),
+			task: Task{Agent: AgentClaude, SessionID: actionSessionID, CWD: "/workspace/user/project", State: StateBusy},
+			want: TaskActions{Summary: availableAction},
+		},
+		{
+			name: "a missing CLI makes resume unavailable", probe: probeAnswer("cli claude found", "cli codex missing"),
+			task: stoppedTask(AgentCodex, actionSessionID, "/workspace/user/project"),
+			want: TaskActions{
+				Resume: &TaskAction{Status: Unavailable, Reason: ReasonCLIMissing,
+					Detail: "codex is not on PATH or in a login shell's PATH"},
+				Summary: availableAction,
+			},
+		},
+		{
+			name: "a session ID the agent does not resume", probe: probeAnswer("cli claude found", "cli codex found"),
+			task: stoppedTask(AgentClaude, "7c21e0a4", "/workspace/user/project"),
+			want: TaskActions{
+				Resume:  sessionInfoMissingAction("the session ID is not one claude resumes"),
+				Summary: availableAction,
+			},
+		},
+		{
+			name: "no recorded working directory", probe: probeAnswer("cli claude found", "cli codex found"),
+			task: stoppedTask(AgentClaude, actionSessionID, ""),
+			want: TaskActions{
+				Resume:  sessionInfoMissingAction("the session's working directory is not recorded"),
+				Summary: availableAction,
+			},
+		},
+	}
+}
+
 func TestTaskActions_BeforeTheHostIsProbedResumeIsUnknown(t *testing.T) {
 	svc := New(Options{RunLocal: (&probeHost{}).run})
 	defer svc.Close()
@@ -145,23 +163,24 @@ func TestTaskActions_BeforeTheHostIsProbedResumeIsUnknown(t *testing.T) {
 func TestStateNote(t *testing.T) {
 	tests := []struct {
 		name string
-		task Task
 		want string
+		task Task
 	}{
-		{"a codex task in the shared daemon", Task{Agent: AgentCodex, State: StateBusy, Location: Location{Kind: LocationDaemon}},
-			"This session runs in codex's shared daemon"},
-		{"a codex process without a session", Task{Agent: AgentCodex, State: StateRun},
-			"Codex has no session of its own yet"},
-		{"a busy codex task", Task{Agent: AgentCodex, State: StateBusy},
-			"a command waiting for approval also shows as working"},
-		{"a codex task in an unknown state", Task{Agent: AgentCodex, State: StateUnknown},
-			"Neither codex's thread history nor the end of its session log"},
-		{"a running claude process", Task{Agent: AgentClaude, State: StateRun},
-			"claude reports no detailed state"},
-		{"a claude status outside the known set", Task{Agent: AgentClaude, SessionID: "s", State: StateUnknown},
-			"Claude Code reported a status the dashboard does not recognize."},
-		{"an unreadable claude state file", Task{Agent: AgentClaude, State: StateUnknown},
-			"The session state file under ~/.claude/sessions could not be read"},
+		{name: "a codex task in the shared daemon",
+			task: Task{Agent: AgentCodex, State: StateBusy, Location: Location{Kind: LocationDaemon}},
+			want: "This session runs in codex's shared daemon"},
+		{name: "a codex process without a session", task: Task{Agent: AgentCodex, State: StateRun},
+			want: "Codex has no session of its own yet"},
+		{name: "a busy codex task", task: Task{Agent: AgentCodex, State: StateBusy},
+			want: "a command waiting for approval also shows as working"},
+		{name: "a codex task in an unknown state", task: Task{Agent: AgentCodex, State: StateUnknown},
+			want: "Neither codex's thread history nor the end of its session log"},
+		{name: "a running claude process", task: Task{Agent: AgentClaude, State: StateRun},
+			want: "claude reports no detailed state"},
+		{name: "a claude status outside the known set", task: Task{Agent: AgentClaude, SessionID: "s", State: StateUnknown},
+			want: "Claude Code reported a status the dashboard does not recognize."},
+		{name: "an unreadable claude state file", task: Task{Agent: AgentClaude, State: StateUnknown},
+			want: "The session state file under ~/.claude/sessions could not be read"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
