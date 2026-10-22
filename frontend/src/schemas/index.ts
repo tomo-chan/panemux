@@ -484,6 +484,57 @@ export const TaskSummarySchema = z.object({
 
 export type TaskSummary = z.infer<typeof TaskSummarySchema>
 
+// Whether one capability of an agent, or one action on a task, can be used
+// (issue #376). Only the status is a closed set: a capability or reason this
+// build does not know is still shown, by its text, rather than failing the
+// whole response.
+export const AvailabilityStatusSchema = z.enum(['available', 'degraded', 'unavailable', 'unknown'])
+
+export type AvailabilityStatus = z.infer<typeof AvailabilityStatusSchema>
+
+// What the probe and the last full collection of a host found of one agent's
+// capability. detail is bounded by the server.
+export const AgentAvailabilitySchema = z.object({
+  agent: z.string().min(1),
+  capability: z.string().min(1),
+  status: AvailabilityStatusSchema,
+  reason: z.string().optional(),
+  detail: z.string().optional(),
+  observed_version: z.string().optional(),
+})
+
+export type AgentAvailability = z.infer<typeof AgentAvailabilitySchema>
+
+// One registered agent: what it declares and the fixed notes its adapters
+// give on its own constraints.
+export const AgentInfoSchema = z.object({
+  id: z.string().min(1),
+  display_name: z.string(),
+  capabilities: z.array(z.string().min(1)),
+  notes: z.object({
+    launch: z.string().optional(),
+  }),
+})
+
+export type AgentInfo = z.infer<typeof AgentInfoSchema>
+
+export const TaskActionSchema = z.object({
+  status: AvailabilityStatusSchema,
+  reason: z.string().optional(),
+  detail: z.string().optional(),
+})
+
+export type TaskAction = z.infer<typeof TaskActionSchema>
+
+// The actions a task offers. An action is absent when the task's agent does
+// not declare it or it does not apply (resume to a task that is not stopped).
+export const TaskActionsSchema = z.object({
+  resume: TaskActionSchema.optional(),
+  summary: TaskActionSchema.optional(),
+})
+
+export type TaskActions = z.infer<typeof TaskActionsSchema>
+
 export const TaskSchema = z.object({
   id: z.string().min(1),
   // The ssh_connections key, or '' for the panemux host itself.
@@ -508,6 +559,10 @@ export const TaskSchema = z.object({
   labels: z.array(z.string()).optional(),
   // Present only while summaries are enabled and once the task has one.
   summary: TaskSummarySchema.optional(),
+  // What the task's agent says its state means, absent when it says nothing.
+  state_note: z.string().optional(),
+  // The server always sends it; absent offers nothing.
+  actions: TaskActionsSchema.optional(),
 })
 
 export type Task = z.infer<typeof TaskSchema>
@@ -531,6 +586,9 @@ export const TaskHostSchema = z.object({
   error: z.string().optional(),
   collected_at: z.string().optional(),
   unreadable_state_files: z.array(TaskUnreadableStateFileSchema).optional(),
+  // Each agent's collect, launch and resume on this host, as it declares
+  // them. The server always sends it.
+  availability: z.array(AgentAvailabilitySchema).optional(),
 })
 
 export type TaskHost = z.infer<typeof TaskHostSchema>
@@ -538,6 +596,9 @@ export type TaskHost = z.infer<typeof TaskHostSchema>
 export const TasksResponseSchema = z.object({
   hosts: z.array(TaskHostSchema),
   tasks: z.array(TaskSchema),
+  // Every registered agent, in registry order. The server always sends it;
+  // absent offers nothing.
+  agents: z.array(AgentInfoSchema).optional(),
   // Why the task record file could not be read; the tasks come without records.
   records_error: z.string().optional(),
   // Every label the task record file holds, once each, in case-insensitive

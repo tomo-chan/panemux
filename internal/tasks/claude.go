@@ -30,6 +30,18 @@ func (claudeCollect) processHints() []string { return []string{string(agent.Clau
 
 func (claudeCollect) newCollected() agentCollected { return &claudeCollected{} }
 
+func (claudeCollect) stateNote(task Task) string {
+	switch {
+	case task.State == StateRun:
+		return "claude reports no detailed state; the dashboard only knows it is running."
+	case task.State == StateUnknown && task.SessionID != "":
+		return "Claude Code reported a status the dashboard does not recognize."
+	case task.State == StateUnknown:
+		return "The session state file under ~/.claude/sessions could not be read or has an unexpected format."
+	}
+	return ""
+}
+
 // claudeStateScript prints each ~/.claude/sessions/*.json after
 // "::file <name>".
 const claudeStateScript = `for f in "$HOME"/.claude/sessions/*.json; do

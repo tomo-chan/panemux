@@ -163,8 +163,20 @@ type taskResponse struct {
 	// dashboard (tasks.RecordStore). Done does not change State: a task
 	// marked done that is running again reports the state it is in.
 	Labels []string `json:"labels,omitempty"`
+	// StateNote is what the task's agent says its state means
+	// (tasks.StateNote), absent when it says nothing.
+	StateNote string `json:"state_note,omitempty"`
 	tasks.Task
-	Done bool `json:"done,omitempty"`
+	// Actions are the actions the task offers (issue #376).
+	Actions tasks.TaskActions `json:"actions"`
+	Done    bool              `json:"done,omitempty"`
+}
+
+// taskHostResponse is a host's collection result with what is known about
+// using each agent there (issue #376).
+type taskHostResponse struct {
+	tasks.HostResult
+	Availability []tasks.Availability `json:"availability"`
 }
 
 type tasksResponse struct {
@@ -175,8 +187,10 @@ type tasksResponse struct {
 	// (issue #352). They are still made and shown. Present only while
 	// summaries are enabled.
 	SummariesError string             `json:"summaries_error,omitempty"`
-	Hosts          []tasks.HostResult `json:"hosts"`
+	Hosts          []taskHostResponse `json:"hosts"`
 	Tasks          []taskResponse     `json:"tasks"`
+	// Agents is every registered agent, with what it declares (issue #376).
+	Agents []tasks.AgentInfo `json:"agents"`
 	// KnownLabels is every label the record file holds, listed task or not,
 	// once each in case-insensitive alphabetical order: the suggestions the
 	// dashboard offers when labeling a task (issue #310). Absent when there
@@ -299,9 +313,13 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	git := h.taskGitInfos(r.Context(), snapshot.Tasks, collected)
 
 	resp := tasksResponse{
-		Hosts:            snapshot.Hosts,
+		Hosts:            make([]taskHostResponse, 0, len(snapshot.Hosts)),
 		Tasks:            make([]taskResponse, 0, len(snapshot.Tasks)),
+		Agents:           tasks.Agents(),
 		SummariesEnabled: h.cfg.TaskDashboard.Summary.Enabled,
+	}
+	for _, host := range snapshot.Hosts {
+		resp.Hosts = append(resp.Hosts, taskHostResponse{HostResult: host, Availability: h.tasks.Availability(host.Name)})
 	}
 	var summaries map[string]*tasks.SummaryView
 	if resp.SummariesEnabled {
@@ -312,9 +330,11 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, task := range snapshot.Tasks {
 		resp.Tasks = append(resp.Tasks, taskResponse{
-			Task:    task,
-			Git:     taskGitFor(task, git[taskGitKey(task.Host, task.CWD)]),
-			Summary: summaries[task.ID],
+			Task:      task,
+			Git:       taskGitFor(task, git[taskGitKey(task.Host, task.CWD)]),
+			Summary:   summaries[task.ID],
+			StateNote: tasks.StateNote(task),
+			Actions:   h.tasks.TaskActions(task),
 		})
 	}
 	if records, err := h.taskRecords.Records(); err != nil {

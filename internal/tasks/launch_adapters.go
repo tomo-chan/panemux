@@ -55,6 +55,9 @@ type launchAdapter interface {
 	// found, that sets run: the `sh -c` script tmux runs with the prompt
 	// file, the binary, the session ID and the working directory as $1–$4.
 	newCommand() string
+	// note is a fixed text on what to know before starting a new session,
+	// "" when there is nothing to say (issue #376).
+	note() string
 	// refusals are the refusal codes the adapter's fragments print, beyond
 	// the launch script's own, each with its fixed message.
 	refusals() map[string]string
@@ -280,6 +283,7 @@ func (claudeLaunch) validNewSessionID(id string) bool { return validUUID.MatchSt
 func (claudeLaunch) validSessionID(id string) bool    { return validUUID.MatchString(id) }
 func (claudeLaunch) tmuxSessionFor(id string) string  { return tmuxSessionForTask(id) }
 func (claudeLaunch) refusals() map[string]string      { return nil }
+func (claudeLaunch) note() string                     { return "" }
 
 // A claude resume passes the session ID as "--resume=<id>": `--resume`
 // takes an optional value, and an ID given as a separate argument that
@@ -308,6 +312,11 @@ func (codexLaunch) validNewSessionID(id string) bool { return id == "" }
 // only a listed UUID is passed.
 func (codexLaunch) validSessionID(id string) bool   { return validUUID.MatchString(id) }
 func (codexLaunch) tmuxSessionFor(id string) string { return tmuxSessionForCodex(id) }
+
+func (codexLaunch) note() string {
+	return "Codex chooses its session ID once it has started its session, so the labels are recorded once codex " +
+		"has started its session. If it stops at a start-up screen, open the task's pane to answer it."
+}
 
 func (codexLaunch) refusals() map[string]string {
 	return map[string]string{RefusedCodexTooOld: "codex on the host is too old: it has no --no-daemon option"}

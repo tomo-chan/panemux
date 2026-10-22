@@ -50,6 +50,26 @@ func (codexCollect) processHints() []string { return []string{codexProgram} }
 
 func (codexCollect) newCollected() agentCollected { return &codexCollected{} }
 
+func (codexCollect) stateNote(task Task) string {
+	if task.Location.Kind == LocationDaemon {
+		return "This session runs in codex's shared daemon: codex was started without --no-daemon, and nothing on " +
+			"the host says which pane shows it. The dashboard's own starts use --no-daemon."
+	}
+	switch task.State {
+	case StateRun:
+		return "Codex has no session of its own yet: it is waiting for its first instruction, held at a start-up " +
+			"screen (trusting the directory, a new model, a usage limit), or running its session in codex's shared " +
+			"daemon, which the dashboard lists as a task of its own. Open the pane to see which. Done and labels " +
+			"become available on the session."
+	case StateBusy:
+		return "Unless codex's permission hook is registered on this host, a command waiting for approval also " +
+			"shows as working."
+	case StateUnknown:
+		return "Neither codex's thread history nor the end of its session log says whether a turn is in progress."
+	}
+	return ""
+}
+
 // codexOpenScript lists the open rollouts. Codex writes no file that ties a process to its session (issue #264): the
 // rollout a codex process holds open is its session, found through
 // /proc/<pid>/fd, or lsof where there is no /proc. Each codex process gets a

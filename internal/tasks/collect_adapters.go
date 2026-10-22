@@ -38,6 +38,9 @@ type collectAdapter interface {
 	processHints() []string
 	// newCollected is an empty part for one host's output.
 	newCollected() agentCollected
+	// stateNote is a fixed text on what the task's state means for the
+	// agent, "" when there is nothing to say (issue #376).
+	stateNote(task Task) string
 }
 
 // agentCollected is one adapter's part of one host's output, and how the

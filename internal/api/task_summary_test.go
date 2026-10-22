@@ -207,6 +207,9 @@ func TestPostTaskSummary_CodexIdentityAndRouting(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, postTaskSummary(t, h, `{"host":"","session_id":"`+sid+`"}`).Code)
 	bad := postTaskSummary(t, h, `{"host":"","agent":"other","session_id":"`+sid+`"}`)
 	assert.Equal(t, http.StatusBadRequest, bad.Code)
+	// An agent the registry knows but that does not declare summary.
+	assert.Equal(t, http.StatusBadRequest,
+		postTaskSummary(t, h, `{"host":"","agent":"cursor","session_id":"`+sid+`"}`).Code)
 	assert.Equal(t, http.StatusBadRequest, postTaskSummary(t, h, `{"host":"","agent":"codex","session_id":"abc"}`).Code)
 }
 

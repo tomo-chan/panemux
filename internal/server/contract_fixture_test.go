@@ -276,6 +276,8 @@ var contractFixtures = map[string]contractFixture{
 			},
 			RunLocal: func(_ context.Context, script string) ([]byte, error) {
 				switch {
+				case strings.Contains(script, fixtureProbeHeader):
+					return []byte(fixtureProbeHeader + "\ncli claude found\ncli codex found\n::end\n"), nil
 				case strings.Contains(script, "sid='"+fixtureDaemonCodexSessionID+"'"):
 					return fixtureCodexTranscript(), nil
 				case strings.Contains(script, "sid='7c21e0a4'"):
@@ -313,8 +315,11 @@ var contractFixtures = map[string]contractFixture{
 		require.Equal(t, http.StatusAccepted, rr.Code, rr.Body.String())
 		require.Eventually(t, func() bool {
 			rr = e.do(t, http.MethodGet, "/api/tasks", "")
-			return rr.Code == http.StatusOK && strings.Count(rr.Body.String(), `"state":"ready"`) == 3
-		}, 10*time.Second, 20*time.Millisecond, "Claude and Codex summaries become ready")
+			// Only gpu-box, which cannot be dialed, is not probed: its
+			// collect, launch and resume of claude and codex.
+			return rr.Code == http.StatusOK && strings.Count(rr.Body.String(), `"state":"ready"`) == 3 &&
+				strings.Count(rr.Body.String(), `"reason":"not_probed"`) == 6
+		}, 10*time.Second, 20*time.Millisecond, "Claude and Codex summaries become ready and the hosts are probed")
 		return rr.Body.Bytes(), nil
 	}},
 
@@ -650,7 +655,7 @@ const fixtureLocalTaskCollection = `::panemux-tasks v2
 ::now 1790000000
 ::section claude/state
 ::file 101.json
-` + `{"pid":101,"sessionId":"7c21e0a4","cwd":"/workspace/user/panemux","status":"waiting",` +
+` + `{"pid":101,"sessionId":"7c21e0a4","version":"2.1.0","cwd":"/workspace/user/panemux","status":"waiting",` +
 	`"waitingFor":"input needed","statusUpdatedAt":1789999820000,"startedAt":1789997300000}
 ::file 102.json
 ` + `{"pid":102,"sessionId":"b41f9d20","cwd":"/workspace/user/panemux-docs","status":"busy",` +
@@ -743,7 +748,17 @@ func fixtureSummarize(_ context.Context, excerpt string) (tasks.Summary, error) 
 // frontend/src/schemas/contract.test.ts.
 type fixtureTaskConn struct{}
 
-func (fixtureTaskConn) Run(context.Context, string, io.Reader) ([]byte, error) {
+// fixtureProbeHeader starts the agent probe script, which a host answers
+// with which agent CLIs it has.
+const fixtureProbeHeader = "::panemux-probe v1"
+
+func (fixtureTaskConn) Run(_ context.Context, _ string, stdin io.Reader) ([]byte, error) {
+	if stdin != nil {
+		if script, err := io.ReadAll(stdin); err == nil && strings.Contains(string(script), fixtureProbeHeader) {
+			// The build box has claude but not codex (issue #376).
+			return []byte(fixtureProbeHeader + "\ncli claude found\ncli codex missing\n::end\n"), nil
+		}
+	}
 	return []byte(`::panemux-tasks v2
 ::now 1790000000
 ::section claude/state

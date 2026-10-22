@@ -1057,3 +1057,79 @@ func withAllSections(out []byte) []byte {
 	}
 	return []byte(strings.Join(append(append(lines[:end:end], missing...), lines[end:]...), "\n"))
 }
+
+// GET /api/tasks carries what the dashboard offers from (issue #376): the
+// registered agents, what each host's probe and collection found of each,
+// and the actions each task offers, with why one cannot be taken.
+func TestGetTasks_CarriesAgentsAvailabilityAndTaskActions(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	collection := taskCollection("s", "/workspace/user/project")
+	h.tasks = tasks.New(tasks.Options{
+		Hosts: h.taskHostNames,
+		Dial:  func(string) (tasks.Conn, error) { return nil, errors.New("i/o timeout") },
+		RunLocal: func(_ context.Context, script string) ([]byte, error) {
+			if strings.Contains(script, "::panemux-probe v1") {
+				return []byte("::panemux-probe v1\ncli claude found\ncli codex missing\n::end\n"), nil
+			}
+			return collection, nil
+		},
+	})
+
+	var resp tasksResponse
+	require.Eventually(t, func() bool {
+		resp = getTasks(t, h)
+		for _, a := range resp.Hosts[0].Availability {
+			if a.Reason == tasks.ReasonNotProbed {
+				return false
+			}
+		}
+		return true
+	}, 5*time.Second, 10*time.Millisecond, "the local host's probe answers")
+
+	assert.Equal(t, tasks.Agents(), resp.Agents)
+	assert.Equal(t, h.tasks.Availability(""), resp.Hosts[0].Availability)
+	assert.Contains(t, resp.Hosts[0].Availability, tasks.Availability{
+		Agent: "codex", Capability: "launch", Status: tasks.Unavailable, Reason: tasks.ReasonCLIMissing,
+		Detail: "codex is not on PATH or in a login shell's PATH",
+	})
+	task := findTaskResponse(t, resp, "local:claude:s")
+	assert.Equal(t, tasks.TaskActions{Summary: &tasks.TaskAction{Status: tasks.Available}}, task.Actions)
+	assert.Empty(t, task.StateNote, "claude says nothing about a busy session")
+
+	rec := httptest.NewRecorder()
+	setupRouterWithHandler(h).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tasks", nil))
+	var raw struct {
+		Agents []map[string]any `json:"agents"`
+		Hosts  []map[string]any `json:"hosts"`
+		Tasks  []map[string]any `json:"tasks"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &raw))
+	for _, key := range []string{"id", "display_name", "capabilities", "notes"} {
+		assert.Contains(t, raw.Agents[0], key)
+	}
+	assert.Contains(t, raw.Hosts[0], "availability")
+	assert.Equal(t, map[string]any{"summary": map[string]any{"status": "available"}}, raw.Tasks[0]["actions"])
+}
+
+// A task's state note is its agent's adapter's, as it gives it.
+func TestGetTasks_CarriesTheStateNoteOfTheTasksAgent(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	useTaskService(h, withAllSections([]byte(strings.Join([]string{
+		"::panemux-tasks v2",
+		"::now 1000",
+		"::section claude/state",
+		"::section ps",
+		"7 1 claude",
+		"::section tmux",
+		"1 task-7c21",
+		"::section cwd",
+		"7 /workspace/user/project",
+		"::section claude/transcripts",
+		"::end",
+	}, "\n")+"\n")), nil)
+
+	resp := getTasks(t, h)
+	require.Len(t, resp.Tasks, 1)
+	assert.Equal(t, tasks.StateNote(resp.Tasks[0].Task), resp.Tasks[0].StateNote)
+	assert.NotEmpty(t, resp.Tasks[0].StateNote)
+}

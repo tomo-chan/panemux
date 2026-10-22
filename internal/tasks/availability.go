@@ -47,17 +47,17 @@ const (
 )
 
 // Availability is whether one capability of one agent can be used on a host
-// (issue #373). It is internal: the API does not carry it yet.
+// (issue #373). GET /api/tasks carries it on each host (issue #376).
 type Availability struct {
-	Agent      agent.ID
-	Capability agent.Capability
-	Status     AvailabilityStatus
-	Reason     AvailabilityReason
+	Agent      agent.ID           `json:"agent"`
+	Capability agent.Capability   `json:"capability"`
+	Status     AvailabilityStatus `json:"status"`
+	Reason     AvailabilityReason `json:"reason,omitempty"`
 	// Detail says what was found, bounded and without control characters.
-	Detail string
+	Detail string `json:"detail,omitempty"`
 	// ObservedVersion is the agent's version as its newest session
 	// recorded it. It is recorded, never checked.
-	ObservedVersion string
+	ObservedVersion string `json:"observed_version,omitempty"`
 }
 
 const (
