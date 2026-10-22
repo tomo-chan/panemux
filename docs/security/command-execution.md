@@ -392,9 +392,10 @@ probe never runs that file: it prints only `cli <id> found` or `cli <id> missing
 accepts only those two answers for an ID it asked about, once each, and fails the probe on
 anything else, on a missing answer and on output without `::end`. A probe that fails changes
 nothing about the host's collection: it runs beside it, never dials, keepalives or drops the
-connection, and is not waited for. Its error reaches only the internal availability detail and
-the server log (when it changes), the detail made valid UTF-8 with control characters replaced and
-bounded (`boundedText`).
+connection, and is not waited for. Its error reaches only the availability detail — which
+`GET /api/tasks` carries, to be shown as text only, never as markup or a link — and the server
+log (when it changes), the detail made valid UTF-8 with control characters replaced and bounded
+(`boundedText`).
 
 What the collection reads in a format this build does not know is reported the same way: the
 examples and versions in an availability detail are host text, each bounded to 120 and 32
