@@ -1579,6 +1579,7 @@ describe('PreviewResponseSchema', () => {
     expect(PreviewResponseSchema.safeParse({ ...relayed, host: '' }).success).toBe(false)
   })
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('keeps a file preview below the preview route', () => {
     expect(PreviewResponseSchema.safeParse({ ...ready, url: relayed.url }).success).toBe(false)
     const { kind: _kind, ...withoutKind } = ready
@@ -1628,6 +1629,14 @@ describe('TasksResponseSchema agent capabilities', () => {
       }],
     })
     expect(result.success).toBe(true)
+    // Zod drops a key it does not name: each must survive the parse.
+    expect(result.data?.agents).toEqual(agents)
+    expect(result.data?.hosts[0].availability).toEqual(availability)
+    expect(result.data?.tasks[0].state_note).toBe('No running process handles this session.')
+    expect(result.data?.tasks[0].actions).toEqual({
+      resume: { status: 'unavailable', reason: 'cli_missing', detail: 'codex is not on PATH' },
+      summary: { status: 'available' },
+    })
   })
 
   it('accepts a reason and a capability this build does not know', () => {
@@ -1639,8 +1648,12 @@ describe('TasksResponseSchema agent capabilities', () => {
       tasks: [{ ...task, actions: { resume: { status: 'unavailable', reason: 'quota_exceeded' } } }],
     })
     expect(result.success).toBe(true)
+    expect(result.data?.agents?.[0].capabilities).toEqual(['detect', 'teleport'])
+    expect(result.data?.hosts[0].availability?.[0].reason).toBe('auth_missing')
+    expect(result.data?.tasks[0].actions?.resume?.reason).toBe('quota_exceeded')
   })
 
+  // efficacy:exempt pins compatibility with a response that predates the fields: it passes without them by design
   it('accepts a response without them, offering nothing', () => {
     expect(TasksResponseSchema.safeParse({ hosts: [{ name: '', status: 'ok' }], tasks: [task] }).success).toBe(true)
   })
