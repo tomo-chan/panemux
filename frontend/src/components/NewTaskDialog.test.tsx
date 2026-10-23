@@ -54,6 +54,7 @@ function fill(fields: { cwd?: string; prompt?: string; labels?: string; host?: s
 }
 
 describe('NewTaskDialog', () => {
+  //efficacy:exempt only passes the new agents prop; a closed dialog renders nothing, as before this branch
   it('renders nothing while closed', () => {
     render(<NewTaskDialog isOpen={false} hosts={hosts} agents={agents} onLaunch={vi.fn()} onLaunched={vi.fn()} onClose={vi.fn()} />)
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -65,6 +66,19 @@ describe('NewTaskDialog', () => {
     expect(hostOptions).toEqual([['', 'Local'], ['build-box', 'build-box'], ['gpu-box', 'gpu-box (unreachable)']])
     const agentOptions = Array.from((screen.getByLabelText('Agent') as HTMLSelectElement).options).map((o) => o.value)
     expect(agentOptions).toEqual(['claude', 'codex'])
+  })
+
+  it('offers an agent the registry adds once it declares launch, and starts it', async () => {
+    const gemini: AgentInfo = { id: 'gemini', display_name: 'Gemini CLI', capabilities: ['detect', 'launch'], notes: {} }
+    const onLaunch = vi.fn().mockResolvedValue({ ok: true, launched })
+    render(<NewTaskDialog isOpen hosts={hosts} agents={[gemini, ...agents]} onLaunch={onLaunch} onLaunched={vi.fn()} onClose={vi.fn()} />)
+    const agentOptions = Array.from((screen.getByLabelText('Agent') as HTMLSelectElement).options).map((o) => o.value)
+    expect(agentOptions).toEqual(['gemini', 'claude', 'codex'])
+    fill({ cwd: '/workspace/user/api', prompt: 'go' })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+    })
+    expect(onLaunch).toHaveBeenCalledWith({ host: '', agent: 'gemini', cwd: '/workspace/user/api', prompt: 'go', labels: [] })
   })
 
   it('says why an agent cannot be started on the chosen host and does not start it', async () => {
@@ -84,6 +98,7 @@ describe('NewTaskDialog', () => {
     expect(start.disabled).toBe(false)
   })
 
+  //efficacy:exempt pins that unknown (not probed) does not stop the form, which never stopped it before this branch
   it('lets an agent start where the host has not been probed; the server decides', () => {
     renderDialog()
     fill({ host: 'gpu-box' })
@@ -481,6 +496,7 @@ describe('NewTaskDialog working directory suggestions', () => {
     expect(within(screen.getByRole('listbox')).getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true')
   })
 
+  //efficacy:exempt only passes the new agents prop; the directory list is untouched by this branch
   it('keeps the highlighted directory when a board update reorders the list', () => {
     const before = [
       task({ id: 'a', host: '', cwd: '/workspace/user/alpha', state: 'busy' }),

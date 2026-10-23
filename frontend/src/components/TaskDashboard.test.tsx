@@ -433,6 +433,7 @@ describe('TaskDashboard', () => {
     expect(detail).toHaveTextContent('No running process handles this session.')
   })
 
+  //efficacy:exempt its note now comes from the fixture's state_note, the same text the dashboard wrote before
   it("shows a session codex's shared daemon runs as one no pane can be opened for", () => {
     renderDashboard(tasksState({
       data: {
@@ -958,6 +959,7 @@ describe('TaskDashboard new tasks and resume', () => {
     expect(within(detail()).queryByRole('button', { name: /^(Resume|Summarize)/ })).toBeNull()
   })
 
+  //efficacy:exempt only its fixture gains the resume action the server sends; resuming codex is unchanged
   it('offers Resume on a stopped codex task', async () => {
     const codexStopped = task({
       id: 'local:codex:01a0e2b9-d054-7cc2-9278-a5e25ebcc524', agent: 'codex', session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524',
@@ -999,6 +1001,7 @@ describe('TaskDashboard new tasks and resume', () => {
 
   // Each resume in flight is its own: resuming a second task must not let
   // the first one be resumed again while its request is still running.
+  //efficacy:exempt only its fixture gains the resume action the server sends; resumes in flight are unchanged
   it('keeps every resume in flight disabled until its own request finishes', async () => {
     const other = task({
       id: 'local:claude:6e8f4b01-2c3d-4e4f-9a51-627384a5b6c7', session_id: '6e8f4b01-2c3d-4e4f-9a51-627384a5b6c7',
