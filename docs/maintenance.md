@@ -40,6 +40,22 @@ Why this matters:
 - it narrows supply-chain drift
 - it keeps workflow changes explicit in code review
 
+## Runner Images
+
+Workflows run on `ubuntu-latest`, except `ci.yml` and `coverage-blocks.yml`, which are pinned to
+`ubuntu-24.04`. `ubuntu-latest` is now Ubuntu 26.04, and those two jobs cannot run there yet:
+
+- Ubuntu 26.04 ships uutils coreutils, one multicall binary behind `/usr/bin/sleep`, `mkdir` and the
+  rest. It refuses to run under another name, and its `mkdir` leaves the path out of its error. The
+  Go tests that depended on either were changed to pass on 26.04 too (issue #423), and the
+  collection script reads `/proc` there as it does on 24.04.
+- `ci.yml` installs Playwright's Chromium, and the pinned Playwright (1.59.1) refuses the platform:
+  `Playwright does not support chromium on ubuntu26.04-x64`. Playwright 1.62 and later know it.
+
+Return both to `ubuntu-latest` once Playwright is updated to a version that installs Chromium on
+Ubuntu 26.04 and both jobs pass there (issue #425). Until then, add no new job that installs
+Playwright on `ubuntu-latest`.
+
 ## Dependency Updates
 
 - Renovate is the repository's scheduled dependency update mechanism.
