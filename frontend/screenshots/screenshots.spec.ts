@@ -54,6 +54,9 @@ test('documentation screenshots', async ({ page }) => {
     await pane(page, 'editor').getByTitle('Pane settings').click()
     const dialog = page.getByRole('dialog', { name: 'Pane settings' })
     await expect(dialog).toBeVisible()
+    // The dialog opens before the pane's settings load into it.
+    await expect(dialog.getByPlaceholder('My Terminal')).toHaveValue('Project')
+    await expect(dialog.getByLabel('Message delivery')).toBeVisible()
     await page.screenshot({ path: imagePath('pane-settings.png') })
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await expect(dialog).toHaveCount(0)
