@@ -1664,6 +1664,11 @@ Stage E of #348, second half (the UI), applying what #376 agreed:
 - **Agent IDs stay as the labels.** The cards and the form keep showing `claude` / `codex`, not
   `display_name`, so the existing screens read the same; an unregistered agent is marked
   "(unknown agent)".
+- **An unknown agent's task keeps its pane.** Agreed on #376 after review: its tasks offer `Open`,
+  `Go to pane` and `Type in pane`, which act on the pane rather than the agent and which the server
+  does not refuse; `Resume`, `Summarize`, `Mark done` and labels are not shown, since the server
+  refuses each for an agent its registry does not know. Hiding the pane actions too was rejected: it
+  would leave a running session of a newer agent unreachable from the dashboard.
 - **`daemon` stays a location.** "codex's shared daemon" where a card says where a task runs comes
   from the location kind the server reports, not from the agent name, and is left as it is.
 

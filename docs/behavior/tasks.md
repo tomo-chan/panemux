@@ -263,7 +263,9 @@ not know, is `400`.
   `reason` this build knows (`cli_missing`, `session_info_missing`), else the `reason` as sent.
 - An `available`, `degraded` or `unknown` action is offered; the server decides again when it is used.
 - A task whose agent is not in `agents` is shown as "<agent> (unknown agent)" on its card and in the
-  detail panel, which says the dashboard offers no actions on its tasks.
+  detail panel. It offers only the task's pane (`Open`, `Go to pane`, `Type in pane`), which act on
+  the pane and not on the agent: no `Resume` or `Summarize`, and neither `Mark done` nor labels,
+  since the server records nothing for an agent its registry does not know. The detail panel says so.
 - The detail panel's state note is the task's `state_note`; a stopped task of any agent says that no
   running process handles its session.
 

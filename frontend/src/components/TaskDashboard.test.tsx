@@ -955,8 +955,26 @@ describe('TaskDashboard new tasks and resume', () => {
     expect(card).toHaveTextContent('aider (unknown agent)')
     expect(within(card).queryByRole('button', { name: /^Resume/ })).toBeNull()
     fireEvent.click(card)
-    expect(detail()).toHaveTextContent('panemux does not know the agent aider, so the dashboard offers no actions on its tasks.')
+    expect(detail()).toHaveTextContent('panemux does not know the agent aider, so the dashboard offers only its pane on its tasks.')
     expect(within(detail()).queryByRole('button', { name: /^(Resume|Summarize)/ })).toBeNull()
+  })
+
+  it('offers neither Mark done nor labels on a task of an unknown agent, but keeps its pane actions', () => {
+    const stranger = task({
+      id: 'local:aider:x2', agent: 'aider', session_id: 'x2', state: 'idle', cwd: '/workspace/user/tools',
+      summary: { state: 'ready', text: 'Nothing left.', done_candidate: true },
+      actions: {},
+    })
+    renderDashboard(tasksState({ data: { ...base, tasks: [stranger] } }))
+
+    const card = screen.getByTestId(`task-card-${stranger.id}`)
+    expect(within(card).getByRole('button', { name: 'Open: tools' })).toBeEnabled()
+    fireEvent.click(card)
+    expect(within(detail()).getByRole('button', { name: 'Open: tools' })).toBeEnabled()
+    expect(within(detail()).queryByRole('button', { name: /^Mark (not )?done/ })).toBeNull()
+    expect(within(detail()).queryByRole('textbox', { name: 'Add a label' })).toBeNull()
+    expect(detail()).not.toHaveTextContent('a candidate for Mark done')
+    expect(detail()).toHaveTextContent('panemux does not know the agent aider, so its tasks cannot be marked done or labeled.')
   })
 
   //efficacy:exempt only its fixture gains the resume action the server sends; resuming codex is unchanged

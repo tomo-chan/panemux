@@ -501,7 +501,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
   title, waiting reason, `Type in pane` (in the interactive blue) or, for a waiting or idle task
   that cannot take it, "Type in pane is not available: <reason>.", the open action or the reason
   there is none (a stopped task whose agent resumes offers `Resume` instead, and says why when it is
-  disabled; a task of an unknown agent says no actions are offered), `Input given` for a codex
+  disabled; a task of an unknown agent says it offers only the pane: its pane actions stay, while
+  `Resume`, `Summarize`, `Mark done` and labels are not shown), `Input given` for a codex
   task waiting on a permission request its hook recorded, `Mark done` or `Mark not done`, and for a done candidate the line "The summary
   finds no work left: a candidate for Mark done." — stays in place, and only the body below scrolls:
   state notes, which come from the server's `state_note` (for codex: a task with no session of its own is waiting for its first instruction,

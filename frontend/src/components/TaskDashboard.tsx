@@ -1174,7 +1174,8 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   const inputAction = taskInputAction(task, pane)
   const age = formatElapsed(task.status_since, nowMs)
   const started = formatElapsed(task.started_at, nowMs)
-  const recordable = canRecord(task)
+  // The server records nothing for an agent its registry does not know.
+  const recordable = canRecord(task) && knownAgent
   const labels = task.labels ?? []
   const done = task.done ?? false
   const saving = savingId === task.id
@@ -1265,7 +1266,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
           )}
           {!knownAgent && (
             <p className="td-note">
-              panemux does not know the agent {task.agent}, so the dashboard offers no actions on its tasks.
+              panemux does not know the agent {task.agent}, so the dashboard offers only its pane on its tasks.
             </p>
           )}
           {inputAction?.kind === 'unavailable' && (
@@ -1405,8 +1406,10 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
                 disabled={saving}
               />
             </>
-          ) : (
+          ) : knownAgent ? (
             <p className="td-note">Only a task with a session ID can be marked done or labeled.</p>
+          ) : (
+            <p className="td-note">panemux does not know the agent {task.agent}, so its tasks cannot be marked done or labeled.</p>
           )}
         </section>
         <section className="td-sec">
