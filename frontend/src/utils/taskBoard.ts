@@ -118,7 +118,7 @@ const UNAVAILABLE_REASONS: Record<string, string> = {
  * Why an action or capability cannot be used: the server's own detail, else
  * a sentence for a reason this build knows, else the reason as sent.
  */
-export function actionUnavailableReason(action: Pick<TaskAction, 'reason' | 'detail'>): string {
+export function actionUnavailableReason(action: Pick<TaskAction | AgentAvailability, 'status' | 'reason' | 'detail'>): string {
   if (action.detail) return action.detail
   if (!action.reason) return 'not available'
   return UNAVAILABLE_REASONS[action.reason] ?? action.reason

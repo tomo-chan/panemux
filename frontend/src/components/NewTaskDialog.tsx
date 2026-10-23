@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useModalKeyboard } from '../hooks/useModalKeyboard'
-import type { TaskActionResult, TaskAgent, TaskLaunchInput } from '../hooks/useTasks'
-import type { Task, TaskHost, TaskLaunchResponse } from '../schemas'
-import { hostLabel, parseLabelInput } from '../utils/taskBoard'
+import type { TaskActionResult, TaskLaunchInput } from '../hooks/useTasks'
+import type { AgentInfo, Task, TaskHost, TaskLaunchResponse } from '../schemas'
+import { actionUnavailableReason, hostCapability, hostLabel, launchableAgents, parseLabelInput } from '../utils/taskBoard'
 import { lastLabelToken, matchLabelSuggestions, toggleLabelInput } from '../utils/labelSuggestions'
 import { LabelSuggestions } from './LabelSuggestions'
 import { recentWorkdirs } from '../utils/workdirSuggestions'
@@ -10,26 +10,30 @@ import { WorkdirCombobox } from './WorkdirCombobox'
 
 // The task dashboard's New task form (issues #257 and #264): a host, a working
 // directory, an agent, labels and the first instruction. Starting a task runs
-// claude or codex in a detached tmux session on the host; no pane is opened.
+// the agent in a detached tmux session on the host; no pane is opened. The
+// agents offered are the registered ones that declare launch (issue #376).
 // The server checks every field again — what this form checks is only what
 // can be told without asking it.
 
 export interface NewTaskDialogProps {
   isOpen: boolean
   hosts: TaskHost[]
+  /** The registered agents (agents); those declaring launch are offered. */
+  agents?: AgentInfo[]
   /** The labels used before (known_labels), offered under the Labels field. */
   knownLabels?: string[]
   /** The tasks on the board: the directories they ran in are offered under Working directory. */
   tasks?: Task[]
   onLaunch: (input: TaskLaunchInput) => Promise<TaskActionResult<TaskLaunchResponse>>
   /** Called with the started task, its host and agent; the dialog is then the caller's to close. */
-  onLaunched: (launched: TaskLaunchResponse, host: string, agent: TaskAgent) => void
+  onLaunched: (launched: TaskLaunchResponse, host: string, agent: string) => void
   onClose: () => void
 }
 
 export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
   isOpen,
   hosts,
+  agents,
   knownLabels = [],
   tasks,
   onLaunch,
@@ -37,7 +41,7 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
   onClose,
 }) => {
   const [host, setHost] = useState('')
-  const [agent, setAgent] = useState<TaskAgent>('claude')
+  const [chosenAgent, setAgent] = useState('')
   const [cwd, setCwd] = useState('')
   const [cwdListOpen, setCwdListOpen] = useState(false)
   const [labels, setLabels] = useState('')
@@ -68,6 +72,18 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
 
   if (!isOpen) return null
 
+  // The first agent until one is chosen, or when the chosen one is no longer offered.
+  const offered = launchableAgents(agents)
+  const current = offered.find((a) => a.id === chosenAgent) ?? offered[0]
+  const agent = current?.id ?? ''
+  // Only unavailable stops the form: unknown (a host not probed yet) is the server's to decide.
+  const launchCapability = hostCapability(
+    hosts.find((h) => h.name === host),
+    agent,
+    'launch',
+  )
+  const blocked = launchCapability?.status === 'unavailable' ? launchCapability : null
+
   // Filtered by what is typed after the last comma; an entered label stays.
   const enteredLabels = parseLabelInput(labels)
   const typedLabel = lastLabelToken(labels)
@@ -79,6 +95,7 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
+    if (agent === '' || blocked) return
     const dir = cwd.trim()
     if (dir === '') {
       setError('Enter the working directory.')
@@ -152,17 +169,21 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
         />
         <label className="td-field">
           <span>Agent</span>
-          <select value={agent} disabled={starting} onChange={(event) => setAgent(event.target.value as TaskAgent)}>
-            <option value="claude">claude</option>
-            <option value="codex">codex</option>
+          <select value={agent} disabled={starting} onChange={(event) => setAgent(event.target.value)}>
+            {offered.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.id}
+              </option>
+            ))}
           </select>
         </label>
-        {agent === 'codex' && (
+        {offered.length === 0 && <p className="td-note">No registered agent can start a task.</p>}
+        {blocked && (
           <p className="td-note">
-            Codex chooses its session ID once it has started its session, so the labels are recorded once codex has
-            started its session. If it stops at a start-up screen, open the task's pane to answer it.
+            {agent} cannot be started on {hostLabel(host)}: {actionUnavailableReason(blocked)}.
           </p>
         )}
+        {current?.notes.launch && <p className="td-note">{current.notes.launch}</p>}
         <label className="td-field">
           <span>Labels</span>
           <input
@@ -198,7 +219,7 @@ export const NewTaskDialog: React.FC<NewTaskDialogProps> = ({
           <button type="button" className="td-btn" onClick={onClose} disabled={starting}>
             Cancel
           </button>
-          <button type="submit" className="td-btn td-btn-primary" disabled={starting}>
+          <button type="submit" className="td-btn td-btn-primary" disabled={starting || agent === '' || blocked !== null}>
             {starting ? 'Starting…' : 'Start'}
           </button>
         </div>
