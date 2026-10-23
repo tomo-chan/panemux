@@ -384,7 +384,9 @@ func TestInstallCodexHookReportsAFailedWrite(t *testing.T) {
 	_, err := s.InstallCodexHook(context.Background(), "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mkdir", "the shell's own reason is reported")
-	assert.Contains(t, err.Error(), ".local")
+	// uutils mkdir (Ubuntu 26.04) leaves the path out of its message, so the
+	// script names the directory itself (issue #423).
+	assert.Contains(t, err.Error(), "~/.local/bin could not be created")
 	_, statErr := os.Stat(filepath.Join(home, ".codex", "hooks.json"))
 	assert.True(t, os.IsNotExist(statErr), "hooks.json is not written when the hook could not be")
 }

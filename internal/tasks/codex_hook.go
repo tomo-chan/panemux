@@ -92,11 +92,13 @@ const codexHookMaxRead = 1 << 20
 // place, so a hooks.json that is a link keeps being one, with its mode. A
 // hooks.json that cannot be written is an ordinary failure; a
 // copy that fails part way exits 3 and keeps the temporary file, the only
-// whole copy of the user's hooks, and says where it is.
+// whole copy of the user's hooks, and says where it is. ~/.local/bin, when
+// it cannot be made, is named by the script: not every mkdir names it (uutils,
+// Ubuntu 26.04's, does not).
 const codexHookWriteScript = `tmp="$HOME/.codex/.hooks.json.panemux-%[1]s"
 (
 	set -e
-	mkdir -p "$HOME/.local/bin"
+	mkdir -p "$HOME/.local/bin" || { echo "~/.local/bin could not be created"; exit 1; }
 	cat >"$HOME/` + codexHookFile + `" <<'PANEMUX_HOOK_%[1]s'
 %[3]sPANEMUX_HOOK_%[1]s
 	chmod 755 "$HOME/` + codexHookFile + `"
