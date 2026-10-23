@@ -1647,6 +1647,26 @@ Stage D of #348, second half. Agreed on #375:
   freshness and migration risk; what is shared is the rule, the parser and the session model. The
   gaps left are in #415.
 
+### The dashboard on the agent capabilities (2026-10-23, issue #376)
+
+Stage E of #348, second half (the UI), applying what #376 agreed:
+
+- **No rule per agent name in the browser.** The UUID check, the `claude`/`codex` lists for Resume
+  and Summarize, the New task form's two fixed options and its codex note, and the per-agent state
+  notes were removed; the dashboard reads `agents`, `hosts[].availability` and `tasks[].actions` /
+  `state_note`. The generic note on a stopped task stays, being the same for every agent.
+- **A CLI missing on the host disables `Start`, it does not hide the agent.** This is the agreed rule
+  for an `unavailable` capability (shown disabled, with why) applied to the form: switching hosts then
+  never changes which agents are listed, and the form says what to install where.
+- **Why, in the server's words.** The reason shown is the action's `detail`, falling back to a
+  sentence for a known `reason` and then the `reason` itself, so a reason added on the server is
+  still shown rather than dropped.
+- **Agent IDs stay as the labels.** The cards and the form keep showing `claude` / `codex`, not
+  `display_name`, so the existing screens read the same; an unregistered agent is marked
+  "(unknown agent)".
+- **`daemon` stays a location.** "codex's shared daemon" where a card says where a task runs comes
+  from the location kind the server reports, not from the agent name, and is left as it is.
+
 ### Capabilities in the task snapshot (2026-10-23, issue #376)
 
 Stage E of #348, first half (the API). Agreed on #376:

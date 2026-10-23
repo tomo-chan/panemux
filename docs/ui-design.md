@@ -442,10 +442,12 @@ terminal that had focus cannot receive what is typed into the dashboard.
   back to is refused before asking, naming the panes, and a refusal only the server can tell — a
   pane or host whose `ProxyJump` goes through it — appears as "Could not delete …". A green notice says what was added, saved or deleted, and the board collects again.
 - **New task.** A modal form over the dashboard: Host (every host on the board, an unreachable one
-  marked "(unreachable)"), Working directory, Agent (`claude` or `codex`), Labels
-  (comma-separated, optional) and First instruction. With `codex` chosen, a note under Agent says
-  the labels are recorded once codex has started its session, and to open the task's pane if codex
-  stops at a start-up screen. Under Labels, `Used before:` offers the labels used before
+  marked "(unreachable)"), Working directory, Agent (the registered agents that declare `launch`,
+  by ID: `claude`, `codex`), Labels (comma-separated, optional) and First instruction. Under Agent
+  goes the chosen agent's launch note from the server — with `codex`, that the labels are recorded
+  once codex has started its session, and to open the task's pane if codex stops at a start-up
+  screen — and, when the chosen host's probe found the agent's CLI missing, "<agent> cannot be
+  started on <host>: <why>." with `Start` disabled. Under Labels, `Used before:` offers the labels used before
   ([Labels used before](#labels-used-before)) as toggle tags: one in the field shows solid with `✓`
   (`aria-pressed` true), one not dashed with `+`. A click adds the label at the end of the field,
   replacing what is typed after the last comma unless that is a label used before in full (shown
@@ -488,8 +490,9 @@ terminal that had focus cannot receive what is typed into the dashboard.
   `owner/name#9`); its labels as colored tags, each label always the same color; a green `Done` tag
   in the meta line for a task marked done that is running again, or a dashed green `Done?` tag for a
   done candidate — a task not marked done whose summary finds no work left; and at the bottom where
-  the task runs with its `Open` / `Go to pane` button, or `Resume` for a stopped claude or codex
-  task. A waiting or idle task in an attachable tmux session also has `Type in pane` before it, and
+  the task runs with its `Open` / `Go to pane` button, or `Resume` for a stopped task whose agent
+  resumes (disabled when the server says it cannot be resumed). The meta line names the agent, as
+  "<agent> (unknown agent)" when the registry does not know it. A waiting or idle task in an attachable tmux session also has `Type in pane` before it, and
   a blue `Typing` tag in the meta line while its popup is open. A task that cannot be opened shows why instead of a button: for an agent outside tmux, "not
   in a panemux pane" or, when the pane it names is in no workspace, "its pane is in no workspace".
   The card is a pointer target for selection, and its title is a button, so the card never nests its
@@ -497,10 +500,11 @@ terminal that had focus cannot receive what is typed into the dashboard.
 - **Detail panel.** Fixed to the window height at the right. Its head — state, host, agent, start,
   title, waiting reason, `Type in pane` (in the interactive blue) or, for a waiting or idle task
   that cannot take it, "Type in pane is not available: <reason>.", the open action or the reason
-  there is none (a stopped claude or codex task offers `Resume` instead), `Input given` for a codex
+  there is none (a stopped task whose agent resumes offers `Resume` instead, and says why when it is
+  disabled; a task of an unknown agent says no actions are offered), `Input given` for a codex
   task waiting on a permission request its hook recorded, `Mark done` or `Mark not done`, and for a done candidate the line "The summary
   finds no work left: a candidate for Mark done." — stays in place, and only the body below scrolls:
-  state notes (for codex: a task with no session of its own is waiting for its first instruction,
+  state notes, which come from the server's `state_note` (for codex: a task with no session of its own is waiting for its first instruction,
   held at a start-up screen, or running its session in codex's shared daemon, to be seen in the pane;
   a session the daemon runs shows "codex's shared daemon · cannot open in a pane" where a card says
   where it runs, and says why; a working one may be waiting for approval, which codex does not
@@ -534,8 +538,10 @@ terminal that had focus cannot receive what is typed into the dashboard.
   another task while it runs leaves that task's controls enabled, and the result is not shown there.
   A task without a session ID offers neither, and says so. At 1000px and narrower it slides over the board
   with a close button.
-- **Summary agent.** Claude and Codex tasks with session IDs offer the same summary controls.
-  Each uses its own agent account on the panemux host; PID-only tasks cannot be summarized.
+- **Summary agent.** A task whose agent declares `summary` (Claude and Codex) offers the same summary
+  controls. Each uses its own agent account on the panemux host. Where the server says the summary is
+  unavailable (no session ID yet, no conversation log found), `Summarize` is disabled and Work says
+  why; an agent that does not summarize shows no control at all.
 - **Resume.** `Resume` reads `Resuming…` and is disabled while its request runs; a refusal is shown in
   a red alert naming the task, and a resumed task is selected. Nothing else on the board waits for it.
 - **Type in pane.** A popup over the board ([behavior](behavior/tasks.md#opening-a-task)), centered,
