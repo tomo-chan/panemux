@@ -218,8 +218,9 @@ How to fix one:
 ### Agent availability
 
 Whether each agent's capabilities can be used on a host is kept per host inside `internal/tasks`
-(`Service.Availability`, issue [#373](https://github.com/tomo-chan/panemux/issues/373)). It is not in
-`GET /api/tasks` or the dashboard yet; the server log carries what changes. A launch or resume is
+(`Service.Availability`, issue [#373](https://github.com/tomo-chan/panemux/issues/373)).
+[`GET /api/tasks`](#get-apitasks) carries it on each host as `availability`, and the server log carries
+what changes. A launch or resume is
 refused on it as described below the table. Each entry is an agent, a capability (`collect`, `launch`, `resume`), a status
 (`available`, `degraded`, `unavailable`, `unknown`), a reason, a detail and the version the agent's
 newest session recorded.
@@ -232,8 +233,27 @@ newest session recorded.
 | `launch`, `resume` | `unknown` / `probe_failed` | The probe failed, timed out or printed something else; the detail says what |
 | `collect` | `available` | The last full collection read everything the agent wrote |
 | `collect` | `degraded` / `unknown_format` | The last full collection found something of the agent's in a format this build does not know (below) |
+| `collect` | `unknown` / `probe_failed` | The last full collection failed: the host could not be reached or its output could not be read. The detail is the host's `error`; what an earlier collection found is not reported until one succeeds again |
 
-`auth_missing` and `session_info_missing` are defined and reported by nothing yet.
+`auth_missing` is defined and reported by nothing yet. `session_info_missing` is reported on a task's
+actions, below.
+
+**A task's actions** (`Service.TaskActions`, issue [#376](https://github.com/tomo-chan/panemux/issues/376))
+are what the dashboard offers on one task, decided by the server from the task's agent's adapters and
+its host's probe. An action is absent when the task's agent does not declare its capability — an
+agent the registry does not know declares nothing — and `resume` is absent on a task that is not
+`stop`:
+
+| Action | Status / reason | When |
+|---|---|---|
+| `resume` | `unavailable` / `session_info_missing` | The session ID is not one the agent's resume accepts, or the session's working directory is not recorded |
+| `resume` | as the host's `resume` above | Otherwise: `available`, `unavailable` / `cli_missing`, or `unknown` / `not_probed` or `probe_failed` |
+| `summary` | `unavailable` / `session_info_missing` | The task has no session ID a summary can name (a codex one is a UUID), or its conversation log has not been found, which `POST /api/tasks/summary` refuses with `404` |
+| `summary` | `available` | Otherwise. Whether summaries are on is `summaries_enabled`, not the action |
+
+`POST /api/tasks/resume` and `POST /api/tasks/summary` refuse what the actions leave out the same way,
+whatever the request says: an agent that does not declare the capability, or that the registry does
+not know, is `400`.
 
 **A launch or resume of an agent that is `unavailable` / `cli_missing`** over the host's current
 connection is refused before anything runs — a resume before the host is collected again — with the
@@ -1076,7 +1096,22 @@ Collects from every host and returns:
         }
       ]
     },
-    { "name": "gpu-box", "status": "error", "error": "connect to gpu-box: dial tcp: i/o timeout" }
+    {
+      "name": "gpu-box", "status": "error", "error": "connect to gpu-box: dial tcp: i/o timeout",
+      "availability": [
+        { "agent": "claude", "capability": "collect", "status": "unknown", "reason": "probe_failed",
+          "detail": "connect to gpu-box: dial tcp: i/o timeout" },
+        { "agent": "codex", "capability": "launch", "status": "unknown", "reason": "not_probed" }
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "id": "codex", "display_name": "Codex",
+      "capabilities": ["detect", "collect", "launch", "resume", "workdir", "summary", "board"],
+      "notes": { "launch": "Codex chooses its session ID once it has started its session, ..." }
+    },
+    { "id": "cursor", "display_name": "Cursor", "capabilities": ["detect", "board"], "notes": {} }
   ],
   "tasks": [
     {
@@ -1104,6 +1139,7 @@ Collects from every host and returns:
       },
       "labels": ["dashboard", "enhancement"],
       "done": true,
+      "actions": { "summary": { "status": "available" } },
       "summary": {
         "state": "ready",
         "text": "Adding task summaries to the dashboard.",
@@ -1124,6 +1160,13 @@ Collects from every host and returns:
   `not_json`, `invalid_pid` or `invalid_session_id`; `detail` is omitted when empty; `pid` and
   `location` are the live claude process the file name names, omitted when it names none. Only
   this route reports them: the task event stream does not.
+- `availability` is the host's [agent availability](#agent-availability): each agent's `collect`,
+  `launch` and `resume`, as it declares them, in registry order. It is present on every host, one that
+  failed included. `reason`, `detail` and `observed_version` are omitted when empty.
+- `agents` is every registered agent ([agent registry](../agent-registry.md)), in registry order:
+  its `id`, `display_name`, the `capabilities` it declares, and the fixed `notes` its adapters give
+  on its own constraints — `notes.launch` is what to know before starting one, omitted when there is
+  nothing. It lists agents the task board does not collect as well (`detect` and `board` only).
 - `tasks` lists each host's running tasks in `id` order, then its stopped tasks newest first. It is
   `[]` when there are none.
 - `id` is `local:<agent>:<key>` for the panemux host and `ssh:<host>:<agent>:<key>` for an SSH host,
@@ -1137,6 +1180,10 @@ Collects from every host and returns:
 - Within `git`, every field is omitted when empty. `issues[].repo` is the issue's `owner/name`,
   which can differ from the pull request's repository.
 - `done` and `labels` are the task's record, omitted when it is not done or has no labels.
+- `actions` are the task's [actions](#agent-availability) — `resume` and `summary`, each with a
+  `status`, a `reason` and a `detail` — and is `{}` when it offers none. `state_note` is a fixed
+  text the task's agent's collect adapter gives on what its state means (codex's `run`, a session in
+  codex's shared daemon), omitted when it says nothing.
 - `summaries_error` is why summaries are not being saved ([Saved summaries](#saved-summaries)); they
   are still made and shown. It is present only while summaries are enabled and saving fails.
 - `summaries_enabled` is `task_dashboard.summary.enabled`. `summary` is present only while it is

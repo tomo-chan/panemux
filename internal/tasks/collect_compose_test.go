@@ -60,6 +60,7 @@ type fakeAdapter struct {
 func (f fakeAdapter) sections() []collectSection   { return f.secs }
 func (f fakeAdapter) processHints() []string       { return f.hints }
 func (f fakeAdapter) newCollected() agentCollected { return &claudeCollected{} }
+func (f fakeAdapter) stateNote(Task) string        { return "" }
 func (f fakeAdapter) withSections(s ...collectSection) fakeAdapter {
 	f.secs = s
 	return f

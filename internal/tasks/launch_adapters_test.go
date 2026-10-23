@@ -41,6 +41,7 @@ type fakeLaunch struct {
 func (f fakeLaunch) newSession(io.Reader) (string, string, error) { return "", "task-0a1b2c3d", nil }
 func (f fakeLaunch) validNewSessionID(id string) bool             { return id == "" }
 func (f fakeLaunch) newCommand() string                           { return f.command }
+func (f fakeLaunch) note() string                                 { return "" }
 func (f fakeLaunch) validSessionID(id string) bool                { return validUUID.MatchString(id) }
 func (f fakeLaunch) tmuxSessionFor(id string) string              { return tmuxSessionForTask(id) }
 func (f fakeLaunch) resumeCommand() string                        { return f.command }

@@ -174,7 +174,7 @@ func (s *Service) Summaries(tasks []Task) map[string]*SummaryView {
 	dirty := s.loadSummariesLocked()
 	now := s.opts.Now()
 	for _, task := range tasks {
-		if (task.Agent != AgentClaude && task.Agent != AgentCodex) || task.SessionID == "" || task.Log == nil {
+		if !summarizable(task.Agent) || task.SessionID == "" || task.Log == nil {
 			continue
 		}
 		key := summaryKey{host: task.Host, agent: task.Agent, sessionID: task.SessionID}
@@ -204,9 +204,7 @@ func (s *Service) RequestSummary(host, sessionID string) (*SummaryView, error) {
 // RequestAgentSummary identifies a task by host, agent and session, preserving
 // RequestSummary as the legacy Claude-only entry point.
 func (s *Service) RequestAgentSummary(host, agent, sessionID string) (*SummaryView, error) {
-	if (agent != AgentClaude && agent != AgentCodex) ||
-		!validSessionID.MatchString(sessionID) || (agent == AgentCodex && !validUUID.MatchString(sessionID)) {
-
+	if !summarizable(agent) || !validSummarySession(agent, sessionID) {
 		return nil, fmt.Errorf("%w: session ID %q", ErrInvalidSummary, sessionID)
 	}
 	s.summaryMu.Lock()

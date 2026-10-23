@@ -298,6 +298,10 @@ func TestAvailability_AHostRemovedFromTheConfigIsForgotten(t *testing.T) {
 	collectAndProbe(svc)
 	assert.Equal(t, ReasonProbeFailed, availabilityOf(svc.Availability("build-box"), agent.Claude, agent.Launch).Reason)
 	assert.Equal(t, Available, availabilityOf(svc.Availability("build-box"), agent.Claude, agent.Collect).Status)
+	conn.output = []byte("garbage\n")
+	collectAndProbe(svc)
+	assert.Equal(t, ReasonProbeFailed, availabilityOf(svc.Availability("build-box"), agent.Claude, agent.Collect).Reason,
+		"its failed collection is forgotten too")
 
 	hosts = nil
 	collectAndProbe(svc)
@@ -517,4 +521,29 @@ func TestAvailability_AProbeOutOfTimeSaysSoAndKeepsTheConnection(t *testing.T) {
 		assert.Zero(t, conn.closeCount())
 		assert.Same(t, Conn(conn), svc.openConn("build-box"))
 	})
+}
+
+// A collection that fails leaves nothing known about collect: what the last
+// good collection found is not reported as if it still held, and the next
+// good one makes collect available again.
+func TestAvailability_AFailedCollectionMakesCollectUnknown(t *testing.T) {
+	host := &probeHost{collection: minimalOutput("s"), probe: probeAnswer("cli claude found", "cli codex found")}
+	svc := New(Options{RunLocal: host.run})
+	defer svc.Close()
+	collectAndProbe(svc)
+	require.Equal(t, Available, availabilityOf(svc.Availability(""), agent.Claude, agent.Collect).Status)
+
+	host.collection = []byte("garbage\n")
+	snap := collectAndProbe(svc)
+	require.Equal(t, HostError, snap.Hosts[0].Status)
+	for _, id := range []agent.ID{agent.Claude, agent.Codex} {
+		got := availabilityOf(svc.Availability(""), id, agent.Collect)
+		assert.Equal(t, AvailabilityUnknown, got.Status, id)
+		assert.Equal(t, ReasonProbeFailed, got.Reason, id)
+		assert.Equal(t, snap.Hosts[0].Error, got.Detail, id)
+	}
+
+	host.collection = minimalOutput("s")
+	collectAndProbe(svc)
+	assert.Equal(t, Available, availabilityOf(svc.Availability(""), agent.Claude, agent.Collect).Status)
 }

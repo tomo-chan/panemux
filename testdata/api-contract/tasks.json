@@ -1,6 +1,109 @@
 {
+  "agents": [
+    {
+      "capabilities": [
+        "detect",
+        "collect",
+        "launch",
+        "resume",
+        "workdir",
+        "summary",
+        "board"
+      ],
+      "display_name": "Claude Code",
+      "id": "claude",
+      "notes": {}
+    },
+    {
+      "capabilities": [
+        "detect",
+        "collect",
+        "launch",
+        "resume",
+        "workdir",
+        "summary",
+        "board"
+      ],
+      "display_name": "Codex",
+      "id": "codex",
+      "notes": {
+        "launch": "Codex chooses its session ID once it has started its session, so the labels are recorded once codex has started its session. If it stops at a start-up screen, open the task's pane to answer it."
+      }
+    },
+    {
+      "capabilities": [
+        "detect",
+        "board"
+      ],
+      "display_name": "Cursor",
+      "id": "cursor",
+      "notes": {}
+    },
+    {
+      "capabilities": [
+        "detect",
+        "board"
+      ],
+      "display_name": "Gemini CLI",
+      "id": "gemini",
+      "notes": {}
+    },
+    {
+      "capabilities": [
+        "detect",
+        "board"
+      ],
+      "display_name": "Grok Build",
+      "id": "grok-build",
+      "notes": {}
+    },
+    {
+      "capabilities": [
+        "detect",
+        "board"
+      ],
+      "display_name": "opencode",
+      "id": "opencode",
+      "notes": {}
+    }
+  ],
   "hosts": [
     {
+      "availability": [
+        {
+          "agent": "claude",
+          "capability": "collect",
+          "detail": "invalid_pid 1, not_json 1; e.g. 103.json: unexpected end of JSON input | legacy.json: pid: \"108\"; versions 2.1.0",
+          "observed_version": "2.1.0",
+          "reason": "unknown_format",
+          "status": "degraded"
+        },
+        {
+          "agent": "claude",
+          "capability": "launch",
+          "status": "available"
+        },
+        {
+          "agent": "claude",
+          "capability": "resume",
+          "status": "available"
+        },
+        {
+          "agent": "codex",
+          "capability": "collect",
+          "status": "available"
+        },
+        {
+          "agent": "codex",
+          "capability": "launch",
+          "status": "available"
+        },
+        {
+          "agent": "codex",
+          "capability": "resume",
+          "status": "available"
+        }
+      ],
       "collected_at": "2026-01-01T00:00:00Z",
       "name": "",
       "status": "ok",
@@ -24,6 +127,44 @@
       ]
     },
     {
+      "availability": [
+        {
+          "agent": "claude",
+          "capability": "collect",
+          "detail": "invalid_session_id 1; e.g. 3130.json: sessionId: \"session 2\"",
+          "reason": "unknown_format",
+          "status": "degraded"
+        },
+        {
+          "agent": "claude",
+          "capability": "launch",
+          "status": "available"
+        },
+        {
+          "agent": "claude",
+          "capability": "resume",
+          "status": "available"
+        },
+        {
+          "agent": "codex",
+          "capability": "collect",
+          "status": "available"
+        },
+        {
+          "agent": "codex",
+          "capability": "launch",
+          "detail": "codex is not on PATH or in a login shell's PATH",
+          "reason": "cli_missing",
+          "status": "unavailable"
+        },
+        {
+          "agent": "codex",
+          "capability": "resume",
+          "detail": "codex is not on PATH or in a login shell's PATH",
+          "reason": "cli_missing",
+          "status": "unavailable"
+        }
+      ],
       "collected_at": "2026-01-01T00:00:00Z",
       "name": "build-box",
       "status": "ok",
@@ -42,6 +183,46 @@
       ]
     },
     {
+      "availability": [
+        {
+          "agent": "claude",
+          "capability": "collect",
+          "detail": "connect to gpu-box: dial tcp: i/o timeout",
+          "reason": "probe_failed",
+          "status": "unknown"
+        },
+        {
+          "agent": "claude",
+          "capability": "launch",
+          "reason": "not_probed",
+          "status": "unknown"
+        },
+        {
+          "agent": "claude",
+          "capability": "resume",
+          "reason": "not_probed",
+          "status": "unknown"
+        },
+        {
+          "agent": "codex",
+          "capability": "collect",
+          "detail": "connect to gpu-box: dial tcp: i/o timeout",
+          "reason": "probe_failed",
+          "status": "unknown"
+        },
+        {
+          "agent": "codex",
+          "capability": "launch",
+          "reason": "not_probed",
+          "status": "unknown"
+        },
+        {
+          "agent": "codex",
+          "capability": "resume",
+          "reason": "not_probed",
+          "status": "unknown"
+        }
+      ],
       "error": "connect to gpu-box: dial tcp: i/o timeout",
       "name": "gpu-box",
       "status": "error"
@@ -57,6 +238,11 @@
   "summaries_enabled": true,
   "tasks": [
     {
+      "actions": {
+        "summary": {
+          "status": "available"
+        }
+      },
       "agent": "claude",
       "cwd": "/workspace/user/panemux",
       "done": true,
@@ -89,6 +275,13 @@
       "waiting_for": "input needed"
     },
     {
+      "actions": {
+        "summary": {
+          "detail": "the conversation log has not been found",
+          "reason": "session_info_missing",
+          "status": "unavailable"
+        }
+      },
       "agent": "claude",
       "cwd": "/workspace/user/panemux-docs",
       "host": "",
@@ -105,6 +298,13 @@
       "status_since": "2026-01-01T00:00:00Z"
     },
     {
+      "actions": {
+        "summary": {
+          "detail": "the task has no session ID yet",
+          "reason": "session_info_missing",
+          "status": "unavailable"
+        }
+      },
       "agent": "claude",
       "host": "",
       "id": "local:claude:pid-103",
@@ -114,9 +314,15 @@
         "pane_id": "pane-1790000000000-d3e4f"
       },
       "pid": 103,
-      "state": "unknown"
+      "state": "unknown",
+      "state_note": "The session state file under ~/.claude/sessions could not be read or has an unexpected format."
     },
     {
+      "actions": {
+        "summary": {
+          "status": "available"
+        }
+      },
       "agent": "codex",
       "cwd": "/workspace/user/sample-web",
       "host": "",
@@ -130,9 +336,15 @@
       "session_id": "01a0e2b9-d054-7cc2-9278-a5e25ebcc524",
       "started_at": "2026-01-01T00:00:00Z",
       "state": "busy",
+      "state_note": "Unless codex's permission hook is registered on this host, a command waiting for approval also shows as working.",
       "status_since": "2026-01-01T00:00:00Z"
     },
     {
+      "actions": {
+        "summary": {
+          "status": "available"
+        }
+      },
       "agent": "codex",
       "cwd": "/workspace/user/sample-cli",
       "host": "",
@@ -145,6 +357,7 @@
       "session_id": "01a0e2bd-ce26-7d81-a280-90c4de0d0046",
       "started_at": "2026-01-01T00:00:00Z",
       "state": "idle",
+      "state_note": "This session runs in codex's shared daemon: codex was started without --no-daemon, and nothing on the host says which pane shows it. The dashboard's own starts use --no-daemon.",
       "status_since": "2026-01-01T00:00:00Z",
       "summary": {
         "remaining": [
@@ -157,6 +370,13 @@
       }
     },
     {
+      "actions": {
+        "summary": {
+          "detail": "the task has no session ID yet",
+          "reason": "session_info_missing",
+          "status": "unavailable"
+        }
+      },
       "agent": "codex",
       "cwd": "/workspace/user/sample-api",
       "host": "",
@@ -167,9 +387,20 @@
       },
       "pid": 104,
       "started_at": "2026-01-01T00:00:00Z",
-      "state": "run"
+      "state": "run",
+      "state_note": "Codex has no session of its own yet: it is waiting for its first instruction, held at a start-up screen (trusting the directory, a new model, a usage limit), or running its session in codex's shared daemon, which the dashboard lists as a task of its own. Open the pane to see which. Done and labels become available on the session."
     },
     {
+      "actions": {
+        "resume": {
+          "detail": "the session ID is not one claude resumes",
+          "reason": "session_info_missing",
+          "status": "unavailable"
+        },
+        "summary": {
+          "status": "available"
+        }
+      },
       "agent": "claude",
       "cwd": "/workspace/user/service-b",
       "host": "",
@@ -189,6 +420,14 @@
       }
     },
     {
+      "actions": {
+        "resume": {
+          "status": "available"
+        },
+        "summary": {
+          "status": "available"
+        }
+      },
       "agent": "codex",
       "cwd": "/workspace/user/sample-api",
       "host": "",
@@ -202,6 +441,13 @@
       "status_since": "2026-01-01T00:00:00Z"
     },
     {
+      "actions": {
+        "summary": {
+          "detail": "the conversation log has not been found",
+          "reason": "session_info_missing",
+          "status": "unavailable"
+        }
+      },
       "agent": "claude",
       "cwd": "/remote/home/demo/infra",
       "git": {
@@ -225,6 +471,13 @@
       "status_since": "2026-01-01T00:00:00Z"
     },
     {
+      "actions": {
+        "summary": {
+          "detail": "the task has no session ID yet",
+          "reason": "session_info_missing",
+          "status": "unavailable"
+        }
+      },
       "agent": "claude",
       "host": "build-box",
       "id": "ssh:build-box:claude:pid-3130",
@@ -234,7 +487,8 @@
         "tmux_session": "my work"
       },
       "pid": 3130,
-      "state": "unknown"
+      "state": "unknown",
+      "state_note": "The session state file under ~/.claude/sessions could not be read or has an unexpected format."
     }
   ]
 }

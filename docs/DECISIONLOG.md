@@ -1647,6 +1647,29 @@ Stage D of #348, second half. Agreed on #375:
   freshness and migration risk; what is shared is the rule, the parser and the session model. The
   gaps left are in #415.
 
+### Capabilities in the task snapshot (2026-10-23, issue #376)
+
+Stage E of #348, first half (the API). Agreed on #376:
+
+- **In `GET /api/tasks`, not an endpoint of its own.** The registered agents (`agents`), each host's
+  availability and each task's actions are part of the snapshot the dashboard already polls. A
+  separate `GET /api/agents` was rejected: the list is small, a second route needs its own guard,
+  schema and fixture, and the dashboard would have to reconcile two answers taken at different times.
+- **The server decides a task's actions.** Whether a session ID is one an agent resumes is the resume
+  adapter's rule; deciding it in the browser repeated the UUID check per agent name. The actions are
+  absent for a capability the agent does not declare; a declared one that cannot be used says why
+  (`session_info_missing`, `cli_missing`), and `unknown` leaves it to the server, as before.
+- **Notes come from the consumer's adapters.** A launch adapter gives what to know before starting
+  one, a collect adapter what a state means for its agent, as fixed text with no host or request
+  value. Putting them in the registry was rejected: a state note depends on the task, which the
+  registry does not know.
+- **Summary eligibility from the registry, the rest left for #347.** The `claude`/`codex` name check
+  became the `summary` declaration; reading the log and choosing the runner stay where they are.
+- **Codex's own features stay.** The permission hook's Input given and the host menu's Codex input
+  notifications are not capabilities and are left as they are.
+- **Every worktree of a task on the board is #420.** It needs the Workdir capability per task and more
+  git lookups, apart from capabilities.
+
 ## 2026-10-17: Updating the codex permission hook by itself (#294, #402)
 
 Stage 4 of #294 was to ship the hook as a binary for four targets and update it. Stage 3 had already

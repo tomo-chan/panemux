@@ -54,7 +54,10 @@ An agent declares any subset of these. A capability is a declaration of what pan
 the agent, not a statement that it works on a given host right now. Whether `collect`, `launch` and
 `resume` work on a host is found out per host and kept inside `internal/tasks` as
 [agent availability](behavior/tasks.md#agent-availability): a probe for the agent's CLI, and what the
-collection could not read.
+collection could not read. [`GET /api/tasks`](behavior/tasks.md#get-apitasks) carries the registered
+agents with their declarations (`agents`), each host's availability, and each task's actions with why
+one cannot be taken, so the dashboard offers what the registry and the host allow rather than what an
+agent's name suggests.
 
 | Capability | Meaning | Rule the registry checks |
 |---|---|---|
@@ -72,14 +75,18 @@ implemented by a collect adapter per agent, which `internal/tasks` defines in it
 explicitly by ID in `collectAdapters` (`internal/tasks/collect_adapters.go`): each adapter declares
 its collection script sections, named `<agent ID>/<name>`, and turns their rows into tasks. When
 panemux starts, the adapters are checked against the registry — an agent that declares `collect`
-has exactly one adapter and no other agent has one — and an invalid set stops it.
+has exactly one adapter and no other agent has one — and an invalid set stops it. A collect adapter
+also gives the fixed note on what a task's state means for its agent (`stateNote`, the task's
+`state_note`).
 
 `launch` and `resume` are implemented the same way, by a launch and a resume adapter per agent listed
 in `launchAdapters` and `resumeAdapters` (`internal/tasks/launch_adapters.go`), checked against the
 registry when panemux starts. They are separate, so an agent can launch without resuming. A launch
 adapter names a new session — the session ID it is started with, or none when the agent picks its own
 once it runs, and its tmux session — and a resume adapter checks the session ID it is given and names
-the tmux session the resume runs in. Each supplies a fixed shell fragment that the one launch script
+the tmux session the resume runs in. A launch adapter also gives the fixed note on what to know
+before starting one (`note`, the agent's `notes.launch`); notes name nothing about a host or a
+request. Each supplies a fixed shell fragment that the one launch script
 composes under the case of its agent and mode; a fragment takes no request value, and refuses only
 with codes the script or its adapter declares. A launch that names no session ID has its labels held
 until a collection finds exactly one session of that agent in its tmux session
@@ -92,10 +99,11 @@ turns an agent process into a `WorkdirSession` — its `SessionKey`, PID, record
 `workdirs` lists every working directory of that session, its subagents' transcripts included. Where
 the session runs, the panemux host or an SSH host, is a host abstraction that only fetches; what the
 files mean is decided once, in the adapter. A pane finds its agent with `agent.MatchInteractiveSession`
-and calls both; a task names its session with `Task.WorkdirSession`, which the task board's caller
-(stage E, #376) hands to `workdirs`. Claude Code's `~/.claude/sessions` files are read by one parser,
+and calls both; a task names its session with `Task.WorkdirSession`, which the task board is to hand
+to `workdirs` to show every working directory of a task (#420). Claude Code's `~/.claude/sessions` files are read by one parser,
 `session.ParseClaudeSessionState`, which the task board wraps to keep its unreadable-file reasons.
-`summary` is still in `internal/tasks`, which branches on the claude and codex IDs.
+`summary` is still in `internal/tasks`: which agents can be summarized is the registry's `summary`
+declaration, but reading the log and choosing the runner branch on the claude and codex IDs (#347).
 
 `board` is implemented by a board adapter per agent, which the root package defines in its own types
 and lists explicitly by ID in `boardAdapters` (`board_adapters.go`), checked against the registry when

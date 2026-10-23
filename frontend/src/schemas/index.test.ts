@@ -1579,9 +1579,98 @@ describe('PreviewResponseSchema', () => {
     expect(PreviewResponseSchema.safeParse({ ...relayed, host: '' }).success).toBe(false)
   })
 
+  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('keeps a file preview below the preview route', () => {
     expect(PreviewResponseSchema.safeParse({ ...ready, url: relayed.url }).success).toBe(false)
     const { kind: _kind, ...withoutKind } = ready
     expect(PreviewResponseSchema.safeParse(withoutKind).success).toBe(false)
+  })
+})
+
+// Issue #376: what the dashboard offers comes from the server — the
+// registered agents, each host's availability, and each task's actions.
+describe('TasksResponseSchema agent capabilities', () => {
+  const task = {
+    id: 'local:codex:01a0e2bc-bdf9-71b2-867a-df8302180efe',
+    host: '',
+    agent: 'codex',
+    session_id: '01a0e2bc-bdf9-71b2-867a-df8302180efe',
+    state: 'stop',
+    location: { kind: 'none', attachable: false },
+  }
+  const agents = [
+    {
+      id: 'codex',
+      display_name: 'Codex',
+      capabilities: ['detect', 'collect', 'launch', 'resume', 'workdir', 'summary', 'board'],
+      notes: { launch: 'Codex chooses its session ID once it has started its session.' },
+    },
+    { id: 'cursor', display_name: 'Cursor', capabilities: ['detect', 'board'], notes: {} },
+  ]
+  const availability = [
+    { agent: 'codex', capability: 'collect', status: 'degraded', reason: 'unknown_format', detail: 'malformed_row 1',
+      observed_version: '0.130.0' },
+    { agent: 'codex', capability: 'launch', status: 'unavailable', reason: 'cli_missing' },
+    { agent: 'codex', capability: 'resume', status: 'unknown', reason: 'not_probed' },
+    { agent: 'claude', capability: 'launch', status: 'available' },
+  ]
+
+  it('accepts agents, host availability, task actions and a state note', () => {
+    const result = TasksResponseSchema.safeParse({
+      agents,
+      hosts: [{ name: '', status: 'ok', availability }],
+      tasks: [{
+        ...task,
+        state_note: 'No running process handles this session.',
+        actions: {
+          resume: { status: 'unavailable', reason: 'cli_missing', detail: 'codex is not on PATH' },
+          summary: { status: 'available' },
+        },
+      }],
+    })
+    expect(result.success).toBe(true)
+    // Zod drops a key it does not name: each must survive the parse.
+    expect(result.data?.agents).toEqual(agents)
+    expect(result.data?.hosts[0].availability).toEqual(availability)
+    expect(result.data?.tasks[0].state_note).toBe('No running process handles this session.')
+    expect(result.data?.tasks[0].actions).toEqual({
+      resume: { status: 'unavailable', reason: 'cli_missing', detail: 'codex is not on PATH' },
+      summary: { status: 'available' },
+    })
+  })
+
+  it('accepts a reason and a capability this build does not know', () => {
+    // A new reason or capability on the server must not hide every task.
+    const result = TasksResponseSchema.safeParse({
+      agents: [{ id: 'devin', display_name: 'Devin', capabilities: ['detect', 'teleport'], notes: {} }],
+      hosts: [{ name: '', status: 'ok', availability: [{ agent: 'devin', capability: 'teleport', status: 'unavailable',
+        reason: 'auth_missing' }] }],
+      tasks: [{ ...task, actions: { resume: { status: 'unavailable', reason: 'quota_exceeded' } } }],
+    })
+    expect(result.success).toBe(true)
+    expect(result.data?.agents?.[0].capabilities).toEqual(['detect', 'teleport'])
+    expect(result.data?.hosts[0].availability?.[0].reason).toBe('auth_missing')
+    expect(result.data?.tasks[0].actions?.resume?.reason).toBe('quota_exceeded')
+  })
+
+  // efficacy:exempt pins compatibility with a response that predates the fields: it passes without them by design
+  it('accepts a response without them, offering nothing', () => {
+    expect(TasksResponseSchema.safeParse({ hosts: [{ name: '', status: 'ok' }], tasks: [task] }).success).toBe(true)
+  })
+
+  it('rejects a status outside the four and malformed entries', () => {
+    const bad = [
+      { agents, hosts: [{ name: '', status: 'ok', availability: [{ ...availability[0], status: 'partial' }] }],
+        tasks: [] },
+      { agents, hosts: [], tasks: [{ ...task, actions: { resume: { status: 'maybe' } } }] },
+      { agents: [{ ...agents[0], id: '' }], hosts: [], tasks: [] },
+      { agents: [{ ...agents[0], capabilities: 'launch' }], hosts: [], tasks: [] },
+      { agents, hosts: [{ name: '', status: 'ok', availability: [{ capability: 'launch', status: 'available' }] }],
+        tasks: [] },
+      { agents, hosts: [], tasks: [{ ...task, state_note: 1 }] },
+    ]
+    for (const response of bad) {
+      expect(TasksResponseSchema.safeParse(response).success, JSON.stringify(response)).toBe(false)
+    }
   })
 })

@@ -137,11 +137,13 @@ type Service struct {
 	// unreadableLogged is, per host, the unreadable state files last logged,
 	// keyed by their full name; guarded by mu.
 	unreadableLogged map[string]map[string]UnreadableStateFile
-	// probes are each host's last agent probe, and collectAvailability
-	// each host's collect availability from its last full collection, by
-	// agent (issue #373); both guarded by mu.
+	// probes are each host's last agent probe, collectAvailability each
+	// host's collect availability from its last full collection, by agent
+	// (issue #373), and collectFailed the error of each host whose last full
+	// collection failed; all guarded by mu.
 	probes              map[string]probeEntry
 	collectAvailability map[string]map[agent.ID]Availability
+	collectFailed       map[string]string
 	// probing are the hosts whose probe is running, guarded by mu. The
 	// probes run beside the collections, under probeCtx, which ends when
 	// the service is closed; probeRuns counts them, and probeTimeout
@@ -345,6 +347,9 @@ func (s *Service) hostNames() []string {
 func (s *Service) collectHost(ctx context.Context, name string) (HostResult, []Task) {
 	result, raw, collectedAt, ok := s.collectRaw(ctx, name, collectPlan.full)
 	if !ok {
+		if result.Status == HostError {
+			s.recordCollectFailure(name, result.Error)
+		}
 		return result, nil
 	}
 	tasks, unreadable, formats := buildTasksWithDiagnostics(name, raw, collectedAt)
@@ -695,6 +700,11 @@ func (s *Service) forgetHostsExcept(names []string) {
 	for name := range s.collectAvailability {
 		if name != "" && !keep[name] {
 			delete(s.collectAvailability, name)
+		}
+	}
+	for name := range s.collectFailed {
+		if name != "" && !keep[name] {
+			delete(s.collectFailed, name)
 		}
 	}
 	var stale []Conn
