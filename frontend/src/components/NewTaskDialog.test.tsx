@@ -60,6 +60,7 @@ describe('NewTaskDialog', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  //efficacy:exempt pins that claude and codex are still the two offered, as before this branch; cursor declares no launch
   it('offers every host, the panemux host first, and the agents that declare launch', () => {
     renderDialog()
     const hostOptions = Array.from((screen.getByLabelText('Host') as HTMLSelectElement).options).map((o) => [o.value, o.text])
