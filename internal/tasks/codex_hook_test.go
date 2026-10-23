@@ -392,11 +392,16 @@ func TestInstallCodexHookReportsAFailedWrite(t *testing.T) {
 }
 
 // ~/.codex is a file, so it cannot be made as a directory. The script names
-// it, as it names ~/.local/bin (issue #423).
+// it, as it names ~/.local/bin (issue #423). codex is on PATH, so the host
+// has codex without a ~/.codex directory.
 func TestInstallCodexHookReportsAnUncreatableCodexDirectory(t *testing.T) {
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex"), nil, 0o600))
+	bin := t.TempDir()
+	codexPath := filepath.Join(bin, "codex")
+	require.NoError(t, os.WriteFile(codexPath, []byte("#!/bin/sh\n"), 0o700)) //nolint:gosec // G306: an executable fixture
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	s := New(Options{Hosts: func() []string { return nil }})
 	defer s.Close()
 	_, err := s.InstallCodexHook(context.Background(), "")
