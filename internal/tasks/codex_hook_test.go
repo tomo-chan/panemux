@@ -391,6 +391,19 @@ func TestInstallCodexHookReportsAFailedWrite(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "hooks.json is not written when the hook could not be")
 }
 
+// ~/.codex is a file, so it cannot be made as a directory. The script names
+// it, as it names ~/.local/bin (issue #423).
+func TestInstallCodexHookReportsAnUncreatableCodexDirectory(t *testing.T) {
+	home := t.TempDir()
+	homedir.SetForTest(t, home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex"), nil, 0o600))
+	s := New(Options{Hosts: func() []string { return nil }})
+	defer s.Close()
+	_, err := s.InstallCodexHook(context.Background(), "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "~/.codex could not be created")
+}
+
 func TestInstallCodexHookOverSSHReportsWhyItFailed(t *testing.T) {
 	home := codexHome(t, "")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".local"), nil, 0o600))
