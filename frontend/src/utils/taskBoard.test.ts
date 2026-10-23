@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type { Task, Workspace } from '../schemas'
+import type { AgentInfo, Task, TaskHost, Workspace } from '../schemas'
 import {
   TASK_COLUMNS,
   allLabels,
   applyTaskRecord,
   canRecord,
+  actionUnavailableReason,
   canResume,
+  hostCapability,
+  isKnownAgent,
+  launchableAgents,
+  taskAction,
   findLaunchedTask,
   canSummarize,
   summaryNext,
@@ -45,6 +50,7 @@ function task(overrides: Partial<Task> = {}): Task {
     cwd: '/workspace/user/panemux',
     state: 'busy',
     location: { kind: 'tmux', tmux_session: 'task-7c21', attachable: true },
+    actions: { summary: { status: 'available' } },
     ...overrides,
   }
 }
@@ -114,16 +120,76 @@ describe('canRecord', () => {
 })
 
 describe('canResume', () => {
-  const stopped = { state: 'stop' as const, session_id: '5d7e3a90-1b2c-4d3e-8f40-51627384a5b6', location: { kind: 'none' as const, attachable: false } }
+  const stopped = { state: 'stop' as const, location: { kind: 'none' as const, attachable: false } }
 
-  it('offers resume only for a stopped claude or codex task whose session id is a UUID', () => {
-    expect(canResume(task(stopped))).toBe(true)
-    expect(canResume(task({ ...stopped, done: true }))).toBe(true)
-    expect(canResume(task({ ...stopped, state: 'idle' }))).toBe(false)
-    expect(canResume(task({ ...stopped, agent: 'codex' }))).toBe(true)
-    expect(canResume(task({ ...stopped, agent: 'aider' }))).toBe(false)
-    expect(canResume(task({ ...stopped, session_id: undefined }))).toBe(false)
-    expect(canResume(task({ ...stopped, session_id: 'my-session' }))).toBe(false)
+  it('offers resume where the server says the task has it and it is not unavailable', () => {
+    expect(canResume(task({ ...stopped, actions: { resume: { status: 'available' } } }))).toBe(true)
+    // unknown (the host was not probed) is tried; the server decides again.
+    expect(canResume(task({ ...stopped, actions: { resume: { status: 'unknown', reason: 'not_probed' } } }))).toBe(true)
+    expect(canResume(task({ ...stopped, actions: { resume: { status: 'unavailable', reason: 'cli_missing' } } }))).toBe(false)
+    expect(canResume(task({ ...stopped, actions: {} }))).toBe(false)
+    expect(canResume(task({ ...stopped, actions: undefined }))).toBe(false)
+  })
+
+  it('takes no account of the agent or the shape of the session id', () => {
+    const available = { actions: { resume: { status: 'available' as const } } }
+    expect(canResume(task({ ...stopped, ...available, agent: 'aider', session_id: 'my-session' }))).toBe(true)
+  })
+})
+
+describe('taskAction', () => {
+  it('is the action the server sent, or null when the task does not offer it', () => {
+    const resume = { status: 'unavailable' as const, reason: 'cli_missing' }
+    expect(taskAction(task({ actions: { resume } }), 'resume')).toEqual(resume)
+    expect(taskAction(task({ actions: { resume } }), 'summary')).toBeNull()
+    expect(taskAction(task({ actions: undefined }), 'resume')).toBeNull()
+  })
+})
+
+describe('actionUnavailableReason', () => {
+  it('is the detail the server gave, else a sentence for a known reason, else the reason itself', () => {
+    expect(actionUnavailableReason({ status: 'unavailable', reason: 'cli_missing', detail: 'codex is not on PATH' }))
+      .toBe('codex is not on PATH')
+    expect(actionUnavailableReason({ status: 'unavailable', reason: 'cli_missing' })).toBe('its CLI is not installed on the host')
+    expect(actionUnavailableReason({ status: 'unavailable', reason: 'session_info_missing' }))
+      .toBe('the session information it needs is missing')
+    expect(actionUnavailableReason({ status: 'unavailable', reason: 'quota_exhausted' })).toBe('quota_exhausted')
+    expect(actionUnavailableReason({ status: 'unavailable' })).toBe('not available')
+  })
+})
+
+describe('agent capabilities', () => {
+  const agents: AgentInfo[] = [
+    { id: 'claude', display_name: 'Claude Code', capabilities: ['collect', 'launch', 'resume'], notes: {} },
+    { id: 'codex', display_name: 'Codex', capabilities: ['collect', 'launch'], notes: { launch: 'later' } },
+    { id: 'cursor', display_name: 'Cursor', capabilities: ['detect', 'board'], notes: {} },
+  ]
+
+  it('starts only the agents that declare launch, in registry order', () => {
+    expect(launchableAgents(agents).map((a) => a.id)).toEqual(['claude', 'codex'])
+    expect(launchableAgents(undefined)).toEqual([])
+  })
+
+  it('knows an agent the registry lists, whatever it declares', () => {
+    expect(isKnownAgent(agents, 'cursor')).toBe(true)
+    expect(isKnownAgent(agents, 'aider')).toBe(false)
+    // An answer without the list says nothing about the agent.
+    expect(isKnownAgent(undefined, 'aider')).toBe(true)
+  })
+
+  it('reads what the host probe found of an agent capability, or null when it found nothing', () => {
+    const host: TaskHost = {
+      name: 'build-box', status: 'ok',
+      availability: [
+        { agent: 'claude', capability: 'launch', status: 'available' },
+        { agent: 'codex', capability: 'launch', status: 'unavailable', reason: 'cli_missing' },
+        { agent: 'codex', capability: 'resume', status: 'unavailable', reason: 'cli_missing' },
+      ],
+    }
+    expect(hostCapability(host, 'codex', 'launch')).toEqual({ agent: 'codex', capability: 'launch', status: 'unavailable', reason: 'cli_missing' })
+    expect(hostCapability(host, 'claude', 'launch')?.status).toBe('available')
+    expect(hostCapability(host, 'cursor', 'launch')).toBeNull()
+    expect(hostCapability(undefined, 'claude', 'launch')).toBeNull()
   })
 })
 
@@ -160,12 +226,12 @@ describe('findLaunchedTask', () => {
 })
 
 describe('canSummarize', () => {
-  it('summarizes either supported agent with a session id', () => {
-    expect(canSummarize(task())).toBe(true)
-    expect(canSummarize(task({ state: 'stop' }))).toBe(true)
-    expect(canSummarize(task({ agent: 'codex' }))).toBe(true)
-    expect(canSummarize(task({ agent: 'codex', session_id: undefined }))).toBe(false)
-    expect(canSummarize(task({ session_id: undefined }))).toBe(false)
+  it('summarizes where the server says the task has a summary that is not unavailable', () => {
+    expect(canSummarize(task({ actions: { summary: { status: 'available' } } }))).toBe(true)
+    expect(canSummarize(task({ actions: { summary: { status: 'unknown' } } }))).toBe(true)
+    expect(canSummarize(task({ actions: { summary: { status: 'unavailable', reason: 'session_info_missing' } } }))).toBe(false)
+    expect(canSummarize(task({ actions: {} }))).toBe(false)
+    expect(canSummarize(task({ agent: 'aider', actions: { summary: { status: 'available' } } }))).toBe(true)
   })
 })
 
@@ -198,7 +264,8 @@ describe('summaryRequestOnSelect', () => {
     // A failure is retried by the button, not by selecting the task again.
     expect(summaryRequestOnSelect(task({ ...stopped, summary: { state: 'error', error: 'x' } }), true)).toBe(false)
     expect(summaryRequestOnSelect(task({ ...stopped, summary: { state: 'unreadable' } }), true)).toBe(false)
-    expect(summaryRequestOnSelect(task({ ...stopped, session_id: undefined }), true)).toBe(false)
+    expect(summaryRequestOnSelect(task({ ...stopped, actions: { summary: { status: 'unavailable', reason: 'session_info_missing' } } }), true)).toBe(false)
+    expect(summaryRequestOnSelect(task({ ...stopped, actions: {} }), true)).toBe(false)
   })
 
   it('leaves running tasks to the poll', () => {
