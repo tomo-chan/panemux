@@ -384,9 +384,29 @@ func TestInstallCodexHookReportsAFailedWrite(t *testing.T) {
 	_, err := s.InstallCodexHook(context.Background(), "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mkdir", "the shell's own reason is reported")
-	assert.Contains(t, err.Error(), ".local")
+	// uutils mkdir (Ubuntu 26.04) leaves the path out of its message, so the
+	// script names the directory itself (issue #423).
+	assert.Contains(t, err.Error(), "~/.local/bin could not be created")
 	_, statErr := os.Stat(filepath.Join(home, ".codex", "hooks.json"))
 	assert.True(t, os.IsNotExist(statErr), "hooks.json is not written when the hook could not be")
+}
+
+// ~/.codex is a file, so it cannot be made as a directory. The script names
+// it, as it names ~/.local/bin (issue #423). codex is on PATH, so the host
+// has codex without a ~/.codex directory.
+func TestInstallCodexHookReportsAnUncreatableCodexDirectory(t *testing.T) {
+	home := t.TempDir()
+	homedir.SetForTest(t, home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex"), nil, 0o600))
+	bin := t.TempDir()
+	codexPath := filepath.Join(bin, "codex")
+	require.NoError(t, os.WriteFile(codexPath, []byte("#!/bin/sh\n"), 0o700)) //nolint:gosec // G306: an executable fixture
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	s := New(Options{Hosts: func() []string { return nil }})
+	defer s.Close()
+	_, err := s.InstallCodexHook(context.Background(), "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "~/.codex could not be created")
 }
 
 func TestInstallCodexHookOverSSHReportsWhyItFailed(t *testing.T) {

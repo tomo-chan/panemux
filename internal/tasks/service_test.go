@@ -606,25 +606,47 @@ func TestRunLocal_CollectScriptRunsUnderShAndParses(t *testing.T) {
 	assert.Equal(t, int64(3), byID["no-cwd"].Size)
 }
 
+// fakeAgentScript writes a shell script named name in dir that sleeps for
+// its first argument, and returns its path. ps lists it as
+// `/bin/sh <dir>/<name> <seconds>`, the way it lists a real agent run by its
+// interpreter (`node .../claude`). A link to sleep is not used: uutils
+// coreutils (Ubuntu 26.04) is one binary that refuses to run under another
+// name, so such a process exits at once (issue #423).
+func fakeAgentScript(t *testing.T, dir, name string) string {
+	t.Helper()
+	sleepPath, err := exec.LookPath("sleep")
+	require.NoError(t, err)
+	path := filepath.Join(dir, name)
+	script := "#!/bin/sh\n'" + sleepPath + "' \"$1\"\n"
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o700)) //nolint:gosec // G306: an executable fixture
+	return path
+}
+
+// startFakeAgent starts cmd in a process group of its own and stops the
+// whole group when the test ends, so the script's sleep goes with it.
+func startFakeAgent(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+}
+
 // The cwd probe reports a claude process's working directory, and ps lists
-// this user's own processes. `claude` here is a symlink to sleep.
+// this user's own processes. `claude` here is a script that sleeps.
+//
+//efficacy:exempt only the fixture changed (issue #423); the cwd reading it pins predates this branch
 func TestRunLocal_ReportsTheWorkingDirectoryOfAClaudeProcess(t *testing.T) {
 	testcap.RequirePS(t)
 	homedir.SetForTest(t, t.TempDir())
-	sleepPath, err := exec.LookPath("sleep")
-	require.NoError(t, err)
-	binDir := t.TempDir()
-	fake := filepath.Join(binDir, "claude")
-	require.NoError(t, os.Symlink(sleepPath, fake))
+	fake := fakeAgentScript(t, t.TempDir(), "claude")
 	workDir := t.TempDir()
 
 	cmd := exec.Command(fake, "30")
 	cmd.Dir = workDir
-	require.NoError(t, cmd.Start())
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	})
+	startFakeAgent(t, cmd)
 
 	out, err := runLocal(context.Background(), collectScript)
 	require.NoError(t, err)
@@ -646,31 +668,25 @@ func TestRunLocal_ReportsTheWorkingDirectoryOfAClaudeProcess(t *testing.T) {
 // The env probe reports the PANEMUX_PANE_ID a claude or codex process was
 // started with, read from its environment and not its command line. Linux
 // reads /proc/<pid>/environ. macOS reads `ps -E` instead, which is covered by
-// TestRunLocal_ReadsThePaneIDFromPsEOnMacOS: these fake agents are the OS's
-// own sleep, and what macOS shows of such a binary's environment when it is
-// started through a symlink was not checked (issue #263).
+// TestRunLocal_ReadsThePaneIDFromPsEOnMacOS: these fake agents are scripts
+// run by the OS's own sh, and what macOS shows of an Apple binary's
+// environment is nothing (issue #263).
 //
-//efficacy:exempt only the non-Linux skip changed; the Linux reading it pins predates this branch
+//efficacy:exempt only the fixture changed (issue #423); the Linux reading it pins predates this branch
 func TestRunLocal_ReportsThePaneIDInAnAgentsEnvironment(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("reads /proc/<pid>/environ, which only Linux has")
 	}
 	homedir.SetForTest(t, t.TempDir())
-	sleepPath, err := exec.LookPath("sleep")
-	require.NoError(t, err)
 	binDir := t.TempDir()
 	for _, name := range []string{"claude", "codex"} {
-		require.NoError(t, os.Symlink(sleepPath, filepath.Join(binDir, name)))
+		fakeAgentScript(t, binDir, name)
 	}
 
 	start := func(name string, env []string, args ...string) int {
 		cmd := exec.Command(filepath.Join(binDir, name), args...) //nolint:gosec // G204: fixture binary under test
 		cmd.Env = env
-		require.NoError(t, cmd.Start())
-		t.Cleanup(func() {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-		})
+		startFakeAgent(t, cmd)
 		return cmd.Process.Pid
 	}
 	withPane := start("claude", []string{"PATH=/usr/bin:/bin", "PANEMUX_PANE_ID=pane-1790346631000-a1b2c"}, "30")

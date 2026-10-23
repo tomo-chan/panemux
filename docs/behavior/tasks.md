@@ -453,7 +453,8 @@ review there.
   panemux's entry, is kept, and the reason shown says where it is. A `hooks.json` that cannot be written (read-only) is
   reported as `~/.codex/hooks.json is not writable` and left as it was, and no temporary file is kept. A failed write
   shows the shell's own reason, such as `Permission denied`, on the local host and on an SSH host
-  alike. A hook file larger than 1 MiB is not read either, and shows `Update`. A `hooks.json` the check could not read as above is never written, and neither is the hook.
+  alike; a `~/.local/bin` or `~/.codex` that cannot be made is also named, as `~/.local/bin could not be
+  created` or `~/.codex could not be created`, since not every `mkdir` names it (uutils coreutils, Ubuntu 26.04's, does not). A hook file larger than 1 MiB is not read either, and shows `Update`. A `hooks.json` the check could not read as above is never written, and neither is the hook.
   The menu then shows the status read back, and says to trust the hook in codex's `/hooks`: panemux
   neither trusts it nor checks whether it is trusted. A hook that differs from this panemux's shows
   `Update` until it is pressed, unless the host has `Update automatically` on (below).
