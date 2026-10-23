@@ -255,6 +255,20 @@ agent the registry does not know declares nothing — and `resume` is absent on 
 whatever the request says: an agent that does not declare the capability, or that the registry does
 not know, is `400`.
 
+**The dashboard shows what the server decided** and holds no rule of its own per agent name:
+
+- An absent action is not shown: no `Resume`, and Work says "<agent> does not summarize its tasks.".
+- An `unavailable` action is shown disabled, with "Resume is not available: <why>." or "Summarize is
+  not available: <why>." in the detail panel. The why is the action's `detail`, else a sentence for a
+  `reason` this build knows (`cli_missing`, `session_info_missing`), else the `reason` as sent.
+- An `available`, `degraded` or `unknown` action is offered; the server decides again when it is used.
+- A task whose agent is not in `agents` is shown as "<agent> (unknown agent)" on its card and in the
+  detail panel. It offers only the task's pane (`Open`, `Go to pane`, `Type in pane`), which act on
+  the pane and not on the agent: no `Resume` or `Summarize`, and neither `Mark done` nor labels,
+  since the server records nothing for an agent its registry does not know. The detail panel says so.
+- The detail panel's state note is the task's `state_note`; a stopped task of any agent says that no
+  running process handles its session.
+
 **A launch or resume of an agent that is `unavailable` / `cli_missing`** over the host's current
 connection is refused before anything runs — a resume before the host is collected again — with the
 `409` and fixed message the launch script itself gives ("claude was not found on the host"), and the
@@ -659,7 +673,7 @@ set.
 
 ### Starting a task
 
-`New task` starts one session of an agent that declares `launch` — claude or codex — on a host, in a detached tmux session of its own. No
+`New task` starts one session of an agent that declares `launch` — claude or codex today — on a host, in a detached tmux session of its own. No
 pane is created: the task is opened from the dashboard like any other, when someone wants to watch
 it.
 
@@ -667,7 +681,7 @@ it.
 |---|---|
 | Host | The panemux host or an `ssh_connections` key |
 | Working directory | An absolute path with no shell metacharacters or control characters — the rule a pane's remote `cwd` follows ([Remote path arguments](../security/command-execution.md#remote-path-arguments-ssh-working-directory)) — that exists on the host |
-| Agent | `claude` or `codex` |
+| Agent | A registered agent that declares `launch`, in registry order (`agents`). The form shows the agent's `notes.launch`, and when the chosen host's `launch` for it is `unavailable` it says "<agent> cannot be started on <host>: <why>." and `Start` is disabled; `unknown` (not probed yet) is left to the server |
 | Labels | Optional, comma-separated in the form, under the rules of [Done and labels](#done-and-labels) |
 | First instruction | Required. Surrounding blank space is dropped and line endings become LF; at most 32 KiB after that, and no NUL |
 
@@ -777,7 +791,7 @@ environment's claude stopped at its first-run screen). Scenario J21 is the manua
 
 ### Resuming a task
 
-`Resume` is offered on a stopped claude or codex task whose session ID is a UUID.
+`Resume` is offered on a stopped task whose `actions.resume` the server sends ([Agent availability](#agent-availability)): today a claude or codex task whose session ID is a UUID. It is disabled, with the reason, when that action is `unavailable`.
 
 - **The session must be listed as a stopped task of that agent on its host at that moment.** The host
   is collected again first; a session that is running, is another agent's, or is not listed there is
@@ -964,7 +978,7 @@ See [Codex summary runner and rollout reader](../security/command-execution.md#c
 | In tmux, not attachable | Not opened; the reason is shown |
 | Outside tmux, in a `local` / `ssh` pane the workspaces hold | That pane's workspace becomes active and the pane takes focus |
 | Outside tmux, naming a pane no workspace holds, or no pane | Not opened; the reason is shown |
-| Stopped | Not opened; a stopped claude or codex task offers `Resume` ([Resuming a task](#resuming-a-task)) |
+| Stopped | Not opened; a stopped task whose agent resumes offers `Resume` ([Resuming a task](#resuming-a-task)) |
 | Unknown | Not opened |
 
 Either way the dashboard closes and the pane is briefly outlined. Opening the same tmux session again

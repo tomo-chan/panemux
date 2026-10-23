@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { TaskDashboard } from './TaskDashboard'
 import type { TasksState } from '../hooks/useTasks'
 import type { SSHConnectionsState } from '../hooks/useSSHConnections'
-import type { Task, TasksResponse, Workspace } from '../schemas'
+import type { AgentInfo, Task, TasksResponse, Workspace } from '../schemas'
 
 const NOW = Date.parse('2026-09-25T12:00:00Z')
 
@@ -17,11 +17,21 @@ function task(overrides: Partial<Task>): Task {
     state: 'busy',
     status_since: '2026-09-25T11:57:00Z',
     location: { kind: 'tmux', tmux_session: 'task-a', attachable: true },
+    actions: { summary: { status: 'available' } },
     ...overrides,
   }
 }
 
+const agents: AgentInfo[] = [
+  { id: 'claude', display_name: 'Claude Code', capabilities: ['detect', 'collect', 'launch', 'resume', 'summary'], notes: {} },
+  { id: 'codex', display_name: 'Codex', capabilities: ['detect', 'collect', 'launch', 'resume', 'summary'], notes: {} },
+  { id: 'cursor', display_name: 'Cursor', capabilities: ['detect', 'board'], notes: {} },
+]
+
+const sessionInfoMissing = (detail: string) => ({ status: 'unavailable' as const, reason: 'session_info_missing', detail })
+
 const response: TasksResponse = {
+  agents,
   hosts: [
     { name: '', status: 'ok', collected_at: '2026-09-25T12:00:00Z' },
     { name: 'dev-server', status: 'ok', collected_at: '2026-09-25T12:00:00Z' },
@@ -46,8 +56,14 @@ const response: TasksResponse = {
       },
     }),
     task({ id: 'idle-1', state: 'idle', cwd: '/workspace/user/docs', location: { kind: 'outside', attachable: false } }),
-    task({ id: 'run-1', state: 'run', agent: 'codex', session_id: undefined, cwd: '/workspace/user/api' }),
-    task({ id: 'stop-1', state: 'stop', cwd: '/workspace/user/old', location: { kind: 'none', attachable: false } }),
+    task({
+      id: 'run-1', state: 'run', agent: 'codex', session_id: undefined, cwd: '/workspace/user/api',
+      actions: { summary: sessionInfoMissing('the task has no session ID yet') },
+    }),
+    task({
+      id: 'stop-1', state: 'stop', cwd: '/workspace/user/old', location: { kind: 'none', attachable: false },
+      actions: { resume: sessionInfoMissing('the session ID is not one claude resumes'), summary: { status: 'available' } },
+    }),
   ],
 }
 
@@ -391,35 +407,33 @@ describe('TaskDashboard', () => {
     expect(screen.getAllByRole('heading', { level: 3, name: 'Not in a Git repository' }).length).toBeGreaterThan(0)
   })
 
-  it('explains the codex and unreadable states', () => {
+  it("shows the note the task's agent gives on its state, and none of its own for an agent", () => {
+    const runNote = 'Codex has no session of its own yet: it is waiting for its first instruction.'
     renderDashboard(tasksState({
       data: {
         hosts: [{ name: '', status: 'ok' }],
         tasks: [
-          task({ id: 'codex', state: 'run', agent: 'codex', session_id: undefined, cwd: '/workspace/user/api' }),
+          task({ id: 'codex', state: 'run', agent: 'codex', session_id: undefined, cwd: '/workspace/user/api', state_note: runNote }),
           task({ id: 'codex-busy', state: 'busy', agent: 'codex', session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524' }),
-          task({ id: 'codex-unknown', state: 'unknown', agent: 'codex', session_id: '01a0e2bc-bdf9-71b2-867a-df8302180efe' }),
-          task({ id: 'unreadable', state: 'unknown', session_id: undefined, cwd: undefined, location: { kind: 'none', attachable: false } }),
+          task({ id: 'gemini-run', state: 'run', agent: 'gemini', session_id: undefined, actions: {} }),
+          task({ id: 'stopped', state: 'stop', location: { kind: 'none', attachable: false } }),
         ],
       },
     }))
     const detail = screen.getByRole('complementary', { name: 'Task details' })
     fireEvent.click(screen.getByTestId('task-card-codex'))
-    expect(detail).toHaveTextContent(
-      'Codex has no session of its own yet: it is waiting for its first instruction, held at a start-up screen',
-    )
-    expect(detail).toHaveTextContent("or running its session in codex's shared daemon")
-    expect(detail).toHaveTextContent('Open the pane to see which.')
+    expect(within(detail).getByText(runNote)).toBeInTheDocument()
+    // Without a note from the server the dashboard adds none of its own.
     fireEvent.click(screen.getByTestId('task-card-codex-busy'))
-    expect(detail).toHaveTextContent(
-      "Unless codex's permission hook is registered on this host, a command waiting for approval also shows as working.",
-    )
-    fireEvent.click(screen.getByTestId('task-card-codex-unknown'))
-    expect(detail).toHaveTextContent("Neither codex's thread history nor the end of its session log says")
-    fireEvent.click(screen.getByTestId('task-card-unreadable'))
-    expect(detail).toHaveTextContent('could not be read or has an unexpected format')
+    expect(detail).not.toHaveTextContent('permission hook')
+    fireEvent.click(screen.getByTestId('task-card-gemini-run'))
+    expect(detail).not.toHaveTextContent('reports no detailed state')
+    // What a stopped task means is the same for every agent.
+    fireEvent.click(screen.getByTestId('task-card-stopped'))
+    expect(detail).toHaveTextContent('No running process handles this session.')
   })
 
+  //efficacy:exempt its note now comes from the fixture's state_note, the same text the dashboard wrote before
   it("shows a session codex's shared daemon runs as one no pane can be opened for", () => {
     renderDashboard(tasksState({
       data: {
@@ -427,6 +441,7 @@ describe('TaskDashboard', () => {
         tasks: [task({
           id: 'daemon', state: 'idle', agent: 'codex', session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524',
           cwd: '/workspace/user/api', location: { kind: 'daemon', attachable: false },
+          state_note: "This session runs in codex's shared daemon: codex was started without --no-daemon.",
         })],
       },
     }))
@@ -775,9 +790,9 @@ describe('TaskDashboard new tasks and resume', () => {
   const STOPPED_SID = '5d7e3a90-1b2c-4d3e-8f40-51627384a5b6'
   const stopped = task({
     id: 'local:claude:' + STOPPED_SID, session_id: STOPPED_SID, state: 'stop', cwd: '/workspace/user/old',
-    location: { kind: 'none', attachable: false },
+    location: { kind: 'none', attachable: false }, actions: { resume: { status: 'available' }, summary: { status: 'available' } },
   })
-  const base: TasksResponse = { hosts: response.hosts, tasks: [stopped, ...response.tasks] }
+  const base: TasksResponse = { agents, hosts: response.hosts, tasks: [stopped, ...response.tasks] }
   const launchedTask = task({
     id: NEW_ID, host: 'dev-server', session_id: '0f0e0d0c-0b0a-4908-8706-050403020100', state: 'busy',
     cwd: '/remote/home/demo/new', location: { kind: 'tmux', tmux_session: 'task-0f0e0d0c', attachable: true },
@@ -891,22 +906,83 @@ describe('TaskDashboard new tasks and resume', () => {
     expect(screen.getByRole('alert').textContent).toBe('The task started, but its labels could not be saved: parse tasks.json')
   })
 
-  it('offers Resume only on a stopped claude task with a resumable session id', () => {
+  it('offers Resume where the task has it, and disables it with the reason where it is unavailable', () => {
     renderDashboard(tasksState({ data: base }))
 
-    expect(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: 'Resume: old' })).toBeTruthy()
-    // stop-1's session id is not a UUID, and the others are running.
-    for (const id of ['stop-1', 'wait-1', 'run-1']) {
+    expect(within(screen.getByTestId(`task-card-${stopped.id}`)).getByRole('button', { name: 'Resume: old' })).toBeEnabled()
+    // The running tasks offer no resume at all.
+    for (const id of ['wait-1', 'run-1']) {
       expect(within(screen.getByTestId(`task-card-${id}`)).queryByRole('button', { name: /^Resume/ })).toBeNull()
     }
+    // stop-1's session id is not one claude resumes: the server says so.
+    expect(within(screen.getByTestId('task-card-stop-1')).getByRole('button', { name: /^Resume/ })).toBeDisabled()
     fireEvent.click(screen.getByTestId('task-card-stop-1'))
-    expect(within(detail()).queryByRole('button', { name: /^Resume/ })).toBeNull()
+    expect(within(detail()).getByRole('button', { name: /^Resume/ })).toBeDisabled()
+    expect(detail()).toHaveTextContent('Resume is not available: the session ID is not one claude resumes.')
   })
 
+  it('disables Resume where the host has no CLI for the agent, and offers none where the agent does not declare it', () => {
+    const cliMissing = task({
+      id: 'ssh:dev-server:codex:01a0e2b9-d054-7cc2-9278-a5e25ebcc524', host: 'dev-server', agent: 'codex',
+      session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524', state: 'stop', cwd: '/remote/home/demo/api',
+      location: { kind: 'none', attachable: false },
+      actions: { resume: { status: 'unavailable', reason: 'cli_missing' }, summary: { status: 'available' } },
+    })
+    const partial = task({
+      id: 'local:cursor:c1', agent: 'cursor', session_id: 'c1', state: 'stop', cwd: '/workspace/user/web',
+      location: { kind: 'none', attachable: false }, actions: {},
+    })
+    renderDashboard(tasksState({ data: { ...base, tasks: [cliMissing, partial] } }))
+
+    expect(within(screen.getByTestId(`task-card-${cliMissing.id}`)).getByRole('button', { name: 'Resume: api' })).toBeDisabled()
+    fireEvent.click(screen.getByTestId(`task-card-${cliMissing.id}`))
+    expect(detail()).toHaveTextContent('Resume is not available: its CLI is not installed on the host.')
+
+    expect(within(screen.getByTestId(`task-card-${partial.id}`)).queryByRole('button', { name: /^Resume/ })).toBeNull()
+    fireEvent.click(screen.getByTestId(`task-card-${partial.id}`))
+    expect(within(detail()).queryByRole('button', { name: /^Resume/ })).toBeNull()
+    expect(detail()).not.toHaveTextContent('Resume is not available')
+  })
+
+  it('shows a task of an agent the registry does not know as such, and offers no action on it', () => {
+    const stranger = task({
+      id: 'local:aider:x1', agent: 'aider', session_id: 'x1', state: 'stop', cwd: '/workspace/user/tools',
+      location: { kind: 'none', attachable: false }, actions: {},
+    })
+    renderDashboard(tasksState({ data: { ...base, tasks: [stranger], summaries_enabled: true } }))
+
+    const card = screen.getByTestId(`task-card-${stranger.id}`)
+    expect(card).toHaveTextContent('aider (unknown agent)')
+    expect(within(card).queryByRole('button', { name: /^Resume/ })).toBeNull()
+    fireEvent.click(card)
+    expect(detail()).toHaveTextContent('panemux does not know the agent aider, so the dashboard offers only its pane on its tasks.')
+    expect(within(detail()).queryByRole('button', { name: /^(Resume|Summarize)/ })).toBeNull()
+  })
+
+  it('offers neither Mark done nor labels on a task of an unknown agent, but keeps its pane actions', () => {
+    const stranger = task({
+      id: 'local:aider:x2', agent: 'aider', session_id: 'x2', state: 'idle', cwd: '/workspace/user/tools',
+      summary: { state: 'ready', text: 'Nothing left.', done_candidate: true },
+      actions: {},
+    })
+    renderDashboard(tasksState({ data: { ...base, tasks: [stranger] } }))
+
+    const card = screen.getByTestId(`task-card-${stranger.id}`)
+    expect(within(card).getByRole('button', { name: 'Open: tools' })).toBeEnabled()
+    fireEvent.click(card)
+    expect(within(detail()).getByRole('button', { name: 'Open: tools' })).toBeEnabled()
+    expect(within(detail()).queryByRole('button', { name: /^Mark (not )?done/ })).toBeNull()
+    expect(within(detail()).queryByRole('textbox', { name: 'Add a label' })).toBeNull()
+    expect(detail()).not.toHaveTextContent('a candidate for Mark done')
+    expect(detail()).toHaveTextContent('panemux does not know the agent aider, so its tasks cannot be marked done or labeled.')
+  })
+
+  //efficacy:exempt only its fixture gains the resume action the server sends; resuming codex is unchanged
   it('offers Resume on a stopped codex task', async () => {
     const codexStopped = task({
       id: 'local:codex:01a0e2b9-d054-7cc2-9278-a5e25ebcc524', agent: 'codex', session_id: '01a0e2b9-d054-7cc2-9278-a5e25ebcc524',
       state: 'stop', cwd: '/workspace/user/api', location: { kind: 'none', attachable: false },
+      actions: { resume: { status: 'available' } },
     })
     const resume = vi.fn().mockResolvedValue({
       ok: true, launched: { id: codexStopped.id, session_id: codexStopped.session_id, tmux_session: 'task-5ebcc524' },
@@ -943,10 +1019,12 @@ describe('TaskDashboard new tasks and resume', () => {
 
   // Each resume in flight is its own: resuming a second task must not let
   // the first one be resumed again while its request is still running.
+  //efficacy:exempt only its fixture gains the resume action the server sends; resumes in flight are unchanged
   it('keeps every resume in flight disabled until its own request finishes', async () => {
     const other = task({
       id: 'local:claude:6e8f4b01-2c3d-4e4f-9a51-627384a5b6c7', session_id: '6e8f4b01-2c3d-4e4f-9a51-627384a5b6c7',
       state: 'stop', cwd: '/workspace/user/other', location: { kind: 'none', attachable: false },
+      actions: { resume: { status: 'available' } },
     })
     const finishers = new Map<string, (value: unknown) => void>()
     const resume = vi.fn().mockImplementation((t: Task) => new Promise((resolve) => { finishers.set(t.id, resolve) }))
@@ -1210,10 +1288,24 @@ describe('TaskDashboard summaries', () => {
     expect(requestSummary).not.toHaveBeenCalled()
   })
 
-  it('says a task that is not claude cannot be summarized', () => {
+  it('disables Summarize with the reason where the task cannot be summarized yet', () => {
     renderDashboard(tasksState({ data: { ...response, summaries_enabled: true } }))
     selectCard('run-1')
-    expect(workSection()).toHaveTextContent('Only a Claude or Codex task with a session ID can be summarized.')
+    expect(workSection()).toHaveTextContent('Summarize is not available: the task has no session ID yet.')
+    expect(within(workSection()).getByRole('button', { name: 'Summarize' })).toBeDisabled()
+  })
+
+  it('says a task whose agent does not summarize has no summary, and offers no Summarize', () => {
+    const data = {
+      ...response, summaries_enabled: true,
+      tasks: [task({ id: 'cursor-1', agent: 'cursor', state: 'stop', location: { kind: 'none', attachable: false }, actions: {} })],
+    }
+    const requestSummary = vi.fn()
+    renderDashboard(tasksState({ data, requestSummary }))
+    selectCard('cursor-1')
+    expect(workSection()).toHaveTextContent('cursor does not summarize its tasks.')
+    expect(within(workSection()).queryByRole('button', { name: /Summarize/ })).toBeNull()
+    expect(requestSummary).not.toHaveBeenCalled()
   })
 
   // efficacy:exempt unchanged by this branch; the tests appended after it fall inside its line range

@@ -1,12 +1,38 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NewTaskDialog } from './NewTaskDialog'
-import type { Task, TaskHost } from '../schemas'
+import type { AgentInfo, Task, TaskHost } from '../schemas'
+
+const codexMissing = { status: 'unavailable' as const, reason: 'cli_missing', detail: "codex is not on PATH or in a login shell's PATH" }
 
 const hosts: TaskHost[] = [
   { name: '', status: 'ok' },
-  { name: 'build-box', status: 'ok' },
-  { name: 'gpu-box', status: 'error', error: 'i/o timeout' },
+  {
+    name: 'build-box', status: 'ok',
+    availability: [
+      { agent: 'claude', capability: 'launch', status: 'available' },
+      { agent: 'codex', capability: 'launch', ...codexMissing },
+    ],
+  },
+  {
+    name: 'gpu-box', status: 'error', error: 'i/o timeout',
+    availability: [
+      { agent: 'claude', capability: 'launch', status: 'unknown', reason: 'not_probed' },
+      { agent: 'codex', capability: 'launch', status: 'unknown', reason: 'not_probed' },
+    ],
+  },
+]
+
+const agents: AgentInfo[] = [
+  { id: 'claude', display_name: 'Claude Code', capabilities: ['detect', 'collect', 'launch', 'resume', 'summary'], notes: {} },
+  {
+    id: 'codex', display_name: 'Codex', capabilities: ['detect', 'collect', 'launch', 'resume', 'summary'],
+    notes: {
+      launch: 'Codex chooses its session ID once it has started its session, so the labels are recorded once codex has ' +
+        "started its session. If it stops at a start-up screen, open the task's pane to answer it.",
+    },
+  },
+  { id: 'cursor', display_name: 'Cursor', capabilities: ['detect', 'board'], notes: {} },
 ]
 
 const launched = {
@@ -16,7 +42,7 @@ const launched = {
 }
 
 function renderDialog(onLaunch = vi.fn().mockResolvedValue({ ok: true, launched }), onLaunched = vi.fn(), onClose = vi.fn()) {
-  render(<NewTaskDialog isOpen hosts={hosts} onLaunch={onLaunch} onLaunched={onLaunched} onClose={onClose} />)
+  render(<NewTaskDialog isOpen hosts={hosts} agents={agents} onLaunch={onLaunch} onLaunched={onLaunched} onClose={onClose} />)
   return { onLaunch, onLaunched, onClose }
 }
 
@@ -28,17 +54,65 @@ function fill(fields: { cwd?: string; prompt?: string; labels?: string; host?: s
 }
 
 describe('NewTaskDialog', () => {
+  //efficacy:exempt only passes the new agents prop; a closed dialog renders nothing, as before this branch
   it('renders nothing while closed', () => {
-    render(<NewTaskDialog isOpen={false} hosts={hosts} onLaunch={vi.fn()} onLaunched={vi.fn()} onClose={vi.fn()} />)
+    render(<NewTaskDialog isOpen={false} hosts={hosts} agents={agents} onLaunch={vi.fn()} onLaunched={vi.fn()} onClose={vi.fn()} />)
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('offers every host, the panemux host first, and claude or codex', () => {
+  //efficacy:exempt pins that claude and codex are still the two offered, as before this branch; cursor declares no launch
+  it('offers every host, the panemux host first, and the agents that declare launch', () => {
     renderDialog()
     const hostOptions = Array.from((screen.getByLabelText('Host') as HTMLSelectElement).options).map((o) => [o.value, o.text])
     expect(hostOptions).toEqual([['', 'Local'], ['build-box', 'build-box'], ['gpu-box', 'gpu-box (unreachable)']])
     const agentOptions = Array.from((screen.getByLabelText('Agent') as HTMLSelectElement).options).map((o) => o.value)
     expect(agentOptions).toEqual(['claude', 'codex'])
+  })
+
+  it('offers an agent the registry adds once it declares launch, and starts it', async () => {
+    const gemini: AgentInfo = { id: 'gemini', display_name: 'Gemini CLI', capabilities: ['detect', 'launch'], notes: {} }
+    const onLaunch = vi.fn().mockResolvedValue({ ok: true, launched })
+    render(<NewTaskDialog isOpen hosts={hosts} agents={[gemini, ...agents]} onLaunch={onLaunch} onLaunched={vi.fn()} onClose={vi.fn()} />)
+    const agentOptions = Array.from((screen.getByLabelText('Agent') as HTMLSelectElement).options).map((o) => o.value)
+    expect(agentOptions).toEqual(['gemini', 'claude', 'codex'])
+    fill({ cwd: '/workspace/user/api', prompt: 'go' })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+    })
+    expect(onLaunch).toHaveBeenCalledWith({ host: '', agent: 'gemini', cwd: '/workspace/user/api', prompt: 'go', labels: [] })
+  })
+
+  it('says why an agent cannot be started on the chosen host and does not start it', async () => {
+    const { onLaunch } = renderDialog()
+    fill({ host: 'build-box', cwd: '/remote/home/demo/payment', prompt: 'go' })
+    fireEvent.change(screen.getByLabelText('Agent'), { target: { value: 'codex' } })
+    expect(screen.getByText("codex cannot be started on build-box: codex is not on PATH or in a login shell's PATH.")).toBeTruthy()
+    const start = screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement
+    expect(start.disabled).toBe(true)
+    await act(async () => {
+      fireEvent.submit(start.form!)
+    })
+    expect(onLaunch).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Agent'), { target: { value: 'claude' } })
+    expect(screen.queryByText(/cannot be started on/)).toBeNull()
+    expect(start.disabled).toBe(false)
+  })
+
+  //efficacy:exempt pins that unknown (not probed) does not stop the form, which never stopped it before this branch
+  it('lets an agent start where the host has not been probed; the server decides', () => {
+    renderDialog()
+    fill({ host: 'gpu-box' })
+    fireEvent.change(screen.getByLabelText('Agent'), { target: { value: 'codex' } })
+    expect(screen.queryByText(/cannot be started on/)).toBeNull()
+    expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('says so and starts nothing when no registered agent declares launch', () => {
+    render(<NewTaskDialog isOpen hosts={hosts} agents={[agents[2]]} onLaunch={vi.fn()} onLaunched={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.getByText('No registered agent can start a task.')).toBeTruthy()
+    expect((screen.getByLabelText('Agent') as HTMLSelectElement).options).toHaveLength(0)
+    expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('starts the task with what was entered and hands the result on', async () => {
@@ -138,7 +212,7 @@ describe('NewTaskDialog label suggestions', () => {
 
   function renderWithLabels(onLaunch = vi.fn().mockResolvedValue({ ok: true, launched })) {
     render(
-      <NewTaskDialog isOpen hosts={hosts} knownLabels={knownLabels} onLaunch={onLaunch} onLaunched={vi.fn()} onClose={vi.fn()} />,
+      <NewTaskDialog isOpen hosts={hosts} agents={agents} knownLabels={knownLabels} onLaunch={onLaunch} onLaunched={vi.fn()} onClose={vi.fn()} />,
     )
     return { onLaunch }
   }
@@ -266,7 +340,7 @@ describe('NewTaskDialog working directory suggestions', () => {
     onClose = vi.fn(),
   ) {
     render(
-      <NewTaskDialog isOpen hosts={hosts} tasks={list} onLaunch={onLaunch} onLaunched={vi.fn()} onClose={onClose} />,
+      <NewTaskDialog isOpen hosts={hosts} agents={agents} tasks={list} onLaunch={onLaunch} onLaunched={vi.fn()} onClose={onClose} />,
     )
     return { onLaunch, onClose }
   }
@@ -423,12 +497,13 @@ describe('NewTaskDialog working directory suggestions', () => {
     expect(within(screen.getByRole('listbox')).getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true')
   })
 
+  //efficacy:exempt only passes the new agents prop; the directory list is untouched by this branch
   it('keeps the highlighted directory when a board update reorders the list', () => {
     const before = [
       task({ id: 'a', host: '', cwd: '/workspace/user/alpha', state: 'busy' }),
       task({ id: 'b', host: '', cwd: '/workspace/user/beta', status_since: '2026-10-09T10:00:00Z' }),
     ]
-    const props = { isOpen: true, hosts, onLaunch: vi.fn(), onLaunched: vi.fn(), onClose: vi.fn() }
+    const props = { isOpen: true, hosts, agents, onLaunch: vi.fn(), onLaunched: vi.fn(), onClose: vi.fn() }
     const { rerender } = render(<NewTaskDialog {...props} tasks={before} />)
     fireEvent.click(cwdInput())
     fireEvent.keyDown(cwdInput(), { key: 'ArrowDown' })

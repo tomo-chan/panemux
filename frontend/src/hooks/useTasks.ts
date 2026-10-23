@@ -29,14 +29,12 @@ import { postInputGiven } from '../utils/inputGiven'
 // the page is visible — never in the background (issue #252).
 export const TASKS_POLL_INTERVAL_MS = 10000
 
-/** The agents a task can be started with. */
-export type TaskAgent = 'claude' | 'codex'
-
 /** A new task: where it runs, which agent, and its first instruction and labels. */
 export interface TaskLaunchInput {
   /** The ssh_connections key, or '' for the panemux host. */
   host: string
-  agent: TaskAgent
+  /** A registered agent that declares launch (agents[].id). */
+  agent: string
   cwd: string
   prompt: string
   labels: string[]

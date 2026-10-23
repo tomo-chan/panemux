@@ -54,6 +54,9 @@ test('documentation screenshots', async ({ page }) => {
     await pane(page, 'editor').getByTitle('Pane settings').click()
     const dialog = page.getByRole('dialog', { name: 'Pane settings' })
     await expect(dialog).toBeVisible()
+    // The dialog opens before the pane's settings load into it.
+    await expect(dialog.getByPlaceholder('My Terminal')).toHaveValue('Project')
+    await expect(dialog.getByLabel('Message delivery')).toBeVisible()
     await page.screenshot({ path: imagePath('pane-settings.png') })
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await expect(dialog).toHaveCount(0)
@@ -123,6 +126,9 @@ async function clickTerminalText(page: Page, target: Locator, text: string) {
 // images, so the dashboard is given a fixed set of placeholder tasks
 // instead, and the task event stream is kept from replacing their states.
 const WAITING_TASK_ID = 'local:claude:0b6a7c1e-2d3f-4a5b-8c9d-0e1f2a3b4c5d'
+
+// What claude and codex declare in the agent registry.
+const AGENT_CAPABILITIES = ['detect', 'collect', 'launch', 'resume', 'workdir', 'summary', 'board']
 
 async function serveTasks(page: Page) {
   const now = Date.now()
@@ -214,6 +220,17 @@ async function serveTasks(page: Page) {
       git: repo('sample-infra', 'chore/upgrade-runtime'),
     },
   ]
+  // What the server decides each task offers (issue #376): a summary for
+  // every task, and Resume on a stopped one.
+  const available = { status: 'available' }
+  for (const task of tasks) {
+    Object.assign(task, {
+      actions: task.state === 'stop' ? { resume: available, summary: available } : { summary: available },
+    })
+  }
+  Object.assign(tasks[2], {
+    state_note: "Unless codex's permission hook is registered on this host, a command waiting for approval also shows as working.",
+  })
   // Summaries are shown only for the first task: they come from the server's
   // own `claude -p` run, which this fixture does not have.
   Object.assign(tasks[0], {
@@ -232,6 +249,16 @@ async function serveTasks(page: Page) {
           { name: 'build-box', status: 'ok', collected_at: ago(0) },
         ],
         tasks,
+        agents: [
+          { id: 'claude', display_name: 'Claude Code', capabilities: AGENT_CAPABILITIES, notes: {} },
+          {
+            id: 'codex', display_name: 'Codex', capabilities: AGENT_CAPABILITIES,
+            notes: {
+              launch: 'Codex chooses its session ID once it has started its session, so the labels are recorded once codex has ' +
+                "started its session. If it stops at a start-up screen, open the task's pane to answer it.",
+            },
+          },
+        ],
         // Labels used before (issue #310), offered under Add a label.
         known_labels: [
           'api', 'backend', 'bug', 'ci', 'Docs', 'docs', 'e2e', 'frontend', 'infra', 'perf',

@@ -1,4 +1,17 @@
-import type { LayoutChild, PaneConfig, Task, TaskRecord, TaskState, TaskSummary, Workspace } from '../schemas'
+import type {
+  AgentAvailability,
+  AgentInfo,
+  LayoutChild,
+  PaneConfig,
+  Task,
+  TaskAction,
+  TaskActions,
+  TaskHost,
+  TaskRecord,
+  TaskState,
+  TaskSummary,
+  Workspace,
+} from '../schemas'
 
 // The task dashboard's pure logic: which column a task sits in, how the board
 // is filtered and split into lanes, and how a task maps onto a pane. Kept out
@@ -62,11 +75,6 @@ export function canRecord(task: Task): boolean {
   return Boolean(task.session_id)
 }
 
-// The only session IDs the server resumes: `claude --resume` also accepts a
-// session title and `codex resume` a session name, so anything else is
-// refused there (issues #257 and #264).
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
 /** What a codex task waits for while its permission hook recorded a request: the server's codexWaitingForPermission. */
 export const CODEX_PERMISSION_WAIT = 'a permission request from codex'
 
@@ -79,15 +87,59 @@ export function isPermissionWait(task: Pick<Task, 'state' | 'agent' | 'waiting_f
 }
 
 /**
- * Whether the dashboard offers Resume: a stopped claude or codex task with a
- * session ID. Done does not matter; a done task can be resumed and stays done.
+ * An action the server says a task offers (issue #376), or null when it does
+ * not: its agent does not declare it, the registry does not know the agent,
+ * or it does not apply (Resume to a task that is not stopped).
+ */
+export function taskAction(task: Pick<Task, 'actions'>, name: keyof TaskActions): TaskAction | null {
+  return task.actions?.[name] ?? null
+}
+
+// An action is tried unless the server says it cannot be used: unknown (a
+// host not probed yet) is decided again by the server.
+function usable(action: TaskAction | null): boolean {
+  return action !== null && action.status !== 'unavailable'
+}
+
+/**
+ * Whether the dashboard offers Resume. The server decides it from the agent's
+ * adapters, the task's session and the host's probe; done does not matter.
  */
 export function canResume(task: Task): boolean {
-  return (
-    (task.agent === 'claude' || task.agent === 'codex') &&
-    task.state === 'stop' &&
-    UUID_PATTERN.test(task.session_id ?? '')
-  )
+  return usable(taskAction(task, 'resume'))
+}
+
+const UNAVAILABLE_REASONS: Record<string, string> = {
+  cli_missing: 'its CLI is not installed on the host',
+  session_info_missing: 'the session information it needs is missing',
+}
+
+/**
+ * Why an action or capability cannot be used: the server's own detail, else
+ * a sentence for a reason this build knows, else the reason as sent.
+ */
+export function actionUnavailableReason(action: Pick<TaskAction | AgentAvailability, 'status' | 'reason' | 'detail'>): string {
+  if (action.detail) return action.detail
+  if (!action.reason) return 'not available'
+  return UNAVAILABLE_REASONS[action.reason] ?? action.reason
+}
+
+/** The registered agents a task can be started with, in registry order. */
+export function launchableAgents(agents: AgentInfo[] | undefined): AgentInfo[] {
+  return (agents ?? []).filter((a) => a.capabilities.includes('launch'))
+}
+
+/**
+ * Whether the registry knows an agent. Without the list nothing is known
+ * about the agent either way, so it is not called unknown.
+ */
+export function isKnownAgent(agents: AgentInfo[] | undefined, agent: string): boolean {
+  return agents === undefined || agents.some((a) => a.id === agent)
+}
+
+/** What the host's probe found of one agent capability, or null when it says nothing. */
+export function hostCapability(host: TaskHost | undefined, agent: string, capability: string): AgentAvailability | null {
+  return host?.availability?.find((a) => a.agent === agent && a.capability === capability) ?? null
 }
 
 /** A task that was started and that the dashboard selects once it is listed. */
@@ -123,9 +175,9 @@ export function findLaunchedTask(tasks: Task[], launched: LaunchedTaskRef): { ta
   return candidates.length > 0 ? { task: candidates[0], settled: false } : null
 }
 
-/** Whether a task can be summarized: a Claude or Codex task with a session ID. */
+/** Whether a task can be summarized, as the server decides it (issue #376). */
 export function canSummarize(task: Task): boolean {
-  return (task.agent === 'claude' || task.agent === 'codex') && Boolean(task.session_id)
+  return usable(taskAction(task, 'summary'))
 }
 
 /** The work a summary says comes next, and how much remains in all. */

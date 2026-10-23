@@ -21,7 +21,10 @@ import {
   TASK_STATE_LABELS,
   allLabels,
   canRecord,
+  actionUnavailableReason,
   canResume,
+  isKnownAgent,
+  taskAction,
   canSummarize,
   columnForTask,
   filterTasks,
@@ -44,7 +47,6 @@ import type { LaneMode, LaunchedTaskRef, TaskInputAction, TaskOpenAction, TaskPa
 import { matchLabelSuggestions } from '../utils/labelSuggestions'
 import { unreadableRows } from '../utils/unreadableState'
 import UnreadableStateDialog from './UnreadableStateDialog'
-import type { TaskAgent } from '../hooks/useTasks'
 
 // Layer 1 of issue #252: every agent session on every host, as a kanban by
 // state, with a detail panel on the right. Besides reading, it records what a
@@ -197,6 +199,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const tasks = useMemo(() => data?.tasks ?? [], [data])
   const summariesEnabled = data?.summaries_enabled ?? false
   const hosts = data?.hosts ?? []
+  const agents = data?.agents
   const unreadableCount = unreadableRows(hosts).length
 
   // The connection menu goes with its host when a poll finds the host gone
@@ -288,12 +291,12 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     select(task)
     if (summaryRequestOnSelect(task, summariesEnabled)) void requestSummary(task)
   }
-  const launched = (result: TaskLaunchResponse, host: string, agent: TaskAgent) => {
+  const launched = (result: TaskLaunchResponse, host: string, agent: string) => {
     setNewTaskOpen(false)
     setActionError(
       result.records_error ? `The task started, but its labels could not be saved: ${result.records_error}` : null,
     )
-    const labelsNote = result.pending_labels?.length ? '; its labels are recorded once codex has started its session' : ''
+    const labelsNote = result.pending_labels?.length ? `; its labels are recorded once ${agent} has started its session` : ''
     setPendingLaunch({
       ref: { host, agent, id: result.id, tmux_session: result.tmux_session },
       message: `Started tmux ${result.tmux_session} on ${hostLabel(host)}. It is selected here once ${agent} has started${labelsNote}.`,
@@ -575,6 +578,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
                             resuming={resumingIds.has(task.id)}
                             onTypeIn={typeIn}
                             inputMark={inputMark(task)}
+                            knownAgent={isKnownAgent(agents, task.agent)}
                           />
                         ))}
                       </React.Fragment>
@@ -587,6 +591,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         </div>
         <TaskDetail
           task={selected}
+          knownAgent={selected ? isKnownAgent(agents, selected.agent) : true}
           pane={selected ? panes.get(selected.id) ?? null : null}
           open={detailOpen}
           nowMs={nowMs}
@@ -607,6 +612,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
       <NewTaskDialog
         isOpen={newTaskOpen}
         hosts={hosts}
+        agents={agents}
         knownLabels={knownLabels}
         tasks={tasks}
         onLaunch={launch}
@@ -834,10 +840,12 @@ interface TaskCardProps {
   resuming: boolean
   onTypeIn: TypeInHandler
   inputMark: TaskInputMark
+  /** Whether the registry knows the task's agent (issue #376). */
+  knownAgent: boolean
 }
 
 const TaskCard: React.FC<TaskCardProps> = ({
-  task, pane, selected, flashing = false, nowMs, onSelect, onOpen, onResume, resuming, onTypeIn, inputMark,
+  task, pane, selected, flashing = false, nowMs, onSelect, onOpen, onResume, resuming, onTypeIn, inputMark, knownAgent,
 }) => {
   const action = taskOpenAction(task, pane)
   const inputAction = taskInputAction(task, pane)
@@ -860,7 +868,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
     >
       <div className="td-meta">
         <span className="td-meta-host">{hostLabel(task.host)}</span>
-        <span>{task.agent}</span>
+        <span>{agentLabel(task.agent, knownAgent)}</span>
         {task.done && <span className="td-done-badge">Done</span>}
         {!task.done && task.summary?.done_candidate && (
           <span className="td-candidate-badge" title="The summary finds no work left">
@@ -985,6 +993,12 @@ const LabelChips: React.FC<LabelChipsProps> = ({ labels, onRemove, disabled = fa
   )
 }
 
+// The agent as a card or the detail names it, saying so when the registry
+// does not know it (issue #376).
+function agentLabel(agent: string, known: boolean): string {
+  return known ? agent : `${agent} (unknown agent)`
+}
+
 function whereLabel(task: Task, pane: TaskPaneRef | null): string {
   if (pane) return `pane ${pane.paneTitle} · ${pane.workspaceTitle}`
   switch (task.location.kind) {
@@ -1055,9 +1069,11 @@ const OpenButton: React.FC<OpenButtonProps> = ({ task, action, onOpen, small = f
   )
 }
 
-// Resume runs `claude --resume` or `codex resume` for a stopped task in a new
-// tmux session on its host (issues #257 and #264). It opens no pane; Open does, once the
-// task is running.
+// Resume starts a stopped task again in a new tmux session on its host
+// (issues #257 and #264), through its agent's resume adapter. It opens no
+// pane; Open does, once the task is running. The button is there when the
+// task offers resume, disabled when the server says it is unavailable
+// (issue #376); the detail says why.
 interface ResumeButtonProps {
   task: Task
   resuming: boolean
@@ -1066,13 +1082,14 @@ interface ResumeButtonProps {
 }
 
 const ResumeButton: React.FC<ResumeButtonProps> = ({ task, resuming, onResume, small = false }) => {
-  if (!canResume(task)) return null
+  const resume = taskAction(task, 'resume')
+  if (!resume) return null
   return (
     <button
       type="button"
       className={small ? 'td-btn td-btn-sm' : 'td-btn td-btn-primary'}
       aria-label={`Resume: ${taskTitle(task)}`}
-      disabled={resuming}
+      disabled={resuming || !canResume(task)}
       onClick={() => onResume(task)}
     >
       {resuming ? 'Resuming…' : 'Resume'}
@@ -1098,6 +1115,8 @@ interface TaskDetailProps {
   summariesEnabled: boolean
   /** Whether the Done column is on screen, for what Mark done says will happen. */
   showDone: boolean
+  /** Whether the registry knows the task's agent (issue #376). */
+  knownAgent: boolean
   onClose: () => void
 }
 
@@ -1117,8 +1136,10 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   onInputGiven,
   summariesEnabled,
   showDone,
+  knownAgent,
   onClose,
 }) => {
+  const resumeAction = task ? taskAction(task, 'resume') : null
   const [confirmingDone, setConfirmingDone] = useState(false)
   const [labelInput, setLabelInput] = useState('')
   // The task whose save is in flight. A save belongs to the task it was made
@@ -1153,7 +1174,8 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   const inputAction = taskInputAction(task, pane)
   const age = formatElapsed(task.status_since, nowMs)
   const started = formatElapsed(task.started_at, nowMs)
-  const recordable = canRecord(task)
+  // The server records nothing for an agent its registry does not know.
+  const recordable = canRecord(task) && knownAgent
   const labels = task.labels ?? []
   const done = task.done ?? false
   const saving = savingId === task.id
@@ -1238,6 +1260,14 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
           )}
           {action.kind === 'unavailable' && !canResume(task) && (
             <p className="td-note">Cannot open in a pane: {action.reason}.</p>
+          )}
+          {resumeAction?.status === 'unavailable' && (
+            <p className="td-note">Resume is not available: {actionUnavailableReason(resumeAction)}.</p>
+          )}
+          {!knownAgent && (
+            <p className="td-note">
+              panemux does not know the agent {task.agent}, so the dashboard offers only its pane on its tasks.
+            </p>
           )}
           {inputAction?.kind === 'unavailable' && (
             <p className="td-note">Type in pane is not available: {inputAction.reason}.</p>
@@ -1376,8 +1406,10 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
                 disabled={saving}
               />
             </>
-          ) : (
+          ) : knownAgent ? (
             <p className="td-note">Only a task with a session ID can be marked done or labeled.</p>
+          ) : (
+            <p className="td-note">panemux does not know the agent {task.agent}, so its tasks cannot be marked done or labeled.</p>
           )}
         </section>
         <section className="td-sec">
@@ -1389,7 +1421,9 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
             </li>
             <li data-on={task.pid !== undefined}>
               <span className="td-k">Agent</span>
-              <span>{task.pid !== undefined ? `${task.agent} pid ${task.pid}` : 'no process'}</span>
+              <span>
+                {task.pid !== undefined ? `${agentLabel(task.agent, knownAgent)} pid ${task.pid}` : 'no process'}
+              </span>
             </li>
             <li data-on={task.location.kind === 'tmux'}>
               <span className="td-k">Runs in</span>
@@ -1440,45 +1474,12 @@ function markDoneQuestion(task: Task, showDone: boolean): string {
   return "Mark this task done? It moves to the Done column, which is hidden until 'Done column' is checked."
 }
 
+// What the task's state means: the note its agent's collect adapter gives
+// (state_note, issue #376), or what a stopped task means for every agent.
 const StateNote: React.FC<{ task: Task }> = ({ task }) => {
-  if (task.location.kind === 'daemon') {
-    return (
-      <p className="td-note">
-        This session runs in codex's shared daemon: codex was started without --no-daemon, and nothing on the host says
-        which pane shows it. The dashboard's own starts use --no-daemon.
-      </p>
-    )
-  }
-  let note: string | null = null
-  switch (task.state) {
-    case 'run':
-      note =
-        task.agent === 'codex'
-          ? 'Codex has no session of its own yet: it is waiting for its first instruction, held at a start-up ' +
-            "screen (trusting the directory, a new model, a usage limit), or running its session in codex's shared " +
-            'daemon, which the dashboard lists as a task of its own. Open the pane to see which. Done and labels ' +
-            'become available on the session.'
-          : `${task.agent} reports no detailed state; the dashboard only knows it is running.`
-      break
-    case 'busy':
-      if (task.agent === 'codex') {
-        note =
-          "Unless codex's permission hook is registered on this host, a command waiting for approval also shows as working."
-      }
-      break
-    case 'unknown':
-      if (task.agent === 'codex') {
-        note = "Neither codex's thread history nor the end of its session log says whether a turn is in progress."
-      } else {
-        note = task.session_id
-          ? 'Claude Code reported a status the dashboard does not recognize.'
-          : 'The session state file under ~/.claude/sessions could not be read or has an unexpected format.'
-      }
-      break
-    case 'stop':
-      note =
-        'No running process handles this session. A host restart, a crash and a normal exit all look the same.'
-      break
+  let note = task.state_note ?? null
+  if (!note && task.state === 'stop') {
+    note = 'No running process handles this session. A host restart, a crash and a normal exit all look the same.'
   }
   return note ? <p className="td-note">{note}</p> : null
 }
@@ -1494,6 +1495,7 @@ const WorkSection: React.FC<WorkSectionProps> = ({ task, enabled, onRequest }) =
   // A failed request belongs to the task it was made for.
   const [requestError, setRequestError] = useState<{ id: string; message: string } | null>(null)
   const summary = task.summary
+  const summaryAction = taskAction(task, 'summary')
   let body: React.ReactNode
   if (!enabled) {
     body = (
@@ -1502,13 +1504,15 @@ const WorkSection: React.FC<WorkSectionProps> = ({ task, enabled, onRequest }) =
         each task&apos;s conversation.
       </p>
     )
-  } else if (!canSummarize(task)) {
-    body = <p className="td-note">Only a Claude or Codex task with a session ID can be summarized.</p>
+  } else if (!summaryAction) {
+    body = <p className="td-note">{task.agent} does not summarize its tasks.</p>
   } else {
     // A log that could not be read reads the same until it changes, and the
     // server does not read it again before then: the button stays, disabled,
     // until the log has changed.
     const unreadable = summary?.state === 'unreadable' && !summary.outdated
+    // Unavailable (no session ID or log yet, issue #376): the button stays, disabled, with the reason.
+    const unavailable = !canSummarize(task)
     const retry = summary?.state !== 'pending' && (!summary?.text || summary.outdated || summary.state === 'error')
     const request = async () => {
       const failure = await onRequest(task)
@@ -1540,12 +1544,15 @@ const WorkSection: React.FC<WorkSectionProps> = ({ task, enabled, onRequest }) =
           <button
             type="button"
             className="td-btn td-btn-sm"
-            disabled={unreadable}
+            disabled={unreadable || unavailable}
             title={unreadable ? 'The conversation log cannot be read, so it cannot be summarized.' : undefined}
             onClick={() => void request()}
           >
             {summary?.text || summary?.state === 'error' ? 'Summarize again' : 'Summarize'}
           </button>
+        )}
+        {unavailable && (
+          <p className="td-note">Summarize is not available: {actionUnavailableReason(summaryAction)}.</p>
         )}
         {requestError?.id === task.id && (
           <div role="alert" className="td-alert td-alert-inline">
