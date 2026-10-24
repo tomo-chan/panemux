@@ -62,6 +62,8 @@ test-go:
 # run untagged above. Each FIXTURE_AGENT_REQUIRED test (<package>:<test>) must
 # be among those the pattern selects, so a renamed contract test fails the run
 # rather than dropping out of it, and so does a package none of it matches.
+# It depends on build-frontend as coverage-go does: the root package is among
+# FIXTURE_AGENT_PKGS, and its //go:embed needs frontend/dist.
 FIXTURE_AGENT_TAG := panemux_fixture_agent
 FIXTURE_AGENT_PKGS := . ./internal/agent ./internal/session ./internal/tasks ./internal/api ./internal/server
 FIXTURE_AGENT_RUN := ^Test(FixtureAgent|[A-Za-z]+_MatchTheRegistry$$|SummaryAdapters_Contract$$|CollectPrefilter_CoversEveryTaskRule$$|RegisteredDefinitionsAreValid$$|WorkdirAdaptersMatchDeclarations$$|APIContractFixtures_FixtureAgent$$)
@@ -77,7 +79,7 @@ FIXTURE_AGENT_REQUIRED := \
 	./internal/api:TestFixtureAgent_ResumeIsRefusedAndRunsNothing \
 	./internal/server:TestAPIContractFixtures_FixtureAgent
 
-test-go-fixture-agent:
+test-go-fixture-agent: build-frontend
 	@listed=$$(for pkg in $(FIXTURE_AGENT_PKGS); do \
 		go test -tags '$(FIXTURE_AGENT_TAG)' -list '$(FIXTURE_AGENT_RUN)' "$$pkg" | sed -n "s|^Test|$$pkg:Test|p" || exit 1; \
 	done) || exit 1; \
