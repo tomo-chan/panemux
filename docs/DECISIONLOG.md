@@ -1672,6 +1672,40 @@ Stage E of #348, second half (the UI), applying what #376 agreed:
 - **`daemon` stays a location.** "codex's shared daemon" where a card says where a task runs comes
   from the location kind the server reports, not from the agent name, and is left as it is.
 
+### A third agent behind a build tag (2026-10-24, issue #377)
+
+Stage G of #348, first part. Agreed on #377:
+
+- **A build tag, not a test seam.** The fixture agent, a third agent with collect, launch and summary
+  and without resume, workdir, board and usage, is registered only with the `panemux_fixture_agent`
+  tag. `registered()` is the shipped agents plus `fixtureAgents()`, and each `*Adapters()` list is the
+  shipped adapters plus the fixture agent's, so the registration stays explicit and static. A
+  `ForTest` seam in shipped code was rejected: the test agent's code would be in every binary, and the
+  E2E run, which starts a real binary, could not use it. A hidden flag was rejected for the same
+  reason, and because it would let a shipped binary change its registry. The fixture CLI is found as
+  every launchable agent's is, by its ID on `PATH`; nothing from the environment or the configuration
+  reaches the registry or an exec.
+- **A selected tagged run.** `make test-go-fixture-agent` runs the fixture agent's tests and the
+  registry-wide contract tests rather than whole packages: many tests pin the shipped agents' set,
+  sections and probe answers, and making each of them depend on the tag would weaken what they pin
+  about the shipped build. The Makefile names the contract tests the run must hold
+  (`FIXTURE_AGENT_REQUIRED`), and the run fails when one of them is not among those its pattern
+  selects, or when a package matches none: a per-package check alone let a renamed contract test drop
+  out while the package's own fixture-agent tests kept it green (review on #429). Its one fixture,
+  `tasks-fixture-agent`, is written by that run alone.
+- **Mutation measures the default build.** gremlins mutates every Go file whatever its build
+  constraints but runs the tests in the default build, so each mutant in a tagged file came back
+  NOT COVERED and the gate failed for deciding nothing. `scripts/mutation.sh` leaves out a changed
+  `panemux_fixture_agent` file the default build does not compile (`go list -e`'s `IgnoredGoFiles`) and
+  names it; only that tag does, since which OS-specific files a build ignores depends on where the gate
+  runs (review on #429). A second
+  gremlins run with the tag was rejected: the tagged build fails the tests that pin the shipped agents.
+- **Lint reaches the tagged files.** golangci-lint, gosec included, reads them through `build-tags`,
+  `make lint-go` vets both builds, and the pre-push hook vets and tests a package holding them with
+  the tag. The Claude Code `PostToolUse` hook was left untagged.
+- **CLI name is the ID.** The launch script and the probe find an agent's CLI by its ID, so the fixture
+  agent's ID is its CLI's name; an agent whose CLI is named otherwise is #428.
+
 ### Summary adapters (2026-10-24, issue #347)
 
 Stage F of #348. Agreed on #347:

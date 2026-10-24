@@ -109,6 +109,8 @@ const roundTrips: RoundTrip[] = [
     schema: schemas.BoardCommandHistoryResponseSchema,
   },
   { fixture: 'tasks', schemaName: 'TasksResponseSchema', schema: schemas.TasksResponseSchema },
+  // Written by the Go suite's panemux_fixture_agent run (issue #377).
+  { fixture: 'tasks-fixture-agent', schemaName: 'TasksResponseSchema', schema: schemas.TasksResponseSchema },
   { fixture: 'task-record', schemaName: 'TaskRecordSchema', schema: schemas.TaskRecordSchema },
   { fixture: 'task-launch', schemaName: 'TaskLaunchResponseSchema', schema: schemas.TaskLaunchResponseSchema },
   { fixture: 'task-launch-codex', schemaName: 'TaskLaunchResponseSchema', schema: schemas.TaskLaunchResponseSchema },
@@ -256,6 +258,42 @@ describe('API contract fixtures', () => {
   })
 })
 
+// ── A third agent, added through registration alone (issue #377) ─────────
+//
+// The fixture agent exists only in the Go suite's panemux_fixture_agent run,
+// which captures tasks-fixture-agent. The same schema reads it as it reads
+// Claude Code's and codex's: what the dashboard offers comes from the
+// agent's declarations and each task's actions, not from its name.
+describe('the fixture agent in the tasks response', () => {
+  const tasks = schemas.TasksResponseSchema.parse(readFixture('tasks-fixture-agent'))
+  const fixtureAgent = 'panemux-fixture-agent'
+
+  it('lists the agent with what it declares', () => {
+    const info = tasks.agents?.find((a) => a.id === fixtureAgent)
+    expect(info?.display_name).toBe('Fixture Agent')
+    expect(info?.capabilities).toEqual(['detect', 'collect', 'launch', 'summary'])
+  })
+
+  it('reports its availability on the host it was probed on', () => {
+    const local = tasks.hosts.find((h) => h.name === '')
+    const own = local?.availability?.filter((a) => a.agent === fixtureAgent)
+    expect(own?.map((a) => [a.capability, a.status])).toEqual([
+      ['collect', 'available'],
+      ['launch', 'available'],
+    ])
+  })
+
+  it('offers a summary and no resume for its task, and its summary is ready', () => {
+    const own = tasks.tasks.filter((t) => t.agent === fixtureAgent)
+    expect(own.length).toBeGreaterThan(0)
+    for (const task of own) {
+      expect(task.actions?.resume).toBeUndefined()
+      expect(task.actions?.summary?.status).toBe('available')
+    }
+    expect(own.some((t) => t.summary?.state === 'ready')).toBe(true)
+  })
+})
+
 // ── Optional fields the captures never populate ───────────────────────────
 //
 // Accepting a capture proves nothing about a field the capture does not
@@ -366,9 +404,15 @@ function collect(schema: z.ZodTypeAny, value: unknown, path: string[], out: Cove
 // key for every sibling that omits it — the question the gate asks is whether
 // a renamed Go tag would leave the key missing everywhere, not whether every
 // element happens to carry it.
+// tasks-fixture-agent is a second capture of the tasks response, made to show
+// a third agent (issue #377); the tasks capture is the one that pins its
+// optional fields, so this one is left out of their coverage.
+const coverageExemptFixtures = new Set(['tasks-fixture-agent'])
+
 function unexercisedOptionalPaths(): string[] {
   const out: Coverage = { seen: new Set(), populated: new Set() }
   for (const { fixture, schema } of roundTrips) {
+    if (coverageExemptFixtures.has(fixture)) continue
     collect(schema, readFixture(fixture), [fixture], out)
   }
   return [...out.seen].filter((path) => !out.populated.has(path)).sort()

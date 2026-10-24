@@ -62,6 +62,22 @@ verified cache install is locked and published atomically; damaged SDKs fail clo
 explicitly in CI, protect selection, inheritance, and bootstrap failure behavior.
 See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
 
+### The fixture agent's tagged build
+
+A third agent, the fixture agent, is registered only in a build with the `panemux_fixture_agent`
+tag, which no shipped binary has (issue #377). `make test-go-fixture-agent` — part of `make test-go`,
+and its own step in CI — runs, with that tag, the fixture agent's own tests and the registry-wide
+contract tests (each `*_MatchTheRegistry`, the summary adapter contract, the collection
+prefilter's), the HTTP routes' handling of the fixture agent, and writes the one contract fixture
+only that build can capture. It fails when a test `FIXTURE_AGENT_REQUIRED` names is not among those
+it runs, or a package matches none. The tests
+that pin the shipped agents run untagged. `make lint-go` vets both builds and golangci-lint reads
+the tagged files; the pre-push hook vets and tests a package that holds them with the tag. The
+coverage, red-check and mutation gates measure the untagged build alone — the mutation gate leaves
+out, and names, a changed `panemux_fixture_agent` file the default build does not compile — and the Claude Code
+`PostToolUse` hook vets a file's package without the tag. See
+[Adding an agent](agent-registry.md#adding-an-agent).
+
 ### Local verification execution
 
 `make verify-*` preserves the original gate results while saving checkout-local

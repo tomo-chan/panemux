@@ -1,0 +1,164 @@
+{
+  "agents": [
+    {
+      "capabilities": [
+        "detect",
+        "collect",
+        "launch",
+        "resume",
+        "workdir",
+        "summary",
+        "board"
+      ],
+      "display_name": "Claude Code",
+      "id": "claude",
+      "notes": {}
+    },
+    {
+      "capabilities": [
+        "detect",
+        "collect",
+        "launch",
+        "resume",
+        "workdir",
+        "summary",
+        "board"
+      ],
+      "display_name": "Codex",
+      "id": "codex",
+      "notes": {
+        "launch": "Codex chooses its session ID once it has started its session, so the labels are recorded once codex has started its session. If it stops at a start-up screen, open the task's pane to answer it."
+      }
+    },
+    {
+      "capabilities": [
+        "detect",
+        "board"
+      ],
+      "display_name": "Cursor",
+      "id": "cursor",
+      "notes": {}
+    },
+    {
+      "capabilities": [
+        "detect",
+        "board"
+      ],
+      "display_name": "Gemini CLI",
+      "id": "gemini",
+      "notes": {}
+    },
+    {
+      "capabilities": [
+        "detect",
+        "board"
+      ],
+      "display_name": "Grok Build",
+      "id": "grok-build",
+      "notes": {}
+    },
+    {
+      "capabilities": [
+        "detect",
+        "board"
+      ],
+      "display_name": "opencode",
+      "id": "opencode",
+      "notes": {}
+    },
+    {
+      "capabilities": [
+        "detect",
+        "collect",
+        "launch",
+        "summary"
+      ],
+      "display_name": "Fixture Agent",
+      "id": "panemux-fixture-agent",
+      "notes": {}
+    }
+  ],
+  "hosts": [
+    {
+      "availability": [
+        {
+          "agent": "claude",
+          "capability": "collect",
+          "status": "available"
+        },
+        {
+          "agent": "claude",
+          "capability": "launch",
+          "status": "available"
+        },
+        {
+          "agent": "claude",
+          "capability": "resume",
+          "status": "available"
+        },
+        {
+          "agent": "codex",
+          "capability": "collect",
+          "status": "available"
+        },
+        {
+          "agent": "codex",
+          "capability": "launch",
+          "status": "available"
+        },
+        {
+          "agent": "codex",
+          "capability": "resume",
+          "status": "available"
+        },
+        {
+          "agent": "panemux-fixture-agent",
+          "capability": "collect",
+          "status": "available"
+        },
+        {
+          "agent": "panemux-fixture-agent",
+          "capability": "launch",
+          "status": "available"
+        }
+      ],
+      "collected_at": "2026-01-01T00:00:00Z",
+      "name": "",
+      "status": "ok"
+    }
+  ],
+  "summaries_enabled": true,
+  "tasks": [
+    {
+      "actions": {
+        "summary": {
+          "status": "available"
+        }
+      },
+      "agent": "panemux-fixture-agent",
+      "cwd": "/workspace/user/project",
+      "host": "",
+      "id": "local:panemux-fixture-agent:11111111-2222-4333-8444-555555555501",
+      "location": {
+        "attachable": true,
+        "kind": "tmux",
+        "tmux_session": "task-11111111"
+      },
+      "pid": 301,
+      "session_id": "11111111-2222-4333-8444-555555555501",
+      "state": "wait",
+      "status_since": "2026-01-01T00:00:00Z",
+      "summary": {
+        "remaining": [
+          "Update the docs",
+          "Run make check"
+        ],
+        "state": "ready",
+        "summarized_at": "2026-01-01T00:00:00Z",
+        "text": "Adding task summaries to the dashboard."
+      },
+      "wait_signature": "w1-ee38bc3a386490fb23400f9f5a832b2773449c4485079b83e491f83652130ec6",
+      "waiting_for": "approve the plan"
+    }
+  ]
+}

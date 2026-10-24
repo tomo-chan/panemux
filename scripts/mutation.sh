@@ -255,14 +255,41 @@ tab=$(printf '\t')
 # a test asks whether the tests test the tests, and what judges a changed test
 # is the red-check (G4(b)), which reverts the implementation under it. This gate
 # judges changed implementation.
+#
+# A panemux_fixture_agent file the default build does not compile is left out
+# too, and named: gremlins mutates every Go file whatever its build
+# constraints, but runs the tests in the default build, so every mutant in one
+# comes back NOT COVERED whatever the tests do. Those are the fixture agent's
+# files (issue #377), which only `make test-go-fixture-agent` builds, and this
+# gate measures the default build alone. Only that tag takes a file out: which
+# files of another OS or architecture a build ignores depends on where the gate
+# runs, so they stay in scope as before. When `go list` cannot answer, the file
+# is kept, so a broken lookup can fail the run but never quiet it.
+outside_build() {
+	grep -q '^//go:build.*panemux_fixture_agent' "$repo_root/$1" 2> /dev/null || return 1
+	ignored=$(cd "$repo_root" && go list -e -f '{{join .IgnoredGoFiles "\n"}}' "./$(dirname "$1")" 2> /dev/null) ||
+		return 1
+	printf '%s\n' "$ignored" | grep -qxF -- "$(basename "$1")"
+}
+
 changed=""
+outside=""
 for f in $(git -C "$repo_root" diff --name-only "$merge_base" HEAD); do
 	case $f in
 	*_test.go) ;;
-	*.go) changed="$changed $f" ;;
+	*.go)
+		if outside_build "$f"; then
+			outside="$outside $f"
+		else
+			changed="$changed $f"
+		fi
+		;;
 	esac
 done
 
+if [ -n "$outside" ]; then
+	echo "mutation: left out, as panemux_fixture_agent files the default build does not compile:$outside"
+fi
 if [ -z "$changed" ]; then
 	echo "mutation: no Go implementation changed against $base — nothing to check."
 	exit 0

@@ -28,8 +28,15 @@ const agmsgVerified = "agmsg v1.1.13"
 
 // registered is the whole registry, in matching order: the first Board rule
 // that matches a process names its type. Adding an agent means adding its
-// Definition here; nothing registers itself.
+// Definition to shipped; nothing registers itself. fixtureAgents is empty in
+// every shipped build: only a build with the panemux_fixture_agent tag, which
+// the tests and the E2E run use, registers the fixture agent (issue #377).
 func registered() []Definition {
+	return append(shipped(), fixtureAgents()...)
+}
+
+// shipped are the agents every build registers.
+func shipped() []Definition {
 	return []Definition{
 		{
 			ID: Claude, DisplayName: "Claude Code", Aliases: claudeAliases, AgmsgType: claudeCodeName,

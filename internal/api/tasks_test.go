@@ -1005,6 +1005,8 @@ func TestTaskGitInfos_ALookupTheRequestAbandonedIsNotCached(t *testing.T) {
 
 // The task event publisher observes the handler's collector as it is at each
 // observation: the ssh_connections hosts, and one host's running tasks.
+//
+//efficacy:exempt unchanged; the diff hunk after it is collectionSections, which only the tagged build extends
 func TestTaskEventSource_ObservesTheCurrentCollector(t *testing.T) {
 	cfg := defaultTestConfig()
 	cfg.SSHConnections = map[string]config.SSHConnection{"gpu-box": {Host: "gpu.invalid"}}
@@ -1026,9 +1028,9 @@ func TestTaskEventSource_ObservesTheCurrentCollector(t *testing.T) {
 
 // collectionSections are the sections internal/tasks's full collection
 // asks every host for (::panemux-tasks v2).
-var collectionSections = []string{
+var collectionSections = append([]string{
 	"claude/state", "codex/open", "codex/permission", "ps", "tmux", "cwd", "env", "claude/transcripts", "codex/rollouts",
-}
+}, fixtureAgentCollectionSections...)
 
 // withAllSections adds, empty and before "::end", every section of the
 // collection a fixture leaves out: a host's output must carry them all, and

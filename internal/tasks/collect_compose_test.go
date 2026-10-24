@@ -152,12 +152,18 @@ var taskRuleSampleCommands = []string{
 }
 
 func TestCollectPrefilter_CoversEveryTaskRule(t *testing.T) {
-	assert.Equal(t, "claude|codex", collectPlan.prefilter)
-	prefilter := regexp.MustCompile(`awk '(tolower\(\$2 " " \$3\) ~ /claude\|codex/ \{ print \$1 \})'`)
+	var hints []string
+	for _, r := range collectAdapters() {
+		hints = append(hints, r.adapter.processHints()...)
+	}
+	assert.Equal(t, strings.Join(hints, "|"), collectPlan.prefilter)
+	prefilter := regexp.MustCompile(`awk '(tolower\(\$2 " " \$3\) ~ /` +
+		regexp.QuoteMeta(collectPlan.prefilter) + `/ \{ print \$1 \})'`)
 	m := prefilter.FindStringSubmatch(collectScript)
 	require.NotNil(t, m, "the cwd section's prefilter")
+	samples := slices.Concat(taskRuleSampleCommands, fixtureSampleCommands)
 	var rows []string
-	for i, command := range taskRuleSampleCommands {
+	for i, command := range samples {
 		rows = append(rows, "  "+strconv.Itoa(1000+i)+" "+command)
 	}
 	cmd := exec.Command("awk", m[1]) //nolint:gosec // the program is collectScript's own constant
@@ -174,12 +180,12 @@ func TestCollectPrefilter_CoversEveryTaskRule(t *testing.T) {
 			continue
 		}
 		matched := 0
-		for _, command := range taskRuleSampleCommands {
+		for _, command := range samples {
 			if !d.Detection.Task.Process(command) {
 				continue
 			}
 			matched++
-			assert.True(t, passed[strconv.Itoa(1000+slices.Index(taskRuleSampleCommands, command))], "%s: %q", d.ID, command)
+			assert.True(t, passed[strconv.Itoa(1000+slices.Index(samples, command))], "%s: %q", d.ID, command)
 		}
 		assert.Positive(t, matched, "%s matched none of the sample commands", d.ID)
 	}

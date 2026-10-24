@@ -1110,6 +1110,11 @@ func newFixtureRunnerAt(t *testing.T, claudeBin, historyPath string) *commandcen
 	})
 }
 
+// fixtureAgentTasksFixture is the fixture only the panemux_fixture_agent run
+// writes (TestAPIContractFixtures_FixtureAgent, issue #377): this run's
+// captures cannot hold the fixture agent, which no shipped build registers.
+const fixtureAgentTasksFixture = "tasks-fixture-agent"
+
 // TestAPIContractFixtures captures every fixture and writes it to disk. It is
 // a generator, not an assertion about the previous run's output — see this
 // file's header for why failing on drift would defeat the gate.
@@ -1175,6 +1180,8 @@ func TestAPIContractFixtures_AreDeterministic(t *testing.T) {
 // still be reported, but a *missing* one would only mean nobody generated it
 // yet. That is the weaker half, and it is the half the frontend's own
 // "reads every fixture the Go side captured" check covers from the other side.
+//
+//efficacy:exempt the panemux_fixture_agent run writes tasks-fixture-agent, which a revert leaves in place
 func TestAPIContractFixtures_DirectoryHasNoStrayFiles(t *testing.T) {
 	entries, err := os.ReadDir(contractFixtureDir)
 	require.NoError(t, err)
@@ -1188,10 +1195,11 @@ func TestAPIContractFixtures_DirectoryHasNoStrayFiles(t *testing.T) {
 	}
 	sort.Strings(found)
 
-	want := make([]string, 0, len(contractFixtures))
+	want := make([]string, 0, len(contractFixtures)+1)
 	for name := range contractFixtures {
 		want = append(want, name)
 	}
+	want = append(want, fixtureAgentTasksFixture)
 	sort.Strings(want)
 
 	assert.Equal(t, want, found,
@@ -1328,29 +1336,38 @@ func TestNormalizeFixtureString_AppliesTheMoreSpecificLiteralFirst(t *testing.T)
 // to type while iterating on a normalization rule, which is exactly when the
 // rule is broken — passed in 6ms having regenerated nothing. Demonstrated by
 // dropping the `directories` capture's literal: filtered run ok, full run red.
+//
+//efficacy:exempt its checks moved into assertNoMachinePaths unchanged, for the fixture agent's capture
 func TestAPIContractFixtures_ContainNoMachinePaths(t *testing.T) {
-	// The real machine's home directory, deliberately: this is the one test
+	for name, fixture := range contractFixtures {
+		t.Run(name, func(t *testing.T) {
+			body, literals := fixture.capture(t)
+			assertNoMachinePaths(t, name, string(normalizedFixtureBytes(t, body, literals)))
+		})
+	}
+}
+
+// assertNoMachinePaths fails when written, a fixture as it is written, names
+// the capturing machine's home directory or one of its temp directories.
+// TestAPIContractFixtures_FixtureAgent calls it on the one fixture this file's
+// table does not hold.
+func assertNoMachinePaths(t *testing.T, name, written string) {
+	t.Helper()
+	// The real machine's home directory, deliberately: this is the one check
 	// whose subject IS what os.UserHomeDir answers on the capturing machine,
 	// so going through homedir.Dir() would let a substitution elsewhere in the
 	// package hide the very path this is looking for.
 	home, err := os.UserHomeDir() //nolint:forbidigo // the capturing machine's own home is the subject
 	require.NoError(t, err)
 
-	for name, fixture := range contractFixtures {
-		t.Run(name, func(t *testing.T) {
-			body, literals := fixture.capture(t)
-			written := string(normalizedFixtureBytes(t, body, literals))
-
-			assert.NotContains(t, written, home, "%s carries the capturing machine's home directory", name)
-			// t.TempDir() names its directories after the test
-			// ("/tmp/TestAPIContractFixtures.../001"), and macOS puts them
-			// under /var/folders. A bare os.TempDir() check is not usable
-			// here: fixtureHomePath is itself /tmp/sample-project, which is
-			// the placeholder these paths are replaced *with*.
-			for _, prefix := range []string{filepath.Join(os.TempDir(), "Test"), "/var/folders/"} {
-				assert.NotContains(t, written, prefix, "%s carries a temp path from the capturing machine", name)
-			}
-		})
+	assert.NotContains(t, written, home, "%s carries the capturing machine's home directory", name)
+	// t.TempDir() names its directories after the test
+	// ("/tmp/TestAPIContractFixtures.../001"), and macOS puts them
+	// under /var/folders. A bare os.TempDir() check is not usable
+	// here: fixtureHomePath is itself /tmp/sample-project, which is
+	// the placeholder these paths are replaced *with*.
+	for _, prefix := range []string{filepath.Join(os.TempDir(), "Test"), "/var/folders/"} {
+		assert.NotContains(t, written, prefix, "%s carries a temp path from the capturing machine", name)
 	}
 }
 

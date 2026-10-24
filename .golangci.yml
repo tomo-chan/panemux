@@ -2,6 +2,11 @@ version: "2"
 
 run:
   timeout: 5m
+  # The fixture agent's files (issue #377) are linted, gosec included, though
+  # no shipped build compiles them. The files built only without the tag are
+  # each a one-line empty list, which the untagged `go vet` in lint-go reads.
+  build-tags:
+    - panemux_fixture_agent
 
 linters:
   default: standard

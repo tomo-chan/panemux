@@ -14,10 +14,10 @@ import (
 // itself. TestCollectAdapters_MatchTheRegistry keeps this list and the
 // registry's declarations in step.
 func collectAdapters() []registeredCollect {
-	return []registeredCollect{
+	return append([]registeredCollect{
 		{id: agent.Claude, adapter: claudeCollect{}},
 		{id: agent.Codex, adapter: codexCollect{}},
-	}
+	}, fixtureCollectAdapters()...)
 }
 
 // registeredCollect is one entry of collectAdapters.

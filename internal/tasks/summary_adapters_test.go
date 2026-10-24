@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os/exec"
 	"strings"
 	"testing"
@@ -168,20 +169,30 @@ var summaryContractIDs = []string{
 }
 
 func TestSummaryAdapters_Contract(t *testing.T) {
-	regs := map[agent.ID]registeredSummary{}
-	for _, r := range append(summaryAdapters(), thirdRegistration) {
-		regs[r.id] = r
+	samples := map[agent.ID]summaryContractSample{
+		agent.Claude: {sessionID: "s10", log: conversationLog("Fix the test")},
+		agent.Codex:  {sessionID: summarySessionID, log: codexTranscript("Fix the test")},
+		thirdAgent:   {sessionID: "t-1", log: []byte("Fix the test")},
 	}
-	t.Run("claude", func(t *testing.T) {
-		checkSummaryAdapterContract(t, regs[agent.Claude], "s10", conversationLog("Fix the test"))
-	})
-	t.Run("codex", func(t *testing.T) {
-		checkSummaryAdapterContract(t, regs[agent.Codex], summarySessionID, codexTranscript("Fix the test"))
-		assert.False(t, regs[agent.Codex].source.validSessionID("s10"), "codex sessions are UUIDs")
-	})
-	t.Run("third", func(t *testing.T) {
-		checkSummaryAdapterContract(t, regs[thirdAgent], "t-1", []byte("Fix the test"))
-	})
+	maps.Copy(samples, fixtureSummaryContractSamples)
+	// Every registered adapter is checked, so one added without a sample
+	// fails here rather than going unchecked.
+	for _, reg := range append(summaryAdapters(), thirdRegistration) {
+		t.Run(string(reg.id), func(t *testing.T) {
+			sample, ok := samples[reg.id]
+			require.True(t, ok, "%s has a summary adapter and no contract sample", reg.id)
+			checkSummaryAdapterContract(t, reg, sample.sessionID, sample.log)
+		})
+	}
+	codex, ok := summaryPlan.lookup(AgentCodex)
+	require.True(t, ok)
+	assert.False(t, codex.source.validSessionID("s10"), "codex sessions are UUIDs")
+}
+
+// summaryContractSample is a session ID an adapter accepts, and a log of it.
+type summaryContractSample struct {
+	sessionID string
+	log       []byte
 }
 
 // Claude's and Codex's summarizer versions are what they were before the

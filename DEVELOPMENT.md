@@ -304,7 +304,7 @@ A test that genuinely should not go red without its implementation is marked `//
 - `make check` must pass before `make build`.
 - Before reporting implementation complete, `make check` must pass when run by hand, or the pull request's CI must pass. The pre-push hook no longer runs it (see [Push protection](#push-protection)).
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
-- Test commands: `make test-verify`, `make test-go`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-pre-push`, `make test-tmpdir-guard`, `make test-install-hooks`, `make test-golangci-lint-cache`, `make test-require-pty`, `make test-efficacy`, `make test-scenarios-check`, `make test-docs-links`, `make test-screenshots-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
+- Test commands: `make test-verify`, `make test-go`, `make test-go-fixture-agent`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-pre-push`, `make test-tmpdir-guard`, `make test-install-hooks`, `make test-golangci-lint-cache`, `make test-require-pty`, `make test-efficacy`, `make test-scenarios-check`, `make test-docs-links`, `make test-screenshots-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
 - Ledger command: `make check-scenarios`
 - Documentation-link command: `make check-docs-links`
 - Pull-request-only gates: `make efficacy`, `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`, and `MUTATION_BASE=origin/main make mutation` (all three fail the build — `make mutation` warned until #180's item 6 reached stage 4; see above)
@@ -316,6 +316,11 @@ A test that genuinely should not go red without its implementation is marked `//
 - Accessibility ceiling: `make test-e2e` scans the dashboard and the pane settings dialog with axe-core and **fails when a violation count rises** above the value frozen in `CEILINGS` in `frontend/e2e/a11y-ceiling.ts`. A count may fall; a rule not listed has a ceiling of zero. After fixing a violation, lower the ceiling in that map and in the "Accessibility" table in [docs/quality-gateway/measurements.md](docs/quality-gateway/measurements.md) in the same change — the run prints the exact replacement line.
 - Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
 - Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.
+- The fixture agent's files build only with the `panemux_fixture_agent` tag (issue #377). `make test-go`
+  also runs `make test-go-fixture-agent`, which tests that build; `make lint-go` vets both builds, and
+  `.golangci.yml`'s `build-tags` makes golangci-lint read the tagged files. The coverage, red-check and
+  mutation gates and the Claude Code `PostToolUse` hook see the untagged build only
+  ([the fixture agent's tagged build](docs/quality-gateway.md#the-fixture-agents-tagged-build)).
 - `.golangci.yml`'s `forbidigo` rule is where a repository convention is enforced rather than remembered: it fails the build on any `os.UserHomeDir()` call outside `internal/homedir`. The testability rule above had been advice for long enough to accumulate 16 violations across nine packages before anyone counted them.
 - `make lint-go` hands golangci-lint `.cache/golangci-lint/` inside the checkout it runs from as its cache (`scripts/golangci_lint_cache.sh`, Git-ignored). The main checkout and every worktree each keep their own, whatever the working directory, and an inherited `GOLANGCI_LINT_CACHE` is overridden — it may have been exported for another checkout. Existing caches in the user cache directory are left in place, unused; remove them yourself if you want the space back.
 - `lint-go-deps` refreshes the pinned `golangci-lint` binary when the local version does not match `GOLANGCI_LINT_VERSION`, so local lint matches CI.
@@ -329,6 +334,7 @@ A test that genuinely should not go red without its implementation is marked `//
 - The change is the difference between each pushed branch and the same branch on the remote. A branch the remote does not have yet is measured from its merge base with `origin/main`, so a first push checks what the branch adds and nothing `main` gained since. Deleting a branch checks nothing.
 - What the changed files select:
   - `.go` files: `gofmt -s` on each, then `go vet`, `golangci-lint` (the pinned binary and this checkout's cache, as `make lint-go` uses) and `go test` on the packages that hold them — without `-race`, and not on the packages that import them. A file under a package's `testdata/` selects that package.
+  - A package holding a file built with or without the `panemux_fixture_agent` tag also gets `go vet` with that tag, and `make test-go-fixture-agent`.
   - `frontend/src` TypeScript: `tsc --noEmit` and `vitest related` on the changed modules. A file under `testdata/api-contract/` selects the frontend contract test.
   - Shell scripts: `scripts/<name>.sh` selects `scripts/<name>_test.sh`, and any `.sh` selects the `$TMPDIR` guard. `.claude/` selects the hook tests; `frontend/screenshots/` and `frontend/e2e/*.sh` select the screenshot fixtures' tests.
   - Markdown selects `make check-docs-links`; `docs/scenarios.md` also selects `make check-scenarios`.

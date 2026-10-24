@@ -1931,6 +1931,114 @@ else
 	fi
 fi
 
+# ── 49. A file outside the build the tests run is out of scope ────────────────
+#
+# gremlins mutates every Go file, whatever its build constraints, but runs the
+# tests in the default build, so issue #377's panemux_fixture_agent files come
+# back NOT COVERED on every line. That says nothing about the tests of this
+# build, so such a file is left out and named, rather than making the run
+# "decide nothing".
+
+checks=$((checks + 1))
+repo=$(new_repo) || exit 1
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/tagged.go" <<'EOF'
+//go:build panemux_fixture_agent
+
+package pkg
+
+func Tagged(n int) bool {
+	return n > 7
+}
+EOF
+cat > "$repo/pkg/plain.go" <<'EOF'
+package pkg
+
+func Plain(n int) bool {
+	return n > 7
+}
+EOF
+commit_on_branch "$repo" "add a tagged and a plain file"
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/tagged.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"NOT COVERED","line":6,"column":11}]},
+ {"file_name":"pkg/plain.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"KILLED","line":4,"column":11}]}]}'
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a file outside the default build does not fail the run" "exit $rc: $out"
+elif ! printf '%s' "$out" | grep -q 'pkg/tagged.go'; then
+	fail "a file left out for its build constraints is named" "$out"
+elif ! printf '%s' "$out" | grep -q 'among 1 on lines this branch changed'; then
+	fail "only the default build's mutants are counted" "$out"
+else
+	pass "leaves out, and names, a file the default build does not compile"
+fi
+
+# ── 50. A branch whose only changed file is outside the build measures nothing ─
+
+checks=$((checks + 1))
+repo=$(new_repo) || exit 1
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/tagged.go" <<'EOF'
+//go:build panemux_fixture_agent
+
+package pkg
+
+func Tagged(n int) bool {
+	return n > 7
+}
+EOF
+commit_on_branch "$repo" "add a tagged file"
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/tagged.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"NOT COVERED","line":6,"column":11}]}]}'
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	fail "a branch changing only a file outside the default build passes" "exit $rc: $out"
+elif printf '%s' "$out" | grep -qi 'nothing was decided'; then
+	fail "it is not reported as a run that decided nothing" "$out"
+elif ! printf '%s' "$out" | grep -q 'pkg/tagged.go'; then
+	fail "the file left out is named" "$out"
+else
+	pass "a branch changing only a file outside the default build measures nothing"
+fi
+
+# ── 51. Only the fixture agent's tag takes a file out of scope ────────────────
+#
+# A file another constraint keeps out of the default build — another OS's, or
+# another tag's — is not what case 49 is for: which OS-specific files a build
+# ignores depends on where the gate runs. Such a file stays in scope, as it was
+# before #377, so its NOT COVERED mutants still fail a run that decided nothing.
+
+checks=$((checks + 1))
+repo=$(new_repo) || exit 1
+commit_on_main "$repo" "empty base"
+cat > "$repo/pkg/other.go" <<'EOF'
+//go:build sometag
+
+package pkg
+
+func Other(n int) bool {
+	return n > 7
+}
+EOF
+commit_on_branch "$repo" "add a file of another tag"
+write_report "$repo/rep.json" '{"go_module":"example","files":[
+ {"file_name":"pkg/other.go","mutations":[
+   {"type":"CONDITIONALS_BOUNDARY","status":"NOT COVERED","line":6,"column":11}]}]}'
+out=$(run_checker "$repo" --base main --report rep.json)
+rc=$?
+if [ "$rc" -ne 1 ]; then
+	fail "a file another constraint leaves out stays in scope" "exit $rc: $out"
+elif printf '%s' "$out" | grep -q 'left out'; then
+	fail "a file another constraint leaves out is not reported as left out" "$out"
+else
+	pass "only the panemux_fixture_agent tag takes a file out of scope"
+fi
+
 # ── Result ────────────────────────────────────────────────────────────────────
 
 echo

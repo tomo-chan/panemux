@@ -253,6 +253,21 @@ func main() { _ = 1 }')" "go-test ./." "build-frontend"
 expect "a path with a space is not split" \
 	"$(planfor 'a/my file.go' 'package a')" "gofmt a/my file.go" "go-test ./a"
 
+# The fixture agent's files are built only with the panemux_fixture_agent
+# tag (issue #377), which the untagged go vet and go test leave out.
+expect "a package with fixture-agent files is vetted and tested with their tag" \
+	"$(planfor a/fixture.go '//go:build panemux_fixture_agent
+
+package a')" "go-vet-fixture-agent ./a" "fixture-agent-tests" "go-vet ./a" "golangci-lint ./a"
+
+expect "a package without them is not" \
+	"$(planfor a/a.go 'package a')" "go-vet ./a" "!go-vet-fixture-agent ./a" "!fixture-agent-tests"
+
+expect "a file built only without the tag still selects the tagged run" \
+	"$(planfor a/off.go '//go:build !panemux_fixture_agent
+
+package a')" "go-vet-fixture-agent ./a" "fixture-agent-tests"
+
 expect "a frontend module selects tsc and its related tests" \
 	"$(planfor frontend/src/x.ts 'export const x = 2')" "tsc" "vitest src/x.ts" "!go-test ./."
 

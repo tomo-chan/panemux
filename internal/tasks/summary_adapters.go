@@ -16,10 +16,10 @@ import (
 // TestSummaryAdapters_MatchTheRegistry keeps this list and the registry's
 // declarations in step.
 func summaryAdapters() []registeredSummary {
-	return []registeredSummary{
+	return append([]registeredSummary{
 		{id: agent.Claude, source: claudeSummarySource{}, runner: claudeSummaryRunner{}},
 		{id: agent.Codex, source: codexSummarySource{}, runner: codexSummaryRunner{}},
-	}
+	}, fixtureSummaryAdapters()...)
 }
 
 type registeredSummary struct {
