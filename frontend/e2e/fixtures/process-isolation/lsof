@@ -1,18 +1,28 @@
 #!/bin/sh
-# Stands in for lsof in the task-dashboard e2e fixture (review on #430): it
-# runs the real lsof, E2E_REAL_LSOF, only for a `-p <pid>` the ps beside it
-# answers for — a process that descends from the fixture — and answers nothing
-# otherwise, as for a process that does not exist. A call that names no
-# process is refused.
+# Stands in for lsof in the task-dashboard e2e fixture (review on #430). It
+# runs the real lsof, E2E_REAL_LSOF, only for the argument shapes panemux
+# passes, each naming one process:
+#
+#   -a -p <pid> -d cwd -Fn
+#   -a -p <pid> -Fn
+#   -p <pid> -Fn
+#
+# and only for a process the ps beside it answers for — one that descends
+# from the fixture. Another process answers nothing, as one that does not
+# exist; any other shape is refused, with an error and no output.
 set -u
 
-pid=
-after_p=
-for arg do
-	[ -n "$after_p" ] && pid=$arg
-	after_p=
-	[ "$arg" = -p ] && after_p=1
-done
-[ -n "$pid" ] && [ -n "${E2E_REAL_LSOF:-}" ] || exit 1
+refuse() {
+	echo "lsof stand-in: refused: lsof $*" >&2
+	exit 2
+}
+
+case "$#:${1-}:${2-}:${3-}:${4-}:${5-}:${6-}" in
+6:-a:-p:*:-d:cwd:-Fn | 4:-a:-p:*:-Fn:: ) pid=$3 ;;
+3:-p:*:-Fn::: ) pid=$2 ;;
+*) refuse "$@" ;;
+esac
+case $pid in '' | *[!0-9]*) refuse "$@" ;; esac
+[ -n "${E2E_REAL_LSOF:-}" ] || exit 1
 "$(dirname "$0")/ps" -p "$pid" -o pid= >/dev/null 2>&1 || exit 1
 exec "$E2E_REAL_LSOF" "$@"

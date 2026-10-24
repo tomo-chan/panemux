@@ -3,15 +3,57 @@
 # real collection the fixture runs never sees the developer's own claude and
 # codex sessions, nor reads their working directories, environments or logs.
 #
-# It runs the real ps, E2E_REAL_PS, with the same arguments and answers only
-# for the processes that descend from E2E_PROCESS_ROOTS — the fixture's
-# start-up script and its private tmux server. A listing keeps those rows and
-# its header; `-p <pid>` of any other process answers as for a process that
-# does not exist. Without roots it answers for none. Every listing panemux
-# asks for has the pid first.
+# It runs the real ps, E2E_REAL_PS, only for the argument shapes panemux and
+# the lsof beside it pass, and answers only for the processes that descend
+# from E2E_PROCESS_ROOTS — the fixture's start-up script and its private tmux
+# server:
+#
+#   -U <uid> -o pid=,ppid=,command=     a listing, pid first: rows of other
+#   -U <uid> -o pid=,command=           processes are left out, a header is
+#   -U <uid> -o pid=,etime=,command=    kept
+#   -Ao pid,ppid,command
+#   -p <pid> -o command=                one process: any other answers as a
+#   -E -p <pid> -o command=             process that does not exist
+#   -p <pid> -o pid=
+#
+# Any other shape is refused, with an error and no output, rather than run
+# unfiltered. Without roots it answers for no process.
 set -u
 
+refuse() {
+	echo "ps stand-in: refused: ps $*" >&2
+	exit 2
+}
+
 real=${E2E_REAL_PS:?E2E_REAL_PS names the real ps}
+
+numeric() {
+	case $1 in '' | *[!0-9]*) return 1 ;; esac
+}
+
+one=
+case $# in
+2) [ "$1 $2" = '-Ao pid,ppid,command' ] || refuse "$@" ;;
+4)
+	if [ "$1" = -U ] && [ "$3" = -o ]; then
+		numeric "$2" || refuse "$@"
+		case $4 in
+		pid=,ppid=,command= | pid=,command= | pid=,etime=,command=) ;;
+		*) refuse "$@" ;;
+		esac
+	elif [ "$1" = -p ] && [ "$3" = -o ] && { [ "$4" = command= ] || [ "$4" = pid= ]; }; then
+		one=$2
+	else
+		refuse "$@"
+	fi
+	;;
+5)
+	[ "$1" = -E ] && [ "$2" = -p ] && [ "$4" = -o ] && [ "$5" = command= ] || refuse "$@"
+	one=$3
+	;;
+*) refuse "$@" ;;
+esac
+[ -z "$one" ] || numeric "$one" || refuse "$@"
 
 allowed=$("$real" -A -o pid=,ppid= 2>/dev/null | awk -v roots="${E2E_PROCESS_ROOTS:-}" '
 	BEGIN { n = split(roots, r, " "); for (i = 1; i <= n; i++) ok[r[i]] = 1 }
@@ -27,21 +69,16 @@ allowed=$("$real" -A -o pid=,ppid= 2>/dev/null | awk -v roots="${E2E_PROCESS_ROO
 		for (p in ok) printf "%s ", p
 	}')
 
-after_p=
-for arg do
-	if [ -n "$after_p" ]; then
-		case " $allowed" in
-		*" $arg "*) ;;
-		*) exit 1 ;;
-		esac
-	fi
-	after_p=
-	[ "$arg" = -p ] && after_p=1
-done
+if [ -n "$one" ]; then
+	case " $allowed" in
+	*" $one "*) exec "$real" "$@" ;;
+	*) exit 1 ;;
+	esac
+fi
 
 out=$("$real" "$@")
 status=$?
 [ -n "$out" ] && printf '%s\n' "$out" | awk -v allowed="$allowed" '
 	BEGIN { n = split(allowed, a, " "); for (i = 1; i <= n; i++) ok[a[i]] = 1 }
-	$1 !~ /^[0-9]+$/ || ($1 in ok)'
+	NR == 1 && $1 == "PID" || ($1 in ok)'
 exit "$status"

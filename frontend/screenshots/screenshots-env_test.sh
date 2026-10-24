@@ -771,7 +771,7 @@ else
 	fi
 
 	check
-	listed=$(roots='' iso_ps -A -o pid= | tr -d ' ')
+	listed=$(roots='' iso_ps -U "$(id -u)" -o pid=,command= | tr -d ' ')
 	if [ -n "$listed" ]; then
 		fail 'ps lists nothing without roots' "$listed"
 	else
@@ -783,10 +783,72 @@ else
 		fail 'lsof answers nothing for a detached process' "$out"
 	elif [ -n "$real_lsof" ] && ! out=$(E2E_REAL_PS="$real_ps" E2E_REAL_LSOF="$real_lsof" E2E_PROCESS_ROOTS="$$" "$iso/lsof" -a -p "$child" -d cwd -Fn 2>&1); then
 		fail 'lsof answers for a descendant' "$out"
-	elif out=$(E2E_REAL_PS="$real_ps" E2E_REAL_LSOF="$real_lsof" E2E_PROCESS_ROOTS="$$" "$iso/lsof" -d cwd -Fn 2>&1) || [ -n "$out" ]; then
-		fail 'lsof refuses a call that names no process' "$out"
 	else
 		pass 'lsof answers only for a descendant'
+	fi
+	# Only the shapes panemux passes are answered; any other is refused,
+	# with an error and no output, rather than run unfiltered.
+	iso_lsof() { E2E_REAL_PS="$real_ps" E2E_REAL_LSOF="$real_lsof" E2E_PROCESS_ROOTS="$$" "$iso/lsof" "$@"; }
+	for shape in \
+		"-A -o comm=" "-A -o pid=" "-Ao pid" "-ax" "aux" "-e" "-p$child -o command=" "-p1 -o command=" \
+		"-o command= -p $child" "-p $child,1 -o command=" "-p $child -p 1 -o command=" \
+		"-U $(id -u) -o comm=,pid=" "-U $(id -u) -o pid=,command= -p 1" "-p $child -o command= extra"; do
+		check
+		# shellcheck disable=SC2086 # one argument per word
+		if out=$(iso_ps $shape 2>"$work/iso-err"); then
+			fail "ps refuses the shape: $shape" "$out"
+		elif [ -n "$out" ]; then
+			fail "ps prints nothing for the shape: $shape" "$out"
+		elif ! grep -q 'refused' "$work/iso-err"; then
+			fail "ps says it refused the shape: $shape" "$(cat "$work/iso-err")"
+		else
+			pass "ps refuses the shape: $shape"
+		fi
+	done
+	for shape in \
+		"-a -p $child -p 1 -d cwd -Fn" "-a -p1 -d cwd -Fn" "-a -p $child -d cwd -Fn -p 1" "-p $child,1 -Fn" \
+		"-d cwd -Fn" "-Fn" "-a -p $child -d txt -Fn" "-i" "-p $child -Fn -c codex"; do
+		check
+		# shellcheck disable=SC2086 # one argument per word
+		if out=$(iso_lsof $shape 2>"$work/iso-err"); then
+			fail "lsof refuses the shape: $shape" "$out"
+		elif [ -n "$out" ]; then
+			fail "lsof prints nothing for the shape: $shape" "$out"
+		elif ! grep -q 'refused' "$work/iso-err"; then
+			fail "lsof says it refused the shape: $shape" "$(cat "$work/iso-err")"
+		else
+			pass "lsof refuses the shape: $shape"
+		fi
+	done
+	# Every shape panemux passes for a descendant is answered.
+	for shape in "-U $(id -u) -o pid=,ppid=,command=" "-U $(id -u) -o pid=,command=" "-U $(id -u) -o pid=,etime=,command=" \
+		"-p $child -o command=" "-p $child -o pid=" "-Ao pid,ppid,command"; do
+		check
+		# shellcheck disable=SC2086 # one argument per word
+		if ! out=$(iso_ps $shape 2>&1) || [ -z "$out" ]; then
+			fail "ps answers the shape panemux passes: $shape" "$out"
+		else
+			pass "ps answers the shape panemux passes: $shape"
+		fi
+	done
+	if [ "$(uname -s)" = Darwin ]; then
+		check
+		if ! out=$(iso_ps -E -p "$child" -o command= 2>&1) || [ -z "$out" ]; then
+			fail 'ps answers -E -p <pid> -o command=' "$out"
+		else
+			pass 'ps answers -E -p <pid> -o command='
+		fi
+	fi
+	if [ -n "$real_lsof" ]; then
+		for shape in "-a -p $child -d cwd -Fn" "-a -p $child -Fn" "-p $child -Fn"; do
+			check
+			# shellcheck disable=SC2086 # one argument per word
+			if ! out=$(iso_lsof $shape 2>&1) || [ -z "$out" ]; then
+				fail "lsof answers the shape panemux passes: $shape" "$out"
+			else
+				pass "lsof answers the shape panemux passes: $shape"
+			fi
+		done
 	fi
 	kill "$child" "$detached" 2>/dev/null
 fi
