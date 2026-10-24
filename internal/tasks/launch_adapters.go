@@ -15,10 +15,10 @@ import (
 // TestLaunchAdapters_MatchTheRegistry keeps both lists and the registry's
 // declarations in step.
 func launchAdapters() []registeredLaunch {
-	return []registeredLaunch{
+	return append([]registeredLaunch{
 		{id: agent.Claude, adapter: claudeLaunch{}},
 		{id: agent.Codex, adapter: codexLaunch{}},
-	}
+	}, fixtureLaunchAdapters()...)
 }
 
 func resumeAdapters() []registeredResume {
