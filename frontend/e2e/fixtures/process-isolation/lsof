@@ -1,0 +1,18 @@
+#!/bin/sh
+# Stands in for lsof in the task-dashboard e2e fixture (review on #430): it
+# runs the real lsof, E2E_REAL_LSOF, only for a `-p <pid>` the ps beside it
+# answers for — a process that descends from the fixture — and answers nothing
+# otherwise, as for a process that does not exist. A call that names no
+# process is refused.
+set -u
+
+pid=
+after_p=
+for arg do
+	[ -n "$after_p" ] && pid=$arg
+	after_p=
+	[ "$arg" = -p ] && after_p=1
+done
+[ -n "$pid" ] && [ -n "${E2E_REAL_LSOF:-}" ] || exit 1
+"$(dirname "$0")/ps" -p "$pid" -o pid= >/dev/null 2>&1 || exit 1
+exec "$E2E_REAL_LSOF" "$@"

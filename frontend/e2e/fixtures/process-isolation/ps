@@ -1,0 +1,47 @@
+#!/bin/sh
+# Stands in for ps in the task-dashboard e2e fixture (review on #430), so the
+# real collection the fixture runs never sees the developer's own claude and
+# codex sessions, nor reads their working directories, environments or logs.
+#
+# It runs the real ps, E2E_REAL_PS, with the same arguments and answers only
+# for the processes that descend from E2E_PROCESS_ROOTS — the fixture's
+# start-up script and its private tmux server. A listing keeps those rows and
+# its header; `-p <pid>` of any other process answers as for a process that
+# does not exist. Without roots it answers for none. Every listing panemux
+# asks for has the pid first.
+set -u
+
+real=${E2E_REAL_PS:?E2E_REAL_PS names the real ps}
+
+allowed=$("$real" -A -o pid=,ppid= 2>/dev/null | awk -v roots="${E2E_PROCESS_ROOTS:-}" '
+	BEGIN { n = split(roots, r, " "); for (i = 1; i <= n; i++) ok[r[i]] = 1 }
+	{ pid[NR] = $1; parent[$1] = $2 }
+	END {
+		do {
+			more = 0
+			for (i = 1; i <= NR; i++) {
+				p = pid[i]
+				if (!(p in ok) && (parent[p] in ok)) { ok[p] = 1; more = 1 }
+			}
+		} while (more)
+		for (p in ok) printf "%s ", p
+	}')
+
+after_p=
+for arg do
+	if [ -n "$after_p" ]; then
+		case " $allowed" in
+		*" $arg "*) ;;
+		*) exit 1 ;;
+		esac
+	fi
+	after_p=
+	[ "$arg" = -p ] && after_p=1
+done
+
+out=$("$real" "$@")
+status=$?
+[ -n "$out" ] && printf '%s\n' "$out" | awk -v allowed="$allowed" '
+	BEGIN { n = split(allowed, a, " "); for (i = 1; i <= n; i++) ok[a[i]] = 1 }
+	$1 !~ /^[0-9]+$/ || ($1 in ok)'
+exit "$status"

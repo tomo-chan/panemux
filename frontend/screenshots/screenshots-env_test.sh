@@ -716,6 +716,81 @@ else
 	pass 'run-panemux-e2e.sh puts the stand-ins first right before go run'
 fi
 
+# ── The task-dashboard fixture's process isolation ──────────────────────
+#
+# frontend/e2e/fixtures/process-isolation/ps and lsof answer only for the
+# processes that descend from E2E_PROCESS_ROOTS, so the real collection the
+# fixture runs never sees the developer's own claude and codex sessions
+# (review on #430). Here the roots are this test's shell: a child of it is
+# seen, and a process detached from it — as a developer's session is — is
+# not. They need ps, which the Claude Code sandbox denies: they skip there,
+# and fail in CI.
+iso="$here/../e2e/fixtures/process-isolation"
+real_ps=$(command -v ps 2>/dev/null || true)
+iso_skip=
+if [ -z "$real_ps" ] || ! "$real_ps" -A -o pid= >/dev/null 2>&1; then
+	iso_skip='ps cannot run here'
+fi
+if [ -n "$iso_skip" ] && [ -n "${CI:-}" ]; then
+	check
+	fail "process isolation checks cannot run in CI: $iso_skip"
+elif [ -n "$iso_skip" ]; then
+	skip "process isolation checks: $iso_skip"
+else
+	sleep 60 >/dev/null 2>&1 &
+	child=$!
+	detached=$(sh -c 'sleep 60 >/dev/null 2>&1 & echo $!')
+	real_lsof=$(command -v lsof 2>/dev/null || true)
+	iso_ps() { E2E_REAL_PS="$real_ps" E2E_REAL_LSOF="$real_lsof" E2E_PROCESS_ROOTS="${roots-$$}" "$iso/ps" "$@"; }
+
+	check
+	listed=$(iso_ps -U "$(id -u)" -o pid=,ppid=,command= | awk '{ print $1 }')
+	if ! printf '%s\n' "$listed" | grep -qx "$child"; then
+		fail 'ps lists a process that descends from the roots' "$listed"
+	elif printf '%s\n' "$listed" | grep -qx "$detached"; then
+		fail 'ps leaves out a process detached from the roots' "$listed"
+	else
+		pass 'ps lists the descendants of the roots and leaves out a detached process'
+	fi
+
+	check
+	header=$(iso_ps -Ao pid,ppid,command | sed -n 1p)
+	if ! printf '%s' "$header" | grep -q PID; then
+		fail 'ps keeps the header of a listing with one' "$header"
+	else
+		pass 'ps keeps the header of a listing with one'
+	fi
+
+	check
+	if ! out=$(iso_ps -p "$child" -o command=) || [ -z "$out" ]; then
+		fail 'ps -p answers for a descendant' "$out"
+	elif out=$(iso_ps -p "$detached" -o command= 2>&1) || [ -n "$out" ]; then
+		fail 'ps -p answers for a detached process as for one that does not exist' "$out"
+	else
+		pass 'ps -p answers for a descendant, and not for a detached process'
+	fi
+
+	check
+	listed=$(roots='' iso_ps -A -o pid= | tr -d ' ')
+	if [ -n "$listed" ]; then
+		fail 'ps lists nothing without roots' "$listed"
+	else
+		pass 'ps lists nothing without roots'
+	fi
+
+	check
+	if out=$(E2E_REAL_PS="$real_ps" E2E_REAL_LSOF="$real_lsof" E2E_PROCESS_ROOTS="$$" "$iso/lsof" -a -p "$detached" -d cwd -Fn 2>&1) || [ -n "$out" ]; then
+		fail 'lsof answers nothing for a detached process' "$out"
+	elif [ -n "$real_lsof" ] && ! out=$(E2E_REAL_PS="$real_ps" E2E_REAL_LSOF="$real_lsof" E2E_PROCESS_ROOTS="$$" "$iso/lsof" -a -p "$child" -d cwd -Fn 2>&1); then
+		fail 'lsof answers for a descendant' "$out"
+	elif out=$(E2E_REAL_PS="$real_ps" E2E_REAL_LSOF="$real_lsof" E2E_PROCESS_ROOTS="$$" "$iso/lsof" -d cwd -Fn 2>&1) || [ -n "$out" ]; then
+		fail 'lsof refuses a call that names no process' "$out"
+	else
+		pass 'lsof answers only for a descendant'
+	fi
+	kill "$child" "$detached" 2>/dev/null
+fi
+
 if [ "$failures" -ne 0 ]; then
 	echo "screenshots-env tests: $failures of $checks failed"
 	exit 1

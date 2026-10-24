@@ -80,6 +80,14 @@ out, and names, a changed `panemux_fixture_agent` file the default build does no
 capture, and the task-dashboard E2E runs panemux built with the tag against a fake CLI for the
 fixture agent. See [Adding an agent](agent-registry/adding-an-agent.md).
 
+The task-dashboard E2E runs the real collection with summaries on, isolated from the developer's own
+agent sessions. Its `HOME` is a fixture directory. Its `ps` and `lsof` are stand-ins that answer
+only for processes descending from the fixture, so those sessions' processes, working directories,
+environments and logs are never read. Its `claude` and `codex` are stand-ins that run nothing, so
+no real CLI runs. A detached `claude` process with a state file stands in for a developer's
+session, and the spec checks it is not listed: the check fails when the isolation stops working.
+The stand-ins' own behavior is tested by `make test-screenshots-check`.
+
 ### Local verification execution
 
 `make verify-*` preserves the original gate results while saving checkout-local

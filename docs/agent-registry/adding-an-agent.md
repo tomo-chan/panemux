@@ -88,8 +88,8 @@ What checks it:
   a running session is listed in its state with its summary, and a task is started from the New task
   dialog in a tmux session. The fixture's stand-ins for the CLIs — the fake one, and a `claude` and a
   `codex` that refuse a summary — are put first on `PATH` right before panemux starts
-  (`frontend/e2e/stand-ins.sh`), so no real CLI answers for the machine's own sessions the collection
-  lists.
+  (`frontend/e2e/stand-ins.sh`), so no real CLI runs. `ps` and `lsof` stand-ins answer only for
+  the fixture's own processes, so the developer's own sessions are never listed or read.
 
 The tagged files sit outside the coverage, red-check and mutation gates, and the Claude Code
 `PostToolUse` hook vets them untagged

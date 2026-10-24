@@ -126,9 +126,19 @@ as for `make test-e2e` when the installed Chromium is not the one Playwright exp
   panemux and its children. It starts tmux with `-f /dev/null` and stops its private server on exit,
   including sessions started or resumed through the dashboard. Playwright sends `SIGTERM` to this
   fixture so its cleanup trap runs. It never uses the caller's server.
+- The task-dashboard E2E fixture never reads the developer's own agent sessions. The collection it
+  runs is the real one, so its `ps` and `lsof` are stand-ins (`frontend/e2e/fixtures/process-isolation/`).
+  They answer only for processes that descend from the fixture's start-up script or its private tmux
+  server. A `claude` process detached from the fixture, with a state file, stands in for a developer's
+  session, and the spec checks that it is not listed. The fixture's `claude` and `codex` stand-ins run
+  nothing, so no real CLI is ever started. All the stand-ins are put first on `PATH` right before
+  panemux starts (`frontend/e2e/stand-ins.sh`), and the run stops when one of them is not what
+  `PATH` resolves.
 - `make test-screenshots-check` tests both fixtures' tmux isolation and these staging helpers
   (`frontend/screenshots/screenshots-env.sh`), and that the task-dashboard fixture's stand-ins for
-  real CLIs come first on `PATH` after the runtime selection (`frontend/e2e/stand-ins.sh`). Its tmux sockets sit deeper than either fixture's, so
+  real CLIs come first on `PATH` after the runtime selection (`frontend/e2e/stand-ins.sh`), and that its
+`ps` and `lsof` stand-ins answer only for the fixture's processes. Those checks need `ps`, so they
+skip inside the Claude Code sandbox and fail in CI. Its tmux sockets sit deeper than either fixture's, so
   it makes their directory with `tmux_short_dir`: under `$TMPDIR` when the socket fits there (inside
   the Claude Code sandbox, where `/tmp` is not writable), otherwise under `/tmp` (outside the sandbox
   on macOS, whose per-user `$TMPDIR` leaves no room). Where neither fits it fails, naming the path,

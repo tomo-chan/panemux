@@ -490,3 +490,17 @@ test('starts a fixture agent task in a tmux session and selects it', async ({ pa
   await expect(detail.getByRole('button', { name: /^Resume/ })).toHaveCount(0)
   expect(existsSync('/tmp/panemux-e2e-fixture-pwned'), 'the prompt must never reach a shell').toBe(false)
 })
+
+// Review on #430: the collection is the real one, but it sees only the
+// fixture's own processes. The fixture starts a claude process detached from
+// it, with a state file, as a developer's own session would be; ps and lsof
+// stand-ins answer only for processes that descend from the fixture, so it is
+// never listed, and neither is anything else running outside the fixture.
+test('lists nothing running outside the fixture', async ({ request }) => {
+  const tasks: { id: string; cwd?: string }[] = (await (await request.get('/api/tasks')).json()).tasks
+  expect(tasks.map((t) => t.id)).not.toContain('local:claude:e2e-decoy-outside')
+  const outside = tasks.filter(
+    (t) => t.cwd && !/^\/(private\/)?tmp(\/e2e-stopped)?$|\/panemux-e2e-task-dashboard-home(\/|$)/.test(t.cwd),
+  )
+  expect(outside.map((t) => `${t.id} ${t.cwd}`)).toEqual([])
+})

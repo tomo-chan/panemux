@@ -3,7 +3,9 @@
 # agent sessions the dashboard should find.
 #
 # The collection itself is the real one: the fixed script runs `ps` and
-# `tmux` on this machine and reads ~/.claude under HOME. What is fake is only
+# `tmux` on this machine and reads ~/.claude under HOME — `ps` and `lsof`
+# through stand-ins that answer only for this fixture's own processes (see
+# below), and `tmux` on a private server. What is fake is only
 # what an agent would have written and the agent process itself — `claude`
 # here is a symlink to `sleep`, so `ps` lists a process named claude that
 # does nothing. Each one lives for 15 minutes, which outlasts the suite and
@@ -28,6 +30,15 @@
 # A summary of any other task is refused by launch-bin's claude and codex,
 # which start nothing: this machine's own codex sessions can be listed, and
 # the real CLIs must never be run for them.
+#
+# The collection sees only this fixture's own processes (review on #430).
+# fixtures/process-isolation's ps and lsof, first on PATH like the other
+# stand-ins, answer only for processes that descend from E2E_PROCESS_ROOTS:
+# this script and its private tmux server. The developer's own claude and
+# codex sessions are never listed, and their working directories,
+# environments and logs never read. A claude process detached from this
+# script, with a state file, stands in for such a session: the spec checks it
+# is not listed.
 #
 # bin/start-agent is what the spec types into the local pane: an agent
 # started from a pane's shell inherits that shell's PANEMUX_PANE_ID. The
@@ -60,6 +71,7 @@ E2E_HOME="${TMPDIR:-/tmp}/panemux-e2e-task-dashboard-home"
 # conversation logs in their directories, hiding the session to resume.
 if command -v pkill >/dev/null 2>&1; then
     pkill -f "$E2E_HOME/fake/claude/sleep" 2>/dev/null || true
+    pkill -f "$E2E_HOME/bin/claude" 2>/dev/null || true
     pkill -f "$E2E_HOME/.panemux-fixture-agent/bin/panemux-fixture-agent" 2>/dev/null || true
 fi
 rm -rf "$E2E_HOME"
@@ -84,6 +96,9 @@ write_state() {
 
 "$E2E_HOME/bin/claude" 900 >/dev/null 2>&1 &
 write_state "$!" e2e-outside busy
+
+# Not a descendant of this script: its parent exits at once.
+write_state "$(sh -c '"$1" 900 >/dev/null 2>&1 & echo "$!"' sh "$E2E_HOME/bin/claude")" e2e-decoy-outside busy
 
 cat >"$E2E_HOME/bin/start-agent" <<'AGENT'
 #!/bin/sh
@@ -138,13 +153,19 @@ printf '{"text":"Plan the change."}\n{"text":"Waiting for the plan to be approve
 
 # The stand-ins come first on PATH for the tmux server started below, and
 # again for panemux, after run-panemux-e2e.sh selects the runtime once more.
-E2E_STAND_INS="$E2E_DIR/fixtures/fixture-agent:$E2E_HOME/launch-bin"
+E2E_REAL_PS=$(command -v ps)
+E2E_REAL_LSOF=$(command -v lsof || true)
+E2E_PROCESS_ROOTS=$$
+export E2E_REAL_PS E2E_REAL_LSOF E2E_PROCESS_ROOTS
+E2E_STAND_INS="$E2E_DIR/fixtures/process-isolation:$E2E_DIR/fixtures/fixture-agent:$E2E_HOME/launch-bin"
 export E2E_STAND_INS
 export PATH="$E2E_STAND_INS:$PATH"
 
 if command -v tmux >/dev/null 2>&1; then
     tmux -f /dev/null new-session -d -s e2e-task-dashboard -c "$E2E_HOME/work" "exec '$E2E_HOME/bin/claude' 900"
     write_state "$(tmux list-panes -t e2e-task-dashboard -F '#{pane_pid}')" e2e-in-tmux waiting
+    # The private server detaches from this script; its sessions descend from it.
+    E2E_PROCESS_ROOTS="$E2E_PROCESS_ROOTS $(tmux display-message -p -t e2e-task-dashboard '#{pid}')"
 fi
 
 # Keep this wrapper alive so its EXIT trap stops the private tmux server.
