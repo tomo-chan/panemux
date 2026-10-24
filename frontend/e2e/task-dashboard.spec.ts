@@ -76,7 +76,8 @@ test('goes to the local pane an agent outside tmux was started from', async ({ p
   const main = page.locator('[data-pane-id="task-dashboard-main"]')
   await expect.poll(async () => (await main.locator('.xterm-rows').textContent()) ?? '').toMatch(/\S/)
   await main.locator('.xterm-helper-textarea').focus()
-  await page.keyboard.type('"$HOME/bin/start-agent" e2e-in-pane')
+  // In the background, so the agent stays a child of the pane's shell.
+  await page.keyboard.type('"$HOME/bin/start-agent" e2e-in-pane &')
   await page.keyboard.press('Enter')
   await expect.poll(async () => {
     const tasks = await (await request.get('/api/tasks')).json()

@@ -100,11 +100,14 @@ write_state "$!" e2e-outside busy
 # Not a descendant of this script: its parent exits at once.
 write_state "$(sh -c '"$1" 900 >/dev/null 2>&1 & echo "$!"' sh "$E2E_HOME/bin/claude")" e2e-decoy-outside busy
 
+# It records its own pid and becomes the agent, so the agent stays a child of
+# the pane's shell, as one started there is, and so a descendant of this
+# fixture that the ps stand-in answers for.
 cat >"$E2E_HOME/bin/start-agent" <<'AGENT'
 #!/bin/sh
-"$HOME/bin/claude" 900 >/dev/null 2>&1 &
 printf '{"pid":%s,"sessionId":"%s","cwd":"/tmp","status":"busy","statusUpdatedAt":%s000}\n' \
-    "$!" "$1" "$(date +%s)" >"$HOME/.claude/sessions/$!.json"
+    "$$" "$1" "$(date +%s)" >"$HOME/.claude/sessions/$$.json"
+exec "$HOME/bin/claude" 900 >/dev/null 2>&1
 AGENT
 chmod 700 "$E2E_HOME/bin/start-agent"
 
