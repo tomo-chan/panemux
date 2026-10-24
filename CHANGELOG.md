@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.27.0](https://github.com/tomo-chan/panemux/compare/v0.26.0...v0.27.0) (2026-10-24)
+
+
+### Features
+
+* report agent capabilities in GET /api/tasks ([#421](https://github.com/tomo-chan/panemux/issues/421)) ([d2ac144](https://github.com/tomo-chan/panemux/commit/d2ac144caf50877935a528b4e0dc92de8b4ec8e4))
+* show agents and their operations from the agent capabilities on the dashboard ([#422](https://github.com/tomo-chan/panemux/issues/422)) ([4bfa251](https://github.com/tomo-chan/panemux/commit/4bfa251e9b11a7a17bcb5f0f20807ff0b45f3d09))
+
+
+### Bug Fixes
+
+* make internal/tasks tests pass on ubuntu-26.04 runners ([#424](https://github.com/tomo-chan/panemux/issues/424)) ([3a19cd2](https://github.com/tomo-chan/panemux/commit/3a19cd2f652edea1aa928702fe9aac7155b12ec5))
+
 ## [0.26.0](https://github.com/tomo-chan/panemux/compare/v0.25.0...v0.26.0) (2026-10-18)
 
 
