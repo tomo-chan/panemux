@@ -1180,6 +1180,8 @@ func TestAPIContractFixtures_AreDeterministic(t *testing.T) {
 // still be reported, but a *missing* one would only mean nobody generated it
 // yet. That is the weaker half, and it is the half the frontend's own
 // "reads every fixture the Go side captured" check covers from the other side.
+//
+//efficacy:exempt the panemux_fixture_agent run writes tasks-fixture-agent, which a revert leaves in place
 func TestAPIContractFixtures_DirectoryHasNoStrayFiles(t *testing.T) {
 	entries, err := os.ReadDir(contractFixtureDir)
 	require.NoError(t, err)
