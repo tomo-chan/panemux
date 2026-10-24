@@ -58,10 +58,10 @@ func (s *Service) TaskActions(task Task) TaskActions {
 	if adapter, ok := launchPlan.resume[id]; ok && task.State == StateStop {
 		actions.Resume = s.resumeAction(task, adapter)
 	}
-	if summarizable(task.Agent) {
+	if adapter, ok := s.summaryPlan.lookup(task.Agent); ok {
 		action := &TaskAction{Status: Available}
 		switch {
-		case !validSummarySession(task.Agent, task.SessionID):
+		case !adapter.source.validSessionID(task.SessionID):
 			action = sessionInfoMissing("the task has no session ID yet")
 		case task.Log == nil:
 			// RequestAgentSummary accepts only a task listed with its log.
@@ -90,12 +90,6 @@ func (s *Service) resumeAction(task Task, adapter resumeAdapter) *TaskAction {
 
 func sessionInfoMissing(detail string) *TaskAction {
 	return &TaskAction{Status: Unavailable, Reason: ReasonSessionInfoMissing, Detail: detail}
-}
-
-// validSummarySession reports whether sessionID names a session of
-// agentName a summary can be made of.
-func validSummarySession(agentName, sessionID string) bool {
-	return validSessionID.MatchString(sessionID) && (agentName != AgentCodex || validUUID.MatchString(sessionID))
 }
 
 // StateNote is what the task's agent says its state means, "" when it says

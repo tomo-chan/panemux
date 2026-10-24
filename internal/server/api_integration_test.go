@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/agent"
 	"panemux/internal/api"
 	"panemux/internal/board"
 	"panemux/internal/cachedir"
@@ -603,7 +604,7 @@ var apiCases = map[string]apiCase{
 				}
 				return []byte(fixtureLocalTaskCollection), nil
 			},
-			Summarize: fixtureSummarize,
+			Summarizers: map[agent.ID]tasks.SummarizeFunc{agent.Claude: fixtureSummarize},
 		}))
 		rr = e.do(t, http.MethodGet, "/api/tasks", "")
 		require.Equal(t, http.StatusOK, rr.Code)

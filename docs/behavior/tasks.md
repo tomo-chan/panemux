@@ -833,7 +833,8 @@ environment's claude stopped at its first-run screen). Scenario J21 is the manua
 
 ### Summaries
 
-With `task_dashboard.summary.enabled: true` in `config.yaml`, each Claude or Codex task with a collected log gets a summary of what
+With `task_dashboard.summary.enabled: true` in `config.yaml`, each task of an agent with a summary
+adapter (today Claude and Codex) with a collected log gets a summary of what
 it is doing and the work left, made by its own CLI on the panemux host. **Summaries are off by
 default**, because they send conversation excerpts to the corresponding agent account on the panemux host.
 
@@ -843,8 +844,11 @@ task_dashboard:
     enabled: true
 ```
 
-- **Which tasks.** A Claude or Codex task with a session ID whose conversation log the collection listed (the
-  last 7 days, the newest 100 per host). Processes known only by a pid have no summary.
+- **Which tasks.** A task of an agent with a summary adapter
+  ([Agent registry](../agent-registry.md#capabilities)), with a session ID the adapter accepts (a
+  Codex session ID is a UUID), whose conversation log the collection listed (the last 7 days, the
+  newest 100 per host). Processes known only by a pid have no summary. A task's summary is made by
+  its own agent's CLI; when that fails, no other agent's CLI is asked instead.
 - **What is read.** The task's log, `~/.claude/projects/*/<session ID>.jsonl`, is read on its host by
   a fixed script run like the collection's ([Task summaries](../security/command-execution.md#task-summaries)).
   When the session has a log in more than one project directory, the one read is chosen as the
@@ -907,7 +911,8 @@ task_dashboard:
   that made it, and the server logs it once per model, giving only the model ID. A name that is not
   shaped like a model ID is reported as `unknown`. When claude fails, the task reports a fixed message (its exit status, a timeout,
   an answer that was not JSON or had no summary); nothing claude printed is passed on, since it can
-  quote the conversation.
+  quote the conversation. When `claude` is not on the panemux process's `PATH`, the message is
+  `claude CLI was not found on the panemux host` (Codex's says `codex`), naming no path.
 
 #### Saved summaries
 
@@ -917,15 +922,19 @@ or asking an agent.
 
 - **What is saved.** For each summary: its host, agent and session ID, the text, the remaining work
   and when it was made, when its task was last listed (saved at most once a day), the SHA-256 of the
-  excerpt it was made from with the summarizer's version, and the log's modification time, size and
+  excerpt it was made from with the summarizer's version (its adapter's reader and runner), and the log's modification time, size and
   Codex rollout name it was last found current for. Never the log or the excerpt. A summary still
   running, a failure and an unreadable log are not saved, so a restart shows neither `pending` nor
   `error`: a task summarizing when panemux stopped shows the summary before it.
 - **After a restart.** A saved summary whose log is unchanged is current; one whose log changed is
   outdated and is made again, or found current by its hash, under the usual rules.
 - **When summaries are off** the file is neither read nor written, and is left as it is.
+- **A summary of an agent without a summary adapter** — one whose adapter was removed — is not shown,
+  is written back unchanged, and is dropped 30 days after its task was last listed, like any other.
+  The file stays usable.
 - **A file that cannot be used** — not JSON, a format version other than `1`, or an entry panemux would
-  not have written, such as an empty summary or one of an agent that does not declare `summary` — is renamed to `task-summaries.json.bad-<UTC time>`
+  not have written, such as an empty summary, a malformed agent ID or a session ID the agent's
+  adapter refuses — is renamed to `task-summaries.json.bad-<UTC time>`
   (with `-1`, `-2`, … added when an earlier file moved aside in the same second holds that name;
   once 100 names in one second are taken, the file is treated as one that cannot be moved aside),
   unchanged, the server log says so, and saving starts again from an empty file. Edits made to the file while panemux runs are

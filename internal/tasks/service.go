@@ -86,11 +86,11 @@ type Options struct {
 	// Rand is the random source for the session IDs and heredoc tags a task
 	// launch generates. It defaults to crypto/rand.
 	Rand io.Reader
-	// Summarize makes a task's summary from its conversation excerpt. It
-	// defaults to `claude -p` on the panemux host.
-	Summarize SummarizeFunc
-	// SummarizeCodex uses the operator's Codex settings; never falls back to Claude.
-	SummarizeCodex SummarizeFunc
+	// Summarizers make a task's summary from its conversation excerpt, by
+	// the task's agent. An agent missing from it uses its summary adapter's
+	// own runner on the panemux host (`claude -p`, `codex exec`); no agent's
+	// summarizer stands in for another's.
+	Summarizers map[agent.ID]SummarizeFunc
 	// Logf writes a server log line. It defaults to log.Printf.
 	Logf func(format string, args ...any)
 	// SummaryStore keeps the summaries across restarts. Without one they
@@ -99,6 +99,9 @@ type Options struct {
 	// CodexHookAuto keeps the hosts whose codex hook is updated by itself
 	// (issue #402). Without one no hook is.
 	CodexHookAuto *CodexHookAutoStore
+	// summaryPlan replaces the summary adapters checked against the
+	// registry; tests use it to register an agent of their own.
+	summaryPlan *summaryPlanned
 	// HostTimeout bounds one host's collection, including waiting for its
 	// connection to come up. A connection still coming up when it expires
 	// keeps dialing and serves the next collection.
@@ -106,7 +109,7 @@ type Options struct {
 	// RetryAfter is how long a host whose connection failed is left alone
 	// before an ordinary collection dials it again. Reconnect skips the wait.
 	RetryAfter time.Duration
-	// SummaryTimeout bounds one Summarize call.
+	// SummaryTimeout bounds one summarizer call.
 	SummaryTimeout time.Duration
 }
 
@@ -164,6 +167,10 @@ type Service struct {
 	// also counts the codex hook checks after start (codex_hook_auto.go).
 	summaries    map[summaryKey]*summaryEntry
 	summaryTasks map[string]map[summaryKey]summaryTask
+	// summaryPlan is the summary adapters, and summarizers each agent's
+	// summarizer.
+	summaryPlan summaryPlanned
+	summarizers map[agent.ID]SummarizeFunc
 	// summaryHosts are the hosts configured at the last collection, nil
 	// before it. summaryLoaded is whether opts.SummaryStore was read,
 	// summaryLoadErr the last error reading it, and summaryGen the
@@ -214,11 +221,16 @@ func New(opts Options) *Service {
 	if opts.Rand == nil {
 		opts.Rand = rand.Reader
 	}
-	if opts.Summarize == nil {
-		opts.Summarize = newClaudeSummarizer(claudeBin, nil)
+	plan := summaryPlan
+	if opts.summaryPlan != nil {
+		plan = *opts.summaryPlan
 	}
-	if opts.SummarizeCodex == nil {
-		opts.SummarizeCodex = newCodexSummarizer()
+	summarizers := map[agent.ID]SummarizeFunc{}
+	for id, r := range plan.adapters {
+		summarizers[id] = r.runner.newSummarizer()
+		if f := opts.Summarizers[id]; f != nil {
+			summarizers[id] = f
+		}
 	}
 	if opts.SummaryTimeout <= 0 {
 		opts.SummaryTimeout = defaultSummaryTimeout
@@ -237,6 +249,8 @@ func New(opts Options) *Service {
 		codexHookAuto:  map[string]codexHookAuto{},
 		summaries:      map[summaryKey]*summaryEntry{},
 		summaryTasks:   map[string]map[summaryKey]summaryTask{},
+		summaryPlan:    plan,
+		summarizers:    summarizers,
 		summarySlots:   make(chan struct{}, summaryConcurrency),
 		summaryCtx:     summaryCtx,
 		summaryCancel:  summaryCancel,

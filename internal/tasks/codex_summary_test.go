@@ -263,7 +263,7 @@ func TestCodexSummarizer_FixedFailures(t *testing.T) {
 	t.Run("missing binary", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
 		_, err := newCodexSummarizer()(context.Background(), "x")
-		require.EqualError(t, err, "codex could not run while summarizing")
+		require.EqualError(t, err, "codex CLI was not found on the panemux host")
 	})
 	t.Run("setup", func(t *testing.T) {
 		fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: os.ErrPermission}).Ops())

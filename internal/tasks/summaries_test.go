@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"panemux/internal/agent"
 )
 
 // summaryHost is a fake panemux host for summary tests: its collection lists
@@ -136,9 +137,9 @@ func (f *fakeSummarizer) set(result Summary, err error) {
 func newSummaryService(t *testing.T, host *summaryHost, summarizer *fakeSummarizer) *Service {
 	t.Helper()
 	svc := New(Options{
-		RunLocal:  host.run,
-		Summarize: summarizer.summarize,
-		Now:       func() time.Time { return collectedAt },
+		RunLocal:    host.run,
+		Summarizers: map[agent.ID]SummarizeFunc{agent.Claude: summarizer.summarize},
+		Now:         func() time.Time { return collectedAt },
 	})
 	t.Cleanup(svc.Close)
 	return svc
@@ -418,10 +419,10 @@ func TestSummaries_ReadARemoteLogOverTheHostsConnection(t *testing.T) {
 	}}
 	summarizer := &fakeSummarizer{result: Summary{Text: "remote", Remaining: []string{"x"}}}
 	svc := New(Options{
-		Hosts:     func() []string { return []string{"gpu-box"} },
-		Dial:      func(string) (Conn, error) { return conn, nil },
-		RunLocal:  localOutput(minimalOutput("local"), nil),
-		Summarize: summarizer.summarize,
+		Hosts:       func() []string { return []string{"gpu-box"} },
+		Dial:        func(string) (Conn, error) { return conn, nil },
+		RunLocal:    localOutput(minimalOutput("local"), nil),
+		Summarizers: map[agent.ID]SummarizeFunc{agent.Claude: summarizer.summarize},
 	})
 	t.Cleanup(svc.Close)
 
@@ -487,7 +488,7 @@ func TestSummaries_CloseStopsRunningSummaries(t *testing.T) {
 	host := &summaryHost{}
 	host.set(hostCollection(100, "idle"), conversationLog("a"))
 	summarizer := &fakeSummarizer{gate: make(chan struct{})}
-	svc := New(Options{RunLocal: host.run, Summarize: summarizer.summarize})
+	svc := New(Options{RunLocal: host.run, Summarizers: map[agent.ID]SummarizeFunc{agent.Claude: summarizer.summarize}})
 	snap := svc.Collect(context.Background())
 	svc.Summaries(snap.Tasks)
 	require.Eventually(t, func() bool { return summarizer.calls() == 1 }, 5*time.Second, 10*time.Millisecond)
@@ -513,11 +514,12 @@ func TestSummaries_CloseEndsASummaryWaitingForASlot(t *testing.T) {
 	// released, so the waiting one can only see the service close.
 	release := make(chan struct{})
 	var calls atomic.Int32
-	svc := New(Options{RunLocal: host.run, Summarize: func(context.Context, string) (Summary, error) {
+	slow := func(context.Context, string) (Summary, error) {
 		calls.Add(1)
 		<-release
 		return Summary{Text: "s", Remaining: []string{}}, nil
-	}})
+	}
+	svc := New(Options{RunLocal: host.run, Summarizers: map[agent.ID]SummarizeFunc{agent.Claude: slow}})
 	snap := svc.Collect(context.Background())
 	svc.Summaries(snap.Tasks)
 	require.Eventually(t, func() bool { return calls.Load() == summaryConcurrency },
@@ -553,7 +555,10 @@ func TestSummaries_TimeOut(t *testing.T) {
 	host := &summaryHost{}
 	host.set(hostCollection(100, "idle"), conversationLog("a"))
 	summarizer := &fakeSummarizer{gate: make(chan struct{})}
-	svc := New(Options{RunLocal: host.run, Summarize: summarizer.summarize, SummaryTimeout: 50 * time.Millisecond})
+	svc := New(Options{
+		RunLocal: host.run, Summarizers: map[agent.ID]SummarizeFunc{agent.Claude: summarizer.summarize},
+		SummaryTimeout: 50 * time.Millisecond,
+	})
 	t.Cleanup(svc.Close)
 
 	_, views := collectAndSummarize(svc)
@@ -608,9 +613,9 @@ func TestSummaries_AHostRemovedFromTheConfigLosesItsSummaries(t *testing.T) {
 			defer mu.Unlock()
 			return hosts
 		},
-		Dial:      func(string) (Conn, error) { return conn, nil },
-		RunLocal:  localOutput(minimalOutput("local"), nil),
-		Summarize: summarizer.summarize,
+		Dial:        func(string) (Conn, error) { return conn, nil },
+		RunLocal:    localOutput(minimalOutput("local"), nil),
+		Summarizers: map[agent.ID]SummarizeFunc{agent.Claude: summarizer.summarize},
 	})
 	t.Cleanup(svc.Close)
 	snap, views := collectAndSummarize(svc)
@@ -633,7 +638,7 @@ func TestSummaries_NothingStartsAfterClose(t *testing.T) {
 	host := &summaryHost{}
 	host.set(hostCollection(100, "idle"), conversationLog("a"))
 	summarizer := &fakeSummarizer{}
-	svc := New(Options{RunLocal: host.run, Summarize: summarizer.summarize})
+	svc := New(Options{RunLocal: host.run, Summarizers: map[agent.ID]SummarizeFunc{agent.Claude: summarizer.summarize}})
 	snap := svc.Collect(context.Background())
 	svc.Close()
 

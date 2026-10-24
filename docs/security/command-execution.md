@@ -560,6 +560,16 @@ When `task_dashboard.summary.enabled` is set, the dashboard summarizes each Clau
 log on a host, and the matching agent CLI process on the panemux host whose input is text from that log —
 text written by whoever and whatever took part in the conversation, which panemux does not control.
 
+Both sinks belong to an agent's summary adapter (`summaryAdapters` in
+`internal/tasks/summary_adapters.go`), and the rules below hold for every adapter, not only the two
+registered today. A source's `logScript` is a fixed script that takes nothing but a session ID its
+`validSessionID` accepted, and the collected log version, and refuses any other ID with
+`ErrInvalidSummary` before anything runs; the same check decides the dashboard's summary action and
+`POST /api/tasks/summary`. A runner keeps its agent's own authentication, settings and tool limits:
+registering an adapter grants nothing, and a task's excerpt is only ever given to its own agent's CLI.
+A runner's errors are fixed messages; a CLI missing from `PATH` reads
+`<agent> CLI was not found on the panemux host`, naming no path.
+
 **The log is read by one fixed script, run as `sh -s`**, like the collection and the launch.
 `transcriptScriptTemplate` in `internal/tasks/transcript.go` is a compile-time constant with four
 placeholders: three byte counts that are Go constants, and the session ID, which must match

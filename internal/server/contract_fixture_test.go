@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/agent"
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
@@ -287,8 +288,7 @@ var contractFixtures = map[string]contractFixture{
 				}
 				return []byte(fixtureLocalTaskCollection), nil
 			},
-			Summarize:      fixtureSummarize,
-			SummarizeCodex: fixtureSummarize,
+			Summarizers: map[agent.ID]tasks.SummarizeFunc{agent.Claude: fixtureSummarize, agent.Codex: fixtureSummarize},
 		}))
 		// Summaries on (issue #258): the waiting task is summarized by the
 		// poll, and the stopped one when asked, as selecting it does.
@@ -339,8 +339,7 @@ var contractFixtures = map[string]contractFixture{
 				}
 				return []byte(fixtureLocalTaskCollection), nil
 			},
-			Summarize:      fixtureSummarize,
-			SummarizeCodex: fixtureSummarize,
+			Summarizers: map[agent.ID]tasks.SummarizeFunc{agent.Claude: fixtureSummarize, agent.Codex: fixtureSummarize},
 		}))
 		e.cfg.TaskDashboard.Summary.Enabled = true
 		require.Eventually(t, func() bool {

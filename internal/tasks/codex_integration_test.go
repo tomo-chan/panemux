@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"panemux/internal/agent"
 	"panemux/internal/homedir"
 )
 
@@ -30,7 +31,7 @@ func TestSummaries_CodexRoutingStatesAndAgentIsolation(t *testing.T) {
 					return codexTranscript("Codex request"), nil
 				}
 				return conversationLog("Claude request"), nil
-			}, Summarize: claude.summarize, SummarizeCodex: codex.summarize})
+			}, Summarizers: map[agent.ID]SummarizeFunc{agent.Claude: claude.summarize, agent.Codex: codex.summarize}})
 			defer s.Close()
 			list := []Task{
 				{ID: "claude", Agent: AgentClaude, SessionID: summarySessionID,
@@ -161,7 +162,7 @@ func TestSummaries_CodexFIFOReleasesSlots(t *testing.T) {
 			return dir, err
 		},
 	})
-	s := New(Options{RunLocal: codexTestTranscriptForScript, SummarizeCodex: runner, SummaryTimeout: 2 * time.Second})
+	s := New(Options{RunLocal: codexTestTranscriptForScript, Summarizers: codexOnly(runner), SummaryTimeout: fifoTimeout})
 	t.Cleanup(func() {
 		s.Close()
 		// A red test against the old reader releases its FIFO waits before returning.
@@ -218,3 +219,10 @@ func codexTestTranscriptForScript(_ context.Context, script string) ([]byte, err
 	id, _, _ := strings.Cut(tail, "'")
 	return []byte(strings.ReplaceAll(string(codexTranscript("request")), summarySessionID, id)), nil
 }
+
+func codexOnly(runner SummarizeFunc) map[agent.ID]SummarizeFunc {
+	return map[agent.ID]SummarizeFunc{agent.Codex: runner}
+}
+
+// fifoTimeout bounds each summary in TestSummaries_CodexFIFOReleasesSlots.
+const fifoTimeout = 2 * time.Second

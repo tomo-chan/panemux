@@ -131,7 +131,7 @@ var automaticSummaryStates = map[State]bool{StateWait: true, StateIdle: true}
 func (s *Service) rememberSummaryTasks(host string, tasks []Task) {
 	listed := map[summaryKey]summaryTask{}
 	for _, task := range tasks {
-		if (task.Agent == AgentClaude || task.Agent == AgentCodex) && task.SessionID != "" && task.Log != nil {
+		if s.summaryPlan.summarizable(task.Agent, task.SessionID) && task.Log != nil {
 			key := summaryKey{host: host, agent: task.Agent, sessionID: task.SessionID}
 			listed[key] = summaryTask{host: host, sessionID: task.SessionID, log: *task.Log}
 		}
@@ -174,7 +174,7 @@ func (s *Service) Summaries(tasks []Task) map[string]*SummaryView {
 	dirty := s.loadSummariesLocked()
 	now := s.opts.Now()
 	for _, task := range tasks {
-		if !summarizable(task.Agent) || task.SessionID == "" || task.Log == nil {
+		if !s.summaryPlan.summarizable(task.Agent, task.SessionID) || task.Log == nil {
 			continue
 		}
 		key := summaryKey{host: task.Host, agent: task.Agent, sessionID: task.SessionID}
@@ -204,7 +204,7 @@ func (s *Service) RequestSummary(host, sessionID string) (*SummaryView, error) {
 // RequestAgentSummary identifies a task by host, agent and session, preserving
 // RequestSummary as the legacy Claude-only entry point.
 func (s *Service) RequestAgentSummary(host, agent, sessionID string) (*SummaryView, error) {
-	if !summarizable(agent) || !validSummarySession(agent, sessionID) {
+	if !s.summaryPlan.summarizable(agent, sessionID) {
 		return nil, fmt.Errorf("%w: session ID %q", ErrInvalidSummary, sessionID)
 	}
 	s.summaryMu.Lock()
@@ -258,6 +258,8 @@ func (s *Service) startSummaryLocked(key summaryKey, log LogVersion, retryFailed
 // of the excerpt it is for, or none when the log was unreadable or the
 // excerpt was the one the last answer was made from (reused).
 type summaryOutcome struct {
+	// runner is the runner that answered.
+	runner     summaryRunner
 	hash       string
 	summary    Summary
 	reused     bool
@@ -301,7 +303,7 @@ func (s *Service) runSummary(key summaryKey, log LogVersion, reuse string) {
 		entry.resultAt = s.opts.Now()
 		entry.resultLog = log
 		entry.inputHash = outcome.hash
-		entry.summarizer = summarizerVersion(key.agent)
+		entry.summarizer = s.summaryPlan.summarizerVersion(key.agent)
 		changed = true
 	}
 	warn := s.unexpectedModelWarningLocked(outcome)
@@ -311,14 +313,16 @@ func (s *Service) runSummary(key summaryKey, log LogVersion, reuse string) {
 	save()
 }
 
-// summarize reads the task's log and uses the matching CLI on the panemux
-// host, unless the excerpt's hash is reuse.
+// summarize reads the task's log on its host with its agent's source, and
+// summarizes the excerpt with the agent's summarizer on the panemux host,
+// unless the excerpt's hash is reuse.
 func (s *Service) summarize(key summaryKey, log LogVersion, reuse string) (summaryOutcome, error) {
-	script, err := buildTranscriptScript(key.sessionID)
-	if key.agent == AgentCodex {
-		script, err = buildCodexTranscriptScriptForLog(key.sessionID, log)
+	adapter, ok := s.summaryPlan.lookup(key.agent)
+	if !ok { //coverage:exempt keys come from listed tasks, whose agent passed summarizable
+		return summaryOutcome{}, ErrInvalidSummary
 	}
-	if err != nil { //coverage:exempt keys come from collected sessions, which passed validSessionID when parsed
+	script, err := adapter.source.logScript(key.sessionID, log)
+	if err != nil { //coverage:exempt keys come from listed tasks, whose session ID passed summarizable
 		return summaryOutcome{}, err
 	}
 	fetchCtx, cancel := context.WithTimeout(s.summaryCtx, s.opts.HostTimeout)
@@ -327,35 +331,24 @@ func (s *Service) summarize(key summaryKey, log LogVersion, reuse string) (summa
 	if err != nil {
 		return summaryOutcome{}, err
 	}
-	data, err := parseTranscriptOutput(out)
-	if key.agent == AgentCodex {
-		data, err = parseCodexTranscriptOutput(out, key.sessionID)
-	}
+	excerpt, ok, err := adapter.source.excerpt(out, key.sessionID)
 	if err != nil {
 		return summaryOutcome{}, err
-	}
-	excerpt, ok := buildExcerpt(data)
-	if key.agent == AgentCodex {
-		excerpt, ok = buildCodexExcerpt(data)
 	}
 	if !ok {
 		return summaryOutcome{unreadable: true}, nil
 	}
-	hash := summaryInputHash(key.agent, excerpt)
+	hash := s.summaryPlan.summaryInputHash(key.agent, excerpt)
 	if hash == reuse {
 		return summaryOutcome{hash: hash, reused: true}, nil
 	}
 	summaryCtx, cancel := context.WithTimeout(s.summaryCtx, s.opts.SummaryTimeout)
 	defer cancel()
-	runner := s.opts.Summarize
-	if key.agent == AgentCodex {
-		runner = s.opts.SummarizeCodex
-	}
-	summary, err := runner(summaryCtx, excerpt)
+	summary, err := s.summarizers[adapter.id](summaryCtx, excerpt)
 	if err != nil {
 		return summaryOutcome{}, err
 	}
-	return summaryOutcome{summary: summary, hash: hash}, nil
+	return summaryOutcome{summary: summary, hash: hash, runner: adapter.runner}, nil
 }
 
 // view is the entry as the API reports it for a task whose log is at
@@ -397,19 +390,20 @@ func (s *Service) waitSummaries() {
 }
 
 // unexpectedModelWarningLocked returns what logs, once for each model, that
-// a new answer came from a model other than the one asked for. The line names
-// the model and nothing that claude said.
+// a new answer came from a model other than the one asked for, in the words
+// of the runner that answered.
 func (s *Service) unexpectedModelWarningLocked(outcome summaryOutcome) func() {
 	model := outcome.summary.UnexpectedModel
 	if outcome.reused || outcome.unreadable || model == "" || s.warnedModels[model] {
+		return func() {}
+	}
+	warning := outcome.runner.unexpectedModelWarning(model)
+	if warning == "" {
 		return func() {}
 	}
 	if s.warnedModels == nil {
 		s.warnedModels = map[string]bool{}
 	}
 	s.warnedModels[model] = true
-	return func() {
-		s.opts.Logf("task summaries: claude answered with %s, not %s, which costs many times more; "+
-			"the account's availableModels setting may not allow %s", model, summaryModel, summaryModel)
-	}
+	return func() { s.opts.Logf("task summaries: %s", warning) }
 }

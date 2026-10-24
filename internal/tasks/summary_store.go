@@ -2,8 +2,6 @@ package tasks
 
 import (
 	"cmp"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,35 +46,6 @@ const (
 	summaryStoreBadLimit = 100
 )
 
-// summaryPipelineVersion names how an excerpt is made and summarized. Raise
-// it when a change to the excerpt, the CLI's arguments, or the answer's
-// handling would make an earlier summary of the same conversation differ;
-// the instruction and the schema, and Claude's system prompt and model, are
-// folded in on their own. A
-// summary made by another version is shown but never current.
-const summaryPipelineVersion = 1
-
-// summarizerVersion identifies agent's summarizer: what, besides the
-// excerpt, decides its answer.
-func summarizerVersion(agent string) string {
-	// Claude's system prompt and model decide its answer too (issue #353);
-	// they are part of its instruction here, so Codex's version is unchanged.
-	instruction := summaryInstruction + "\x00" + summarySystemPrompt + "\x00" + summaryModel
-	if agent == AgentCodex {
-		instruction = codexSummaryInstruction
-	}
-	sum := sha256.Sum256(fmt.Appendf(nil, "%d\x00%s\x00%s\x00%s",
-		summaryPipelineVersion, agent, instruction, summarySchema))
-	return hex.EncodeToString(sum[:])
-}
-
-// summaryInputHash identifies what agent's summarizer is given: the excerpt,
-// and the summarizer itself. Two equal hashes would get the same answer.
-func summaryInputHash(agent, excerpt string) string {
-	sum := sha256.Sum256([]byte(summarizerVersion(agent) + "\x00" + excerpt))
-	return hex.EncodeToString(sum[:])
-}
-
 var validInputHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // storedSummary is one summary as the file keeps it.
@@ -117,18 +86,15 @@ const (
 	maxStoredItemBytes = maxSummaryItemBytes + len(truncationMark)
 )
 
-// summarizable reports whether name is an agent the registry declares
-// summary for, by its ID.
-func summarizable(name string) bool {
-	d, ok := agent.Lookup(agent.ID(name))
-	return ok && d.Has(agent.Summary)
-}
-
-func (s storedSummary) validate() error {
+// validate checks an entry as plan would have written it. The entry of an
+// agent plan has no adapter for — one whose adapter was removed — is kept
+// when its ID and session ID are well formed (issue #347).
+func (s storedSummary) validate(plan summaryPlanned) error {
+	_, adapted := plan.lookup(s.Agent)
 	switch {
-	case !summarizable(s.Agent):
-		return fmt.Errorf("unknown agent %q", s.Agent)
-	case !validSessionID.MatchString(s.SessionID) || (s.Agent == AgentCodex && !validUUID.MatchString(s.SessionID)):
+	case !agent.ID(s.Agent).Valid():
+		return fmt.Errorf("invalid agent %q", s.Agent)
+	case !validSessionID.MatchString(s.SessionID) || (adapted && !plan.summarizable(s.Agent, s.SessionID)):
 		return fmt.Errorf("invalid session ID %q", s.SessionID)
 	case !validInputHash.MatchString(s.InputHash):
 		return errors.New("invalid input hash")
@@ -195,7 +161,7 @@ func (s *SummaryStore) Err() error {
 
 // load reads the file's summaries. A file it cannot use is moved aside, and
 // moved names where to.
-func (s *SummaryStore) load(now time.Time) (entries []storedSummary, moved string, err error) {
+func (s *SummaryStore) load(now time.Time, plan summaryPlanned) (entries []storedSummary, moved string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer func() { s.err = err }()
@@ -212,7 +178,7 @@ func (s *SummaryStore) load(now time.Time) (entries []storedSummary, moved strin
 	case err != nil:
 		return nil, "", fmt.Errorf("reading task summary file: %w", err)
 	}
-	entries, problem := parseSummaryStoreFile(data)
+	entries, problem := parseSummaryStoreFile(data, plan)
 	if problem != nil {
 		if moved, err = moveAside(s.path, s.path+summaryStoreBadSuffix+now.UTC().Format(summaryStoreBadTime)); err != nil {
 			return nil, "", fmt.Errorf("moving aside task summary file (%v): %w", problem, err)
@@ -240,7 +206,7 @@ func moveAside(path, base string) (string, error) {
 	return "", fmt.Errorf("%d files already moved aside this second", summaryStoreBadLimit)
 }
 
-func parseSummaryStoreFile(data []byte) ([]storedSummary, error) {
+func parseSummaryStoreFile(data []byte, plan summaryPlanned) ([]storedSummary, error) {
 	var file summaryStoreFile
 	if err := json.Unmarshal(data, &file); err != nil {
 		return nil, fmt.Errorf("parsing: %w", err)
@@ -250,7 +216,7 @@ func parseSummaryStoreFile(data []byte) ([]storedSummary, error) {
 	}
 	seen := map[summaryKey]bool{}
 	for _, entry := range file.Summaries {
-		if err := entry.validate(); err != nil {
+		if err := entry.validate(plan); err != nil {
 			return nil, err
 		}
 		if seen[entry.key()] {
