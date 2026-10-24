@@ -1005,6 +1005,8 @@ func TestTaskGitInfos_ALookupTheRequestAbandonedIsNotCached(t *testing.T) {
 
 // The task event publisher observes the handler's collector as it is at each
 // observation: the ssh_connections hosts, and one host's running tasks.
+//
+//efficacy:exempt unchanged; the diff hunk after it is collectionSections, which only the tagged build extends
 func TestTaskEventSource_ObservesTheCurrentCollector(t *testing.T) {
 	cfg := defaultTestConfig()
 	cfg.SSHConnections = map[string]config.SSHConnection{"gpu-box": {Host: "gpu.invalid"}}

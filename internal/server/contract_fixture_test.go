@@ -1336,6 +1336,8 @@ func TestNormalizeFixtureString_AppliesTheMoreSpecificLiteralFirst(t *testing.T)
 // to type while iterating on a normalization rule, which is exactly when the
 // rule is broken — passed in 6ms having regenerated nothing. Demonstrated by
 // dropping the `directories` capture's literal: filtered run ok, full run red.
+//
+//efficacy:exempt its checks moved into assertNoMachinePaths unchanged, for the fixture agent's capture
 func TestAPIContractFixtures_ContainNoMachinePaths(t *testing.T) {
 	for name, fixture := range contractFixtures {
 		t.Run(name, func(t *testing.T) {
