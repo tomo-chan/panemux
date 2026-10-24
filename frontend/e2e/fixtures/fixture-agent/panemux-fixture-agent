@@ -1,0 +1,48 @@
+#!/bin/sh
+# Stands in for the fixture agent's CLI in the task-dashboard e2e fixture
+# (issue #377). The fixture agent exists only in a panemux built with the
+# panemux_fixture_agent tag (internal/agent/fixture_agent.go); this is the
+# CLI its adapters are written against (internal/tasks/fixture_agent.go).
+# run-panemux-task-dashboard-e2e.sh puts this directory first on PATH, so
+# both the launch script and the summary resolve it the way they resolve any
+# agent's CLI.
+#
+#   panemux-fixture-agent --session-id=<uuid> -- <prompt>
+#       A session: records a state file and a one-line log under
+#       ~/.panemux-fixture-agent for a child process ps names
+#       panemux-fixture-agent, and waits for it. The prompt is never read.
+#   panemux-fixture-agent --print
+#       A summary: reads the excerpt on stdin and answers with fixed JSON.
+#
+# The child is ~/.panemux-fixture-agent/bin/panemux-fixture-agent, a link to
+# sleep the fixture makes: only a process whose program is named like the
+# agent is one of its sessions, and this script's own process is named sh.
+set -eu
+
+dir="$HOME/.panemux-fixture-agent"
+
+case "${1-}" in
+--print)
+    cat >/dev/null
+    printf '%s\n' '{"summary":"The fixture agent answered its first instruction.","remaining":["Check the summary","Run make test-e2e"]}'
+    exit 0
+    ;;
+--session-id=*) sid=${1#--session-id=} ;;
+*)
+    echo 'usage: panemux-fixture-agent --session-id=<uuid> -- <prompt> | --print' >&2
+    exit 2
+    ;;
+esac
+case $sid in
+'' | *[!0-9a-f-]*)
+    echo "panemux-fixture-agent: not a session ID: $sid" >&2
+    exit 2
+    ;;
+esac
+
+mkdir -p "$dir/sessions" "$dir/logs"
+printf '{"text":"The fixture agent started a session."}\n' >"$dir/logs/$sid.log"
+"$dir/bin/panemux-fixture-agent" 900 &
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","status":"idle","statusUpdatedAt":%s000}\n' \
+    "$!" "$sid" "$PWD" "$(date +%s)" >"$dir/sessions/$!.json"
+wait

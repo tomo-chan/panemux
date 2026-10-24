@@ -1,11 +1,17 @@
 #!/bin/sh
 # Boots a real panemux binary for the Playwright suite.
 #
-#   run-panemux-e2e.sh [fixture-config-name] [port]
+#   run-panemux-e2e.sh [fixture-config-name] [port] [build-tags]
 #
-# Both arguments are optional and default to the original single-server
-# harness (workspace-switch.yml on :4173), so playwright.config.ts's other
-# webServer entries only have to name what differs. The fixture config is
+# Every argument is optional. The first two default to the original
+# single-server harness (workspace-switch.yml on :4173), so
+# playwright.config.ts's other webServer entries only have to name what
+# differs. build-tags, when given, are passed to `go run -tags`: the
+# task-dashboard fixture names panemux_fixture_agent, which registers the
+# fixture agent (issue #377). E2E_STAND_INS, a fixture's colon-separated
+# directories of stand-ins for real CLIs, is put first on PATH right before
+# `go run`: the runtime selection above puts the SDK's bin ahead of
+# everything, and panemux must find the stand-ins, never a real CLI there. The fixture config is
 # copied out of the repository into a temp directory first: panemux rewrites
 # its own config file on some API calls, and a tracked fixture must never be
 # mutated by a test run.
@@ -21,6 +27,7 @@ cd "$(dirname "$0")/../.."
 
 E2E_CONFIG_NAME="${1:-workspace-switch.yml}"
 E2E_PORT="${2:-4173}"
+E2E_TAGS="${3:-}"
 
 export GOCACHE="${TMPDIR:-/tmp}/panemux-playwright-gocache"
 mkdir -p "$GOCACHE"
@@ -43,4 +50,6 @@ make build-frontend >/dev/null
 rmdir "$E2E_BUILD_LOCK"
 trap - EXIT INT TERM
 
-exec go run . --config "$E2E_CONFIG_PATH" --port "$E2E_PORT"
+. frontend/e2e/stand-ins.sh
+e2e_stand_ins_first "${E2E_STAND_INS:-}" || exit 1
+exec go run ${E2E_TAGS:+-tags "$E2E_TAGS"} . --config "$E2E_CONFIG_PATH" --port "$E2E_PORT"

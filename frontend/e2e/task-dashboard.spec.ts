@@ -76,7 +76,8 @@ test('goes to the local pane an agent outside tmux was started from', async ({ p
   const main = page.locator('[data-pane-id="task-dashboard-main"]')
   await expect.poll(async () => (await main.locator('.xterm-rows').textContent()) ?? '').toMatch(/\S/)
   await main.locator('.xterm-helper-textarea').focus()
-  await page.keyboard.type('"$HOME/bin/start-agent" e2e-in-pane')
+  // In the background, so the agent stays a child of the pane's shell.
+  await page.keyboard.type('"$HOME/bin/start-agent" e2e-in-pane &')
   await page.keyboard.press('Enter')
   await expect.poll(async () => {
     const tasks = await (await request.get('/api/tasks')).json()
@@ -438,4 +439,69 @@ test('previews a page from the popup, and says where its keys go while the page 
   await expect(hint).toHaveCount(0)
   await page.keyboard.press('Control+Shift+Escape')
   await expect(dialog).toHaveCount(0)
+})
+
+// Issue #377: a third agent added through registration alone. The fixture
+// runs panemux built with the panemux_fixture_agent tag, and its CLI is
+// e2e/fixtures/fixture-agent/panemux-fixture-agent, first on PATH: a fake
+// whose session is a process ps names panemux-fixture-agent, and whose
+// --print mode answers every summary with the same fixed text. The dashboard,
+// the API and the common collection are the shipped ones.
+const FIXTURE_AGENT = 'panemux-fixture-agent'
+const FIXTURE_SESSION = 'local:panemux-fixture-agent:7c1e2d3f-4a5b-4c6d-8e7f-8091a2b3c4d5'
+
+test('lists a running fixture agent session with its state and its summary, and offers no Resume', async ({ page }) => {
+  await openDashboard(page)
+
+  const card = page.getByRole('region', { name: 'Waiting for input' }).getByTestId(`task-card-${FIXTURE_SESSION}`)
+  await expect(card).toContainText(FIXTURE_AGENT)
+  await expect(card).toContainText('approve the plan')
+  await expect(card).not.toContainText('unknown agent')
+  await expect(card.getByRole('button', { name: /^Resume/ })).toHaveCount(0)
+  // A waiting task is summarized by the poll once its log is collected; the
+  // fake CLI's answer is fixed.
+  await expect(card.getByTestId('task-next')).toHaveText('Next: Check the summary · 2 left', { timeout: 30_000 })
+
+  await card.click()
+  const work = page.getByRole('complementary', { name: 'Task details' }).getByRole('region', { name: 'Work' })
+  await expect(work).toContainText('The fixture agent answered its first instruction.')
+  await expect(work).toContainText('Run make test-e2e')
+})
+
+test('starts a fixture agent task in a tmux session and selects it', async ({ page, request }) => {
+  test.skip(!(await hasTmux(request)), 'tmux is not installed here')
+
+  await openDashboard(page)
+  await page.getByRole('button', { name: 'New task' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New task' })
+  await dialog.getByLabel('Agent').selectOption(FIXTURE_AGENT)
+  // The host's probe found the fake CLI on PATH.
+  await expect(dialog.getByText(/cannot be started on/)).toHaveCount(0)
+  await dialog.getByLabel('Working directory').fill('/tmp')
+  await dialog.getByLabel('First instruction').fill('--help $(touch /tmp/panemux-e2e-fixture-pwned)')
+  await dialog.getByRole('button', { name: 'Start' }).click()
+
+  await expect(dialog).toHaveCount(0)
+  const detail = page.getByRole('complementary', { name: 'Task details' })
+  // As for Claude Code, the task may be found by the poll after the launch's.
+  await expect(detail.getByRole('heading', { level: 2 })).toHaveText('tmp', { timeout: 15_000 })
+  const selected = page.locator(`[data-testid^="task-card-local:${FIXTURE_AGENT}:"][data-selected="true"]`)
+  await expect(selected).toContainText(/tmux task-[0-9a-f]{8} · no pane/)
+  await expect(page.getByRole('region', { name: 'Idle' }).locator(`[data-testid^="task-card-local:${FIXTURE_AGENT}:"]`)).not.toHaveCount(0)
+  await expect(detail.getByRole('button', { name: /^Resume/ })).toHaveCount(0)
+  expect(existsSync('/tmp/panemux-e2e-fixture-pwned'), 'the prompt must never reach a shell').toBe(false)
+})
+
+// Review on #430: the collection is the real one, but it sees only the
+// fixture's own processes. The fixture starts a claude process detached from
+// it, with a state file, as a developer's own session would be; ps and lsof
+// stand-ins answer only for processes that descend from the fixture, so it is
+// never listed, and neither is anything else running outside the fixture.
+test('lists nothing running outside the fixture', async ({ request }) => {
+  const tasks: { id: string; cwd?: string }[] = (await (await request.get('/api/tasks')).json()).tasks
+  expect(tasks.map((t) => t.id)).not.toContain('local:claude:e2e-decoy-outside')
+  const outside = tasks.filter(
+    (t) => t.cwd && !/^\/(private\/)?tmp(\/e2e-stopped)?$|\/panemux-e2e-task-dashboard-home(\/|$)/.test(t.cwd),
+  )
+  expect(outside.map((t) => `${t.id} ${t.cwd}`)).toEqual([])
 })

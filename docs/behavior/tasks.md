@@ -1191,6 +1191,10 @@ Collects from every host and returns:
   its `id`, `display_name`, the `capabilities` it declares, and the fixed `notes` its adapters give
   on its own constraints — `notes.launch` is what to know before starting one, omitted when there is
   nothing. It lists agents the task board does not collect as well (`detect` and `board` only).
+  A build with the `panemux_fixture_agent` tag, which no shipped binary is, lists a third agent
+  after the shipped ones, `panemux-fixture-agent` (detect, collect, launch and summary). Its tasks,
+  availability and actions are reported by the same rules as Claude Code's and codex's
+  ([Adding an agent](../agent-registry/adding-an-agent.md)).
 - `tasks` lists each host's running tasks in `id` order, then its stopped tasks newest first. It is
   `[]` when there are none.
 - `id` is `local:<agent>:<key>` for the panemux host and `ssh:<host>:<agent>:<key>` for an SSH host,

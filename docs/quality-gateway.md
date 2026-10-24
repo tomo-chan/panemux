@@ -67,7 +67,8 @@ See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
 A third agent, the fixture agent, is registered only in a build with the `panemux_fixture_agent`
 tag, which no shipped binary has (issue #377). `make test-go-fixture-agent` — part of `make test-go`,
 and its own step in CI — runs, with that tag, the fixture agent's own tests and the registry-wide
-contract tests (each `*_MatchTheRegistry`, the summary adapter contract, the collection
+contract tests (each `*_MatchTheRegistry` and the workdir adapters' check, board and workdir
+included, the summary adapter contract, the collection
 prefilter's), the HTTP routes' handling of the fixture agent, and writes the one contract fixture
 only that build can capture. It fails when a test `FIXTURE_AGENT_REQUIRED` names is not among those
 it runs, or a package matches none. The tests
@@ -75,8 +76,17 @@ that pin the shipped agents run untagged. `make lint-go` vets both builds and go
 the tagged files; the pre-push hook vets and tests a package that holds them with the tag. The
 coverage, red-check and mutation gates measure the untagged build alone — the mutation gate leaves
 out, and names, a changed `panemux_fixture_agent` file the default build does not compile — and the Claude Code
-`PostToolUse` hook vets a file's package without the tag. See
-[Adding an agent](agent-registry.md#adding-an-agent).
+`PostToolUse` hook vets a file's package without the tag. The dashboard's unit tests render that
+capture, and the task-dashboard E2E runs panemux built with the tag against a fake CLI for the
+fixture agent. See [Adding an agent](agent-registry/adding-an-agent.md).
+
+The task-dashboard E2E runs the real collection with summaries on, isolated from the developer's own
+agent sessions. Its `HOME` is a fixture directory. Its `ps` and `lsof` are stand-ins that answer
+only for processes descending from the fixture, and refuse any argument shape panemux does not pass, so those sessions' processes, working directories,
+environments and logs are never read. Its `claude` and `codex` are stand-ins that run nothing, so
+no real CLI runs. A detached `claude` process with a state file stands in for a developer's
+session, and the spec checks it is not listed: the check fails when the isolation stops working.
+The stand-ins' own behavior is tested by `make test-screenshots-check`.
 
 ### Local verification execution
 

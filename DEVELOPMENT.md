@@ -126,8 +126,19 @@ as for `make test-e2e` when the installed Chromium is not the one Playwright exp
   panemux and its children. It starts tmux with `-f /dev/null` and stops its private server on exit,
   including sessions started or resumed through the dashboard. Playwright sends `SIGTERM` to this
   fixture so its cleanup trap runs. It never uses the caller's server.
+- The task-dashboard E2E fixture never reads the developer's own agent sessions. The collection it
+  runs is the real one, so its `ps` and `lsof` are stand-ins (`frontend/e2e/fixtures/process-isolation/`).
+  They answer only for processes that descend from the fixture's start-up script or its private tmux
+  server, and only the argument shapes panemux passes. Any other shape is refused, with no output. A `claude` process detached from the fixture, with a state file, stands in for a developer's
+  session, and the spec checks that it is not listed. The fixture's `claude` and `codex` stand-ins run
+  nothing, so no real CLI is ever started. All the stand-ins are put first on `PATH` right before
+  panemux starts (`frontend/e2e/stand-ins.sh`), and the run stops when one of them is not what
+  `PATH` resolves.
 - `make test-screenshots-check` tests both fixtures' tmux isolation and these staging helpers
-  (`frontend/screenshots/screenshots-env.sh`). Its tmux sockets sit deeper than either fixture's, so
+  (`frontend/screenshots/screenshots-env.sh`), and that the task-dashboard fixture's stand-ins for
+  real CLIs come first on `PATH` after the runtime selection (`frontend/e2e/stand-ins.sh`), and that its
+`ps` and `lsof` stand-ins answer only for the fixture's processes. Those checks need `ps`, so they
+skip inside the Claude Code sandbox and fail in CI. Its tmux sockets sit deeper than either fixture's, so
   it makes their directory with `tmux_short_dir`: under `$TMPDIR` when the socket fits there (inside
   the Claude Code sandbox, where `/tmp` is not writable), otherwise under `/tmp` (outside the sandbox
   on macOS, whose per-user `$TMPDIR` leaves no room). Where neither fits it fails, naming the path,
@@ -138,7 +149,7 @@ as for `make test-e2e` when the installed Chromium is not the one Playwright exp
   UI's components, layout, styles and text, and to the capture itself (`frontend/screenshots/`).
 - CI enforces it (`.github/workflows/screenshots.yml`): a pull request that changes
   `frontend/src/components/`, `frontend/src/App.tsx`, `frontend/src/styles/`, `frontend/index.html`
-  or `frontend/screenshots/` (test files aside; a file moved out of them counts under its old path)
+  or `frontend/screenshots/` (test files — `*.test.ts`, `*.test.tsx`, `*_test.sh` — aside; a file moved out of them counts under its old path)
   without touching `docs/images/` fails. Apply the
   `screenshots-exempt` label to a change that genuinely alters nothing the images show.
 - The rule does not stop at those paths: a change under `frontend/src/hooks/`, `schemas/` or `utils/`
@@ -334,7 +345,7 @@ A test that genuinely should not go red without its implementation is marked `//
 - The change is the difference between each pushed branch and the same branch on the remote. A branch the remote does not have yet is measured from its merge base with `origin/main`, so a first push checks what the branch adds and nothing `main` gained since. Deleting a branch checks nothing.
 - What the changed files select:
   - `.go` files: `gofmt -s` on each, then `go vet`, `golangci-lint` (the pinned binary and this checkout's cache, as `make lint-go` uses) and `go test` on the packages that hold them — without `-race`, and not on the packages that import them. A file under a package's `testdata/` selects that package.
-  - A package holding a file built with or without the `panemux_fixture_agent` tag also gets `go vet` with that tag, and `make test-go-fixture-agent`.
+  - A package holding a file built with or without the `panemux_fixture_agent` tag also gets `go vet` with that tag, and `make test-go-fixture-agent`, which builds the embedded frontend first: it tests the root package too.
   - `frontend/src` TypeScript: `tsc --noEmit` and `vitest related` on the changed modules. A file under `testdata/api-contract/` selects the frontend contract test.
   - Shell scripts: `scripts/<name>.sh` selects `scripts/<name>_test.sh`, and any `.sh` selects the `$TMPDIR` guard. `.claude/` selects the hook tests; `frontend/screenshots/` and `frontend/e2e/*.sh` select the screenshot fixtures' tests.
   - Markdown selects `make check-docs-links`; `docs/scenarios.md` also selects `make check-scenarios`.

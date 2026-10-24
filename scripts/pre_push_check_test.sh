@@ -261,7 +261,14 @@ expect "a package with fixture-agent files is vetted and tested with their tag" 
 package a')" "go-vet-fixture-agent ./a" "fixture-agent-tests" "go-vet ./a" "golangci-lint ./a"
 
 expect "a package without them is not" \
-	"$(planfor a/a.go 'package a')" "go-vet ./a" "!go-vet-fixture-agent ./a" "!fixture-agent-tests"
+	"$(planfor a/a.go 'package a')" "go-vet ./a" "!go-vet-fixture-agent ./a" "!fixture-agent-tests" "!build-frontend"
+
+# make test-go-fixture-agent tests the root package too, whose //go:embed
+# needs frontend/dist, so the tagged run builds the frontend first.
+expect "the tagged run builds the embedded frontend first" \
+	"$(planfor a/fixture.go '//go:build panemux_fixture_agent
+
+package a')" "fixture-agent-tests" "build-frontend"
 
 expect "a file built only without the tag still selects the tagged run" \
 	"$(planfor a/off.go '//go:build !panemux_fixture_agent
