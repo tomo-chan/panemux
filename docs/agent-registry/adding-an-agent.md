@@ -74,8 +74,9 @@ files that build only with the tag:
 What checks it:
 
 - `make test-go-fixture-agent` runs its own tests and every contract test in the table above with
-  the tag, and the HTTP routes' handling of it (`internal/api`): a launch reaches the host, a resume
-  is refused and runs nothing. It writes `testdata/api-contract/tasks-fixture-agent.json`, the
+  the tag — for `board` and `workdir`, which it does not declare, that it has no adapter — and the
+  HTTP routes' handling of it (`internal/api`): a launch reaches the host, a resume is refused and
+  runs nothing. It writes `testdata/api-contract/tasks-fixture-agent.json`, the
   `GET /api/tasks` response with the fixture agent
   ([contract fixtures](../development/contract-fixtures.md)).
 - `frontend/src/schemas/contract.test.ts` reads that capture with the shipped schemas, and

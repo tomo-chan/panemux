@@ -67,7 +67,8 @@ See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
 A third agent, the fixture agent, is registered only in a build with the `panemux_fixture_agent`
 tag, which no shipped binary has (issue #377). `make test-go-fixture-agent` — part of `make test-go`,
 and its own step in CI — runs, with that tag, the fixture agent's own tests and the registry-wide
-contract tests (each `*_MatchTheRegistry`, the summary adapter contract, the collection
+contract tests (each `*_MatchTheRegistry` and the workdir adapters' check, board and workdir
+included, the summary adapter contract, the collection
 prefilter's), the HTTP routes' handling of the fixture agent, and writes the one contract fixture
 only that build can capture. It fails when a test `FIXTURE_AGENT_REQUIRED` names is not among those
 it runs, or a package matches none. The tests

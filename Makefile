@@ -63,9 +63,11 @@ test-go:
 # be among those the pattern selects, so a renamed contract test fails the run
 # rather than dropping out of it, and so does a package none of it matches.
 FIXTURE_AGENT_TAG := panemux_fixture_agent
-FIXTURE_AGENT_PKGS := ./internal/agent ./internal/tasks ./internal/api ./internal/server
-FIXTURE_AGENT_RUN := ^Test(FixtureAgent|[A-Za-z]+_MatchTheRegistry$$|SummaryAdapters_Contract$$|CollectPrefilter_CoversEveryTaskRule$$|RegisteredDefinitionsAreValid$$|APIContractFixtures_FixtureAgent$$)
+FIXTURE_AGENT_PKGS := . ./internal/agent ./internal/session ./internal/tasks ./internal/api ./internal/server
+FIXTURE_AGENT_RUN := ^Test(FixtureAgent|[A-Za-z]+_MatchTheRegistry$$|SummaryAdapters_Contract$$|CollectPrefilter_CoversEveryTaskRule$$|RegisteredDefinitionsAreValid$$|WorkdirAdaptersMatchDeclarations$$|APIContractFixtures_FixtureAgent$$)
 FIXTURE_AGENT_REQUIRED := \
+	.:TestBoardAdapters_MatchTheRegistry \
+	./internal/session:TestWorkdirAdaptersMatchDeclarations \
 	./internal/agent:TestRegisteredDefinitionsAreValid \
 	./internal/tasks:TestCollectAdapters_MatchTheRegistry \
 	./internal/tasks:TestLaunchAdapters_MatchTheRegistry \
