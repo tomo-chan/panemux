@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -51,7 +52,9 @@ func (thirdSummarySource) version() string { return "third-source-1" }
 type thirdSummaryRunner struct{}
 
 func (thirdSummaryRunner) version() string { return "third-runner-1" }
-func (thirdSummaryRunner) model() string   { return "" }
+func (thirdSummaryRunner) unexpectedModelWarning(model string) string {
+	return "third answered with " + model + ", not its usual model"
+}
 func (thirdSummaryRunner) newSummarizer() SummarizeFunc {
 	return func(context.Context, string) (Summary, error) {
 		return Summary{}, errors.New("third has no CLI in these tests")
@@ -123,8 +126,16 @@ func checkSummaryAdapterContract(t *testing.T, reg registeredSummary, sessionID 
 	require.True(t, src.validSessionID(sessionID), "the fixture's session ID is valid")
 	for _, bad := range []string{"", "a'b", "a b", "../x", "a/b", "a;b", "$(x)", "a\nb"} {
 		assert.False(t, src.validSessionID(bad), "%q", bad)
-		_, err := src.logScript(bad, LogVersion{})
-		assert.ErrorIs(t, err, ErrInvalidSummary, "%q is never put in a script", bad)
+	}
+	// Whatever the adapter refuses — the IDs above, and well-formed IDs its
+	// own rule does not accept, such as another agent's — never reaches a
+	// script.
+	for _, id := range summaryContractIDs {
+		if src.validSessionID(id) {
+			continue
+		}
+		_, err := src.logScript(id, LogVersion{})
+		assert.ErrorIs(t, err, ErrInvalidSummary, "%q is never put in a script", id)
 	}
 	script, err := src.logScript(sessionID, LogVersion{})
 	require.NoError(t, err)
@@ -142,7 +153,18 @@ func checkSummaryAdapterContract(t *testing.T, reg registeredSummary, sessionID 
 	assert.Equal(t, src.version(), src.version())
 	assert.Equal(t, reg.runner.version(), reg.runner.version())
 	assert.NotEmpty(t, reg.runner.version(), "the runner's instruction is part of the summary's identity")
+	if warning := reg.runner.unexpectedModelWarning("model-x-1"); warning != "" {
+		assert.Contains(t, warning, "model-x-1", "a warning names the model that answered")
+	}
 	assert.NotNil(t, reg.runner.newSummarizer())
+}
+
+// summaryContractIDs are session IDs checked against every adapter: the
+// malformed ones no adapter may accept, and well-formed ones of several
+// shapes, each refused by some adapter's own rule.
+var summaryContractIDs = []string{
+	"", "a'b", "a b", "../x", "a/b", "a;b", "$(x)", "a\nb", "-x", "s10", "t-1", "x-1", summarySessionID,
+	"7C21E0A4-0000-4000-8000-00000000000Z",
 }
 
 func TestSummaryAdapters_Contract(t *testing.T) {
@@ -327,3 +349,43 @@ func TestSummarizers_ACLIMissingOnThePanemuxHost(t *testing.T) {
 	_, err = exec.LookPath(claudeBin)
 	require.Error(t, err, "the test's PATH has no claude")
 }
+
+// A model other than the one asked for is logged in the runner's own words
+// (once per model, as TestPersistedSummaries_AModelOtherThanHaikuIsShownAndLoggedOnce
+// checks for Claude); a runner that says nothing logs nothing.
+func TestSummaries_AnUnexpectedModelIsLoggedInTheRunnersWords(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		runner summaryRunner
+		want   []string
+	}{
+		{"third", thirdSummaryRunner{}, []string{"task summaries: third answered with big-model-1, not its usual model"}},
+		{"silent", silentRunner{}, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			plan, err := newSummaryPlan([]agent.Definition{thirdDefinition},
+				[]registeredSummary{{id: thirdAgent, source: thirdSummarySource{}, runner: tt.runner}})
+			require.NoError(t, err)
+			var logged []string
+			summarizer := &fakeSummarizer{result: Summary{Text: "x", UnexpectedModel: "big-model-1"}}
+			svc := New(Options{
+				RunLocal:    (&summaryHost{log: []byte("Fix it")}).run,
+				Summarizers: map[agent.ID]SummarizeFunc{thirdAgent: summarizer.summarize},
+				Logf:        func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
+				summaryPlan: &plan,
+			})
+			t.Cleanup(svc.Close)
+			log := LogVersion{Size: 6}
+			svc.rememberSummaryTasks("", []Task{{Agent: string(thirdAgent), SessionID: "t-1", Log: &log}})
+			_, err = svc.RequestAgentSummary("", string(thirdAgent), "t-1")
+			require.NoError(t, err)
+			svc.waitSummaries()
+			assert.Equal(t, 1, summarizer.calls())
+			assert.Equal(t, tt.want, logged)
+		})
+	}
+}
+
+type silentRunner struct{ thirdSummaryRunner }
+
+func (silentRunner) unexpectedModelWarning(string) string { return "" }

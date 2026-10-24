@@ -258,9 +258,8 @@ func (s *Service) startSummaryLocked(key summaryKey, log LogVersion, retryFailed
 // of the excerpt it is for, or none when the log was unreadable or the
 // excerpt was the one the last answer was made from (reused).
 type summaryOutcome struct {
-	// agent and model are who answered and the model it was asked for.
-	agent      string
-	model      string
+	// runner is the runner that answered.
+	runner     summaryRunner
 	hash       string
 	summary    Summary
 	reused     bool
@@ -349,7 +348,7 @@ func (s *Service) summarize(key summaryKey, log LogVersion, reuse string) (summa
 	if err != nil {
 		return summaryOutcome{}, err
 	}
-	return summaryOutcome{summary: summary, hash: hash, model: adapter.runner.model(), agent: key.agent}, nil
+	return summaryOutcome{summary: summary, hash: hash, runner: adapter.runner}, nil
 }
 
 // view is the entry as the API reports it for a task whose log is at
@@ -391,19 +390,20 @@ func (s *Service) waitSummaries() {
 }
 
 // unexpectedModelWarningLocked returns what logs, once for each model, that
-// a new answer came from a model other than the one asked for. The line names
-// the model and nothing that the agent said.
+// a new answer came from a model other than the one asked for, in the words
+// of the runner that answered.
 func (s *Service) unexpectedModelWarningLocked(outcome summaryOutcome) func() {
 	model := outcome.summary.UnexpectedModel
 	if outcome.reused || outcome.unreadable || model == "" || s.warnedModels[model] {
+		return func() {}
+	}
+	warning := outcome.runner.unexpectedModelWarning(model)
+	if warning == "" {
 		return func() {}
 	}
 	if s.warnedModels == nil {
 		s.warnedModels = map[string]bool{}
 	}
 	s.warnedModels[model] = true
-	return func() {
-		s.opts.Logf("task summaries: %s answered with %s, not %s, which costs many times more; "+
-			"the account's availableModels setting may not allow %s", outcome.agent, model, outcome.model, outcome.model)
-	}
+	return func() { s.opts.Logf("task summaries: %s", warning) }
 }

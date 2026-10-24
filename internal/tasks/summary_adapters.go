@@ -56,9 +56,11 @@ type summaryRunner interface {
 	// version names what, besides the excerpt, decides the answer: the
 	// instruction, and the model and system prompt where they are set.
 	version() string
-	// model is the model the runner asks for, "" when it leaves the choice
-	// to the operator's settings.
-	model() string
+	// unexpectedModelWarning is the server log line, after "task summaries: ",
+	// for an answer that came from model rather than the one the runner
+	// asked for; "" logs nothing. It names the model and nothing the agent
+	// said.
+	unexpectedModelWarning(model string) string
 	newSummarizer() SummarizeFunc
 }
 
@@ -192,7 +194,10 @@ func (claudeSummaryRunner) version() string {
 	return summaryInstruction + "\x00" + summarySystemPrompt + "\x00" + summaryModel
 }
 
-func (claudeSummaryRunner) model() string { return summaryModel }
+func (claudeSummaryRunner) unexpectedModelWarning(model string) string {
+	return fmt.Sprintf("claude answered with %s, not %s, which costs many times more; "+
+		"the account's availableModels setting may not allow %s", model, summaryModel, summaryModel)
+}
 
 func (claudeSummaryRunner) newSummarizer() SummarizeFunc { return newClaudeSummarizer(claudeBin, nil) }
 
@@ -221,7 +226,8 @@ type codexSummaryRunner struct{}
 
 func (codexSummaryRunner) version() string { return codexSummaryInstruction }
 
-// model is "": Codex summarizes with the operator's own model setting.
-func (codexSummaryRunner) model() string { return "" }
+// unexpectedModelWarning is "": Codex summarizes with the operator's own
+// model setting, so no model is unexpected.
+func (codexSummaryRunner) unexpectedModelWarning(string) string { return "" }
 
 func (codexSummaryRunner) newSummarizer() SummarizeFunc { return newCodexSummarizer() }
