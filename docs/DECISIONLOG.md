@@ -1695,8 +1695,10 @@ Stage G of #348, first part. Agreed on #377:
   `tasks-fixture-agent`, is written by that run alone.
 - **Mutation measures the default build.** gremlins mutates every Go file whatever its build
   constraints but runs the tests in the default build, so each mutant in a tagged file came back
-  NOT COVERED and the gate failed for deciding nothing. `scripts/mutation.sh` leaves out a changed file
-  the default build does not compile (`go list -e`'s `IgnoredGoFiles`) and names it. A second
+  NOT COVERED and the gate failed for deciding nothing. `scripts/mutation.sh` leaves out a changed
+  `panemux_fixture_agent` file the default build does not compile (`go list -e`'s `IgnoredGoFiles`) and
+  names it; only that tag does, since which OS-specific files a build ignores depends on where the gate
+  runs (review on #429). A second
   gremlins run with the tag was rejected: the tagged build fails the tests that pin the shipped agents.
 - **Lint reaches the tagged files.** golangci-lint, gosec included, reads them through `build-tags`,
   `make lint-go` vets both builds, and the pre-push hook vets and tests a package holding them with

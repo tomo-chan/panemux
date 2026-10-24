@@ -74,7 +74,7 @@ it runs, or a package matches none. The tests
 that pin the shipped agents run untagged. `make lint-go` vets both builds and golangci-lint reads
 the tagged files; the pre-push hook vets and tests a package that holds them with the tag. The
 coverage, red-check and mutation gates measure the untagged build alone — the mutation gate leaves
-out, and names, a changed file the default build does not compile — and the Claude Code
+out, and names, a changed `panemux_fixture_agent` file the default build does not compile — and the Claude Code
 `PostToolUse` hook vets a file's package without the tag. See
 [Adding an agent](agent-registry.md#adding-an-agent).
 
