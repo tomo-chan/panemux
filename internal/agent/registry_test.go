@@ -13,10 +13,11 @@ import (
 // Board rule wins) must not move without a deliberate change here.
 func TestRegisteredAgents(t *testing.T) {
 	var ids []ID
-	for _, d := range All() {
+	for _, d := range shipped() {
 		ids = append(ids, d.ID)
 	}
 	assert.Equal(t, []ID{Claude, Codex, Cursor, Gemini, GrokBuild, OpenCode}, ids)
+	assert.Equal(t, definitionIDs(append(shipped(), fixtureAgents()...)), definitionIDs(registered()))
 
 	want := map[ID]struct {
 		agmsg string
@@ -29,7 +30,7 @@ func TestRegisteredAgents(t *testing.T) {
 		GrokBuild: {"grok-build", []Capability{Detect, Board}},
 		OpenCode:  {"opencode", []Capability{Detect, Board}},
 	}
-	for _, d := range All() {
+	for _, d := range shipped() {
 		w := want[d.ID]
 		assert.Equal(t, w.agmsg, d.AgmsgType, d.ID)
 		assert.Equal(t, w.caps, d.Capabilities, d.ID)
@@ -302,4 +303,14 @@ func must(d Definition, ok bool) Definition {
 		panic("not registered")
 	}
 	return d
+}
+
+// definitionIDs are the IDs of defs, in order: a Definition holds functions,
+// which no two values compare equal on.
+func definitionIDs(defs []Definition) []ID {
+	ids := make([]ID, 0, len(defs))
+	for _, d := range defs {
+		ids = append(ids, d.ID)
+	}
+	return ids
 }
