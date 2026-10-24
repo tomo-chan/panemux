@@ -1672,6 +1672,32 @@ Stage E of #348, second half (the UI), applying what #376 agreed:
 - **`daemon` stays a location.** "codex's shared daemon" where a card says where a task runs comes
   from the location kind the server reports, not from the agent name, and is left as it is.
 
+### Summary adapters (2026-10-24, issue #347)
+
+Stage F of #348. Agreed on #347:
+
+- **A source and a runner, registered together.** Reading a session's conversation (on its host) and
+  summarizing it (on the panemux host) are separate parts of one adapter, listed by ID in
+  `summaryAdapters`. One interface for both was rejected: it would leave no seam for summarizing one
+  agent's log with another's CLI should that ever be wanted. Today a task is summarized only by its
+  own agent's runner, with no fallback, since each CLI has its own authentication, settings and tool
+  limits.
+- **The summarizer versions did not move.** Claude's and Codex's versions are computed from the
+  adapters to the same hashes as before, so the summaries saved before (#321) stayed current and
+  nothing was summarized again. An adapter's later change raises its own version.
+- **A saved summary of an agent without an adapter is kept.** It used to make the whole file unusable
+  and moved aside, losing every other agent's summaries. It is now kept unshown and written back
+  until the 30-day retention drops it, as #348 keeps unknown agents' records. Logging such entries was
+  rejected as noise.
+- **The summary action from the adapter.** `tasks[].actions.summary` is offered when the agent has an
+  adapter, and the adapter's session ID rule replaced the per-agent check that was repeated in the
+  action, the request and the saved file. Letting each adapter return its own action was rejected:
+  the shared conditions would be repeated per agent. No reason value was added; a CLI missing on the
+  panemux host is a fixed error message.
+- **The test agent's UI, E2E and contract fixture are #377's.** Putting the test agent in a fixture
+  needs it collected, which needs the registry and collect adapters to accept a test registration —
+  the third-agent groundwork stage G builds. Here it is verified in `internal/tasks`.
+
 ### Capabilities in the task snapshot (2026-10-23, issue #376)
 
 Stage E of #348, first half (the API). Agreed on #376:

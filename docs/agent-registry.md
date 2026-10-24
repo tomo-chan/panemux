@@ -102,8 +102,17 @@ files mean is decided once, in the adapter. A pane finds its agent with `agent.M
 and calls both; a task names its session with `Task.WorkdirSession`, which the task board is to hand
 to `workdirs` to show every working directory of a task (#420). Claude Code's `~/.claude/sessions` files are read by one parser,
 `session.ParseClaudeSessionState`, which the task board wraps to keep its unreadable-file reasons.
-`summary` is still in `internal/tasks`: which agents can be summarized is the registry's `summary`
-declaration, but reading the log and choosing the runner branch on the claude and codex IDs (#347).
+`summary` is implemented by a summary adapter per agent, which `internal/tasks` defines in its own
+types and lists explicitly by ID in `summaryAdapters` (`internal/tasks/summary_adapters.go`), checked
+against the registry's `summary` declarations when panemux starts. An adapter is two parts: a
+`summarySource`, which says which session IDs it accepts, gives the fixed script that prints the log
+on the session's host, and turns that output into the excerpt; and a `summaryRunner`, which
+summarizes the excerpt with the agent's own CLI on the panemux host. The common code owns the rest —
+which tasks are summarized, the cache and its reuse by excerpt hash, retries, concurrency, timeouts,
+the saved file and `tasks[].actions.summary` — and never branches on an agent's ID. A task is
+summarized by its own agent's runner, never another's. Each part has a version folded into the
+summary's identity; raising it makes earlier summaries outdated, and a source still at its first
+version (`""`) adds nothing, which kept the saved summaries current across the move to adapters.
 
 `board` is implemented by a board adapter per agent, which the root package defines in its own types
 and lists explicitly by ID in `boardAdapters` (`board_adapters.go`), checked against the registry when
@@ -184,6 +193,17 @@ hand ([bootstrap](agent-board/bootstrap.md)).
    `collectAdapters`: its sections, its process hints (words the collection's `cwd`/`env` prefilter
    must find in every process its Task rule lists), and the code that turns its rows into tasks.
    `TestCollectAdapters_MatchTheRegistry` and `TestCollectPrefilter_CoversEveryTaskRule` check it.
+6. An agent that declares `summary` needs a summary adapter in `internal/tasks`, added to
+   `summaryAdapters` as `{id, source, runner}`. The source's `logScript` must be a fixed script that
+   takes nothing but a session ID its `validSessionID` accepted (and the collected log version),
+   returning `ErrInvalidSummary` for any other ID; `excerpt` reports a log it cannot read at all as an
+   error and one with nothing it understands as not ok (unreadable). The runner keeps the agent's own
+   authentication, settings and tool limits, and returns fixed error messages that quote nothing the
+   CLI printed (`errSummaryCLIMissing` when the CLI is not on `PATH`).
+   `TestSummaryAdapters_MatchTheRegistry` checks the list against the declarations, and the new
+   adapter's own test calls `checkSummaryAdapterContract` with a session ID and a sample of its
+   script's output. The test-only `third` agent in `internal/tasks/summary_adapters_test.go` is the
+   smallest example of a source, a runner and their registration.
 
 ## Command Center boundary
 
