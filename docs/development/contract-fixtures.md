@@ -12,6 +12,11 @@
   frontend run.** The direction is one-way — Go → fixture → TypeScript — so the frontend suite only
   sees a renamed field once the Go suite has regenerated the fixture. `make test`, `make check` and
   CI all run them in that order.
+- `tasks-fixture-agent.json` is the one fixture the untagged suite does not write: it is `GET /api/tasks`
+  with the fixture agent, which only a build with the `panemux_fixture_agent` tag registers, so
+  `make test-go-fixture-agent` (part of `make test-go`) captures it. The untagged suite knows its name, so
+  the directory check still holds, and the frontend's optional-field coverage leaves it out, since the
+  `tasks` capture pins those fields.
 - Commit the fixture diff alongside the struct change; it is the contract change, in the diff a
   reviewer reads.
 - Never hand-edit a file under `testdata/api-contract/` — the next Go test run overwrites it. Adding

@@ -9,6 +9,9 @@
 - **The threshold stays at 80%; what gets strengthened is the scope.** Raising it works, but the cheapest way to satisfy a higher number is to generate tautological tests, which lowers both protection against regressions and resistance to refactoring. See decision D1 in [docs/quality-gateway/decisions.md](../quality-gateway/decisions.md).
 - The gated package set is checked against `go list ./...` by `TestCoverageScopeCoversEveryPackage`, so a package added to the repository fails the suite until it is either gated or explicitly excluded with a reason. Do not widen the exclusion list to make that failure go away.
 - `make coverage-go` builds the frontend first: the root package is gated and `main.go` embeds `frontend/dist`.
+- The fixture agent's files build only with the `panemux_fixture_agent` tag (issue #377), which the
+  coverage run does not set, so they are outside the gate, as they are outside every shipped binary;
+  `make test-go-fixture-agent` tests them.
 - What is excluded, and why, is written in the `Makefile` next to `COVERAGE_PKGS` — `internal/session`'s real PTY / SSH / tmux transports, and the process-lifetime entry points (`main`, `runServer`, `bootstrapWatcher.Run`). Do not add an exclusion without a reason recorded there.
 
 ### Per-block coverage (`make coverage-blocks`)
