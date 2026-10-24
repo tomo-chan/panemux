@@ -85,5 +85,6 @@ func TestAPIContractFixtures_FixtureAgent(t *testing.T) {
 		body, literals = captureTasksWithFixtureAgent(t)
 		require.Equal(t, string(want), string(normalizedFixtureBytes(t, body, literals)), "capture %d differs", i+1)
 	}
+	assertNoMachinePaths(t, fixtureAgentTasksFixture, string(want))
 	writeContractFixture(t, fixtureAgentTasksFixture, body, literals)
 }
