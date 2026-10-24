@@ -52,14 +52,14 @@ func TestDefaultSummaryStorePath(t *testing.T) {
 	homedir.SetFailingForTest(t, errors.New("no home"))
 	_, err = DefaultSummaryStorePath()
 	assert.ErrorContains(t, err, "no home")
-	_, _, err = NewSummaryStore("").load(storeNow)
+	_, _, err = NewSummaryStore("").load(storeNow, summaryPlan)
 	assert.ErrorContains(t, err, "no home", "the store resolves the default path when it is first used")
 }
 
 func TestSummaryStore_SavesAndLoadsSummaries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "task-summaries.json")
 	store := NewSummaryStore(path)
-	entries, moved, err := store.load(storeNow)
+	entries, moved, err := store.load(storeNow, summaryPlan)
 	require.NoError(t, err)
 	assert.Empty(t, entries, "a missing file is an empty store")
 	assert.Empty(t, moved)
@@ -78,7 +78,7 @@ func TestSummaryStore_SavesAndLoadsSummaries(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &file))
 	assert.EqualValues(t, 1, file["version"])
 
-	loaded, moved, err := NewSummaryStore(path).load(storeNow)
+	loaded, moved, err := NewSummaryStore(path).load(storeNow, summaryPlan)
 	require.NoError(t, err)
 	assert.Empty(t, moved)
 	assert.ElementsMatch(t, saved, loaded)
@@ -90,13 +90,13 @@ func TestSummaryStore_SavesAndLoadsSummaries(t *testing.T) {
 func TestSummaryStore_AnOlderSaveDoesNotReplaceANewerOne(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "task-summaries.json")
 	store := NewSummaryStore(path)
-	_, _, err := store.load(storeNow)
+	_, _, err := store.load(storeNow, summaryPlan)
 	require.NoError(t, err)
 	newer := sampleStoredSummary("", AgentClaude, "newer")
 	require.NoError(t, store.save(2, []storedSummary{newer}))
 	require.NoError(t, store.save(1, []storedSummary{sampleStoredSummary("", AgentClaude, "older")}))
 
-	loaded, _, err := NewSummaryStore(path).load(storeNow)
+	loaded, _, err := NewSummaryStore(path).load(storeNow, summaryPlan)
 	require.NoError(t, err)
 	assert.Equal(t, []storedSummary{newer}, loaded)
 }
@@ -119,7 +119,7 @@ func TestSummaryStore_MovesAsideAFileItCannotUse(t *testing.T) {
 		"not JSON":       "{broken",
 		"newer version":  `{"version":2,"summaries":[]}`,
 		"no version":     `{"summaries":[]}`,
-		"unknown agent":  entry(func(e *storedSummary) { e.Agent = "gemini" }),
+		"invalid agent":  entry(func(e *storedSummary) { e.Agent = "no such/agent" }),
 		"bad session ID": entry(func(e *storedSummary) { e.SessionID = "../x" }),
 		"codex non-UUID": entry(func(e *storedSummary) { e.Agent = AgentCodex }),
 		"bad input hash": entry(func(e *storedSummary) { e.InputHash = "zz" }),
@@ -143,7 +143,7 @@ func TestSummaryStore_MovesAsideAFileItCannotUse(t *testing.T) {
 			writeStoreFile(t, path, content)
 			store := NewSummaryStore(path)
 
-			entries, moved, err := store.load(storeNow)
+			entries, moved, err := store.load(storeNow, summaryPlan)
 			require.NoError(t, err)
 			assert.Empty(t, entries)
 			assert.Equal(t, path+".bad-20261010T120000Z", moved)
@@ -152,7 +152,7 @@ func TestSummaryStore_MovesAsideAFileItCannotUse(t *testing.T) {
 			assert.Equal(t, content, string(kept), "the file is moved aside unchanged")
 
 			require.NoError(t, store.save(1, []storedSummary{valid}), "saving resumes at once")
-			loaded, _, err := NewSummaryStore(path).load(storeNow)
+			loaded, _, err := NewSummaryStore(path).load(storeNow, summaryPlan)
 			require.NoError(t, err)
 			assert.Equal(t, []storedSummary{valid}, loaded)
 		})
@@ -175,10 +175,10 @@ func TestSummaryStore_KeepsASummaryCutAtItsLimit(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "task-summaries.json")
 	store := NewSummaryStore(path)
-	_, _, err = store.load(storeNow)
+	_, _, err = store.load(storeNow, summaryPlan)
 	require.NoError(t, err)
 	require.NoError(t, store.save(1, []storedSummary{entry}))
-	loaded, moved, err := NewSummaryStore(path).load(storeNow)
+	loaded, moved, err := NewSummaryStore(path).load(storeNow, summaryPlan)
 	require.NoError(t, err)
 	assert.Empty(t, moved)
 	assert.Equal(t, []storedSummary{entry}, loaded)
@@ -190,7 +190,7 @@ func TestSummaryStore_MovingAsideNeverReplacesAnEarlierBadFile(t *testing.T) {
 	var moved []string
 	for i, content := range []string{"{first", "{second", "{third"} {
 		writeStoreFile(t, path, content)
-		_, m, err := NewSummaryStore(path).load(storeNow)
+		_, m, err := NewSummaryStore(path).load(storeNow, summaryPlan)
 		require.NoError(t, err, "move %d", i)
 		moved = append(moved, m)
 	}
@@ -215,13 +215,13 @@ func TestSummaryStore_GivesUpMovingAsideWhenEveryNameIsTaken(t *testing.T) {
 		writeStoreFile(t, fmt.Sprintf("%s-%d", base, n), "")
 	}
 	writeStoreFile(t, path, "{broken")
-	_, moved, err := NewSummaryStore(path).load(storeNow)
+	_, moved, err := NewSummaryStore(path).load(storeNow, summaryPlan)
 	require.NoError(t, err)
 	assert.Equal(t, fmt.Sprintf("%s-%d", base, summaryStoreBadLimit-1), moved)
 
 	writeStoreFile(t, path, "{broken")
 	store := NewSummaryStore(path)
-	_, _, err = store.load(storeNow)
+	_, _, err = store.load(storeNow, summaryPlan)
 	assert.ErrorContains(t, err, "moving aside task summary file")
 	kept, readErr := os.ReadFile(path)
 	require.NoError(t, readErr)
@@ -234,7 +234,7 @@ func TestSummaryStore_GivesUpMovingAsideWhenEveryNameIsTaken(t *testing.T) {
 func TestSummaryStore_AnOlderSaveAfterAFailedNewerOneIsDropped(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "task-summaries.json")
 	store := NewSummaryStore(path)
-	_, _, err := store.load(storeNow)
+	_, _, err := store.load(storeNow, summaryPlan)
 	require.NoError(t, err)
 
 	fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: errors.New("disk full")}).Ops())
@@ -249,7 +249,7 @@ func TestSummaryStore_AnOlderSaveAfterAFailedNewerOneIsDropped(t *testing.T) {
 	newest := []storedSummary{sampleStoredSummary("", AgentClaude, "newest")}
 	require.NoError(t, store.save(3, newest))
 	assert.NoError(t, store.Err())
-	loaded, _, err := NewSummaryStore(path).load(storeNow)
+	loaded, _, err := NewSummaryStore(path).load(storeNow, summaryPlan)
 	require.NoError(t, err)
 	assert.Equal(t, newest, loaded)
 }
@@ -264,13 +264,13 @@ func TestSummaryStore_RefusesToSaveUntilLoaded(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 	store := NewSummaryStore(path)
 
-	_, _, err := store.load(storeNow)
+	_, _, err := store.load(storeNow, summaryPlan)
 	require.Error(t, err)
 	assert.ErrorContains(t, store.Err(), "task summary file")
 	assert.ErrorContains(t, store.save(1, []storedSummary{sampleStoredSummary("", AgentClaude, "s10")}), "not loaded")
 
 	require.NoError(t, os.Chmod(dir, 0o700))
-	_, moved, err := store.load(storeNow)
+	_, moved, err := store.load(storeNow, summaryPlan)
 	require.NoError(t, err)
 	assert.NotEmpty(t, moved)
 	assert.NoError(t, store.Err())
@@ -280,7 +280,7 @@ func TestSummaryStore_RefusesToSaveUntilLoaded(t *testing.T) {
 func TestSummaryStore_AFailedWriteIsReportedUntilOneSucceeds(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "task-summaries.json")
 	store := NewSummaryStore(path)
-	_, _, err := store.load(storeNow)
+	_, _, err := store.load(storeNow, summaryPlan)
 	require.NoError(t, err)
 
 	fileops.SetOpsForTest(t, (&fileops.Spy{WriteErr: errors.New("disk full")}).Ops())
@@ -296,7 +296,7 @@ func TestSummaryStore_AFailedWriteIsReportedUntilOneSucceeds(t *testing.T) {
 func TestSummaryStore_AFailedDirectoryCreationIsReported(t *testing.T) {
 	parent := filepath.Join(t.TempDir(), "config")
 	store := NewSummaryStore(filepath.Join(parent, "task-summaries.json"))
-	_, _, err := store.load(storeNow)
+	_, _, err := store.load(storeNow, summaryPlan)
 	require.NoError(t, err, "a missing directory is an empty store")
 	writeStoreFile(t, parent, "")
 
@@ -312,7 +312,7 @@ func TestSummaryStore_WritesThroughASymlink(t *testing.T) {
 	path := filepath.Join(dir, "task-summaries.json")
 	require.NoError(t, os.Symlink(target, path))
 	store := NewSummaryStore(path)
-	_, _, err := store.load(storeNow)
+	_, _, err := store.load(storeNow, summaryPlan)
 	require.NoError(t, err)
 	require.NoError(t, store.save(1, nil))
 
@@ -337,12 +337,11 @@ func TestSummarizerVersion_FollowsTheAgentsInstruction(t *testing.T) {
 	assert.Equal(t, version(AgentCodex, codexSummaryInstruction), summarizerVersion(AgentCodex))
 }
 
-// A summary can be stored only for an agent the registry declares summary
-// for, not every agent whose tasks are listed.
+// A summary is made only for an agent with a summary adapter, by its ID.
 func TestSummarizableAgentsAreTheSummaryAgents(t *testing.T) {
 	for _, d := range agent.All() {
-		assert.Equal(t, d.Has(agent.Summary), summarizable(string(d.ID)), "agent %s", d.ID)
+		assert.Equal(t, d.Has(agent.Summary), summaryPlan.summarizable(string(d.ID), summarySessionID), "agent %s", d.ID)
 	}
-	assert.False(t, summarizable("vim"), "an unregistered agent")
-	assert.False(t, summarizable("claude-code"), "an alias is not the ID a summary carries")
+	assert.False(t, summaryPlan.summarizable("vim", "s10"), "an unregistered agent")
+	assert.False(t, summaryPlan.summarizable("claude-code", "s10"), "an alias is not the ID a summary carries")
 }

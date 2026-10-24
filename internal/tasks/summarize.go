@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"panemux/internal/agent"
 	"panemux/internal/commandcenter"
 )
 
@@ -159,6 +160,9 @@ func newClaudeSummarizer(bin string, rnd io.Reader) SummarizeFunc {
 		if err != nil {
 			if ctx.Err() != nil {
 				return Summary{}, errors.New("claude did not finish summarizing in time")
+			}
+			if errors.Is(err, exec.ErrNotFound) {
+				return Summary{}, errSummaryCLIMissing(agent.Claude)
 			}
 			var exit *exec.ExitError
 			if errors.As(err, &exit) {

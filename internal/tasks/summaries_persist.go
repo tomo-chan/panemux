@@ -29,7 +29,7 @@ func (s *Service) loadSummariesLocked() bool {
 	if store == nil || s.summaryLoaded {
 		return false
 	}
-	entries, moved, err := store.load(s.opts.Now())
+	entries, moved, err := store.load(s.opts.Now(), s.summaryPlan)
 	if err != nil {
 		if err.Error() != s.summaryLoadErr {
 			s.opts.Logf("task summaries: not saved: %v", err)
@@ -62,8 +62,10 @@ func (s *Service) loadSummariesLocked() bool {
 			lastSeen:   stored.LastSeen,
 			savedSeen:  stored.LastSeen,
 		}
-		// An answer from another summarizer is current for no log.
-		if stored.Summarizer == summarizerVersion(key.agent) {
+		// An answer from another summarizer is current for no log. One of an
+		// agent with no adapter is never shown, and keeps its log to be
+		// written back as it was.
+		if v := s.summaryPlan.summarizerVersion(key.agent); v == "" || stored.Summarizer == v {
 			entry.resultLog = LogVersion{File: stored.Log.File, ModTime: stored.Log.ModTime, Size: stored.Log.Size}
 			entry.triedLog = entry.resultLog
 		}

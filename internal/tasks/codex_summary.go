@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 
+	"panemux/internal/agent"
 	"panemux/internal/fileops"
 )
 
@@ -71,6 +72,9 @@ func newCodexSummarizerWithDirs(dirs codexSummaryDirs) SummarizeFunc {
 		if err = cmd.Run(); err != nil {
 			if ctx.Err() != nil {
 				return Summary{}, errors.New("codex did not finish summarizing in time")
+			}
+			if errors.Is(err, exec.ErrNotFound) {
+				return Summary{}, errSummaryCLIMissing(agent.Codex)
 			}
 			return Summary{}, errors.New("codex could not run while summarizing")
 		}

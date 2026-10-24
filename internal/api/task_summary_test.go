@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/agent"
 	"panemux/internal/session"
 	"panemux/internal/tasks"
 )
@@ -76,7 +77,7 @@ func useSummaryTaskService(t *testing.T, h *Handler, summarizer *countingSummari
 			}
 			return summaryCollection(), nil
 		},
-		Summarize: summarizer.summarize,
+		Summarizers: map[agent.ID]tasks.SummarizeFunc{agent.Claude: summarizer.summarize},
 	}))
 	t.Cleanup(h.Close)
 }
@@ -197,7 +198,7 @@ func TestPostTaskSummary_CodexIdentityAndRouting(t *testing.T) {
 			}
 			return withAllSections([]byte("::panemux-tasks v2\n::now 1000\n::section codex/rollouts\n" +
 				"999\t120\trollout-2026-10-08T01-00-00-" + sid + ".jsonl\t\t\"originator\":\"codex-tui\"\n::end\n")), nil
-		}, Summarize: claude.summarize, SummarizeCodex: codex.summarize,
+		}, Summarizers: map[agent.ID]tasks.SummarizeFunc{agent.Claude: claude.summarize, agent.Codex: codex.summarize},
 	}))
 	getTasks(t, h)
 	rec := postTaskSummary(t, h, `{"host":"","agent":"codex","session_id":"`+sid+`"}`)
@@ -293,7 +294,7 @@ func TestGetTasks_ReportsWhySummariesAreNotSaved(t *testing.T) {
 				Hosts:        h.taskHostNames,
 				Dial:         func(string) (tasks.Conn, error) { return nil, errors.New("unreachable") },
 				RunLocal:     func(context.Context, string) ([]byte, error) { return summaryCollection(), nil },
-				Summarize:    summarizer.summarize,
+				Summarizers:  map[agent.ID]tasks.SummarizeFunc{agent.Claude: summarizer.summarize},
 				SummaryStore: tasks.NewSummaryStore(path),
 				Logf:         func(string, ...any) {},
 			}))

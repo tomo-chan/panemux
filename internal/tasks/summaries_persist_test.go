@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"panemux/internal/agent"
 	"panemux/internal/fileops"
 
 	"github.com/stretchr/testify/assert"
@@ -62,7 +63,7 @@ func (f *persistedSummaryFixture) start(t *testing.T) *Service {
 	t.Helper()
 	svc := New(Options{
 		RunLocal:     f.host.run,
-		Summarize:    f.summarizer.summarize,
+		Summarizers:  map[agent.ID]SummarizeFunc{agent.Claude: f.summarizer.summarize},
 		Now:          f.clock.Now,
 		SummaryStore: NewSummaryStore(f.path),
 		Logf: func(format string, args ...any) {
@@ -449,7 +450,7 @@ func TestPersistedSummaries_AHostRemovedFromTheConfigIsForgotten(t *testing.T) {
 		},
 		Dial:         func(string) (Conn, error) { return conn, nil },
 		RunLocal:     localOutput(minimalOutput("local"), nil),
-		Summarize:    f.summarizer.summarize,
+		Summarizers:  map[agent.ID]SummarizeFunc{agent.Claude: f.summarizer.summarize},
 		Now:          f.clock.Now,
 		SummaryStore: NewSummaryStore(f.path),
 	})
@@ -484,10 +485,9 @@ func TestPersistedSummaries_CodexIsStoredAndReused(t *testing.T) {
 	codex := &fakeSummarizer{result: Summary{Text: "Codex"}}
 	start := func() *Service {
 		s := New(Options{
-			RunLocal:       func(context.Context, string) ([]byte, error) { return codexTranscript("Codex request"), nil },
-			SummarizeCodex: codex.summarize,
-			Summarize:      (&fakeSummarizer{}).summarize,
-			SummaryStore:   NewSummaryStore(path),
+			RunLocal:     func(context.Context, string) ([]byte, error) { return codexTranscript("Codex request"), nil },
+			Summarizers:  map[agent.ID]SummarizeFunc{agent.Claude: (&fakeSummarizer{}).summarize, agent.Codex: codex.summarize},
+			SummaryStore: NewSummaryStore(path),
 		})
 		t.Cleanup(s.Close)
 		return s
@@ -550,7 +550,7 @@ func TestPersistedSummaries_ASummaryFinishingAfterItsHostLeftIsDropped(t *testin
 		},
 		Dial:         func(string) (Conn, error) { return conn, nil },
 		RunLocal:     localOutput(minimalOutput("local"), nil),
-		Summarize:    f.summarizer.summarize,
+		Summarizers:  map[agent.ID]SummarizeFunc{agent.Claude: f.summarizer.summarize},
 		Now:          f.clock.Now,
 		SummaryStore: NewSummaryStore(f.path),
 	})
@@ -648,4 +648,33 @@ func TestPersistedSummaries_HaikusSummaryNamesNoModel(t *testing.T) {
 	require.Equal(t, SummaryReady, views["local:claude:s10"].State)
 	assert.Empty(t, views["local:claude:s10"].UnexpectedModel)
 	assert.NotContains(t, f.logged(), "model")
+}
+
+// A saved summary of an agent no adapter summarizes — one whose adapter was
+// removed — does not make the file unusable: it is not shown, is written
+// back as it was, and is dropped 30 days after its task was last listed
+// (issue #347). The others are restored as usual.
+func TestPersistedSummaries_AnAgentWithoutAnAdapterIsKeptUnshown(t *testing.T) {
+	f := newPersistedSummaryFixture(t)
+	gone := sampleStoredSummary("", "gemini", "g1")
+	gone.LastSeen = collectedAt
+	claude := sampleStoredSummary("", AgentClaude, "s10")
+	claude.LastSeen = collectedAt
+	f.writeStored(t, claude, gone)
+	f.host.set(hostCollection(100, "idle"), conversationLog("a"))
+	svc := f.start(t)
+
+	_, views := collectAndSummarize(svc)
+	assert.Equal(t, "Fixing a race.", views["local:claude:s10"].Text, "the file was read, not moved aside")
+	assert.NotContains(t, f.logged(), "moved aside")
+	assert.Len(t, views, 1, "the other agent's summary is not shown")
+	f.clock.advance(summarySeenSaveInterval)
+	collectAndSummarize(svc)
+	assert.Contains(t, f.stored(t), gone, "written back unchanged")
+
+	f.clock.advance(summaryRetention + time.Second - summarySeenSaveInterval)
+	collectAndSummarize(svc)
+	for _, e := range f.stored(t) {
+		assert.NotEqual(t, "gemini", e.Agent, "dropped 30 days after it was last listed")
+	}
 }
