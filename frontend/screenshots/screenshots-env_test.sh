@@ -645,6 +645,8 @@ fi
 # run-panemux-e2e.sh selects the runtime again before `go run`, and the
 # selection puts the Node SDK's bin — where an npm-installed claude or codex
 # lives — ahead of everything, so the stand-ins are put first after it.
+# Each name is resolved alone: dash, Linux's sh, prints only the first of
+# several names given to one `command -v`.
 stand_ins="$work/stand-ins"
 mkdir -p "$stand_ins/launch-bin" "$stand_ins/agent" "$stand_ins/sdk" "$stand_ins/twice"
 for f in launch-bin/claude launch-bin/codex agent/panemux-fixture-agent sdk/claude sdk/codex sdk/node twice/codex; do
@@ -652,7 +654,7 @@ for f in launch-bin/claude launch-bin/codex agent/panemux-fixture-agent sdk/clau
 	chmod +x "$stand_ins/$f"
 done
 list="$stand_ins/agent:$stand_ins/launch-bin"
-first() { sh -c '. "$1"; shift; e2e_stand_ins_first "$@" && command -v claude codex panemux-fixture-agent' sh "$here/../e2e/stand-ins.sh" "$@"; }
+first() { sh -c '. "$1"; shift; e2e_stand_ins_first "$@" && for n in claude codex panemux-fixture-agent; do command -v "$n"; done' sh "$here/../e2e/stand-ins.sh" "$@"; }
 
 check
 want="$stand_ins/launch-bin/claude
@@ -674,7 +676,7 @@ if ! output=$(PATH="$list:$PATH" sh -c '
 	. "$panemux_runtime_scripts/runtime-env.sh"
 	panemux_runtime "$1" >/dev/null || exit 3
 	. "$1/frontend/e2e/stand-ins.sh"
-	e2e_stand_ins_first "$2" && command -v claude codex panemux-fixture-agent
+	e2e_stand_ins_first "$2" && for n in claude codex panemux-fixture-agent; do command -v "$n"; done
 ' sh "$here/../.." "$list" 2>&1); then
 	fail "the stand-ins come first after this checkout's runtime selection" "$output"
 elif [ "$output" != "$want" ]; then
