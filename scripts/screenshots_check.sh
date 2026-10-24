@@ -9,7 +9,7 @@
 # because `--name-only` would otherwise print only a moved file's new path,
 # and a component moved out of components/ and restyled in the same pull
 # request would pass unseen. A change "the images show" is a
-# non-test file under the paths below; "retaking them" is any change under
+# non-test file (`*.test.ts`, `*.test.tsx`, `*_test.sh`) under the paths below; "retaking them" is any change under
 # docs/images/, which is where `make screenshots` writes.
 #
 # The trigger is deliberately the presentation layer only: components, the
@@ -30,7 +30,7 @@ fi
 
 shown=$(printf '%s\n' "$changed" \
 	| grep -E '^(frontend/src/components/|frontend/src/styles/|frontend/src/App\.tsx$|frontend/index\.html$|frontend/screenshots/)' \
-	| grep -vE '\.test\.(ts|tsx)$' || true)
+	| grep -vE '(\.test\.(ts|tsx)|_test\.sh)$' || true)
 
 if [ -z "$shown" ]; then
 	echo "Nothing the documentation screenshots show changed."

@@ -82,6 +82,8 @@ expect 0 'no files at all' ''
 expect 0 'backend only' "internal/api/server.go${nl}internal/config/validate.go${nl}"
 expect 0 'a component test' "frontend/src/components/PaneHeader.test.tsx${nl}"
 expect 0 'an app test' "frontend/src/App.test.tsx${nl}"
+expect 0 'a shell test of the capture' "frontend/screenshots/screenshots-env_test.sh${nl}"
+expect 1 'a shell script of the capture' "frontend/screenshots/screenshots-env.sh${nl}"
 expect 0 'hooks, schemas and utils hold no presentation' \
 	"frontend/src/hooks/useTasks.ts${nl}frontend/src/schemas/index.ts${nl}frontend/src/utils/layoutTree.ts${nl}"
 expect 0 'the e2e suite' "frontend/e2e/core-multiplexer.spec.ts${nl}"

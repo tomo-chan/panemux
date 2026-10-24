@@ -149,7 +149,7 @@ skip inside the Claude Code sandbox and fail in CI. Its tmux sockets sit deeper 
   UI's components, layout, styles and text, and to the capture itself (`frontend/screenshots/`).
 - CI enforces it (`.github/workflows/screenshots.yml`): a pull request that changes
   `frontend/src/components/`, `frontend/src/App.tsx`, `frontend/src/styles/`, `frontend/index.html`
-  or `frontend/screenshots/` (test files aside; a file moved out of them counts under its old path)
+  or `frontend/screenshots/` (test files — `*.test.ts`, `*.test.tsx`, `*_test.sh` — aside; a file moved out of them counts under its old path)
   without touching `docs/images/` fails. Apply the
   `screenshots-exempt` label to a change that genuinely alters nothing the images show.
 - The rule does not stop at those paths: a change under `frontend/src/hooks/`, `schemas/` or `utils/`
