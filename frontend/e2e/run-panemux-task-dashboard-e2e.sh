@@ -136,7 +136,11 @@ printf '{"pid":%s,"sessionId":"%s","cwd":"/tmp","status":"waiting","waitingFor":
 printf '{"text":"Plan the change."}\n{"text":"Waiting for the plan to be approved."}\n' \
     >"$E2E_HOME/.panemux-fixture-agent/logs/$E2E_FIXTURE_SESSION.log"
 
-export PATH="$E2E_DIR/fixtures/fixture-agent:$E2E_HOME/launch-bin:$PATH"
+# The stand-ins come first on PATH for the tmux server started below, and
+# again for panemux, after run-panemux-e2e.sh selects the runtime once more.
+E2E_STAND_INS="$E2E_DIR/fixtures/fixture-agent:$E2E_HOME/launch-bin"
+export E2E_STAND_INS
+export PATH="$E2E_STAND_INS:$PATH"
 
 if command -v tmux >/dev/null 2>&1; then
     tmux -f /dev/null new-session -d -s e2e-task-dashboard -c "$E2E_HOME/work" "exec '$E2E_HOME/bin/claude' 900"

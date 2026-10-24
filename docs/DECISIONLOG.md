@@ -1711,7 +1711,10 @@ Stage G of #348, first part. Agreed on #377:
   its own was added. Summaries are on in that fixture so the fixture agent's is made, which would
   also summarize the other tasks the real collection lists — among them this machine's own codex
   sessions — so its `claude` stand-in refuses a summary and a `codex` stand-in refuses everything,
-  and the real CLIs never run.
+  and the real CLIs never run. The runtime selection `run-panemux-e2e.sh` repeats puts the Node
+  SDK's bin, where npm-installed CLIs live, ahead of everything, so the stand-ins are put first again
+  right before `go run`, and the run stops when one of them is not what `PATH` resolves (review on
+  #430).
 
 ### Summary adapters (2026-10-24, issue #347)
 

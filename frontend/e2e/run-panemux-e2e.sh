@@ -8,7 +8,10 @@
 # playwright.config.ts's other webServer entries only have to name what
 # differs. build-tags, when given, are passed to `go run -tags`: the
 # task-dashboard fixture names panemux_fixture_agent, which registers the
-# fixture agent (issue #377). The fixture config is
+# fixture agent (issue #377). E2E_STAND_INS, a fixture's colon-separated
+# directories of stand-ins for real CLIs, is put first on PATH right before
+# `go run`: the runtime selection above puts the SDK's bin ahead of
+# everything, and panemux must find the stand-ins, never a real CLI there. The fixture config is
 # copied out of the repository into a temp directory first: panemux rewrites
 # its own config file on some API calls, and a tracked fixture must never be
 # mutated by a test run.
@@ -47,4 +50,6 @@ make build-frontend >/dev/null
 rmdir "$E2E_BUILD_LOCK"
 trap - EXIT INT TERM
 
+. frontend/e2e/stand-ins.sh
+e2e_stand_ins_first "${E2E_STAND_INS:-}" || exit 1
 exec go run ${E2E_TAGS:+-tags "$E2E_TAGS"} . --config "$E2E_CONFIG_PATH" --port "$E2E_PORT"

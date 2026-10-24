@@ -85,7 +85,10 @@ What checks it:
 - The task-dashboard E2E (`frontend/e2e/task-dashboard.spec.ts`) runs panemux built with the tag
   against a fake CLI, `frontend/e2e/fixtures/fixture-agent/panemux-fixture-agent`, first on `PATH`:
   a running session is listed in its state with its summary, and a task is started from the New task
-  dialog in a tmux session.
+  dialog in a tmux session. The fixture's stand-ins for the CLIs — the fake one, and a `claude` and a
+  `codex` that refuse a summary — are put first on `PATH` right before panemux starts
+  (`frontend/e2e/stand-ins.sh`), so no real CLI answers for the machine's own sessions the collection
+  lists.
 
 The tagged files sit outside the coverage, red-check and mutation gates, and the Claude Code
 `PostToolUse` hook vets them untagged

@@ -127,7 +127,8 @@ as for `make test-e2e` when the installed Chromium is not the one Playwright exp
   including sessions started or resumed through the dashboard. Playwright sends `SIGTERM` to this
   fixture so its cleanup trap runs. It never uses the caller's server.
 - `make test-screenshots-check` tests both fixtures' tmux isolation and these staging helpers
-  (`frontend/screenshots/screenshots-env.sh`). Its tmux sockets sit deeper than either fixture's, so
+  (`frontend/screenshots/screenshots-env.sh`), and that the task-dashboard fixture's stand-ins for
+  real CLIs come first on `PATH` after the runtime selection (`frontend/e2e/stand-ins.sh`). Its tmux sockets sit deeper than either fixture's, so
   it makes their directory with `tmux_short_dir`: under `$TMPDIR` when the socket fits there (inside
   the Claude Code sandbox, where `/tmp` is not writable), otherwise under `/tmp` (outside the sandbox
   on macOS, whose per-user `$TMPDIR` leaves no room). Where neither fits it fails, naming the path,

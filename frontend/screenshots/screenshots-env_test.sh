@@ -1,7 +1,8 @@
 #!/bin/sh
 #
 # Tests for frontend/screenshots/screenshots-env.sh, the staging helpers
-# run-panemux-screenshots.sh boots the screenshot fixture with.
+# run-panemux-screenshots.sh boots the screenshot fixture with, and for the
+# E2E fixtures' helpers in frontend/e2e/: tmux-env.sh and stand-ins.sh.
 #
 # What they protect: nothing from the developer's own configuration reaches
 # the images, nothing the developer owns is deleted, and nothing the run
@@ -635,6 +636,84 @@ elif [ "$(cat "$l")" != keep ]; then
 	fail 'a file at a fixed path is refused: it was touched' "$output"
 else
 	refused 'a file at a fixed path is refused' "$l" "$output"
+fi
+
+# ── The task-dashboard fixture's stand-ins (frontend/e2e/stand-ins.sh) ──
+#
+# The fixture runs the real collection, which lists this machine's own claude
+# and codex sessions, with summaries on; only its stand-ins may answer them.
+# run-panemux-e2e.sh selects the runtime again before `go run`, and the
+# selection puts the Node SDK's bin — where an npm-installed claude or codex
+# lives — ahead of everything, so the stand-ins are put first after it.
+stand_ins="$work/stand-ins"
+mkdir -p "$stand_ins/launch-bin" "$stand_ins/agent" "$stand_ins/sdk" "$stand_ins/twice"
+for f in launch-bin/claude launch-bin/codex agent/panemux-fixture-agent sdk/claude sdk/codex sdk/node twice/codex; do
+	printf '#!/bin/sh\nexit 1\n' >"$stand_ins/$f"
+	chmod +x "$stand_ins/$f"
+done
+list="$stand_ins/agent:$stand_ins/launch-bin"
+first() { sh -c '. "$1"; shift; e2e_stand_ins_first "$@" && command -v claude codex panemux-fixture-agent' sh "$here/../e2e/stand-ins.sh" "$@"; }
+
+check
+want="$stand_ins/launch-bin/claude
+$stand_ins/launch-bin/codex
+$stand_ins/agent/panemux-fixture-agent"
+# The SDK's bin was put first after the stand-ins, as the selection does.
+if ! output=$(PATH="$stand_ins/sdk:$list:$PATH" first "$list" 2>&1); then
+	fail 'the stand-ins come first again after an SDK put ahead of them' "$output"
+elif [ "$output" != "$want" ]; then
+	fail 'the stand-ins come first again after an SDK put ahead of them' "$output"
+else
+	pass 'the stand-ins come first again after an SDK put ahead of them'
+fi
+
+check
+# The real selection of this checkout, on a PATH holding the stand-ins first.
+if ! output=$(PATH="$list:$PATH" sh -c '
+	panemux_runtime_scripts="$1/scripts"
+	. "$panemux_runtime_scripts/runtime-env.sh"
+	panemux_runtime "$1" >/dev/null || exit 3
+	. "$1/frontend/e2e/stand-ins.sh"
+	e2e_stand_ins_first "$2" && command -v claude codex panemux-fixture-agent
+' sh "$here/../.." "$list" 2>&1); then
+	fail "the stand-ins come first after this checkout's runtime selection" "$output"
+elif [ "$output" != "$want" ]; then
+	fail "the stand-ins come first after this checkout's runtime selection" "$output"
+else
+	pass "the stand-ins come first after this checkout's runtime selection"
+fi
+
+check
+# A stand-in another one shadows is not the one that runs: refused.
+if output=$(first "$stand_ins/twice:$list" 2>&1); then
+	fail 'a stand-in PATH does not resolve to is refused' "$output"
+elif ! printf '%s' "$output" | grep -q "codex resolves to $stand_ins/twice/codex, not the stand-in $stand_ins/launch-bin/codex"; then
+	fail 'a stand-in PATH does not resolve to is refused, naming it' "$output"
+else
+	pass 'a stand-in PATH does not resolve to is refused, naming it'
+fi
+
+check
+if ! output=$(PATH="/usr/bin:/bin" sh -c '. "$1"; e2e_stand_ins_first "" && printf %s "$PATH"' sh "$here/../e2e/stand-ins.sh" 2>&1); then
+	fail 'no stand-ins leave PATH alone' "$output"
+elif [ "$output" != "/usr/bin:/bin" ]; then
+	fail 'no stand-ins leave PATH alone' "$output"
+else
+	pass 'no stand-ins leave PATH alone'
+fi
+
+check
+# run-panemux-e2e.sh puts them first last: after the selection and the build,
+# right before `go run`.
+run_script="$here/../e2e/run-panemux-e2e.sh"
+order=$(grep -n -E '^panemux_runtime |^make build-frontend|^e2e_stand_ins_first |^exec go run' "$run_script" | cut -d: -f2 | cut -c1-20)
+if [ "$order" != "panemux_runtime \"\$pa
+make build-frontend 
+e2e_stand_ins_first 
+exec go run \${E2E_TA" ]; then
+	fail 'run-panemux-e2e.sh puts the stand-ins first right before go run' "$order"
+else
+	pass 'run-panemux-e2e.sh puts the stand-ins first right before go run'
 fi
 
 if [ "$failures" -ne 0 ]; then
