@@ -6,10 +6,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"panemux/internal/agent"
 )
 
-// fixtureSampleCommands is empty without the panemux_fixture_agent tag.
-var fixtureSampleCommands []string
+// fixtureSampleCommands and fixtureSummaryContractSamples are empty without
+// the panemux_fixture_agent tag.
+var (
+	fixtureSampleCommands         []string
+	fixtureSummaryContractSamples map[agent.ID]summaryContractSample
+)
 
 // A shipped build collects, launches and summarizes Claude Code and codex
 // alone (issue #377).

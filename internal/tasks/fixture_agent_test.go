@@ -22,6 +22,12 @@ import (
 
 // fixtureSampleCommands extend taskRuleSampleCommands, so the prefilter
 // contract covers the fixture agent's Task rule too.
+// fixtureSummaryContractSamples give TestSummaryAdapters_Contract the
+// fixture agent's sample.
+var fixtureSummaryContractSamples = map[agent.ID]summaryContractSample{
+	agent.FixtureAgent: {sessionID: fixtureBusy, log: []byte(`{"text":"Fix the test"}` + "\n")},
+}
+
 var fixtureSampleCommands = []string{
 	"panemux-fixture-agent", "/workspace/user/bin/panemux-fixture-agent --session-id=x", "panemux-fixture-agent --print",
 }
@@ -214,10 +220,11 @@ func TestFixtureAgent_TaskActions(t *testing.T) {
 	assert.Equal(t, ReasonSessionInfoMissing, got.Summary.Reason)
 }
 
-func TestFixtureAgent_SummaryAdapterContract(t *testing.T) {
+// The summary contract itself is TestSummaryAdapters_Contract's; this is
+// what the fixture agent's log is.
+func TestFixtureAgent_SummaryLog(t *testing.T) {
 	reg, ok := summaryPlan.lookup(fixtureAgentName)
 	require.True(t, ok)
-	checkSummaryAdapterContract(t, reg, fixtureBusy, []byte(`{"text":"Fix the test"}`+"\n"))
 
 	excerpt, ok, err := reg.source.excerpt([]byte(`{"text":"one"}`+"\n"+`{"text":"two"}`+"\n"), fixtureBusy)
 	require.NoError(t, err)
