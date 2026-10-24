@@ -1110,6 +1110,11 @@ func newFixtureRunnerAt(t *testing.T, claudeBin, historyPath string) *commandcen
 	})
 }
 
+// fixtureAgentTasksFixture is the fixture only the panemux_fixture_agent run
+// writes (TestAPIContractFixtures_FixtureAgent, issue #377): this run's
+// captures cannot hold the fixture agent, which no shipped build registers.
+const fixtureAgentTasksFixture = "tasks-fixture-agent"
+
 // TestAPIContractFixtures captures every fixture and writes it to disk. It is
 // a generator, not an assertion about the previous run's output — see this
 // file's header for why failing on drift would defeat the gate.
@@ -1188,10 +1193,11 @@ func TestAPIContractFixtures_DirectoryHasNoStrayFiles(t *testing.T) {
 	}
 	sort.Strings(found)
 
-	want := make([]string, 0, len(contractFixtures))
+	want := make([]string, 0, len(contractFixtures)+1)
 	for name := range contractFixtures {
 		want = append(want, name)
 	}
+	want = append(want, fixtureAgentTasksFixture)
 	sort.Strings(want)
 
 	assert.Equal(t, want, found,

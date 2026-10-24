@@ -2,7 +2,7 @@
 override SHELL := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/scripts/runtime-shell.sh
 
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks test-install-hooks test-pre-push test-tmpdir-guard test-golangci-lint-cache test-require-pty \
-        test-node-toolchain test-go-toolchain test test-go test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
+        test-node-toolchain test-go-toolchain test test-go test-go-fixture-agent test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
         test-scenarios-check check-scenarios check-docs-links test-docs-links screenshots test-screenshots-check \
         coverage-blocks test-coverage-blocks \
         mutation test-mutation bench \
@@ -53,6 +53,25 @@ test-go-toolchain:
 
 test-go:
 	go test ./... -v -race
+	@$(MAKE) --no-print-directory test-go-fixture-agent
+
+# The fixture agent (issue #377) is registered only in a build with
+# FIXTURE_AGENT_TAG, which no shipped binary has. This run selects the fixture
+# agent's own tests and the registry-wide contract tests, and writes the one
+# contract fixture only it can capture; the tests that pin the shipped agents
+# run untagged above. A package no test of the pattern matches fails the run
+# rather than passing with nothing tested.
+FIXTURE_AGENT_TAG := panemux_fixture_agent
+FIXTURE_AGENT_PKGS := ./internal/agent ./internal/tasks ./internal/server
+FIXTURE_AGENT_RUN := ^Test(FixtureAgent|[A-Za-z]+_MatchTheRegistry$$|CollectPrefilter_CoversEveryTaskRule$$|RegisteredDefinitionsAreValid$$|APIContractFixtures_FixtureAgent$$)
+
+test-go-fixture-agent:
+	@for pkg in $(FIXTURE_AGENT_PKGS); do \
+		list=$$(go test -tags '$(FIXTURE_AGENT_TAG)' -list '$(FIXTURE_AGENT_RUN)' "$$pkg") || exit 1; \
+		n=$$(printf '%s\n' "$$list" | grep -c '^Test' || true); \
+		if [ "$$n" -eq 0 ]; then echo "test-go-fixture-agent: no test in $$pkg matches $(FIXTURE_AGENT_RUN)" >&2; exit 1; fi; \
+	done
+	go test -tags '$(FIXTURE_AGENT_TAG)' -race -v -run '$(FIXTURE_AGENT_RUN)' $(FIXTURE_AGENT_PKGS)
 
 test-frontend:
 	cd frontend && npm test
@@ -476,6 +495,7 @@ lint-go-deps:
 # GOLANGCI_LINT_CACHE is overridden (issue #325).
 lint-go: fmt-check-go lint-go-deps
 	go vet ./...
+	go vet -tags '$(FIXTURE_AGENT_TAG)' ./...
 	cache="$$(sh '$(CURDIR)/scripts/golangci_lint_cache.sh')" && \
 	GOLANGCI_LINT_CACHE="$$cache" '$(GOLANGCI_LINT_BIN)' run ./...
 

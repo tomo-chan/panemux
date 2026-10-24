@@ -94,7 +94,8 @@ func withEmptySections(run collectRun, lines []string) []byte {
 }
 
 func TestFixtureAgent_CollectListsItsRunningSessions(t *testing.T) {
-	raw, err := parseCollectOutput(withEmptySections(collectPlan.full, slices.Concat(fixtureLive(), fixtureStopped)), collectPlan.full)
+	full := withEmptySections(collectPlan.full, slices.Concat(fixtureLive(), fixtureStopped))
+	raw, err := parseCollectOutput(full, collectPlan.full)
 	require.NoError(t, err)
 	tasks := buildTasks("build-box", raw, collectedAt)
 
@@ -129,7 +130,8 @@ func TestFixtureAgent_CollectListsItsRunningSessions(t *testing.T) {
 // The full and the attention collection decide the fixture agent's live
 // tasks from the same live sections.
 func TestFixtureAgent_LiveTasksAreTheSameInTheFullAndTheAttentionCollection(t *testing.T) {
-	fullRaw, err := parseCollectOutput(withEmptySections(collectPlan.full, slices.Concat(fixtureLive(), fixtureStopped)), collectPlan.full)
+	fullOut := withEmptySections(collectPlan.full, slices.Concat(fixtureLive(), fixtureStopped))
+	fullRaw, err := parseCollectOutput(fullOut, collectPlan.full)
 	require.NoError(t, err)
 	attentionRaw, err := parseCollectOutput(withEmptySections(collectPlan.live, fixtureLive()), collectPlan.live)
 	require.NoError(t, err)
@@ -151,7 +153,8 @@ func TestFixtureAgent_LaunchesButDoesNotResume(t *testing.T) {
 	assert.False(t, resumes)
 	assert.Contains(t, launchPlan.script, "panemux-fixture-agent:new)\n")
 	assert.NotContains(t, launchPlan.script, "panemux-fixture-agent:resume)")
-	assert.Equal(t, "panemux-fixture-agent was not found on the host", launchPlan.messages[refusedNoAgent(agent.FixtureAgent)])
+	assert.Equal(t, "panemux-fixture-agent was not found on the host",
+		launchPlan.messages[refusedNoAgent(agent.FixtureAgent)])
 
 	l := launchPlan.launch[agent.FixtureAgent]
 	id, tmuxSession, err := l.newSession(strings.NewReader(strings.Repeat("\x01", 16)))
@@ -199,7 +202,9 @@ func TestFixtureAgent_TaskActions(t *testing.T) {
 	defer svc.Close()
 	collectAndProbe(svc)
 
-	running := Task{Agent: fixtureAgentName, SessionID: fixtureBusy, State: StateBusy, Log: &LogVersion{ModTime: 1, Size: 2}}
+	running := Task{
+		Agent: fixtureAgentName, SessionID: fixtureBusy, State: StateBusy, Log: &LogVersion{ModTime: 1, Size: 2},
+	}
 	assert.Equal(t, TaskActions{Summary: availableAction}, svc.TaskActions(running), "summary, and no resume")
 
 	noSession := Task{Agent: fixtureAgentName, State: StateBusy}
@@ -232,7 +237,8 @@ func TestFixtureAgent_SummaryAdapterContract(t *testing.T) {
 func writeFixtureStub(t *testing.T, answer string) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "panemux-fixture-agent")
-	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s' '"+answer+"'\n"), 0o700)) //nolint:gosec // a test stub
+	script := "#!/bin/sh\ncat >/dev/null\nprintf '%s' '" + answer + "'\n"
+	require.NoError(t, os.WriteFile(bin, []byte(script), 0o700)) //nolint:gosec // a test stub
 	return bin
 }
 
@@ -248,8 +254,8 @@ func TestFixtureAgent_SummaryRunner(t *testing.T) {
 		`{"summary":"  "}`:            "the fixture agent's answer had no summary",
 		`{"remaining":["only this"]}`: "the fixture agent's answer had no summary",
 	} {
-		_, err := fixtureSummaryRunner{bin: writeFixtureStub(t, answer)}.newSummarizer()(ctx, "excerpt")
-		assert.EqualError(t, err, want, answer)
+		_, gotErr := fixtureSummaryRunner{bin: writeFixtureStub(t, answer)}.newSummarizer()(ctx, "excerpt")
+		assert.EqualError(t, gotErr, want, answer)
 	}
 
 	_, err = fixtureSummaryRunner{bin: filepath.Join(t.TempDir(), "panemux-fixture-agent")}.newSummarizer()(ctx, "excerpt")
@@ -258,5 +264,6 @@ func TestFixtureAgent_SummaryRunner(t *testing.T) {
 	assert.EqualError(t, err, errSummaryCLIMissing(agent.FixtureAgent).Error())
 
 	reg, _ := summaryPlan.lookup(fixtureAgentName)
-	assert.Equal(t, fixtureSummaryRunner{bin: "panemux-fixture-agent"}, reg.runner, "production runs the CLI by its literal name")
+	assert.Equal(t, fixtureSummaryRunner{bin: "panemux-fixture-agent"}, reg.runner,
+		"production runs the CLI by its literal name")
 }

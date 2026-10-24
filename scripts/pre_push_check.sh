@@ -16,6 +16,8 @@
 #                       (no -race) on the packages that hold them, never on
 #                       their importers
 #   <pkg>/testdata/...  that package's go vet, golangci-lint and go test
+#   panemux_fixture_agent files  their package's go vet with that tag, and
+#                       make test-go-fixture-agent
 #   frontend/src TS     tsc --noEmit, vitest related on the changed modules
 #   testdata/api-contract  the frontend contract test that parses those fixtures
 #   scripts/<x>.sh      scripts/<x>_test.sh, and the tmpdir guard for any .sh
@@ -122,11 +124,21 @@ is_go_pkg() {
 	return 1
 }
 
+# has_fixture_agent_files <dir> — a Go file in it is built with or without
+# the panemux_fixture_agent tag (issue #377).
+has_fixture_agent_files() {
+	grep -lq '^//go:build.*panemux_fixture_agent' "$1"/*.go 2> /dev/null
+}
+
 add_go_pkg() {
 	is_go_pkg "$1" || return 0
 	add "go-vet ./$1"
 	add "golangci-lint ./$1"
 	add "go-test ./$1"
+	if has_fixture_agent_files "$1"; then
+		add "go-vet-fixture-agent ./$1"
+		add fixture-agent-tests
+	fi
 	[ "$1" = . ] && add build-frontend
 	return 0
 }
@@ -255,6 +267,14 @@ if [ -n "$go_pkgs" ]; then
 	run "golangci-lint run $lint_pkgs" golangci_lint $lint_pkgs
 	# shellcheck disable=SC2086 # one argument per package
 	run "go test $go_pkgs" go test $go_pkgs
+fi
+fixture_vet_pkgs=$(args go-vet-fixture-agent | tr '\n' ' ')
+if [ -n "$fixture_vet_pkgs" ]; then
+	# shellcheck disable=SC2086 # one argument per package
+	run "go vet -tags panemux_fixture_agent $fixture_vet_pkgs" go vet -tags panemux_fixture_agent $fixture_vet_pkgs
+fi
+if grep -qx fixture-agent-tests "$plan.sorted"; then
+	run "make test-go-fixture-agent" make test-go-fixture-agent
 fi
 if grep -qx tsc "$plan.sorted"; then
 	run "tsc --noEmit" sh -c 'cd frontend && npx --no-install tsc --noEmit'

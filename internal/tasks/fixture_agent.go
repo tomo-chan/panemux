@@ -175,13 +175,20 @@ func (c *fixtureCollected) liveTasks(b *taskBuilder) []Task {
 	return tasks
 }
 
+// The statuses the fake CLI writes.
+const (
+	fixtureStatusBusy    = "busy"
+	fixtureStatusWaiting = "waiting"
+	fixtureStatusIdle    = "idle"
+)
+
 func fixtureStatusState(status string) State {
 	switch status {
-	case "busy":
+	case fixtureStatusBusy:
 		return StateBusy
-	case "waiting":
+	case fixtureStatusWaiting:
 		return StateWait
-	case "idle":
+	case fixtureStatusIdle:
 		return StateIdle
 	default:
 		return StateUnknown

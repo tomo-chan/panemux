@@ -95,6 +95,12 @@ jobs:
           set -o pipefail
           go test -v ./... -race 2>&1 | go-junit-report -iocopy -out test-results/go-junit.xml -set-exit-code
 
+      # The fixture agent's tests and the contract fixture only they capture
+      # (issue #377) run in a build with the panemux_fixture_agent tag, which
+      # the step above does not have.
+      - name: Test (Go, fixture agent)
+        run: make test-go-fixture-agent
+
       - name: Test (Frontend)
         run: cd frontend && npm run test:ci
 
