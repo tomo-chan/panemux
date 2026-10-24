@@ -111,8 +111,9 @@ summarizes the excerpt with the agent's own CLI on the panemux host. The common 
 which tasks are summarized, the cache and its reuse by excerpt hash, retries, concurrency, timeouts,
 the saved file and `tasks[].actions.summary` — and never branches on an agent's ID. A task is
 summarized by its own agent's runner, never another's. Each part has a version folded into the
-summary's identity; raising it makes earlier summaries outdated, and a source still at its first
-version (`""`) adds nothing, which kept the saved summaries current across the move to adapters.
+summary's identity; raising it makes earlier summaries outdated. A source at its first version
+(`""`) adds nothing to it. A runner says in its own words when an answer came from a model other than
+the one it asked for, or says nothing.
 
 `board` is implemented by a board adapter per agent, which the root package defines in its own types
 and lists explicitly by ID in `boardAdapters` (`board_adapters.go`), checked against the registry when

@@ -1684,7 +1684,10 @@ Stage F of #348. Agreed on #347:
   limits.
 - **The summarizer versions did not move.** Claude's and Codex's versions are computed from the
   adapters to the same hashes as before, so the summaries saved before (#321) stayed current and
-  nothing was summarized again. An adapter's later change raises its own version.
+  nothing was summarized again: a source at its first version (`""`) adds nothing to the hash. An
+  adapter's later change raises its own version.
+- **The unexpected-model warning is the runner's.** It had been Claude's sentence in the common code,
+  which read wrongly for a runner that asks for no model. Each runner now gives its own line, or none.
 - **A saved summary of an agent without an adapter is kept.** It used to make the whole file unusable
   and moved aside, losing every other agent's summaries. It is now kept unshown and written back
   until the 30-day retention drops it, as #348 keeps unknown agents' records. Logging such entries was
