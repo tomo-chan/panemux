@@ -1026,9 +1026,9 @@ func TestTaskEventSource_ObservesTheCurrentCollector(t *testing.T) {
 
 // collectionSections are the sections internal/tasks's full collection
 // asks every host for (::panemux-tasks v2).
-var collectionSections = []string{
+var collectionSections = append([]string{
 	"claude/state", "codex/open", "codex/permission", "ps", "tmux", "cwd", "env", "claude/transcripts", "codex/rollouts",
-}
+}, fixtureAgentCollectionSections...)
 
 // withAllSections adds, empty and before "::end", every section of the
 // collection a fixture leaves out: a host's output must carry them all, and

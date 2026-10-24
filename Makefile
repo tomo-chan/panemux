@@ -59,17 +59,33 @@ test-go:
 # FIXTURE_AGENT_TAG, which no shipped binary has. This run selects the fixture
 # agent's own tests and the registry-wide contract tests, and writes the one
 # contract fixture only it can capture; the tests that pin the shipped agents
-# run untagged above. A package no test of the pattern matches fails the run
-# rather than passing with nothing tested.
+# run untagged above. Each FIXTURE_AGENT_REQUIRED test (<package>:<test>) must
+# be among those the pattern selects, so a renamed contract test fails the run
+# rather than dropping out of it, and so does a package none of it matches.
 FIXTURE_AGENT_TAG := panemux_fixture_agent
-FIXTURE_AGENT_PKGS := ./internal/agent ./internal/tasks ./internal/server
-FIXTURE_AGENT_RUN := ^Test(FixtureAgent|[A-Za-z]+_MatchTheRegistry$$|CollectPrefilter_CoversEveryTaskRule$$|RegisteredDefinitionsAreValid$$|APIContractFixtures_FixtureAgent$$)
+FIXTURE_AGENT_PKGS := ./internal/agent ./internal/tasks ./internal/api ./internal/server
+FIXTURE_AGENT_RUN := ^Test(FixtureAgent|[A-Za-z]+_MatchTheRegistry$$|SummaryAdapters_Contract$$|CollectPrefilter_CoversEveryTaskRule$$|RegisteredDefinitionsAreValid$$|APIContractFixtures_FixtureAgent$$)
+FIXTURE_AGENT_REQUIRED := \
+	./internal/agent:TestRegisteredDefinitionsAreValid \
+	./internal/tasks:TestCollectAdapters_MatchTheRegistry \
+	./internal/tasks:TestLaunchAdapters_MatchTheRegistry \
+	./internal/tasks:TestSummaryAdapters_MatchTheRegistry \
+	./internal/tasks:TestSummaryAdapters_Contract \
+	./internal/tasks:TestCollectPrefilter_CoversEveryTaskRule \
+	./internal/api:TestFixtureAgent_ResumeIsRefusedAndRunsNothing \
+	./internal/server:TestAPIContractFixtures_FixtureAgent
 
 test-go-fixture-agent:
-	@for pkg in $(FIXTURE_AGENT_PKGS); do \
-		list=$$(go test -tags '$(FIXTURE_AGENT_TAG)' -list '$(FIXTURE_AGENT_RUN)' "$$pkg") || exit 1; \
-		n=$$(printf '%s\n' "$$list" | grep -c '^Test' || true); \
-		if [ "$$n" -eq 0 ]; then echo "test-go-fixture-agent: no test in $$pkg matches $(FIXTURE_AGENT_RUN)" >&2; exit 1; fi; \
+	@listed=$$(for pkg in $(FIXTURE_AGENT_PKGS); do \
+		go test -tags '$(FIXTURE_AGENT_TAG)' -list '$(FIXTURE_AGENT_RUN)' "$$pkg" | sed -n "s|^Test|$$pkg:Test|p" || exit 1; \
+	done) || exit 1; \
+	for pkg in $(FIXTURE_AGENT_PKGS); do \
+		printf '%s\n' "$$listed" | grep -q "^$$pkg:" || \
+			{ echo "test-go-fixture-agent: no test in $$pkg matches $(FIXTURE_AGENT_RUN)" >&2; exit 1; }; \
+	done; \
+	for required in $(FIXTURE_AGENT_REQUIRED); do \
+		printf '%s\n' "$$listed" | grep -qxF "$$required" || \
+			{ echo "test-go-fixture-agent: $$required is not among the tests it runs" >&2; exit 1; }; \
 	done
 	go test -tags '$(FIXTURE_AGENT_TAG)' -race -v -run '$(FIXTURE_AGENT_RUN)' $(FIXTURE_AGENT_PKGS)
 
