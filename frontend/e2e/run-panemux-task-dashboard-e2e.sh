@@ -20,6 +20,15 @@
 # inside-tmux session is simply not created, and task-dashboard.spec.ts skips
 # the tests that need it.
 #
+# The fixture agent (issue #377) is the third agent, registered only in a
+# panemux built with the panemux_fixture_agent tag, which this fixture runs.
+# Its CLI is fixtures/fixture-agent/panemux-fixture-agent, first on PATH; a
+# session of it, waiting for input, is already running outside tmux. Task
+# summaries are on in task-dashboard.yml so its summary is made by that CLI.
+# A summary of any other task is refused by launch-bin's claude and codex,
+# which start nothing: this machine's own codex sessions can be listed, and
+# the real CLIs must never be run for them.
+#
 # bin/start-agent is what the spec types into the local pane: an agent
 # started from a pane's shell inherits that shell's PANEMUX_PANE_ID. The
 # variable is removed from this script's own environment, so a suite run from
@@ -51,11 +60,13 @@ E2E_HOME="${TMPDIR:-/tmp}/panemux-e2e-task-dashboard-home"
 # conversation logs in their directories, hiding the session to resume.
 if command -v pkill >/dev/null 2>&1; then
     pkill -f "$E2E_HOME/fake/claude/sleep" 2>/dev/null || true
+    pkill -f "$E2E_HOME/.panemux-fixture-agent/bin/panemux-fixture-agent" 2>/dev/null || true
 fi
 rm -rf "$E2E_HOME"
 mkdir -p "$E2E_HOME/.claude/sessions" "$E2E_HOME/.claude/projects/-tmp-e2e-stopped" \
     "$E2E_HOME/.claude/projects/-e2e-resumable" "$E2E_HOME/bin" "$E2E_HOME/launch-bin" "$E2E_HOME/fake/claude" \
-    "$E2E_HOME/resumable" "$E2E_HOME/work"
+    "$E2E_HOME/resumable" "$E2E_HOME/work" \
+    "$E2E_HOME/.panemux-fixture-agent/sessions" "$E2E_HOME/.panemux-fixture-agent/logs" "$E2E_HOME/.panemux-fixture-agent/bin"
 export HOME="$E2E_HOME"
 # The tmux task's directory, holding a page its Type in pane popup previews.
 printf '<p>pm385-popup</p>\n' >"$E2E_HOME/work/pm385-popup.html"
@@ -91,6 +102,11 @@ printf '{"cwd":"%s"}\n' "$E2E_HOME/resumable" >"$E2E_HOME/.claude/projects/-e2e-
 ln -s "$(command -v sleep)" "$E2E_HOME/fake/claude/sleep"
 cat >"$E2E_HOME/launch-bin/claude" <<'FAKE'
 #!/bin/sh
+# A summary (-p) is refused, starting nothing: this stand-in only starts
+# sessions.
+case " $* " in
+*" -p "*) echo 'this stand-in does not summarize' >&2; exit 1 ;;
+esac
 sid=
 for arg do
     case $arg in
@@ -104,7 +120,23 @@ printf '{"pid":%s,"sessionId":"%s","cwd":"%s","status":"idle","statusUpdatedAt":
 wait
 FAKE
 chmod +x "$E2E_HOME/launch-bin/claude"
-export PATH="$E2E_HOME/launch-bin:$PATH"
+cat >"$E2E_HOME/launch-bin/codex" <<'FAKE'
+#!/bin/sh
+echo 'this stand-in runs nothing' >&2
+exit 1
+FAKE
+chmod +x "$E2E_HOME/launch-bin/codex"
+
+# The fixture agent's sessions are this link, so ps names them after it.
+ln -s "$(command -v sleep)" "$E2E_HOME/.panemux-fixture-agent/bin/panemux-fixture-agent"
+E2E_FIXTURE_SESSION=7c1e2d3f-4a5b-4c6d-8e7f-8091a2b3c4d5
+"$E2E_HOME/.panemux-fixture-agent/bin/panemux-fixture-agent" 900 >/dev/null 2>&1 &
+printf '{"pid":%s,"sessionId":"%s","cwd":"/tmp","status":"waiting","waitingFor":"approve the plan","statusUpdatedAt":%s}\n' \
+    "$!" "$E2E_FIXTURE_SESSION" "$now_ms" >"$E2E_HOME/.panemux-fixture-agent/sessions/$!.json"
+printf '{"text":"Plan the change."}\n{"text":"Waiting for the plan to be approved."}\n' \
+    >"$E2E_HOME/.panemux-fixture-agent/logs/$E2E_FIXTURE_SESSION.log"
+
+export PATH="$E2E_DIR/fixtures/fixture-agent:$E2E_HOME/launch-bin:$PATH"
 
 if command -v tmux >/dev/null 2>&1; then
     tmux -f /dev/null new-session -d -s e2e-task-dashboard -c "$E2E_HOME/work" "exec '$E2E_HOME/bin/claude' 900"
@@ -112,4 +144,4 @@ if command -v tmux >/dev/null 2>&1; then
 fi
 
 # Keep this wrapper alive so its EXIT trap stops the private tmux server.
-sh "$E2E_DIR/run-panemux-e2e.sh" task-dashboard.yml 4179
+sh "$E2E_DIR/run-panemux-e2e.sh" task-dashboard.yml 4179 panemux_fixture_agent
