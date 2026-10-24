@@ -75,8 +75,9 @@ that pin the shipped agents run untagged. `make lint-go` vets both builds and go
 the tagged files; the pre-push hook vets and tests a package that holds them with the tag. The
 coverage, red-check and mutation gates measure the untagged build alone — the mutation gate leaves
 out, and names, a changed `panemux_fixture_agent` file the default build does not compile — and the Claude Code
-`PostToolUse` hook vets a file's package without the tag. See
-[Adding an agent](agent-registry.md#adding-an-agent).
+`PostToolUse` hook vets a file's package without the tag. The dashboard's unit tests render that
+capture, and the task-dashboard E2E runs panemux built with the tag against a fake CLI for the
+fixture agent. See [Adding an agent](agent-registry/adding-an-agent.md).
 
 ### Local verification execution
 

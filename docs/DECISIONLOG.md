@@ -1705,6 +1705,13 @@ Stage G of #348, first part. Agreed on #377:
   the tag. The Claude Code `PostToolUse` hook was left untagged.
 - **CLI name is the ID.** The launch script and the probe find an agent's CLI by its ID, so the fixture
   agent's ID is its CLI's name; an agent whose CLI is named otherwise is #428.
+- **The UI and the E2E (G2).** The dashboard's unit tests render `tasks-fixture-agent` itself rather
+  than a hand-written response. The E2E reuses the task-dashboard fixture, which runs panemux with the
+  tag and puts a fake CLI from `frontend/e2e/fixtures/fixture-agent/` first on `PATH`; no fixture of
+  its own was added. Summaries are on in that fixture so the fixture agent's is made, which would
+  also summarize the other tasks the real collection lists — among them this machine's own codex
+  sessions — so its `claude` stand-in refuses a summary and a `codex` stand-in refuses everything,
+  and the real CLIs never run.
 
 ### Summary adapters (2026-10-24, issue #347)
 
