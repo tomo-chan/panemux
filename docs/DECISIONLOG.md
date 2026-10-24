@@ -1688,8 +1688,16 @@ Stage G of #348, first part. Agreed on #377:
 - **A selected tagged run.** `make test-go-fixture-agent` runs the fixture agent's tests and the
   registry-wide contract tests rather than whole packages: many tests pin the shipped agents' set,
   sections and probe answers, and making each of them depend on the tag would weaken what they pin
-  about the shipped build. A package the pattern matches no test in fails the run, so a renamed test
-  cannot leave it passing empty. Its one fixture, `tasks-fixture-agent`, is written by that run alone.
+  about the shipped build. The Makefile names the contract tests the run must hold
+  (`FIXTURE_AGENT_REQUIRED`), and the run fails when one of them is not among those its pattern
+  selects, or when a package matches none: a per-package check alone let a renamed contract test drop
+  out while the package's own fixture-agent tests kept it green (review on #429). Its one fixture,
+  `tasks-fixture-agent`, is written by that run alone.
+- **Mutation measures the default build.** gremlins mutates every Go file whatever its build
+  constraints but runs the tests in the default build, so each mutant in a tagged file came back
+  NOT COVERED and the gate failed for deciding nothing. `scripts/mutation.sh` leaves out a changed file
+  the default build does not compile (`go list -e`'s `IgnoredGoFiles`) and names it. A second
+  gremlins run with the tag was rejected: the tagged build fails the tests that pin the shipped agents.
 - **Lint reaches the tagged files.** golangci-lint, gosec included, reads them through `build-tags`,
   `make lint-go` vets both builds, and the pre-push hook vets and tests a package holding them with
   the tag. The Claude Code `PostToolUse` hook was left untagged.
