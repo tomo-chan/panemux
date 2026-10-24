@@ -129,7 +129,7 @@ as for `make test-e2e` when the installed Chromium is not the one Playwright exp
 - The task-dashboard E2E fixture never reads the developer's own agent sessions. The collection it
   runs is the real one, so its `ps` and `lsof` are stand-ins (`frontend/e2e/fixtures/process-isolation/`).
   They answer only for processes that descend from the fixture's start-up script or its private tmux
-  server. A `claude` process detached from the fixture, with a state file, stands in for a developer's
+  server, and only the argument shapes panemux passes. Any other shape is refused, with no output. A `claude` process detached from the fixture, with a state file, stands in for a developer's
   session, and the spec checks that it is not listed. The fixture's `claude` and `codex` stand-ins run
   nothing, so no real CLI is ever started. All the stand-ins are put first on `PATH` right before
   panemux starts (`frontend/e2e/stand-ins.sh`), and the run stops when one of them is not what
