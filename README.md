@@ -135,7 +135,7 @@ Common uses:
 - **Cmd/Ctrl+Shift+S** switches between the dashboard and the workspaces, even while a terminal has focus. Change the letter with `display.task_dashboard_shortcut` in `config.yaml` (one letter; `K` and `B` are taken).
 - The **← Tasks** button counts the sessions waiting for input as of the last time the dashboard was shown. The dashboard collects only while it is on screen, every 10 seconds.
 - A session running inside `tmux` can be opened: **Open** adds a `tmux` (or `ssh_tmux`) pane attached to its tmux session to the current workspace, and **Go to pane** jumps to a pane already attached to it. A session running outside tmux, or stopped, cannot be opened in a pane.
-- Each SSH host gets one connection of its own for the dashboard, separate from its panes. An unreachable host shows its error and a **Reconnect** button without hiding the other hosts.
+- Each SSH host gets one command connection shared by both boards, separate from its panes. An unreachable host shows its error and a **Reconnect** button without hiding the other hosts.
 - A card links the repository, branch and pull request of the task's directory, the issues that pull request closes (needs `gh` 2.72.0 or later), and references such as `JIRA-123` in the branch name or pull request title. References are set up in `config.yaml` under `task_dashboard.autolinks`, in the same shape as a GitHub repository's autolink references: `key_prefix: JIRA-` with `url_template: https://jira.example.com/JIRA-<num>` links `JIRA-123` to `https://jira.example.com/JIRA-123`. The tracker itself is never queried.
 - Claude Code sessions are read from the files Claude Code keeps under `~/.claude` on each host, and codex sessions from `~/.codex` (the session log a running `codex` holds open, and its turn history when `sqlite3` is installed). A codex waiting for command approval shows as working, since codex records nothing for it, unless its permission hook is registered on that host ([Codex permission requests](docs/behavior/tasks.md#codex-permission-requests)). A `codex` started without `--no-daemon` runs its session in codex's shared daemon, which the dashboard shows as a card of its own that cannot be opened in a pane.
 - **New task** starts `claude` or `codex` in a tmux session of its own on the chosen host, and **Resume** restarts a stopped session there. If codex stops at a start-up screen (trusting the directory, a new model), open the task's pane to answer it.
@@ -176,9 +176,15 @@ Full design lives in [docs/agent-board.md](docs/agent-board.md).
 
 ### Prerequisites
 
+Both boards use the panemux host and `ssh_connections` keys. For an SSH pane to join Agent Board,
+its `connection` must match a key exactly. A name found only in `~/.ssh/config` is excluded with a
+startup warning; add a name-only entry to `ssh_connections` to include it. Board execution needs no
+pane on the host. Initially unreachable hosts retry on later polls with the shared 60-second dial
+cooldown; **Reconnect** clears that wait for both boards.
+
 **[agmsg](https://github.com/fujibee/agmsg) must already be installed** on every host whose panes join
 the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux is tested against **agmsg
-1.2.0**; it reads each host's `VERSION` at startup and logs a warning for anything else, without
+1.2.0**; it reads each host's `VERSION` on its first successful probe and logs a warning for anything else, without
 blocking. agmsg promises compatibility only for reading through `scripts/api.sh`, while panemux also
 depends on `send.sh`, `join.sh` and `delivery.sh`, so a different version may work or may misbehave. panemux never installs, updates, or
 manages agmsg; it only detects an existing installation by looking for `scripts/api.sh` under the

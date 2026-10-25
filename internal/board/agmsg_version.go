@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"panemux/internal/host"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -55,19 +56,19 @@ func LocalAgmsgVersion(agmsgPath string) (string, error) {
 // positional parameter rather than interpolated into the script. It always
 // exits 0 and prints nothing when the file is absent, so a missing VERSION
 // is distinguishable from a transport failure (which surfaces as a non-nil
-// error from RunBoardCommand) rather than being conflated with it.
+// error from Runner.Run) rather than being conflated with it.
 const remoteAgmsgVersionProbeScript = `cat "$1" 2>/dev/null || true`
 const remoteAgmsgVersionProbeScriptName = "board-agmsg-version"
 
 // RemoteAgmsgVersion reads agmsg's VERSION from an install root on the host
 // reached through executor. Returns "" when absent, matching
 // LocalAgmsgVersion.
-func RemoteAgmsgVersion(ctx context.Context, executor BoardExecutor, agmsgPath string) (string, error) {
+func RemoteAgmsgVersion(ctx context.Context, executor host.Runner, agmsgPath string) (string, error) {
 	versionPath := agmsgPath + "/" + agmsgVersionFile
 	args := []string{
 		"sh", "-c", remoteAgmsgVersionProbeScript, remoteAgmsgVersionProbeScriptName, versionPath,
 	}
-	out, err := executor.RunBoardCommand(ctx, args)
+	out, err := executor.Run(ctx, execArguments, args...)
 	if err != nil {
 		return "", fmt.Errorf("agmsg: reading remote %s: %w", versionPath, err)
 	}

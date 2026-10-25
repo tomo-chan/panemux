@@ -24,7 +24,7 @@ const hostOperationTimeout = 10 * time.Second
 // (which hosts exist, which AgmsgClient reaches each, which board-enabled
 // pane IDs live on which host) is the caller's job — internal/board does
 // not import internal/config or internal/session, mirroring
-// AgmsgClient/BoardExecutor's own existing dependency direction.
+// AgmsgClient/host.Runner's own existing dependency direction.
 type RelayConfig struct {
 	Clients        map[string]AgmsgClient // keyed by AgmsgClient.HostID()
 	PaneHosts      map[string]string      // board-enabled pane ID -> host (a key into Clients)

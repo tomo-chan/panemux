@@ -2,7 +2,6 @@ package session
 
 import (
 	"bufio"
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -394,9 +393,6 @@ func TestSSHSessionExecMethodsUseRealChannelsAndParseResponses(t *testing.T) {
 	require.NoError(t, err)
 	defer sess.Close()
 
-	out, err := sess.RunBoardCommand(context.Background(), []string{"api.sh", "status"})
-	require.NoError(t, err)
-	assert.Equal(t, "ok\n", string(out))
 	cwd, err := sess.GetCWD()
 	require.NoError(t, err)
 	assert.Equal(t, "/workspace/project", cwd)
@@ -493,9 +489,6 @@ func TestTmuxSSHSessionExecMethodsUseRealChannelsAndParseResponses(t *testing.T)
 	require.NoError(t, err)
 	defer sess.Close()
 
-	out, err := sess.RunBoardCommand(context.Background(), []string{"api.sh", "status"})
-	require.NoError(t, err)
-	assert.Equal(t, "tmux-ok\n", string(out))
 	cwd, err := sess.GetCWD()
 	require.NoError(t, err)
 	assert.Equal(t, "/workspace/tmux-project", cwd)

@@ -131,3 +131,43 @@ func TestDialCommandConnReportsADialFailure(t *testing.T) {
 	_, err := DialCommandConn(SSHConfig{Host: "example.invalid", KeyFile: "relative/key"})
 	require.Error(t, err)
 }
+
+// A shared connection must permit collection and relay to overlap, and cancel
+// only the exec channel that owns the canceled context.
+func TestCommandConnConcurrentExecCancellationIsIsolated(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	client, _ := startSessionTestSSHServer(t, func(command string) testSSHResponse {
+		if command == "slow" {
+			close(started)
+			<-release
+		}
+		return testSSHResponse{stdout: command}
+	})
+	defer close(release)
+	conn := newCommandConn(client, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := conn.Run(ctx, "slow", nil); done <- err }()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("slow exec did not start")
+	}
+	bounded, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	out, err := conn.Run(bounded, "parallel", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "parallel", string(out))
+	cancel()
+	select {
+	case canceledErr := <-done:
+		require.ErrorIs(t, canceledErr, context.Canceled)
+	case <-bounded.Done():
+		t.Fatal("canceled exec did not stop")
+	}
+	require.NoError(t, conn.Ping(bounded))
+	out, err = conn.Run(bounded, "after-cancel", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "after-cancel", string(out))
+}

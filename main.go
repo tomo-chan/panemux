@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"panemux/internal/api"
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
@@ -77,10 +78,12 @@ func main() {
 		log.Fatalf("Failed to start sessions: %v", err)
 	}
 
-	boardCache, boardRelay, boardBootstrap := setupBoard(cfg, manager)
+	handler := api.NewHandler(cfg, manager, nil, nil)
+	boardCache, boardRelay, boardBootstrap := setupBoard(cfg, manager, handler.HostExecution())
+	handler.SetBoard(boardCache, boardRelay)
 	commandRunner := setupCommandCenter(cfg)
 
-	srv := server.New(cfg, manager, boardCache, boardRelay, commandRunner, frontendFS)
+	srv := server.New(cfg, manager, boardCache, boardRelay, commandRunner, frontendFS, handler)
 	addr := "http://" + srv.Addr()
 	log.Printf("Listening on %s", addr)
 

@@ -503,22 +503,22 @@ func TestClose_ClosesOpenAndInFlightConnections(t *testing.T) {
 // host rather than handing back a connection nobody will close.
 func TestCollect_ADialThatFinishesAfterCloseReportsConnecting(t *testing.T) {
 	late := &fakeConn{output: minimalOutput("s")}
+	started := make(chan struct{})
 	dialer := &fakeDialer{conns: []*fakeConn{late}, gate: make(chan struct{})}
 	svc := New(Options{
 		Hosts:       func() []string { return []string{"late"} },
-		Dial:        dialer.dial,
+		Dial:        func(name string) (Conn, error) { close(started); return dialer.dial(name) },
 		RunLocal:    localOutput(minimalOutput("l"), nil),
 		HostTimeout: 5 * time.Second,
 	})
 
 	done := make(chan Snapshot)
 	go func() { done <- svc.Collect(context.Background()) }()
-	require.Eventually(t, func() bool {
-		svc.mu.Lock()
-		defer svc.mu.Unlock()
-		h := svc.hosts["late"]
-		return h != nil && h.dialing != nil
-	}, 2*time.Second, 5*time.Millisecond)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial did not start")
+	}
 
 	svc.Close()
 	close(dialer.gate)

@@ -298,18 +298,22 @@ func TestLaunchAndResume_WhatIsNotKnownToBeMissingIsLeftToTheLaunchScript(t *tes
 // A remote host's probe counts only for the connection it ran over: one
 // from before a reconnect does not refuse a launch.
 func TestCLIMissing_OnlyForTheCurrentConnection(t *testing.T) {
-	svc := New(Options{})
+	current := Conn(&fakeConn{})
+	svc := New(Options{Hosts: func() []string { return []string{"build-box"} },
+		Dial: func(string) (Conn, error) { return current, nil }})
+	_, err := svc.execution.Connect(context.Background(), "build-box")
+	require.NoError(t, err)
 	defer svc.Close()
 	old := &fakeConn{}
 	svc.mu.Lock()
 	svc.probes = map[string]probeEntry{"build-box": {conn: old, found: map[agent.ID]bool{agent.Claude: false}}}
-	svc.hosts = map[string]*hostConn{"build-box": {conn: &fakeConn{}}}
 	svc.mu.Unlock()
 	assert.False(t, svc.cliMissing("build-box", agent.Claude))
 
-	svc.mu.Lock()
-	svc.hosts["build-box"].conn = old
-	svc.mu.Unlock()
+	current = old
+	require.NoError(t, svc.execution.Reconnect("build-box"))
+	_, err = svc.execution.Connect(context.Background(), "build-box")
+	require.NoError(t, err)
 	assert.True(t, svc.cliMissing("build-box", agent.Claude))
 	assert.False(t, svc.cliMissing("build-box", agent.Codex), "an agent the probe did not answer for")
 }

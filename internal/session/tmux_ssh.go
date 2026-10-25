@@ -1,7 +1,6 @@
 package session
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
@@ -256,14 +255,6 @@ func (s *TmuxSSHSession) BoardHostID() string { return s.connectionName }
 
 // PreviewSSHConfig is the connection the session was dialed with.
 func (s *TmuxSSHSession) PreviewSSHConfig() SSHConfig { return s.previewCfg }
-
-// RunBoardCommand runs an agmsg script on the remote host over a new SSH
-// exec channel, matching the pattern GetCWD/InspectGitContext already use.
-func (s *TmuxSSHSession) RunBoardCommand(ctx context.Context, args []string) ([]byte, error) {
-	return runBoardCommand(ctx, func() (sshSessionRunner, error) {
-		return s.client.NewSession()
-	}, args)
-}
 
 // GetCWD runs `tmux display-message` over a new SSH exec channel to get the active pane's CWD.
 func (s *TmuxSSHSession) GetCWD() (string, error) {

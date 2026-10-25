@@ -215,9 +215,7 @@ func NewHandler(
 	h.readDirFn = os.ReadDir
 	h.listLocalDirectoriesFn = h.listLocalDirectories
 	h.listRemoteDirectoriesFn = listRemoteDirectories
-	h.boardBroadcastFn = func(ctx context.Context, to []string, body string) ([]string, error) {
-		return boardRelay.Broadcast(ctx, board.SystemID, to, body)
-	}
+	h.SetBoard(boardCache, boardRelay)
 	h.commandHistoryFn = defaultCommandHistoryFn
 	return h
 }
@@ -1734,4 +1732,12 @@ func (h *Handler) localDirectoryHasChildren(path string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// SetBoard connects the board after host execution is composed, before serving requests.
+func (h *Handler) SetBoard(cache *board.BoardCache, relay *board.Relay) {
+	h.boardCache = cache
+	h.boardBroadcastFn = func(ctx context.Context, to []string, body string) ([]string, error) {
+		return relay.Broadcast(ctx, board.SystemID, to, body)
+	}
 }

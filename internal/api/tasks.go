@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"panemux/internal/config"
+	"panemux/internal/hostexec"
 	"panemux/internal/requestsecurity"
 	"panemux/internal/session"
 	"panemux/internal/taskevents"
@@ -546,3 +547,6 @@ func (h *Handler) lookupTaskGit(ctx context.Context, host, cwd string, withPR bo
 	info.Autolinks = autolinkRefs(h.cfg.TaskDashboard.Autolinks, gitCtx.Branch, prTitle)
 	return info
 }
+
+// HostExecution is the shared execution owner used by both boards.
+func (h *Handler) HostExecution() *hostexec.Pool { return h.tasks.Execution() }

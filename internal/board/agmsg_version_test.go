@@ -46,7 +46,7 @@ type fakeVersionExecutor struct {
 	args []string
 }
 
-func (f *fakeVersionExecutor) RunBoardCommand(_ context.Context, args []string) ([]byte, error) {
+func (f *fakeVersionExecutor) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
 	f.args = args
 	return f.out, f.err
 }

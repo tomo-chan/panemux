@@ -48,9 +48,10 @@ of its conversation (see [Summaries](#summaries)).
   ([`/api/config/ssh-connections`](rest-api.md#apiconfigssh-connections)). A host added there is
   collected from at the next collection; an edited one has its connection dropped and a dial of it
   still in flight discarded, so the next collection dials it with the new details.
-- Each SSH host gets **one** connection for the dashboard, opened with the same dialer panes use
+- Each SSH host gets **one** command connection shared by the task and agent boards, opened with the same dialer panes use
   (ProxyJump, ProxyCommand and `known_hosts` verification included) and reused by every later
-  collection. It is never shared with a pane, and opening or closing panes does not affect it.
+  collection and Agent Board polling or sending. Each operation uses its own exec channel; cancelling
+  one does not cancel another. It is never shared with a pane, and opening or closing panes does not affect it.
 - A connection that fails while in use is dropped and dialed again on the next collection at once,
   which is also how a host restart is handled.
 - A connection that could not be opened is not dialed again by ordinary collections for 60 seconds;

@@ -5,7 +5,8 @@
 
 ### Agent board remote writes
 
-Panemux may invoke only operator-installed agmsg scripts over a pane's existing SSH transport. It
+Panemux may invoke only operator-installed agmsg scripts through the shared host execution port
+(local `sh -s` or the per-host SSH command connection). It
 must never install panemux, agmsg, or persistent helper scripts on a remote host.
 
 Remote commands must satisfy all of these rules:
@@ -25,7 +26,7 @@ CodeQL scan has yet confirmed that the analyzer recognizes the taint break. Trea
 mitigation until verified.
 
 The only fixed probes permitted are those needed to resolve the remote home directory and test for
-agmsg's read script. Variable values must be positional arguments, not embedded in probe text.
+agmsg's read script and read its version marker. Variable values must be positional arguments, not embedded in probe text.
 
 Bootstrap's onboarding text is a PTY write, not an `exec.Command` sink. Shell-escaping rules do not
 apply to that text, but all interpolated identifiers must still pass Agent Board validation so the

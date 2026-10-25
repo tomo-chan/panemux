@@ -4,8 +4,10 @@
 
 ## Cross-host relay
 
-agmsg is host-local. Panemux connects those independent installations because it already holds the
-SSH connections to configured pane hosts.
+agmsg is host-local. Panemux reaches the local host and every `ssh_connections` key through
+the execution port shared with the task board. Polling needs no pane or live pane session.
+Local panes belong to the panemux host; SSH panes belong to the key matching their `connection`
+exactly. Names found only in `~/.ssh/config` have no board host, and their rows are unknown senders.
 
 During one poll, the relay processes each host/team pair in order:
 

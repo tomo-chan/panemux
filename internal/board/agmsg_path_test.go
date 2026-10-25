@@ -26,7 +26,7 @@ func TestResolveRemoteAgmsgPath_AbsolutePath_ReturnedUnchanged_NoExecutorCall(t 
 	got, err := ResolveRemoteAgmsgPath(context.Background(), exec, "/opt/agmsg")
 	require.NoError(t, err)
 	assert.Equal(t, "/opt/agmsg", got)
-	assert.Empty(t, exec.calls, "an already-absolute path must never trigger a RunBoardCommand call")
+	assert.Empty(t, exec.calls, "an already-absolute path must never trigger a Runner.Run call")
 }
 
 func TestResolveRemoteAgmsgPath_ExecutorError_Wrapped(t *testing.T) {

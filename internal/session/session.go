@@ -1,7 +1,6 @@
 package session
 
 import (
-	"context"
 	"io"
 
 	"panemux/internal/config"
@@ -133,18 +132,6 @@ const boardHostIDLocal = "local"
 // name for ssh/ssh_tmux sessions.
 type BoardHostID interface {
 	BoardHostID() string
-}
-
-// BoardExecutor is implemented by SSH-backed sessions. It runs an agmsg
-// script on the remote host over the session's existing exec channel, as a
-// single shell command string built from args. RunBoardCommand itself
-// single-quote-escapes every element of args (the same discipline
-// internal/session/ssh.go already applies to cwd) before building that
-// string — the caller passes raw, unescaped values, exactly like
-// exec.Command's own argv contract, so there is exactly one place this can
-// be gotten wrong rather than one per call site.
-type BoardExecutor interface {
-	RunBoardCommand(ctx context.Context, args []string) ([]byte, error)
 }
 
 // DirectoryEntry represents a browsable directory in a filesystem tree.

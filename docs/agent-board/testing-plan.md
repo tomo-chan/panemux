@@ -34,7 +34,7 @@ Tests must protect these contracts rather than mirror implementation structure.
 ### Bootstrap and dependency handling
 
 - Once a host path is resolved, a missing installation or failed presence probe never writes to the
-  PTY and remains retryable; startup path-resolution failure requires a panemux restart.
+  PTY and remains retryable; path-resolution failures retry through shared host execution on later polls.
 - Home-path expansion produces absolute local and remote paths before command construction.
 - Detection, debounce, warning suppression, write retry, partial-write abandonment, and
   tmux-only restart persistence follow [Bootstrap flow](bootstrap.md#bootstrap-flow).

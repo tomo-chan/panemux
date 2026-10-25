@@ -17,32 +17,18 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
-	"os/exec"
 	"sort"
-	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"panemux/internal/agent"
-	"panemux/internal/homedir"
+	"panemux/internal/host"
+	"panemux/internal/hostexec"
 	"panemux/internal/session"
 )
 
-// Conn is one open connection to a remote host, as the service needs it.
-// *session.CommandConn is the production implementation.
-type Conn interface {
-	// Run runs cmd, feeding it stdin, and returns its standard output. An
-	// error that has an ExitStatus() method is the command failing on a
-	// healthy connection; any other error means the connection itself can
-	// no longer be trusted.
-	Run(ctx context.Context, cmd string, stdin io.Reader) ([]byte, error)
-	InspectGitContext(ctx context.Context, cwd string) (session.GitContext, error)
-	// Ping reports whether the connection still answers.
-	Ping(ctx context.Context) error
-	Close() error
-}
+// Conn is the command adapter used by the shared execution pool.
+type Conn = hostexec.Conn
 
 // HostStatus is whether a host's tasks could be collected.
 type HostStatus string
@@ -75,6 +61,8 @@ type Snapshot struct {
 
 // Options configures a Service. Only Hosts and Dial are required.
 type Options struct {
+	// Execution supplies the shared pool; nil constructs one from the legacy adapter options.
+	Execution *hostexec.Pool
 	// Hosts returns the ssh_connections keys to collect from, read on every
 	// collection so a connection added or removed in the config is picked up.
 	Hosts func() []string
@@ -116,24 +104,19 @@ type Options struct {
 const (
 	defaultHostTimeout = 15 * time.Second
 	defaultRetryAfter  = time.Minute
-	// pingTimeout bounds the keepalive that decides whether a connection
-	// whose collection ran out of time is still worth keeping.
+	// pingTimeout is the shared execution pool keepalive bound.
 	pingTimeout = 5 * time.Second
-	// localWaitDelay bounds how long the local collection waits for its
-	// output pipe to close after its context ended and its process group
-	// was killed.
-	localWaitDelay = time.Second
 )
 
 // errConnecting reports a host whose connection is still being set up.
-var errConnecting = errors.New("connecting")
+var errConnecting = hostexec.ErrConnecting
 
 // ErrUnknownHost is returned for a host name that is not an ssh_connections key.
-var ErrUnknownHost = errors.New("unknown host")
+var ErrUnknownHost = hostexec.ErrUnknownHost
 
-// Service collects tasks and owns the per-host connections.
+// Service collects tasks through the shared host execution pool.
 type Service struct {
-	hosts map[string]*hostConn
+	execution *hostexec.Pool
 	// resumeLocks makes each (host, session) resume's collection and launch
 	// one step; see Service.Resume.
 	resumeLocks map[string]*resumeLock
@@ -194,13 +177,6 @@ type Service struct {
 	summaryLoaded  bool
 }
 
-type hostConn struct {
-	failedAt time.Time
-	conn     Conn
-	err      error
-	dialing  chan struct{}
-}
-
 // New returns a Service. Close it to release its connections.
 func New(opts Options) *Service {
 	if opts.Logf == nil {
@@ -237,13 +213,18 @@ func New(opts Options) *Service {
 	}
 	summaryCtx, summaryCancel := context.WithCancel(context.Background())
 	probeCtx, probeCancel := context.WithCancel(context.Background())
+	if opts.Execution == nil {
+		opts.Execution = hostexec.New(hostexec.Options{
+			Hosts: opts.Hosts, Dial: opts.Dial, RunLocal: opts.RunLocal, Now: opts.Now, RetryAfter: opts.RetryAfter,
+		})
+	}
 	return &Service{
 		probing:        map[string]bool{},
 		probeCtx:       probeCtx,
 		probeCancel:    probeCancel,
 		probeTimeout:   probeTimeout,
 		opts:           opts,
-		hosts:          map[string]*hostConn{},
+		execution:      opts.Execution,
 		resumeLocks:    map[string]*resumeLock{},
 		dismissedWaits: map[string]bool{},
 		codexHookAuto:  map[string]codexHookAuto{},
@@ -267,24 +248,11 @@ func New(opts Options) *Service {
 // its stdout open, and killing sh alone would leave Output waiting for that
 // probe. WaitDelay bounds the wait for anything that escaped the group.
 func runLocal(ctx context.Context, script string) ([]byte, error) {
-	home, err := homedir.Dir()
-	if err != nil {
-		return nil, fmt.Errorf("resolve home dir for task collection: %w", err)
-	}
-	cmd := exec.CommandContext(ctx, "sh", "-s")
-	cmd.Stdin = strings.NewReader(script)
-	cmd.Env = append(os.Environ(), "HOME="+home)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-	cmd.WaitDelay = localWaitDelay
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("run task collection: %w", err)
-	}
-	return out, nil
+	return hostexec.RunLocal(ctx, script) //nolint:wrapcheck // preserve the task adapter error contract
 }
+
+// Execution is the process-shared connection owner, also used by Agent Board.
+func (s *Service) Execution() *hostexec.Pool { return s.execution }
 
 // Collect collects every host concurrently. A host that fails is reported in
 // its HostResult and does not hold up or hide the others.
@@ -505,34 +473,18 @@ func (s *Service) dropDismissedPermissions(host string, raw *rawSnapshot) {
 // RunLocal, remotely over the host's connection with the literal command
 // `sh -s` and the script on stdin. what names the script in errors.
 func (s *Service) runHostScript(ctx context.Context, name, script, what string) ([]byte, error) {
-	if name == "" {
-		return s.opts.RunLocal(ctx, script)
-	}
-	conn, err := s.conn(ctx, name)
+	out, err := s.execution.Run(ctx, host.Host(name), script)
 	if err != nil {
-		return nil, err
-	}
-	out, err := conn.Run(ctx, "sh -s", strings.NewReader(script))
-	switch {
-	case err == nil:
-		return out, nil
-	case isExitError(err):
-		return nil, fmt.Errorf("run %s on %s: %w", what, name, err)
-	case ctx.Err() != nil:
-		// Out of time is not the same as a broken connection: a host that
-		// is slow to answer, or has a large ~/.claude, would otherwise be
-		// redialed every collection and never produce a result. The
-		// connection is kept as long as it still answers a keepalive.
-		pingCtx, cancel := context.WithTimeout(context.Background(), pingTimeout)
-		defer cancel()
-		if pingErr := conn.Ping(pingCtx); pingErr != nil {
-			s.drop(name, conn)
+		var runErr *hostexec.RunError
+		if errors.As(err, &runErr) {
+			if runErr.TimedOut {
+				return nil, fmt.Errorf("%s on %s did not finish within %s", what, name, s.opts.HostTimeout)
+			}
+			return nil, fmt.Errorf("run %s on %s: %w", what, name, err)
 		}
-		return nil, fmt.Errorf("%s on %s did not finish within %s", what, name, s.opts.HostTimeout)
-	default:
-		s.drop(name, conn)
-		return nil, fmt.Errorf("run %s on %s: %w", what, name, err)
+		return nil, err //nolint:wrapcheck // preserve connection setup errors
 	}
+	return out, nil
 }
 
 // InspectGitContext resolves Git metadata for cwd on a remote host over the
@@ -551,14 +503,7 @@ func (s *Service) InspectGitContext(ctx context.Context, host, cwd string) (sess
 }
 
 // openConn is the host's open connection, or nil. It never dials.
-func (s *Service) openConn(host string) Conn {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if h := s.hosts[host]; h != nil {
-		return h.conn
-	}
-	return nil
-}
+func (s *Service) openConn(name string) Conn { return s.execution.Current(name) }
 
 // Reconnect discards a host's connection and any remembered failure, so the
 // next collection dials it straight away. A dial still in flight is
@@ -566,30 +511,7 @@ func (s *Service) openConn(host string) Conn {
 // replace — the host was edited while it showed connecting — so its failure
 // is not remembered and its connection is closed when it arrives.
 func (s *Service) Reconnect(name string) error {
-	known := false
-	for _, candidate := range s.hostNames() {
-		if candidate == name {
-			known = true
-			break
-		}
-	}
-	if !known {
-		return fmt.Errorf("%w: %q", ErrUnknownHost, name)
-	}
-
-	s.mu.Lock()
-	var stale Conn
-	if h := s.hosts[name]; h != nil {
-		stale = h.conn
-		// A fresh entry rather than clearing this one: dial() only keeps
-		// its result while the entry it was started for is still the host's.
-		delete(s.hosts, name)
-	}
-	s.mu.Unlock()
-	if stale != nil {
-		_ = stale.Close()
-	}
-	return nil
+	return s.execution.Reconnect(name) //nolint:wrapcheck // transparent shared pool operation
 }
 
 // Close closes every connection and stops the summaries in flight. A dial
@@ -599,99 +521,9 @@ func (s *Service) Close() {
 	s.probeCancel()
 	s.mu.Lock()
 	s.closed = true
-	var conns []Conn
-	for name, h := range s.hosts {
-		if h.conn != nil {
-			conns = append(conns, h.conn)
-		}
-		delete(s.hosts, name)
-	}
 	s.mu.Unlock()
-	for _, conn := range conns {
-		_ = conn.Close()
-	}
+	s.execution.Close()
 	s.probeRuns.Wait()
-}
-
-// conn returns the host's open connection, dialing one if there is none.
-// It waits for the dial only as long as ctx allows.
-func (s *Service) conn(ctx context.Context, name string) (Conn, error) {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil, errors.New("task collection is closed")
-	}
-	h := s.hosts[name]
-	if h == nil {
-		h = &hostConn{}
-		s.hosts[name] = h
-	}
-	if h.conn != nil {
-		conn := h.conn
-		s.mu.Unlock()
-		return conn, nil
-	}
-	if h.dialing == nil {
-		if h.err != nil && s.opts.Now().Sub(h.failedAt) < s.opts.RetryAfter {
-			err := h.err
-			s.mu.Unlock()
-			return nil, err
-		}
-		h.dialing = make(chan struct{})
-		go s.dial(name, h, h.dialing)
-	}
-	done := h.dialing
-	s.mu.Unlock()
-
-	select {
-	case <-done:
-	case <-ctx.Done():
-		return nil, errConnecting
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if h.conn != nil {
-		return h.conn, nil
-	}
-	if h.err != nil {
-		return nil, h.err
-	}
-	// Closed or reconnected while this dial was in flight.
-	return nil, errConnecting
-}
-
-func (s *Service) dial(name string, h *hostConn, done chan struct{}) {
-	conn, err := s.opts.Dial(name)
-
-	s.mu.Lock()
-	h.dialing = nil
-	switch {
-	case s.closed || s.hosts[name] != h:
-		if conn != nil {
-			defer conn.Close() //nolint:errcheck // nobody is left to use it
-		}
-	case err != nil:
-		h.err = fmt.Errorf("connect to %s: %w", name, err)
-		h.failedAt = s.opts.Now()
-	default:
-		h.conn = conn
-		h.err = nil
-	}
-	s.mu.Unlock()
-	close(done)
-}
-
-// drop discards conn after it failed, unless it was already replaced. The
-// next collection dials again at once: a dropped connection (the host
-// rebooted, the network moved) is not a reason to wait.
-func (s *Service) drop(name string, conn Conn) {
-	s.mu.Lock()
-	if h := s.hosts[name]; h != nil && h.conn == conn {
-		h.conn = nil
-	}
-	s.mu.Unlock()
-	_ = conn.Close()
 }
 
 // forgetHostsExcept closes connections to hosts no longer configured.
@@ -721,25 +553,6 @@ func (s *Service) forgetHostsExcept(names []string) {
 			delete(s.collectFailed, name)
 		}
 	}
-	var stale []Conn
-	for name, h := range s.hosts {
-		if keep[name] {
-			continue
-		}
-		if h.conn != nil {
-			stale = append(stale, h.conn)
-		}
-		delete(s.hosts, name)
-	}
 	s.mu.Unlock()
-	for _, conn := range stale {
-		_ = conn.Close()
-	}
+	s.execution.Retain(names)
 }
-
-func isExitError(err error) bool {
-	var exit interface{ ExitStatus() int }
-	return errors.As(err, &exit)
-}
-
-var _ Conn = (*session.CommandConn)(nil)

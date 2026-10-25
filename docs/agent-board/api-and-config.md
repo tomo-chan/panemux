@@ -47,6 +47,11 @@ panes:
 Board enablement is per pane. All enabled panes use the instance-wide team. agmsg must already be
 installed on each participating host; panemux never installs it.
 
+Both boards use the panemux host and `ssh_connections` keys. An SSH pane participates only when
+its `connection` exactly matches a key; resolved hostname, user and port are not compared. A
+`~/.ssh/config`-only pane is warned about at startup and excluded without a validation error.
+Add a name-only `ssh_connections` entry to use its OpenSSH configuration for both boards.
+
 `command_center` is a sibling of `agent_board` because it talks only to panemux's API and can run
 without any board-enabled pane or local agmsg installation. The browser receives independent
 `command_center_enabled` and `agent_board_enabled` flags.
