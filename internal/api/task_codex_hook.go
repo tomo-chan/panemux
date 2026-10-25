@@ -4,7 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"panemux/internal/tasks"
+	"panemux/internal/host"
+	"panemux/internal/hosttools"
 )
 
 // taskCodexHookRequest is the body of POST /api/tasks/codex-hook: the host
@@ -17,7 +18,7 @@ type taskCodexHookRequest struct {
 // hook (issue #396). A host that cannot be checked answers 200 with status
 // "unknown" and the reason; an unknown host name answers 404.
 func (h *Handler) GetTaskCodexHook(w http.ResponseWriter, r *http.Request) {
-	got, err := h.tasks.CodexHook(r.Context(), r.URL.Query().Get("host"))
+	got, err := h.hostTools.Check(r.Context(), hosttools.CodexHookTool, host.Host(r.URL.Query().Get("host")))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -33,9 +34,9 @@ func (h *Handler) PostTaskCodexHook(w http.ResponseWriter, r *http.Request) {
 	if !decodeStrict(w, r, taskRecordBodyLimit, &req) {
 		return
 	}
-	got, err := h.tasks.InstallCodexHook(r.Context(), req.Host)
+	got, err := h.hostTools.Install(r.Context(), hosttools.CodexHookTool, host.Host(req.Host))
 	switch {
-	case errors.Is(err, tasks.ErrUnknownHost):
+	case errors.Is(err, hosttools.ErrUnknownHost):
 		http.Error(w, err.Error(), http.StatusNotFound)
 	case err != nil:
 		http.Error(w, err.Error(), http.StatusBadGateway)
@@ -63,9 +64,9 @@ func (h *Handler) PostTaskCodexHookAutoUpdate(w http.ResponseWriter, r *http.Req
 	if !decodeStrict(w, r, taskRecordBodyLimit, &req) {
 		return
 	}
-	err := h.tasks.SetCodexHookAuto(req.Host, req.Enabled)
+	err := h.hostTools.SetCodexHookAuto(req.Host, req.Enabled)
 	switch {
-	case errors.Is(err, tasks.ErrUnknownHost):
+	case errors.Is(err, hosttools.ErrUnknownHost):
 		http.Error(w, err.Error(), http.StatusNotFound)
 	case err != nil:
 		http.Error(w, err.Error(), http.StatusInternalServerError)

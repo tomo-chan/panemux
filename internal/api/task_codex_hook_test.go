@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -125,4 +126,47 @@ func TestCodexHookAutoUpdateRoute(t *testing.T) {
 	rec = doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"","enabled":true}`)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "codex hook settings file")
+}
+
+func TestCodexHookAutoUpdateFollowsSuccessfulTaskCollections(t *testing.T) {
+	for _, live := range []bool{false, true} {
+		name := "full"
+		if live {
+			name = "live"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, home := codexHookHandler(t, "")
+			installed := doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook", `{"host":""}`)
+			require.Equal(t, http.StatusOK, installed.Code, installed.Body.String())
+			path := filepath.Join(home, ".local", "bin", "panemux-codex-permission-hook.sh")
+			original, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"), 0o600))
+			enabled := doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook/auto-update", `{"host":"","enabled":true}`)
+			require.Equal(t, http.StatusOK, enabled.Code)
+			options := taskServiceOptions(h)
+			options.Hosts = func() []string { return nil }
+			options.RunLocal = func(context.Context, string) ([]byte, error) {
+				return taskCollection("session", "/workspace/user/project"), nil
+			}
+			h.SetTaskService(tasks.New(options))
+			if live {
+				h.tasks.CollectAttention(context.Background())
+			} else {
+				h.tasks.Collect(context.Background())
+			}
+			h.hostTools.Wait()
+			got, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, original, got)
+			// A second successful collection does not repeat the startup check.
+			changed := []byte("#!/bin/sh\nexit 0\n")
+			require.NoError(t, os.WriteFile(path, changed, 0o600))
+			h.tasks.CollectAttention(context.Background())
+			h.hostTools.Wait()
+			got, err = os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, changed, got)
+		})
+	}
 }

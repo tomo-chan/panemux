@@ -35,7 +35,7 @@ func permissionHookInput(sessionID, turnID string) string {
 // runPermissionHook runs the hook as codex would, with home as HOME.
 func runPermissionHook(t *testing.T, home, stdin string) string {
 	t.Helper()
-	cmd := exec.Command("sh", "codex_permission_hook.sh")
+	cmd := exec.Command("sh", "../codexhook/codex_permission_hook.sh")
 	cmd.Env = append(os.Environ(), "HOME="+home)
 	cmd.Stdin = strings.NewReader(stdin)
 	out, err := cmd.Output()

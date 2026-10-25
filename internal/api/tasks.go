@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"panemux/internal/config"
+	"panemux/internal/host"
 	"panemux/internal/hostexec"
 	"panemux/internal/requestsecurity"
 	"panemux/internal/session"
@@ -242,8 +243,8 @@ func taskServiceOptions(h *Handler) tasks.Options {
 			//coverage:exempt a connection needs a reachable SSH server; internal/session tests CommandConn against one
 			return conn, nil
 		},
-		SummaryStore:  tasks.NewSummaryStore(""),
-		CodexHookAuto: tasks.NewCodexHookAutoStore(""),
+		SummaryStore:    tasks.NewSummaryStore(""),
+		AfterCollection: func(target host.Host) { h.hostTools.AfterCollection(target) },
 	}
 }
 
@@ -292,6 +293,7 @@ func (h *Handler) TaskEventSource() taskevents.Source {
 func (h *Handler) Close() {
 	h.boardAttaches.close()
 	h.tasks.Close()
+	h.hostTools.Close()
 	h.execution.Close()
 	h.previewRelays.Close()
 	h.previewHosts.close()

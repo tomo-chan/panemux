@@ -84,9 +84,8 @@ type Options struct {
 	// SummaryStore keeps the summaries across restarts. Without one they
 	// are kept in memory only.
 	SummaryStore *SummaryStore
-	// CodexHookAuto keeps the hosts whose codex hook is updated by itself
-	// (issue #402). Without one no hook is.
-	CodexHookAuto *CodexHookAutoStore
+	// AfterCollection receives a successful collection; consumers own background work.
+	AfterCollection func(host.Host)
 	// summaryPlan replaces the summary adapters checked against the
 	// registry; tests use it to register an agent of their own.
 	summaryPlan *summaryPlanned
@@ -142,12 +141,9 @@ type Service struct {
 	// only: after a restart a request whose turn has finished is not shown
 	// anyway.
 	dismissedWaits map[string]bool
-	// codexHookAuto is, per host, what was done to its codex hook by itself;
-	// guarded by mu.
-	codexHookAuto map[string]codexHookAuto
 	// The task summaries; see summaries.go. summaryMu guards summaries and
 	// summaryTasks. summaryCtx ends when the service is closed; summaryWG
-	// also counts the codex hook checks after start (codex_hook_auto.go).
+	// counts summary work.
 	summaries    map[summaryKey]*summaryEntry
 	summaryTasks map[string]map[summaryKey]summaryTask
 	// summaryPlan is the summary adapters, and summarizers each agent's
@@ -230,7 +226,6 @@ func New(opts Options) *Service {
 		ownsExecution:  ownsExecution,
 		resumeLocks:    map[string]*resumeLock{},
 		dismissedWaits: map[string]bool{},
-		codexHookAuto:  map[string]codexHookAuto{},
 		summaries:      map[summaryKey]*summaryEntry{},
 		summaryTasks:   map[string]map[summaryKey]summaryTask{},
 		summaryPlan:    plan,
@@ -426,7 +421,9 @@ func (s *Service) collectRaw(
 		return result, rawSnapshot{}, time.Time{}, false
 	}
 	s.dropDismissedPermissions(name, &raw)
-	s.checkCodexHookAfterStart(name)
+	if s.opts.AfterCollection != nil {
+		s.opts.AfterCollection(host.Host(name))
+	}
 	result.Status = HostOK
 	result.CollectedAt = &collectedAt
 	return result, raw, collectedAt, true

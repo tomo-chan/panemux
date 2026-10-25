@@ -25,10 +25,12 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"panemux/internal/board"
+	"panemux/internal/codexhook"
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/homedir"
 	"panemux/internal/hostexec"
+	"panemux/internal/hosttools"
 	"panemux/internal/portforward"
 	"panemux/internal/preview"
 	"panemux/internal/session"
@@ -49,6 +51,7 @@ type Handler struct {
 	gitInfoCacheBySession  map[string]gitInfoCacheEntry
 	tasks                  *tasks.Service
 	execution              *hostexec.Pool
+	hostTools              *hosttools.Service
 	taskRecords            *tasks.RecordStore
 	// pendingTaskLabels holds the labels of codex tasks started before
 	// their session IDs are known (issue #264).
@@ -207,6 +210,13 @@ func NewHandler(
 	}
 	options := taskServiceOptions(h)
 	h.execution = hostexec.New(hostexec.Options{Hosts: options.Hosts, Dial: options.Dial})
+	h.hostTools = hosttools.New(hosttools.Options{
+		Hosts: h.taskHostNames,
+		Tools: map[hosttools.ID]hosttools.Tool{
+			hosttools.CodexHookTool: codexhook.New(codexhook.Options{Execution: h.execution}),
+		},
+		CodexHookAuto: hosttools.NewCodexHookAutoStore(""),
+	})
 	h.tasks = newTaskService(h)
 	h.taskRecords = tasks.NewRecordStore("")
 	h.pendingTaskLabels = tasks.NewPendingLabels(func() time.Time { return h.nowFn() }, log.Printf)
