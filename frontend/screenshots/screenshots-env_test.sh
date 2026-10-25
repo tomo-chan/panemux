@@ -1,7 +1,8 @@
 #!/bin/sh
 #
 # Tests for frontend/screenshots/screenshots-env.sh, the staging helpers
-# run-panemux-screenshots.sh boots the screenshot fixture with.
+# run-panemux-screenshots.sh boots the screenshot fixture with, and for the
+# E2E fixtures' helpers in frontend/e2e/: tmux-env.sh and stand-ins.sh.
 #
 # What they protect: nothing from the developer's own configuration reaches
 # the images, nothing the developer owns is deleted, and nothing the run
@@ -635,6 +636,223 @@ elif [ "$(cat "$l")" != keep ]; then
 	fail 'a file at a fixed path is refused: it was touched' "$output"
 else
 	refused 'a file at a fixed path is refused' "$l" "$output"
+fi
+
+# ── The task-dashboard fixture's stand-ins (frontend/e2e/stand-ins.sh) ──
+#
+# The fixture runs the real collection, which lists this machine's own claude
+# and codex sessions, with summaries on; only its stand-ins may answer them.
+# run-panemux-e2e.sh selects the runtime again before `go run`, and the
+# selection puts the Node SDK's bin — where an npm-installed claude or codex
+# lives — ahead of everything, so the stand-ins are put first after it.
+# Each name is resolved alone: dash, Linux's sh, prints only the first of
+# several names given to one `command -v`.
+stand_ins="$work/stand-ins"
+mkdir -p "$stand_ins/launch-bin" "$stand_ins/agent" "$stand_ins/sdk" "$stand_ins/twice"
+for f in launch-bin/claude launch-bin/codex agent/panemux-fixture-agent sdk/claude sdk/codex sdk/node twice/codex; do
+	printf '#!/bin/sh\nexit 1\n' >"$stand_ins/$f"
+	chmod +x "$stand_ins/$f"
+done
+list="$stand_ins/agent:$stand_ins/launch-bin"
+first() { sh -c '. "$1"; shift; e2e_stand_ins_first "$@" && for n in claude codex panemux-fixture-agent; do command -v "$n"; done' sh "$here/../e2e/stand-ins.sh" "$@"; }
+
+check
+want="$stand_ins/launch-bin/claude
+$stand_ins/launch-bin/codex
+$stand_ins/agent/panemux-fixture-agent"
+# The SDK's bin was put first after the stand-ins, as the selection does.
+if ! output=$(PATH="$stand_ins/sdk:$list:$PATH" first "$list" 2>&1); then
+	fail 'the stand-ins come first again after an SDK put ahead of them' "$output"
+elif [ "$output" != "$want" ]; then
+	fail 'the stand-ins come first again after an SDK put ahead of them' "$output"
+else
+	pass 'the stand-ins come first again after an SDK put ahead of them'
+fi
+
+check
+# The real selection of this checkout, on a PATH holding the stand-ins first.
+if ! output=$(PATH="$list:$PATH" sh -c '
+	panemux_runtime_scripts="$1/scripts"
+	. "$panemux_runtime_scripts/runtime-env.sh"
+	panemux_runtime "$1" >/dev/null || exit 3
+	. "$1/frontend/e2e/stand-ins.sh"
+	e2e_stand_ins_first "$2" && for n in claude codex panemux-fixture-agent; do command -v "$n"; done
+' sh "$here/../.." "$list" 2>&1); then
+	fail "the stand-ins come first after this checkout's runtime selection" "$output"
+elif [ "$output" != "$want" ]; then
+	fail "the stand-ins come first after this checkout's runtime selection" "$output"
+else
+	pass "the stand-ins come first after this checkout's runtime selection"
+fi
+
+check
+# A stand-in another one shadows is not the one that runs: refused.
+if output=$(first "$stand_ins/twice:$list" 2>&1); then
+	fail 'a stand-in PATH does not resolve to is refused' "$output"
+elif ! printf '%s' "$output" | grep -q "codex resolves to $stand_ins/twice/codex, not the stand-in $stand_ins/launch-bin/codex"; then
+	fail 'a stand-in PATH does not resolve to is refused, naming it' "$output"
+else
+	pass 'a stand-in PATH does not resolve to is refused, naming it'
+fi
+
+check
+if ! output=$(PATH="/usr/bin:/bin" sh -c '. "$1"; e2e_stand_ins_first "" && printf %s "$PATH"' sh "$here/../e2e/stand-ins.sh" 2>&1); then
+	fail 'no stand-ins leave PATH alone' "$output"
+elif [ "$output" != "/usr/bin:/bin" ]; then
+	fail 'no stand-ins leave PATH alone' "$output"
+else
+	pass 'no stand-ins leave PATH alone'
+fi
+
+check
+# run-panemux-e2e.sh puts them first last: after the selection and the build,
+# right before `go run`.
+run_script="$here/../e2e/run-panemux-e2e.sh"
+order=$(grep -n -E '^panemux_runtime |^make build-frontend|^e2e_stand_ins_first |^exec go run' "$run_script" | cut -d: -f2 | cut -c1-20)
+if [ "$order" != "panemux_runtime \"\$pa
+make build-frontend 
+e2e_stand_ins_first 
+exec go run \${E2E_TA" ]; then
+	fail 'run-panemux-e2e.sh puts the stand-ins first right before go run' "$order"
+else
+	pass 'run-panemux-e2e.sh puts the stand-ins first right before go run'
+fi
+
+# ── The task-dashboard fixture's process isolation ──────────────────────
+#
+# frontend/e2e/fixtures/process-isolation/ps and lsof answer only for the
+# processes that descend from E2E_PROCESS_ROOTS, so the real collection the
+# fixture runs never sees the developer's own claude and codex sessions
+# (review on #430). Here the roots are this test's shell: a child of it is
+# seen, and a process detached from it — as a developer's session is — is
+# not. They need ps, which the Claude Code sandbox denies: they skip there,
+# and fail in CI.
+iso="$here/../e2e/fixtures/process-isolation"
+real_ps=$(command -v ps 2>/dev/null || true)
+iso_skip=
+if [ -z "$real_ps" ] || ! "$real_ps" -A -o pid= >/dev/null 2>&1; then
+	iso_skip='ps cannot run here'
+fi
+if [ -n "$iso_skip" ] && [ -n "${CI:-}" ]; then
+	check
+	fail "process isolation checks cannot run in CI: $iso_skip"
+elif [ -n "$iso_skip" ]; then
+	skip "process isolation checks: $iso_skip"
+else
+	sleep 60 >/dev/null 2>&1 &
+	child=$!
+	detached=$(sh -c 'sleep 60 >/dev/null 2>&1 & echo $!')
+	real_lsof=$(command -v lsof 2>/dev/null || true)
+	iso_ps() { E2E_REAL_PS="$real_ps" E2E_REAL_LSOF="$real_lsof" E2E_PROCESS_ROOTS="${roots-$$}" "$iso/ps" "$@"; }
+
+	check
+	listed=$(iso_ps -U "$(id -u)" -o pid=,ppid=,command= | awk '{ print $1 }')
+	if ! printf '%s\n' "$listed" | grep -qx "$child"; then
+		fail 'ps lists a process that descends from the roots' "$listed"
+	elif printf '%s\n' "$listed" | grep -qx "$detached"; then
+		fail 'ps leaves out a process detached from the roots' "$listed"
+	else
+		pass 'ps lists the descendants of the roots and leaves out a detached process'
+	fi
+
+	check
+	header=$(iso_ps -Ao pid,ppid,command | sed -n 1p)
+	if ! printf '%s' "$header" | grep -q PID; then
+		fail 'ps keeps the header of a listing with one' "$header"
+	else
+		pass 'ps keeps the header of a listing with one'
+	fi
+
+	check
+	if ! out=$(iso_ps -p "$child" -o command=) || [ -z "$out" ]; then
+		fail 'ps -p answers for a descendant' "$out"
+	elif out=$(iso_ps -p "$detached" -o command= 2>&1) || [ -n "$out" ]; then
+		fail 'ps -p answers for a detached process as for one that does not exist' "$out"
+	else
+		pass 'ps -p answers for a descendant, and not for a detached process'
+	fi
+
+	check
+	listed=$(roots='' iso_ps -U "$(id -u)" -o pid=,command= | tr -d ' ')
+	if [ -n "$listed" ]; then
+		fail 'ps lists nothing without roots' "$listed"
+	else
+		pass 'ps lists nothing without roots'
+	fi
+
+	check
+	if out=$(E2E_REAL_PS="$real_ps" E2E_REAL_LSOF="$real_lsof" E2E_PROCESS_ROOTS="$$" "$iso/lsof" -a -p "$detached" -d cwd -Fn 2>&1) || [ -n "$out" ]; then
+		fail 'lsof answers nothing for a detached process' "$out"
+	elif [ -n "$real_lsof" ] && ! out=$(E2E_REAL_PS="$real_ps" E2E_REAL_LSOF="$real_lsof" E2E_PROCESS_ROOTS="$$" "$iso/lsof" -a -p "$child" -d cwd -Fn 2>&1); then
+		fail 'lsof answers for a descendant' "$out"
+	else
+		pass 'lsof answers only for a descendant'
+	fi
+	# Only the shapes panemux passes are answered; any other is refused,
+	# with an error and no output, rather than run unfiltered.
+	iso_lsof() { E2E_REAL_PS="$real_ps" E2E_REAL_LSOF="$real_lsof" E2E_PROCESS_ROOTS="$$" "$iso/lsof" "$@"; }
+	for shape in \
+		"-A -o comm=" "-A -o pid=" "-Ao pid" "-ax" "aux" "-e" "-p$child -o command=" "-p1 -o command=" \
+		"-o command= -p $child" "-p $child,1 -o command=" "-p $child -p 1 -o command=" \
+		"-U $(id -u) -o comm=,pid=" "-U $(id -u) -o pid=,command= -p 1" "-p $child -o command= extra"; do
+		check
+		# shellcheck disable=SC2086 # one argument per word
+		if out=$(iso_ps $shape 2>"$work/iso-err"); then
+			fail "ps refuses the shape: $shape" "$out"
+		elif [ -n "$out" ]; then
+			fail "ps prints nothing for the shape: $shape" "$out"
+		elif ! grep -q 'refused' "$work/iso-err"; then
+			fail "ps says it refused the shape: $shape" "$(cat "$work/iso-err")"
+		else
+			pass "ps refuses the shape: $shape"
+		fi
+	done
+	for shape in \
+		"-a -p $child -p 1 -d cwd -Fn" "-a -p1 -d cwd -Fn" "-a -p $child -d cwd -Fn -p 1" "-p $child,1 -Fn" \
+		"-d cwd -Fn" "-Fn" "-a -p $child -d txt -Fn" "-i" "-p $child -Fn -c codex"; do
+		check
+		# shellcheck disable=SC2086 # one argument per word
+		if out=$(iso_lsof $shape 2>"$work/iso-err"); then
+			fail "lsof refuses the shape: $shape" "$out"
+		elif [ -n "$out" ]; then
+			fail "lsof prints nothing for the shape: $shape" "$out"
+		elif ! grep -q 'refused' "$work/iso-err"; then
+			fail "lsof says it refused the shape: $shape" "$(cat "$work/iso-err")"
+		else
+			pass "lsof refuses the shape: $shape"
+		fi
+	done
+	# Every shape panemux passes for a descendant is answered.
+	for shape in "-U $(id -u) -o pid=,ppid=,command=" "-U $(id -u) -o pid=,command=" "-U $(id -u) -o pid=,etime=,command=" \
+		"-p $child -o command=" "-p $child -o pid=" "-Ao pid,ppid,command"; do
+		check
+		# shellcheck disable=SC2086 # one argument per word
+		if ! out=$(iso_ps $shape 2>&1) || [ -z "$out" ]; then
+			fail "ps answers the shape panemux passes: $shape" "$out"
+		else
+			pass "ps answers the shape panemux passes: $shape"
+		fi
+	done
+	if [ "$(uname -s)" = Darwin ]; then
+		check
+		if ! out=$(iso_ps -E -p "$child" -o command= 2>&1) || [ -z "$out" ]; then
+			fail 'ps answers -E -p <pid> -o command=' "$out"
+		else
+			pass 'ps answers -E -p <pid> -o command='
+		fi
+	fi
+	if [ -n "$real_lsof" ]; then
+		for shape in "-a -p $child -d cwd -Fn" "-a -p $child -Fn" "-p $child -Fn"; do
+			check
+			# shellcheck disable=SC2086 # one argument per word
+			if ! out=$(iso_lsof $shape 2>&1) || [ -z "$out" ]; then
+				fail "lsof answers the shape panemux passes: $shape" "$out"
+			else
+				pass "lsof answers the shape panemux passes: $shape"
+			fi
+		done
+	fi
+	kill "$child" "$detached" 2>/dev/null
 fi
 
 if [ "$failures" -ne 0 ]; then

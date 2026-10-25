@@ -20,7 +20,7 @@ apply, and where to continue. They do not narrate how the model evolved.
 | What does the running product do? | [Behavior specification](behavior.md) |
 | Which security rules constrain a change? | [Security design](security.md) |
 | How should the interface behave and look? | [UI design](ui-design.md) |
-| Which agents are known, and how is one added? | [Agent registry](agent-registry.md) |
+| Which agents are known, and how is one added? | [Agent registry](agent-registry.md), [Adding an agent](agent-registry/adding-an-agent.md) |
 | How does Agent Board work? | [Agent Board](agent-board.md) |
 | What must the test system protect? | [Quality gateway](quality-gateway.md) |
 | How is CI, dependency, and release work performed? | [Maintenance guide](maintenance.md) |

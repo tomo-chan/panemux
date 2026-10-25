@@ -22,3 +22,6 @@ url_open:
 display:
     show_header: true
     show_status_bar: true
+task_dashboard:
+    summary:
+        enabled: true

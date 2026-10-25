@@ -1705,6 +1705,29 @@ Stage G of #348, first part. Agreed on #377:
   the tag. The Claude Code `PostToolUse` hook was left untagged.
 - **CLI name is the ID.** The launch script and the probe find an agent's CLI by its ID, so the fixture
   agent's ID is its CLI's name; an agent whose CLI is named otherwise is #428.
+- **The UI and the E2E (G2).** The dashboard's unit tests render `tasks-fixture-agent` itself rather
+  than a hand-written response. The E2E reuses the task-dashboard fixture, which runs panemux with the
+  tag and puts a fake CLI from `frontend/e2e/fixtures/fixture-agent/` first on `PATH`; no fixture of
+  its own was added. Summaries are on in that fixture so the fixture agent's is made, which would
+  also summarize the other tasks the real collection lists — among them this machine's own codex
+  sessions — so its `claude` stand-in refuses a summary and a `codex` stand-in refuses everything,
+  and the real CLIs never run. The runtime selection `run-panemux-e2e.sh` repeats puts the Node
+  SDK's bin, where npm-installed CLIs live, ahead of everything, so the stand-ins are put first again
+  right before `go run`, and the run stops when one of them is not what `PATH` resolves (review on
+  #430).
+- **The fixture reads only its own processes (review on #430).** The real collection listed the
+  developer's own claude and codex sessions and read their working directories, environments and
+  open rollouts. The fixture's `ps` and `lsof` stand-ins now answer only for processes that descend
+  from its start-up script and its private tmux server, so no production code changed. Two
+  alternatives were rejected:
+  - a production setting that narrows the collection, which would put a test-only branch in the
+    production path;
+  - running the E2E as another user or in a container, which would protect CI but not a local
+    `make test-e2e`.
+
+  A detached `claude` process with a state file is the detector: the spec fails if it is listed.
+  The isolation would stop working if production called `ps` by absolute path, and that detector
+  would then fail.
 
 ### Summary adapters (2026-10-24, issue #347)
 

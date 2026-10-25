@@ -87,7 +87,7 @@ same name beside it, and the index's own document map routes by section name.
 - Behavior and API specification: [docs/behavior.md](docs/behavior.md) → [docs/behavior/](docs/behavior/)
 - UI intent and interaction design: [docs/ui-design.md](docs/ui-design.md)
 - CI and release maintenance: [docs/maintenance.md](docs/maintenance.md)
-- Agent registry, capabilities and session keys: [docs/agent-registry.md](docs/agent-registry.md)
+- Agent registry, capabilities and session keys: [docs/agent-registry.md](docs/agent-registry.md) → [docs/agent-registry/](docs/agent-registry/)
 - Cross-pane Claude messaging design: [docs/agent-board.md](docs/agent-board.md) → [docs/agent-board/](docs/agent-board/)
 - Use-case scenario coverage map: [docs/scenarios.md](docs/scenarios.md)
 - Test quality characteristics and the gate design: [docs/quality-gateway.md](docs/quality-gateway.md) → [docs/quality-gateway/](docs/quality-gateway/)

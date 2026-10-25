@@ -181,30 +181,15 @@ hand ([bootstrap](agent-board/bootstrap.md)).
 
 ## Adding an agent
 
-1. Add its `ID` constant and its `Definition` to `registered()` in `internal/agent/registry.go`.
-   Nothing registers itself: there is no `init()` registration, and that list is the whole
-   registry.
-2. Declare only the capabilities it has, with the rule each one needs.
-3. Run the `internal/agent` tests. `Validate` rejects a malformed or duplicate ID, alias or agmsg
-   type, an alias that collides with another name, an unknown or repeated capability, and a
-   capability whose rule is missing (or a rule whose capability is). The package builds its
-   registry when it loads, so an invalid registration also stops panemux at startup.
-4. `TestRegisteredAgents` pins the registered set and order; update it in the same change.
-5. An agent that declares `collect` needs a collect adapter in `internal/tasks`, added to
-   `collectAdapters`: its sections, its process hints (words the collection's `cwd`/`env` prefilter
-   must find in every process its Task rule lists), and the code that turns its rows into tasks.
-   `TestCollectAdapters_MatchTheRegistry` and `TestCollectPrefilter_CoversEveryTaskRule` check it.
-6. An agent that declares `summary` needs a summary adapter in `internal/tasks`, added to
-   `summaryAdapters` as `{id, source, runner}`. The source's `logScript` must be a fixed script that
-   takes nothing but a session ID its `validSessionID` accepted (and the collected log version),
-   returning `ErrInvalidSummary` for any other ID; `excerpt` reports a log it cannot read at all as an
-   error and one with nothing it understands as not ok (unreadable). The runner keeps the agent's own
-   authentication, settings and tool limits, and returns fixed error messages that quote nothing the
-   CLI printed (`errSummaryCLIMissing` when the CLI is not on `PATH`).
-   `TestSummaryAdapters_MatchTheRegistry` checks the list against the declarations, and the new
-   adapter's own test calls `checkSummaryAdapterContract` with a session ID and a sample of its
-   script's output. The test-only `third` agent in `internal/tasks/summary_adapters_test.go` is the
-   smallest example of a source, a runner and their registration.
+An agent is added by registration alone: its `Definition` in `registered()`
+(`internal/agent/registry.go`), the capabilities it has, and one adapter per declared capability,
+listed by ID in that capability's consumer. Each list is checked against the registry when panemux
+starts and by its contract test, and the API and the dashboard need no change. Its CLI must be named
+like its ID for now ([#428](https://github.com/tomo-chan/panemux/issues/428)).
+[adding-an-agent.md](agent-registry/adding-an-agent.md) has the steps, the table of each
+capability's consumer interface, registration list, contract test and place in the API and the
+dashboard, and the fixture agent — a third agent registered only in a build with the
+`panemux_fixture_agent` tag — as the smallest adapter set and how it is checked end to end.
 
 ## Command Center boundary
 
@@ -216,6 +201,7 @@ Command Center for another agent would be its own extension.
 ## Related documents
 
 - [Architecture](architecture.md) — where `internal/agent` sits.
+- [Adding an agent](agent-registry/adding-an-agent.md) — the steps, the capability table and the fixture agent.
 - [Task dashboard behavior](behavior/tasks.md) — what the task board does with the Task rules.
 - [Agent Board bootstrap](agent-board/bootstrap.md) — what Agent Board does with the Board rules.
 - [Decision log](DECISIONLOG.md#agent-registry) — why the registry has this shape.
