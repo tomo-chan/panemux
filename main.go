@@ -78,6 +78,7 @@ func main() {
 		log.Fatalf("Failed to start sessions: %v", err)
 	}
 
+	//coverage:exempt CLI process boundary; buildServerServices tests the wiring without the OS signal loop
 	srv, boardRelay, boardBootstrap := buildServerServices(cfg, manager)
 	addr := "http://" + srv.Addr()
 	log.Printf("Listening on %s", addr)

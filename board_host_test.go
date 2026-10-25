@@ -290,6 +290,7 @@ func TestHostAgmsgVersionWarningOnce(t *testing.T) {
 				}
 			})
 			client := &hostAgmsgClient{id: "ssh:dev", path: "/opt/agmsg", runner: runner}
+			require.Equal(t, "ssh:dev", client.HostID())
 			for range 2 {
 				_, err := client.Since(context.Background(), "panemux", "", 10)
 				require.NoError(t, err)
@@ -374,4 +375,18 @@ func TestSetupBoardBootstrapUsesSharedRunner(t *testing.T) {
 	watcher.pollOnce(context.Background())
 	require.Len(t, sess.writes, 1)
 	require.Contains(t, string(sess.writes[0]), cfg.AgentBoard.AgmsgPath)
+}
+
+func TestBootstrapWithoutHostRunnerDoesNotWrite(t *testing.T) {
+	sess := &fakeAgentSession{id: "pane-a", detectType: "codex", detectOK: true}
+	manager := session.NewManager()
+	manager.Add(sess)
+	watcher := newBootstrapWatcher(bootstrapWatcherConfig{
+		Manager: manager, PaneHosts: map[string]string{"pane-a": "ssh:dev"},
+		ResolvedPaths: map[string]string{"ssh:dev": "/opt/agmsg"}, Team: "panemux",
+		RunnerForHost: func(string) host.Runner { return nil },
+	})
+	watcher.pollOnce(context.Background())
+	watcher.pollOnce(context.Background())
+	require.Empty(t, sess.writes)
 }
