@@ -71,6 +71,9 @@ Verification column values:
 | C439b | SSH pane uses only an OpenSSH alias | Excluded with a warning naming the name-only `ssh_connections` remedy; matching uses keys, even for a key named local | `auto`: root — `TestBoardPaneHostMatchesOnlyConfiguredName`, `TestBoardExcludedPaneWarnsWithConfigurationRemedy` |
 | C439c | Both boards execute concurrently on one SSH connection | Cancelling one exec leaves the other and the connection usable | `auto`: `internal/session` — `TestCommandConnConcurrentExecCancellationIsIsolated` |
 
+| C439d | An unused SSH host is still connecting | Healthy hosts are polled without waiting for that dial; identical errors are logged on state change | `auto`: root — `TestBoardPendingDialDoesNotDelayHealthyHost`; `internal/board` — `TestPollLogsOnlyWhenFailureStateChanges` |
+| C439e | A configured host key is removed while the boards run | The execution port refuses further commands and dials even if the OpenSSH alias remains | `auto`: `internal/hostexec` — `TestRemovedHostCannotRunOrDialAgain` |
+
 ## D. Read the board
 
 | # | Scenario | Expected | Verification |
@@ -129,7 +132,7 @@ See [agent-board/agmsg-contract.md](agent-board/agmsg-contract.md#agmsg-compatib
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
 | G1 | panemux parses what agmsg really prints | Real captured `api.sh` JSONL parses into rows, status reports and history exactly as the code assumes | `auto`: `internal/board/agmsg_fixture_test.go` against `testdata/agmsg-v1.2.0/` (captured, not hand-written — see its README) |
-| G2 | A message survives the round trip | What `send.sh` wrote comes back out of `api.sh` with team/from/to/body/timestamp intact, through panemux's own `LocalAgmsgClient` | `auto (opt-in)`: `TestAgmsgContract_SendThenSinceRoundTrip` |
+| G2 | A message survives the round trip | What `send.sh` wrote comes back out of `api.sh` with team/from/to/body/timestamp intact, through the shared host execution port and the same agmsg client used in production | `auto (opt-in)`: `TestAgmsgContract_SendThenSinceRoundTrip` |
 | G3 | A body full of shell and SQL metacharacters | Stored and returned byte for byte — no expansion, no quote stripping, no SQL interpretation | `auto (opt-in)`: `TestAgmsgContract_ShellMetacharacterBodyRoundTrips` |
 | G4 | The relay's poll cursor against a real store | A poll with nothing new returns nothing; the next message, and only it, comes back | `auto (opt-in)`: `TestAgmsgContract_SinceCursorAnchorsOnReturnedOrder` — the regression test for the numeric-id cursor bug |
 | G5 | agmsg's message ids | Present and distinct; nothing about their ordering is assumed (today's are UUIDv7, not integers) | `auto (opt-in)`: `TestAgmsgContract_MessageIDsAreOpaque`, plus `TestAgmsgFixture_TeamMessages_IDsAreNotNumeric` in `make check` |

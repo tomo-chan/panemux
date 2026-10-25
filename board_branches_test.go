@@ -274,16 +274,3 @@ func TestPersistHelpers_FailureMidWrite_LogAndGiveUp(t *testing.T) {
 		})
 	}
 }
-
-// ── Host resolution ──────────────────────────────────────────────────────────
-
-// Two panes on the same host are one host to poll, not two.
-func TestDistinctBoardHosts_DeduplicatesAndKeepsEachHostOnce(t *testing.T) {
-	hosts := distinctBoardHosts(map[string]string{
-		"pane-a": "ssh:build-host",
-		"pane-b": "ssh:build-host",
-		"pane-c": boardHostIDLocal,
-	})
-
-	assert.ElementsMatch(t, []string{"ssh:build-host", boardHostIDLocal}, hosts)
-}

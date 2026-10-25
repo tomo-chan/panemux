@@ -3,31 +3,12 @@ package board
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestLocalAgmsgPresent_ScriptsExist_True(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "scripts"), 0750))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "scripts", "api.sh"), []byte("#!/bin/sh\n"), 0600))
-
-	assert.True(t, LocalAgmsgPresent(dir))
-}
-
-func TestLocalAgmsgPresent_ScriptsMissing_False(t *testing.T) {
-	dir := t.TempDir() // exists, but scripts/api.sh does not
-	assert.False(t, LocalAgmsgPresent(dir))
-}
-
-func TestLocalAgmsgPresent_PathDoesNotExist_False(t *testing.T) {
-	assert.False(t, LocalAgmsgPresent(filepath.Join(t.TempDir(), "nonexistent")))
-}
 
 // remoteAgmsgPresenceProbeKey builds the fakeBoardExecutor outputs key for
 // the fixed presence-probe command RemoteAgmsgPresent issues against

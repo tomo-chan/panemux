@@ -78,12 +78,7 @@ func main() {
 		log.Fatalf("Failed to start sessions: %v", err)
 	}
 
-	handler := api.NewHandler(cfg, manager, nil, nil)
-	boardCache, boardRelay, boardBootstrap := setupBoard(cfg, manager, handler.HostExecution())
-	handler.SetBoard(boardCache, boardRelay)
-	commandRunner := setupCommandCenter(cfg)
-
-	srv := server.New(cfg, manager, boardCache, boardRelay, commandRunner, frontendFS, handler)
+	srv, boardRelay, boardBootstrap := buildServerServices(cfg, manager)
 	addr := "http://" + srv.Addr()
 	log.Printf("Listening on %s", addr)
 
@@ -92,6 +87,19 @@ func main() {
 	}
 
 	runServer(srv, manager, boardRelay, boardBootstrap)
+}
+
+// buildServerServices composes the process services before serving requests.
+func buildServerServices(
+	cfg *config.Config, manager *session.Manager,
+) (*server.Server, *board.Relay, *bootstrapWatcher) {
+	handler := api.NewHandler(cfg, manager, nil, nil)
+	boardCache, boardRelay, boardBootstrap := setupBoard(cfg, manager, handler.HostExecution())
+	handler.SetBoard(boardCache, boardRelay)
+	commandRunner := setupCommandCenter(cfg)
+
+	srv := server.New(cfg, manager, boardCache, boardRelay, commandRunner, frontendFS, handler)
+	return srv, boardRelay, boardBootstrap
 }
 
 // parseOptions parses args (os.Args[1:] in production) into cliOptions.

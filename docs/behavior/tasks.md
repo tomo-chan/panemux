@@ -68,7 +68,8 @@ of its conversation (see [Summaries](#summaries)).
   the script on the host stops at that point depends on the host and has not been checked. On the
   panemux host the script runs in a process group of its own, and the whole group — the script and
   every probe it started — is killed when the collection's time is up or the request is abandoned.
-- A host removed from `ssh_connections` has its connection closed on the next collection. Every
+- A host removed from `ssh_connections` is refused by the execution port before another dial or
+  command, even if OpenSSH still knows the name. Its connection is closed on the next collection. Every
   connection is closed when panemux shuts down.
 - One host failing never hides another host's tasks.
 

@@ -89,7 +89,20 @@ func RunLocal(ctx context.Context, script string, args ...string) ([]byte, error
 	return out, nil
 }
 
+// WithoutDialWait starts missing SSH connections but leaves their completion to a later poll.
+// Script execution on an established connection still obeys the supplied context.
+func (s *Pool) WithoutDialWait() host.Executor { return noDialWait{s} }
+
+type noDialWait struct{ pool *Pool }
+
+func (e noDialWait) Run(ctx context.Context, target host.Host, script string, args ...string) ([]byte, error) {
+	return e.pool.run(ctx, target, script, false, args...) //nolint:wrapcheck // transparent execution adapter
+}
+
 func (s *Pool) Run(ctx context.Context, target host.Host, script string, args ...string) ([]byte, error) {
+	return s.run(ctx, target, script, true, args...)
+}
+func (s *Pool) run(ctx context.Context, target host.Host, script string, wait bool, args ...string) ([]byte, error) {
 	name := string(target)
 	if name == "" {
 		if len(args) == 0 && s.opts.RunLocal != nil {
@@ -97,7 +110,7 @@ func (s *Pool) Run(ctx context.Context, target host.Host, script string, args ..
 		}
 		return RunLocal(ctx, script, args...)
 	}
-	conn, err := s.Connect(ctx, name)
+	conn, err := s.connect(ctx, name, wait)
 	if err != nil {
 		return nil, err
 	}
@@ -134,14 +147,7 @@ func (s *Pool) Current(host string) Conn {
 }
 
 func (s *Pool) Reconnect(name string) error {
-	known := false
-	for _, candidate := range s.hostNames() {
-		if candidate == name {
-			known = true
-			break
-		}
-	}
-	if !known {
+	if !s.known(name) {
 		return fmt.Errorf("%w: %q", ErrUnknownHost, name)
 	}
 
@@ -175,11 +181,25 @@ func (s *Pool) Close() {
 		_ = conn.Close()
 	}
 }
+func (s *Pool) known(name string) bool {
+	for _, candidate := range s.hostNames() {
+		if candidate == name {
+			return true
+		}
+	}
+	return false
+}
 func (s *Pool) Connect(ctx context.Context, name string) (Conn, error) {
+	return s.connect(ctx, name, true)
+}
+func (s *Pool) connect(ctx context.Context, name string, wait bool) (Conn, error) {
+	if !s.known(name) {
+		return nil, fmt.Errorf("%w: %q", ErrUnknownHost, name)
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return nil, errors.New("task collection is closed")
+		return nil, errors.New("host execution is closed")
 	}
 	h := s.hosts[name]
 	if h == nil {
@@ -202,6 +222,9 @@ func (s *Pool) Connect(ctx context.Context, name string) (Conn, error) {
 	}
 	done := h.dialing
 	s.mu.Unlock()
+	if !wait {
+		return nil, ErrConnecting
+	}
 
 	select {
 	case <-done:

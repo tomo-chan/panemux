@@ -601,7 +601,7 @@ func TestRemovePaneFromLayout_UnknownPane_ChangesNothing(t *testing.T) {
 // whatever directory panemux happened to be started in, which resolves
 // silently against the wrong file instead of failing where an operator can
 // see it. Leaving the ~/ in place is the diagnosable answer, and it is what
-// Board path resolution uses the shared host execution port.
+// board.go's expandLocalAgmsgPath already documents itself as matching.
 func TestExpandPaths_UnresolvableHomeDirectory_LeavesTildePathsAlone(t *testing.T) {
 	homedir.SetFailingForTest(t, errNoHomeDir)
 

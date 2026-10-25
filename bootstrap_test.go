@@ -94,12 +94,23 @@ func localAgmsgDir(t *testing.T, present bool) string {
 	return dir
 }
 
+func localPresenceRunner() host.Runner {
+	return hostRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		result := "no"
+		if _, err := os.Stat(args[len(args)-1]); err == nil {
+			result = "yes"
+		}
+		return []byte(result), nil
+	})
+}
+
 func newLocalWatcher(manager *session.Manager, agmsgPath, team string, paneModes map[string]string) *bootstrapWatcher {
 	return newBootstrapWatcher(bootstrapWatcherConfig{
 		Manager:       manager,
 		PaneHosts:     map[string]string{"pane-a": boardHostIDLocal},
 		PaneModes:     func() map[string]string { return paneModes },
 		ResolvedPaths: map[string]string{boardHostIDLocal: agmsgPath},
+		RunnerForHost: func(string) host.Runner { return localPresenceRunner() },
 		Team:          team,
 	})
 }
@@ -450,6 +461,7 @@ func TestBootstrapWatcher_PersistSuccessfulBootstrap(t *testing.T) {
 		Manager:       manager,
 		PaneHosts:     map[string]string{"pane-a": boardHostIDLocal},
 		ResolvedPaths: map[string]string{boardHostIDLocal: localAgmsgDir(t, true)},
+		RunnerForHost: func(string) host.Runner { return localPresenceRunner() },
 		Team:          "panemux",
 		Persist:       func(paneIDs []string) { persisted = append(persisted, paneIDs) },
 	})

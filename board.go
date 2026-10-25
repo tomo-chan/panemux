@@ -10,7 +10,6 @@ import (
 	"panemux/internal/host"
 	"panemux/internal/hostexec"
 	"panemux/internal/session"
-	"sort"
 	"sync"
 	"time"
 )
@@ -47,7 +46,7 @@ func setupBoard(
 	if len(paneHosts) > 0 {
 		for _, target := range execution.Names() {
 			id := target.BoardID()
-			runner := host.Bind(execution, target)
+			runner := host.Bind(execution.WithoutDialWait(), target)
 			runners[id] = runner
 			clients[id] = &hostAgmsgClient{id: id, path: cfg.AgentBoard.AgmsgPath, runner: runner}
 		}
@@ -68,11 +67,7 @@ func setupBoard(
 		PaneModes:     func() map[string]string { return currentPaneModes(cfg) },
 		RunnerForHost: func(id string) host.Runner { return runners[id] },
 		ResolvePath: func(ctx context.Context, id string) (string, error) {
-			runner := runners[id]
-			if runner == nil {
-				return "", errors.New("unknown board host")
-			}
-			return resolveHostAgmsgPath(ctx, runner, cfg.AgentBoard.AgmsgPath)
+			return resolveHostAgmsgPath(ctx, runners[id], cfg.AgentBoard.AgmsgPath)
 		}, Team: cfg.AgentBoard.Team, Persist: persistBootstrapState})
 	if path, err := board.DefaultBootstrapStateFilePath(); err == nil {
 		if ids, err := board.LoadBootstrapState(path); err == nil {
@@ -98,18 +93,6 @@ func boardHostForPane(cfg *config.Config, pane *config.PaneConfig) (host.Host, b
 		return host.Host(pane.Connection), ok
 	}
 	return host.Local, true
-}
-func distinctBoardHosts(paneHosts map[string]string) []string {
-	seen := map[string]bool{}
-	for _, h := range paneHosts {
-		seen[h] = true
-	}
-	hosts := make([]string, 0, len(seen))
-	for h := range seen {
-		hosts = append(hosts, h)
-	}
-	sort.Strings(hosts)
-	return hosts
 }
 func resolveHostAgmsgPath(ctx context.Context, runner host.Runner, path string) (string, error) {
 	resolved, err := board.ResolveRemoteAgmsgPath(ctx, runner, path)

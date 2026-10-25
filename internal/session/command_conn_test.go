@@ -134,6 +134,8 @@ func TestDialCommandConnReportsADialFailure(t *testing.T) {
 
 // A shared connection must permit collection and relay to overlap, and cancel
 // only the exec channel that owns the canceled context.
+//
+//efficacy:exempt existing CommandConn concurrency is unchanged; compatibility coverage for the shared transport
 func TestCommandConnConcurrentExecCancellationIsIsolated(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	client, _ := startSessionTestSSHServer(t, func(command string) testSSHResponse {

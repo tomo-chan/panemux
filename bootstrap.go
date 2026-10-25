@@ -417,9 +417,6 @@ func (b *bootstrapWatcher) agmsgPresent(ctx context.Context, paneID, host string
 	}
 	b.clearWarning(paneID, warnKindAgmsgPath)
 
-	if b.runnerForHost == nil {
-		return board.LocalAgmsgPresent(path), true
-	}
 	executor := b.runnerForHost(host)
 	if executor == nil {
 		return false, false

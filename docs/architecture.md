@@ -71,7 +71,9 @@ layout rendering, terminal emulation, interaction state, and presentation.
 - Each terminal pane owns one browser-side terminal instance and WebSocket lifecycle.
 - The backend resolves live Git/PR context from the active pane work directory and caches the
   result for the behavior-defined interval.
-- `internal/hostexec` owns one command connection per SSH host, shared by both boards and separate
+- The API handler owns the shared `internal/hostexec` pool for its process-service lifetime; closing
+  or replacing the task consumer does not close an injected pool. The pool owns one command
+  connection per SSH host, shared by both boards and separate
   from pane sessions. The task dashboard keeps the labels of codex tasks started but not
   yet collected (in memory), and, on the panemux host, the done and
   label records a person set (`~/.config/panemux/tasks.json`) and, while summaries are enabled, the

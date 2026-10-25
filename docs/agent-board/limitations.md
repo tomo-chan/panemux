@@ -64,3 +64,10 @@ range warns and continues.
 - There is one command-center conversation per panemux instance, with no workspace-specific or
   concurrent sessions.
 - Each query starts a new `claude -p` process, so latency includes process startup.
+
+SSH connection establishment starts in the background: board operations return a connecting state
+without waiting for the dial. Later polls retry, so a pane-less unreachable host cannot consume a
+relay pass's timeout before healthy hosts are polled. Repeated identical poll errors are logged only
+when the failure state changes; a successful pass resets that suppression. All configured keys
+remain available to board execution, including hosts without a board pane. Rows still require a
+known pane sender on the source host.

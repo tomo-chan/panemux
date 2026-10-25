@@ -52,6 +52,7 @@ type Relay struct {
 	persist       func([]CursorEntry)
 	cursors       map[string]string // host -> agmsg-native cursor id (opaque; see filterRowsAfter)
 	team          string
+	lastPollError string
 	limit         int
 	backfillLimit int
 	opTimeout     time.Duration
@@ -296,7 +297,16 @@ func (r *Relay) runLoop(ctx context.Context, tick <-chan time.Time) {
 }
 
 func (r *Relay) pollLogged(ctx context.Context) {
-	if err := r.Poll(ctx); err != nil {
+	err := r.Poll(ctx)
+	state := ""
+	if err != nil {
+		state = err.Error()
+	}
+	r.mu.Lock()
+	changed := state != r.lastPollError
+	r.lastPollError = state
+	r.mu.Unlock()
+	if changed && err != nil {
 		log.Printf("agent board relay: poll error: %v", err)
 	}
 }

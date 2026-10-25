@@ -3,42 +3,11 @@ package board
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func writeVersionFile(t *testing.T, dir, contents string) {
-	t.Helper()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "VERSION"), []byte(contents), 0o600))
-}
-
-func TestLocalAgmsgVersion(t *testing.T) {
-	dir := t.TempDir()
-
-	// No VERSION file: not an error, just unknown. An agmsg install without
-	// one must never be treated as broken.
-	got, err := LocalAgmsgVersion(dir)
-	require.NoError(t, err)
-	assert.Empty(t, got)
-
-	writeVersionFile(t, dir, "1.2.0\n")
-	got, err = LocalAgmsgVersion(dir)
-	require.NoError(t, err)
-	assert.Equal(t, "1.2.0", got, "surrounding whitespace must be trimmed")
-}
-
-func TestLocalAgmsgVersionIgnoresJunk(t *testing.T) {
-	dir := t.TempDir()
-	writeVersionFile(t, dir, "   \n\t\n")
-
-	got, err := LocalAgmsgVersion(dir)
-	require.NoError(t, err)
-	assert.Empty(t, got, "a whitespace-only VERSION reads as unknown, not as a version")
-}
 
 type fakeVersionExecutor struct {
 	out  []byte

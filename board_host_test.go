@@ -77,11 +77,16 @@ func TestBoardHostWithoutPanesSharesTaskConnectionAndRecovers(t *testing.T) {
 	cfg := boardEnabledConfig("/opt/agmsg", paneConfig("local-agent", config.PaneAgentBoardConfig{Enabled: boolPtr(true)}))
 	cfg.SSHConnections = map[string]config.SSHConnection{"dev": {}}
 	_, relay, _ := setupBoard(cfg, session.NewManager(), p)
+	_, err := p.Connect(context.Background(), "dev")
+	require.Error(t, err)
 	relay.Poll(context.Background())
 	require.Equal(t, 0, c.reads)
 	require.Equal(t, 1, dials)
 	now = now.Add(time.Minute)
-	relay.Poll(context.Background())
+	require.Eventually(t, func() bool {
+		relay.Poll(context.Background())
+		return c.reads == 1
+	}, time.Second, time.Millisecond)
 	require.Equal(t, 1, c.reads)
 	require.Equal(t, 2, dials)
 	svc := tasks.New(tasks.Options{Execution: p, Hosts: func() []string { return []string{"dev"} }})
@@ -235,4 +240,138 @@ func TestHostPathResolutionUsesLocalRunner(t *testing.T) {
 	path, err := resolveHostAgmsgPath(context.Background(), host.Bind(pool, host.Local), "~/agmsg")
 	require.NoError(t, err)
 	require.Equal(t, home+"/agmsg", path)
+}
+
+func TestBoardPendingDialDoesNotDelayHealthyHost(t *testing.T) {
+	isolatedHome(t)
+	blocked := make(chan struct{})
+	defer close(blocked)
+	live := &boardCommandConn{}
+	pool := hostexec.New(hostexec.Options{
+		Hosts: func() []string { return []string{"a-unused", "b-live"} },
+		Dial: func(name string) (hostexec.Conn, error) {
+			if name == "a-unused" {
+				<-blocked
+				return nil, errors.New("offline")
+			}
+			return live, nil
+		},
+	})
+	defer pool.Close()
+	_, err := pool.Connect(context.Background(), "b-live")
+	require.NoError(t, err)
+	cfg := boardEnabledConfig("/opt/agmsg", paneConfig("local-agent", config.PaneAgentBoardConfig{Enabled: boolPtr(true)}))
+	_, relay, _ := setupBoard(cfg, session.NewManager(), pool)
+	for range 2 {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		started := time.Now()
+		require.Error(t, relay.Poll(ctx))
+		cancel()
+		require.Less(t, time.Since(started), 250*time.Millisecond, "a pending dial must not consume the poll deadline")
+	}
+	require.Equal(t, 2, live.reads)
+}
+
+func TestHostAgmsgVersionWarningOnce(t *testing.T) {
+	for _, version := range []string{board.TestedAgmsgVersion, "0.0.1", ""} {
+		t.Run(version, func(t *testing.T) {
+			logs := captureBoardLog(t)
+			probes := 0
+			runner := hostRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+				joined := strings.Join(args, " ")
+				switch {
+				case strings.Contains(joined, "board-agmsg-presence"):
+					return []byte("yes"), nil
+				case strings.Contains(joined, "board-agmsg-version"):
+					probes++
+					return []byte(version), nil
+				default:
+					return nil, nil
+				}
+			})
+			client := &hostAgmsgClient{id: "ssh:dev", path: "/opt/agmsg", runner: runner}
+			for range 2 {
+				_, err := client.Since(context.Background(), "panemux", "", 10)
+				require.NoError(t, err)
+			}
+			require.Equal(t, 1, probes)
+			warning := board.VersionMismatchWarning("ssh:dev", version)
+			if version == "0.0.1" {
+				require.NotEmpty(t, warning)
+				require.Equal(t, 1, strings.Count(logs.String(), warning))
+			} else {
+				require.Empty(t, logs.String())
+			}
+		})
+	}
+}
+
+func TestTaskServiceBorrowsSharedExecutionLifetime(t *testing.T) {
+	conn := &boardCommandConn{}
+	pool := hostexec.New(hostexec.Options{Hosts: func() []string { return []string{"dev"} },
+		Dial: func(string) (hostexec.Conn, error) { return conn, nil }})
+	defer pool.Close()
+	svc := tasks.New(tasks.Options{Execution: pool})
+	svc.Close()
+	_, err := pool.Run(context.Background(), "dev", "", "--limit")
+	require.NoError(t, err, "closing a consumer must not close the caller-owned executor")
+}
+
+func TestBuildServerServicesWiresSharedHosts(t *testing.T) {
+	isolatedHome(t)
+	cfg := config.Default()
+	srv, relay, watcher := buildServerServices(cfg, session.NewManager())
+	require.NotNil(t, srv)
+	require.NotNil(t, relay)
+	require.NotNil(t, watcher)
+	require.False(t, relay.HasClients())
+	require.NoError(t, srv.Shutdown(context.Background()))
+}
+
+func TestHostAgmsgOperationErrors(t *testing.T) {
+	for _, operation := range []string{"ready", "read", "send"} {
+		t.Run(operation, func(t *testing.T) {
+			sentinel := errors.New("command failed")
+			runner := hostRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+				joined := strings.Join(args, " ")
+				if operation == "ready" {
+					return nil, sentinel
+				}
+				if strings.Contains(joined, "board-agmsg-presence") {
+					return []byte("yes"), nil
+				}
+				if strings.Contains(joined, "board-agmsg-version") {
+					return []byte(board.TestedAgmsgVersion), nil
+				}
+				return nil, sentinel
+			})
+			c := &hostAgmsgClient{id: "ssh:dev", path: "/opt/agmsg", runner: runner}
+			if operation == "read" {
+				_, err := c.Since(context.Background(), "panemux", "", 10)
+				require.ErrorIs(t, err, sentinel)
+				require.ErrorContains(t, err, "read host messages")
+			} else {
+				err := c.Send(context.Background(), "panemux", "pane-a", "pane-b", "body")
+				require.ErrorIs(t, err, sentinel)
+				if operation == "send" {
+					require.ErrorContains(t, err, "send host message")
+				}
+			}
+		})
+	}
+}
+
+func TestSetupBoardBootstrapUsesSharedRunner(t *testing.T) {
+	isolatedHome(t)
+	sess := &fakeAgentSession{id: "pane-a", detectType: "codex", detectOK: true}
+	manager := session.NewManager()
+	manager.Add(sess)
+	cfg := boardEnabledConfig(installAgmsg(t, t.TempDir(), board.TestedAgmsgVersion),
+		paneConfig("pane-a", config.PaneAgentBoardConfig{Enabled: boolPtr(true)}))
+	srv, _, watcher := buildServerServices(cfg, manager)
+	defer func() { require.NoError(t, srv.Shutdown(context.Background())) }()
+	watcher.pollOnce(context.Background())
+	watcher.pollOnce(context.Background())
+	require.Len(t, sess.writes, 1)
+	require.Contains(t, string(sess.writes[0]), cfg.AgentBoard.AgmsgPath)
 }

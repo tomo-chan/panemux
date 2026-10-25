@@ -1173,6 +1173,13 @@ pane on that host. Bootstrap resolves paths and checks presence through the same
 participation instruction remains a pane PTY write. Confirmed absent agmsg remains a relay skip;
 tool installation, global enablement and agmsg adapter consolidation belong to later stages.
 
+The API handler owns the shared pool independently of either board. A task service closes only a
+pool it constructed itself, so replacing a consumer does not tear down the board's connection.
+Board operations start missing connections without waiting for dial completion, retaining polling
+of all configured keys while preventing an unused unreachable key from stalling healthy hosts.
+Repeated identical poll failures are logged on state change. The execution port checks current
+configured membership on every connection lookup, so removing a key cannot fall back to OpenSSH.
+
 Two existing task tests accessed private connection state. Their fixtures/waits now use observable
 connection availability; their assertions and tested behavior are unchanged, as agreed in #439.
 

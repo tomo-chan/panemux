@@ -28,6 +28,7 @@ import (
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/homedir"
+	"panemux/internal/hostexec"
 	"panemux/internal/portforward"
 	"panemux/internal/preview"
 	"panemux/internal/session"
@@ -47,6 +48,7 @@ type Handler struct {
 	boardCache             *board.BoardCache
 	gitInfoCacheBySession  map[string]gitInfoCacheEntry
 	tasks                  *tasks.Service
+	execution              *hostexec.Pool
 	taskRecords            *tasks.RecordStore
 	// pendingTaskLabels holds the labels of codex tasks started before
 	// their session IDs are known (issue #264).
@@ -203,6 +205,8 @@ func NewHandler(
 		previewRelays:         preview.NewRelays(),
 		previewHosts:          newPreviewHosts(),
 	}
+	options := taskServiceOptions(h)
+	h.execution = hostexec.New(hostexec.Options{Hosts: options.Hosts, Dial: options.Dial})
 	h.tasks = newTaskService(h)
 	h.taskRecords = tasks.NewRecordStore("")
 	h.pendingTaskLabels = tasks.NewPendingLabels(func() time.Time { return h.nowFn() }, log.Printf)

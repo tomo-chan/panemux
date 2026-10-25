@@ -174,6 +174,7 @@ type Service struct {
 	summaryMu      sync.Mutex
 	summaryGen     uint64
 	closed         bool
+	ownsExecution  bool
 	summaryLoaded  bool
 }
 
@@ -213,7 +214,8 @@ func New(opts Options) *Service {
 	}
 	summaryCtx, summaryCancel := context.WithCancel(context.Background())
 	probeCtx, probeCancel := context.WithCancel(context.Background())
-	if opts.Execution == nil {
+	ownsExecution := opts.Execution == nil
+	if ownsExecution {
 		opts.Execution = hostexec.New(hostexec.Options{
 			Hosts: opts.Hosts, Dial: opts.Dial, RunLocal: opts.RunLocal, Now: opts.Now, RetryAfter: opts.RetryAfter,
 		})
@@ -225,6 +227,7 @@ func New(opts Options) *Service {
 		probeTimeout:   probeTimeout,
 		opts:           opts,
 		execution:      opts.Execution,
+		ownsExecution:  ownsExecution,
 		resumeLocks:    map[string]*resumeLock{},
 		dismissedWaits: map[string]bool{},
 		codexHookAuto:  map[string]codexHookAuto{},
@@ -250,9 +253,6 @@ func New(opts Options) *Service {
 func runLocal(ctx context.Context, script string) ([]byte, error) {
 	return hostexec.RunLocal(ctx, script) //nolint:wrapcheck // preserve the task adapter error contract
 }
-
-// Execution is the process-shared connection owner, also used by Agent Board.
-func (s *Service) Execution() *hostexec.Pool { return s.execution }
 
 // Collect collects every host concurrently. A host that fails is reported in
 // its HostResult and does not hold up or hide the others.
@@ -514,15 +514,17 @@ func (s *Service) Reconnect(name string) error {
 	return s.execution.Reconnect(name) //nolint:wrapcheck // transparent shared pool operation
 }
 
-// Close closes every connection and stops the summaries in flight. A dial
-// still in flight closes its own connection when it finishes.
+// Close stops probes and summaries, and closes only an execution pool it created.
+// The caller retains ownership of an injected pool shared with Agent Board.
 func (s *Service) Close() {
 	s.summaryCancel()
 	s.probeCancel()
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
-	s.execution.Close()
+	if s.ownsExecution {
+		s.execution.Close()
+	}
 	s.probeRuns.Wait()
 }
 
