@@ -196,32 +196,10 @@ func (s *Pool) connect(ctx context.Context, name string, wait bool) (Conn, error
 	if !s.known(name) {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownHost, name)
 	}
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return nil, errors.New("host execution is closed")
+	conn, h, done, err := s.beginConnect(name)
+	if err != nil || conn != nil {
+		return conn, err
 	}
-	h := s.hosts[name]
-	if h == nil {
-		h = &hostConn{}
-		s.hosts[name] = h
-	}
-	if h.conn != nil {
-		conn := h.conn
-		s.mu.Unlock()
-		return conn, nil
-	}
-	if h.dialing == nil {
-		if h.err != nil && s.opts.Now().Sub(h.failedAt) < s.opts.RetryAfter {
-			err := h.err
-			s.mu.Unlock()
-			return nil, err
-		}
-		h.dialing = make(chan struct{})
-		go s.dial(name, h, h.dialing)
-	}
-	done := h.dialing
-	s.mu.Unlock()
 	if !wait {
 		return nil, ErrConnecting
 	}
@@ -242,6 +220,31 @@ func (s *Pool) connect(ctx context.Context, name string, wait bool) (Conn, error
 	}
 	// Closed or reconnected while this dial was in flight.
 	return nil, ErrConnecting
+}
+
+// beginConnect keeps connection lookup and dial admission in one lock scope.
+func (s *Pool) beginConnect(name string) (Conn, *hostConn, <-chan struct{}, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, nil, nil, errors.New("host execution is closed")
+	}
+	h := s.hosts[name]
+	if h == nil {
+		h = &hostConn{}
+		s.hosts[name] = h
+	}
+	if h.conn != nil {
+		return h.conn, h, nil, nil
+	}
+	if h.dialing == nil {
+		if h.err != nil && s.opts.Now().Sub(h.failedAt) < s.opts.RetryAfter {
+			return nil, h, nil, h.err
+		}
+		h.dialing = make(chan struct{})
+		go s.dial(name, h, h.dialing)
+	}
+	return nil, h, h.dialing, nil
 }
 
 func (s *Pool) dial(name string, h *hostConn, done chan struct{}) {

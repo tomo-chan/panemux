@@ -192,13 +192,13 @@ func TestPersistBootstrapState_UnwritableLocation_DoesNotPanic(t *testing.T) {
 	assert.Error(t, statErr, "the save must actually have failed for this test to mean anything")
 }
 
-// installAgmsg creates the shape LocalAgmsgPresent looks for: an install
+// installAgmsg creates the shape the presence probe looks for: an install
 // root carrying scripts/api.sh. version, when non-empty, is written to the
 // VERSION file agmsg's own installer maintains.
 func installAgmsg(t *testing.T, root, version string) string {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "scripts"), 0o700))
-	// LocalAgmsgPresent only stats this file, so a non-executable stub is
+	// The presence probe only checks this file, so a non-executable stub is
 	// enough — and gosec's G306 wants 0600 or less even on a fixture.
 	require.NoError(t, os.WriteFile(filepath.Join(root, "scripts", "api.sh"), []byte("#!/bin/sh\n"), 0o600))
 	if version != "" {
@@ -207,12 +207,6 @@ func installAgmsg(t *testing.T, root, version string) string {
 	return root
 }
 
-// installExecutableSendScript replaces an installAgmsg tree's send.sh with a
-// stand-in that dumps its own path and argv, NUL-separated, to capturePath.
-// LocalAgmsgClient.Send really execs that file, so this is how a test
-// observes which install a locally-built client is actually rooted at —
-// asserting on HostID() would not: LocalAgmsgClient returns a hardcoded
-// "local" whatever it was constructed with.
 func TestVersionMismatchWarning_DistinguishesMatchFromMismatch(t *testing.T) {
 	assert.Empty(t, board.VersionMismatchWarning("local", board.TestedAgmsgVersion))
 	assert.NotEmpty(t, board.VersionMismatchWarning("local", "0.0.1"))
