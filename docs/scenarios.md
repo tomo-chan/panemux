@@ -63,9 +63,18 @@ Verification column values:
 | C4 | The instruction's content | Names the pane ID as the agmsg `agent_id`, defines what a `summary` is, and never uses a slash-command prefix | `auto`: root — `TestBuildBootstrapInstruction_*` |
 | C5 | Two board panes in one project directory | Each claims its own identity, so neither receives the other's messages | `auto`: root — `TestBuildBootstrapInstruction_ClaimsItsOwnIdentity` (the instruction) plus C6 (the agmsg behavior it relies on) |
 | C6 | agmsg really does need that claim, and honors it | Without a claim, one pane's watcher receives the *other* pane's messages; after `actas-claim.sh` it receives only its own | `auto (opt-in)`: `make test-agmsg-contract AGMSG_PATH=~/.agents/skills/agmsg` — `internal/board/agmsg_contract_test.go`; runs in CI via `.github/workflows/agmsg-contract.yml` |
-| C7 | A remote (SSH) host | Presence is probed over the existing exec channel, and a transport error is distinguished from "absent" | `auto`: root — `TestBootstrapWatcher_RemotePresenceCheck_YesWritesNoDoesNot`, `..._RemotePresenceCheckTransportError_DistinctFromNo` |
+| C7 | A remote (SSH) host | Presence is probed through the shared host execution port, and a transport error is distinguished from "absent" | `auto`: root — `TestBootstrapWatcher_RemotePresenceCheck_YesWritesNoDoesNot`, `..._RemotePresenceCheckTransportError_DistinctFromNo` |
 | C8 | The PTY write fails or is short | A short write is never retried; a clean failure is retried up to the limit | `auto`: root — `TestBootstrapWatcher_ShortWrite_GivesUpImmediately_NeverRetries`, `..._WriteError_RetriedUpToLimitThenGivesUp` |
 | C9 | A pane keeps failing the same way — a tmux server that went away, agmsg still not installed | The warning is logged once per failing streak rather than once per tick, so one broken pane cannot drown out the rest of the log; a failure that returns after a recovery is logged again — including the recovery of a restarted pane, whose new session inherits no suppression — and one kind of warning never suppresses another for the same pane | `auto`: root — `TestCheckPaneLogsADetectionFailureOncePerStreakAndDropsThePane`, `TestCheckPaneWarnsAgainAfterADetectionFailureStreakEnds`, `TestBootstrapWarningsOfDifferentKindsDoNotSuppressEachOther`, `TestClearingOneWarningKindLeavesTheOthersSuppressed`, `TestARestartedPaneWarnsAboutTheSameFailureAgain`, `TestAPaneThatDisappearsDropsItsSuppressedWarnings` |
+
+| C439a | Configured SSH host has no pane and is initially offline | Relay recovers on a later poll and shares the task board connection | `auto`: root — `TestBoardHostWithoutPanesSharesTaskConnectionAndRecovers` |
+| C439b | SSH pane uses only an OpenSSH alias | Excluded with a warning naming the name-only `ssh_connections` remedy; matching uses keys, even for a key named local | `auto`: root — `TestBoardPaneHostMatchesOnlyConfiguredName`, `TestBoardExcludedPaneWarnsWithConfigurationRemedy` |
+| C439c | Both boards execute concurrently on one SSH connection | Cancelling one exec leaves the other and the connection usable | `auto`: `internal/session` — `TestCommandConnConcurrentExecCancellationIsIsolated` |
+
+| C439d | An unused SSH host is still connecting | Healthy hosts are polled without waiting for that dial; identical errors are logged on state change | `auto`: root — `TestBoardPendingDialDoesNotDelayHealthyHost`; `internal/board` — `TestPollLogsOnlyWhenFailureStateChanges` |
+| C439e | A configured host key is removed while the boards run | The execution port refuses further commands and dials even if the OpenSSH alias remains | `auto`: `internal/hostexec` — `TestRemovedHostCannotRunOrDialAgain` |
+
+| C439f | Sending before polling, after reconnect or after connection loss | A send waits for a successful dial within its context; polling still does not wait | `auto`: root — `TestBoardSendWaitsForDialBeforePollAndAfterConnectionLoss`, `TestBoardPendingDialDoesNotDelayHealthyHost` |
 
 ## D. Read the board
 
@@ -125,7 +134,7 @@ See [agent-board/agmsg-contract.md](agent-board/agmsg-contract.md#agmsg-compatib
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
 | G1 | panemux parses what agmsg really prints | Real captured `api.sh` JSONL parses into rows, status reports and history exactly as the code assumes | `auto`: `internal/board/agmsg_fixture_test.go` against `testdata/agmsg-v1.2.0/` (captured, not hand-written — see its README) |
-| G2 | A message survives the round trip | What `send.sh` wrote comes back out of `api.sh` with team/from/to/body/timestamp intact, through panemux's own `LocalAgmsgClient` | `auto (opt-in)`: `TestAgmsgContract_SendThenSinceRoundTrip` |
+| G2 | A message survives the round trip | What `send.sh` wrote comes back out of `api.sh` with team/from/to/body/timestamp intact, through the shared host execution port and the same agmsg client used in production | `auto (opt-in)`: `TestAgmsgContract_SendThenSinceRoundTrip` |
 | G3 | A body full of shell and SQL metacharacters | Stored and returned byte for byte — no expansion, no quote stripping, no SQL interpretation | `auto (opt-in)`: `TestAgmsgContract_ShellMetacharacterBodyRoundTrips` |
 | G4 | The relay's poll cursor against a real store | A poll with nothing new returns nothing; the next message, and only it, comes back | `auto (opt-in)`: `TestAgmsgContract_SinceCursorAnchorsOnReturnedOrder` — the regression test for the numeric-id cursor bug |
 | G5 | agmsg's message ids | Present and distinct; nothing about their ordering is assumed (today's are UUIDv7, not integers) | `auto (opt-in)`: `TestAgmsgContract_MessageIDsAreOpaque`, plus `TestAgmsgFixture_TeamMessages_IDsAreNotNumeric` in `make check` |

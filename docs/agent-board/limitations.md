@@ -6,9 +6,13 @@
 
 ### Availability and recovery
 
-- Host setup is resolved once when panemux starts. A remote host with no reachable board session at
-  that time remains unavailable to relay and bootstrap until panemux restarts, even if SSH later
-  recovers.
+- An unreachable host is retried on later polls through the shared connection pool: failed dials
+  wait 60 seconds, a connection lost during use can reconnect immediately, and the task host menu
+  reconnect discards the shared connection and cooldown. No restart or pane is needed.
+- A confirmed missing agmsg installation is skipped by relay for the process lifetime; bootstrap
+  continues checking presence. Panemux does not install or update agmsg.
+- An SSH pane whose `connection` exists only in `~/.ssh/config` is outside Agent Board. Add a
+  name-only entry to `ssh_connections` to include it; startup warns without rejecting the config.
 - The status/history cache is memory-only. Restart recovery uses bounded backfill and can omit older
   rows outside that window.
 - Broadcast delivery is immediate, but dashboard history is updated only when the relay polls the
@@ -60,3 +64,14 @@ range warns and continues.
 - There is one command-center conversation per panemux instance, with no workspace-specific or
   concurrent sessions.
 - Each query starts a new `claude -p` process, so latency includes process startup.
+
+SSH connection establishment starts in the background: polling and bootstrap return a connecting state
+without waiting for the dial. Later polls retry, so a pane-less unreachable host cannot consume a
+relay pass's timeout before healthy hosts are polled. Repeated identical poll errors are logged only
+when the failure state changes; a successful pass resets that suppression. All configured keys
+remain available to board execution, including hosts without a board pane. Rows still require a
+known pane sender on the source host.
+
+Operator sends wait for a missing SSH connection within the send context, including before the
+first poll and after reconnect or transport loss. Polling and bootstrap continue to use the
+non-waiting runner; all runners share the same connection pool.

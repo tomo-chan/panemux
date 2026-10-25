@@ -24,7 +24,7 @@ const hostOperationTimeout = 10 * time.Second
 // (which hosts exist, which AgmsgClient reaches each, which board-enabled
 // pane IDs live on which host) is the caller's job — internal/board does
 // not import internal/config or internal/session, mirroring
-// AgmsgClient/BoardExecutor's own existing dependency direction.
+// AgmsgClient/host.Runner's own existing dependency direction.
 type RelayConfig struct {
 	Clients        map[string]AgmsgClient // keyed by AgmsgClient.HostID()
 	PaneHosts      map[string]string      // board-enabled pane ID -> host (a key into Clients)
@@ -52,6 +52,7 @@ type Relay struct {
 	persist       func([]CursorEntry)
 	cursors       map[string]string // host -> agmsg-native cursor id (opaque; see filterRowsAfter)
 	team          string
+	lastPollError string
 	limit         int
 	backfillLimit int
 	opTimeout     time.Duration
@@ -296,7 +297,16 @@ func (r *Relay) runLoop(ctx context.Context, tick <-chan time.Time) {
 }
 
 func (r *Relay) pollLogged(ctx context.Context) {
-	if err := r.Poll(ctx); err != nil {
+	err := r.Poll(ctx)
+	state := ""
+	if err != nil {
+		state = err.Error()
+	}
+	r.mu.Lock()
+	changed := state != r.lastPollError
+	r.lastPollError = state
+	r.mu.Unlock()
+	if changed && err != nil {
 		log.Printf("agent board relay: poll error: %v", err)
 	}
 }

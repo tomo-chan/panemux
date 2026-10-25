@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -715,4 +716,18 @@ func TestRelay_RunLoop_PollErrorLoggedNotPanicked(t *testing.T) {
 		cancel()
 		<-done
 	})
+}
+
+func TestPollLogsOnlyWhenFailureStateChanges(t *testing.T) {
+	logs := captureBoardLog(t)
+	client := &fakeAgmsgClient{hostID: "dev", sinceErr: errors.New("offline")}
+	relay := NewRelay(NewBoardCache(), RelayConfig{Clients: map[string]AgmsgClient{"dev": client}})
+	relay.pollLogged(context.Background())
+	relay.pollLogged(context.Background())
+	require.Equal(t, 1, strings.Count(logs.String(), "poll error:"))
+	client.sinceErr = nil
+	relay.pollLogged(context.Background())
+	client.sinceErr = errors.New("offline")
+	relay.pollLogged(context.Background())
+	require.Equal(t, 2, strings.Count(logs.String(), "poll error:"))
 }

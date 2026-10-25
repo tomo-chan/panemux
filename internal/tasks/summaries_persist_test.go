@@ -558,6 +558,7 @@ func TestPersistedSummaries_ASummaryFinishingAfterItsHostLeftIsDropped(t *testin
 	snap := svc.Collect(context.Background())
 	views := svc.Summaries(snap.Tasks)
 	require.Equal(t, SummaryPending, views["ssh:gpu-box:claude:s10"].State)
+	require.Eventually(t, func() bool { return f.summarizer.calls() == 1 }, time.Second, time.Millisecond)
 
 	mu.Lock()
 	hosts = nil

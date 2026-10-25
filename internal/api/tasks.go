@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"panemux/internal/config"
+	"panemux/internal/hostexec"
 	"panemux/internal/requestsecurity"
 	"panemux/internal/session"
 	"panemux/internal/taskevents"
@@ -217,7 +218,9 @@ const taskGitLookupConcurrency = 4
 const taskGitLookupTimeout = 5 * time.Second
 
 func newTaskService(h *Handler) *tasks.Service {
-	return tasks.New(taskServiceOptions(h))
+	options := taskServiceOptions(h)
+	options.Execution = h.execution
+	return tasks.New(options)
 }
 
 // taskServiceOptions is the production collector's configuration: the
@@ -289,6 +292,7 @@ func (h *Handler) TaskEventSource() taskevents.Source {
 func (h *Handler) Close() {
 	h.boardAttaches.close()
 	h.tasks.Close()
+	h.execution.Close()
 	h.previewRelays.Close()
 	h.previewHosts.close()
 }
@@ -546,3 +550,6 @@ func (h *Handler) lookupTaskGit(ctx context.Context, host, cwd string, withPR bo
 	info.Autolinks = autolinkRefs(h.cfg.TaskDashboard.Autolinks, gitCtx.Branch, prTitle)
 	return info
 }
+
+// HostExecution is the shared execution owner used by both boards.
+func (h *Handler) HostExecution() *hostexec.Pool { return h.execution }

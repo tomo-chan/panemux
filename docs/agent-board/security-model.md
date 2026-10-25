@@ -16,6 +16,10 @@
 
 ### Remote execution boundary
 
+Both boards share the host execution port and per-host command connection. Each operation has its
+own exec channel; cancelling one operation closes only that channel, and a healthy connection
+remains available to the other board. Terminal pane connections are separate.
+
 - No caller-controlled argument may reach a remote shell unescaped, including read arguments.
 - `team`, `from`, and `to` use a strict identifier allowlist.
 - Arbitrary message bodies are base64-encoded, checked against the encoded alphabet, passed as a
@@ -38,7 +42,9 @@ host are therefore trusted; Agent Board does not provide end-to-end encryption.
 
 agmsg's `--force` permits arbitrary sender names. The relay accepts:
 
-- a pane sender only on the host that owns that board-enabled pane;
+- a pane sender only on the host that owns that board-enabled pane: the local host for local
+  panes, or the exact `ssh_connections` key named by an SSH pane; a `~/.ssh/config`-only pane has
+  no board host and its rows are rejected as unknown senders;
 - `_system` only when the row matches a recent panemux-originated send in the own-send ledger.
 
 Ledger entries are recorded before sending to cover a fast poll, removed if the send fails, expire

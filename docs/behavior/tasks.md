@@ -48,9 +48,10 @@ of its conversation (see [Summaries](#summaries)).
   ([`/api/config/ssh-connections`](rest-api.md#apiconfigssh-connections)). A host added there is
   collected from at the next collection; an edited one has its connection dropped and a dial of it
   still in flight discarded, so the next collection dials it with the new details.
-- Each SSH host gets **one** connection for the dashboard, opened with the same dialer panes use
+- Each SSH host gets **one** command connection shared by the task and agent boards, opened with the same dialer panes use
   (ProxyJump, ProxyCommand and `known_hosts` verification included) and reused by every later
-  collection. It is never shared with a pane, and opening or closing panes does not affect it.
+  collection and Agent Board polling or sending. Each operation uses its own exec channel; cancelling
+  one does not cancel another. It is never shared with a pane, and opening or closing panes does not affect it.
 - A connection that fails while in use is dropped and dialed again on the next collection at once,
   which is also how a host restart is handled.
 - A connection that could not be opened is not dialed again by ordinary collections for 60 seconds;
@@ -67,7 +68,8 @@ of its conversation (see [Summaries](#summaries)).
   the script on the host stops at that point depends on the host and has not been checked. On the
   panemux host the script runs in a process group of its own, and the whole group — the script and
   every probe it started — is killed when the collection's time is up or the request is abandoned.
-- A host removed from `ssh_connections` has its connection closed on the next collection. Every
+- A host removed from `ssh_connections` is refused by the execution port before another dial or
+  command, even if OpenSSH still knows the name. Its connection is closed on the next collection. Every
   connection is closed when panemux shuts down.
 - One host failing never hides another host's tasks.
 

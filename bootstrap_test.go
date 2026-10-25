@@ -14,14 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/agent"
+	"panemux/internal/host"
 	"panemux/internal/session"
 )
 
-// fakeAgentSession is a session.Session that also implements
-// session.AgentTypeDetector and board.BoardExecutor, standing in for a real
-// LocalSession/SSHSession in bootstrap tests. Detection results and write
-// behavior are set directly on the struct; RunBoardCommand answers from a
-// map the same way fakeBoardExecutor (internal/board) does.
+// fakeAgentSession supplies pane detection/write behavior and an independently
+// injectable host Runner for bootstrap probes.
 type fakeAgentSession struct {
 	detectErr    error
 	writeErr     error
@@ -63,7 +61,7 @@ func (f *fakeAgentSession) DetectInteractiveAgentType() (string, bool, error) {
 	return f.detectType, f.detectOK, f.detectErr
 }
 
-func (f *fakeAgentSession) RunBoardCommand(_ context.Context, args []string) ([]byte, error) {
+func (f *fakeAgentSession) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
 	if f.boardErr != nil {
 		return nil, f.boardErr
 	}
@@ -96,12 +94,23 @@ func localAgmsgDir(t *testing.T, present bool) string {
 	return dir
 }
 
+func localPresenceRunner() host.Runner {
+	return hostRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		result := "no"
+		if _, err := os.Stat(args[len(args)-1]); err == nil {
+			result = "yes"
+		}
+		return []byte(result), nil
+	})
+}
+
 func newLocalWatcher(manager *session.Manager, agmsgPath, team string, paneModes map[string]string) *bootstrapWatcher {
 	return newBootstrapWatcher(bootstrapWatcherConfig{
 		Manager:       manager,
 		PaneHosts:     map[string]string{"pane-a": boardHostIDLocal},
 		PaneModes:     func() map[string]string { return paneModes },
 		ResolvedPaths: map[string]string{boardHostIDLocal: agmsgPath},
+		RunnerForHost: func(string) host.Runner { return localPresenceRunner() },
 		Team:          team,
 	})
 }
@@ -190,6 +199,7 @@ func TestBootstrapWatcher_RemotePresenceCheck_YesWritesNoDoesNot(t *testing.T) {
 
 		w := newBootstrapWatcher(bootstrapWatcherConfig{
 			Manager:       manager,
+			RunnerForHost: func(string) host.Runner { return sess },
 			PaneHosts:     map[string]string{"pane-a": "ssh:build-host"},
 			ResolvedPaths: map[string]string{"ssh:build-host": agmsgPath},
 			Team:          "panemux",
@@ -209,6 +219,7 @@ func TestBootstrapWatcher_RemotePresenceCheck_YesWritesNoDoesNot(t *testing.T) {
 
 		w := newBootstrapWatcher(bootstrapWatcherConfig{
 			Manager:       manager,
+			RunnerForHost: func(string) host.Runner { return sess },
 			PaneHosts:     map[string]string{"pane-a": "ssh:build-host"},
 			ResolvedPaths: map[string]string{"ssh:build-host": agmsgPath},
 			Team:          "panemux",
@@ -230,6 +241,7 @@ func TestBootstrapWatcher_RemotePresenceCheckTransportError_DistinctFromNo(t *te
 	logs := captureBootstrapLog(t)
 	w := newBootstrapWatcher(bootstrapWatcherConfig{
 		Manager:       manager,
+		RunnerForHost: func(string) host.Runner { return sess },
 		PaneHosts:     map[string]string{"pane-a": "ssh:build-host"},
 		ResolvedPaths: map[string]string{"ssh:build-host": "/opt/agmsg"},
 		Team:          "panemux",
@@ -321,6 +333,7 @@ func TestBootstrapWatcher_InvalidPaneIDOrTeam_SkipsBootstrap(t *testing.T) {
 
 		w := newBootstrapWatcher(bootstrapWatcherConfig{
 			Manager:       manager,
+			RunnerForHost: func(string) host.Runner { return sess },
 			PaneHosts:     map[string]string{"pane a": boardHostIDLocal},
 			ResolvedPaths: map[string]string{boardHostIDLocal: localAgmsgDir(t, true)},
 			Team:          "panemux",
@@ -344,12 +357,7 @@ func TestBootstrapWatcher_InvalidPaneIDOrTeam_SkipsBootstrap(t *testing.T) {
 	})
 }
 
-// TestBootstrapWatcher_RemotePresenceCheck_FailsOverPastDeadFirstCandidate
-// is the regression test for trusting only the alphabetically-first
-// board-enabled pane on a host to answer the presence probe: that pane's
-// own session can be registered but dead (State() can lag reality), which
-// must not block bootstrap for the rest of the host when another pane on
-// it is genuinely reachable.
+// Host probes are independent of a dead pane transport.
 func TestBootstrapWatcher_RemotePresenceCheck_FailsOverPastDeadFirstCandidate(t *testing.T) {
 	agmsgPath := "/opt/agmsg"
 	probeKey := strings.Join([]string{
@@ -358,8 +366,7 @@ func TestBootstrapWatcher_RemotePresenceCheck_FailsOverPastDeadFirstCandidate(t 
 	}, "\x00")
 
 	manager := session.NewManager()
-	// "pane-a" sorts first, so dynamicBoardExecutor tries it first; it must
-	// fail over to "pane-b" rather than reporting checked=false forever.
+	// The pane transport is dead; the host runner remains reachable.
 	dead := &fakeAgentSession{
 		id: "pane-a", detectType: "codex", detectOK: true,
 		boardErr: errors.New("ssh: connection lost"),
@@ -370,6 +377,7 @@ func TestBootstrapWatcher_RemotePresenceCheck_FailsOverPastDeadFirstCandidate(t 
 
 	w := newBootstrapWatcher(bootstrapWatcherConfig{
 		Manager:       manager,
+		RunnerForHost: func(string) host.Runner { return alive },
 		PaneHosts:     map[string]string{"pane-a": "ssh:build-host", "pane-b": "ssh:build-host"},
 		ResolvedPaths: map[string]string{"ssh:build-host": agmsgPath},
 		Team:          "panemux",
@@ -378,7 +386,7 @@ func TestBootstrapWatcher_RemotePresenceCheck_FailsOverPastDeadFirstCandidate(t 
 	w.pollOnce(context.Background())
 
 	require.Len(t, dead.writes, 1,
-		"pane-a must still bootstrap via pane-b's working session, despite pane-a's own RunBoardCommand failing")
+		"pane-a must still bootstrap via independent host execution, despite pane-a's own transport failing")
 }
 
 // TestBootstrapWatcher_PersistedSeed_TmuxPane_PreventsReBootstrapOfLiveSession
@@ -453,6 +461,7 @@ func TestBootstrapWatcher_PersistSuccessfulBootstrap(t *testing.T) {
 		Manager:       manager,
 		PaneHosts:     map[string]string{"pane-a": boardHostIDLocal},
 		ResolvedPaths: map[string]string{boardHostIDLocal: localAgmsgDir(t, true)},
+		RunnerForHost: func(string) host.Runner { return localPresenceRunner() },
 		Team:          "panemux",
 		Persist:       func(paneIDs []string) { persisted = append(persisted, paneIDs) },
 	})

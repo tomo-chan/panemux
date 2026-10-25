@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"panemux/internal/board"
+	"panemux/internal/host"
 	"panemux/internal/session"
 )
 
@@ -61,6 +62,8 @@ type bootstrapWatcherConfig struct {
 	// never reached the instruction, so agmsg's own delivery stayed off.
 	PaneModes     func() map[string]string
 	ResolvedPaths map[string]string
+	RunnerForHost func(string) host.Runner
+	ResolvePath   func(context.Context, string) (string, error)
 	Persist       func(paneIDs []string)
 	Team          string
 }
@@ -78,6 +81,8 @@ type bootstrapWatcher struct {
 	paneHosts     map[string]string
 	paneModes     func() map[string]string
 	resolvedPaths map[string]string
+	runnerForHost func(string) host.Runner
+	resolvePath   func(context.Context, string) (string, error)
 	persist       func(paneIDs []string)
 	bootstrapped  map[string]session.Session
 	pending       map[string]session.Session
@@ -136,11 +141,16 @@ const (
 // newBootstrapWatcher returns a bootstrapWatcher ready to have persisted
 // state loaded (LoadPersistedState) and then be polled or run.
 func newBootstrapWatcher(cfg bootstrapWatcherConfig) *bootstrapWatcher {
+	if cfg.ResolvedPaths == nil {
+		cfg.ResolvedPaths = map[string]string{}
+	}
 	return &bootstrapWatcher{
 		manager:       cfg.Manager,
 		paneHosts:     cfg.PaneHosts,
 		paneModes:     cfg.PaneModes,
 		resolvedPaths: cfg.ResolvedPaths,
+		runnerForHost: cfg.RunnerForHost,
+		resolvePath:   cfg.ResolvePath,
 		team:          cfg.Team,
 		persist:       cfg.Persist,
 		bootstrapped:  map[string]session.Session{},
@@ -270,7 +280,7 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 
 	// A pane ID or team that doesn't match agmsg's own identifier alphabet
 	// (internal/board.ValidAgmsgIdentifier — the same allowlist
-	// RemoteAgmsgClient already enforces before any RunBoardCommand call)
+	// RemoteAgmsgClient already enforces before any Runner.Run call)
 	// can never be bootstrapped correctly: it would either break the shell
 	// command the onboarding instruction tells the agent to run, or join
 	// agmsg under an identity the relay can never address back. Skip and
@@ -387,19 +397,19 @@ func (b *bootstrapWatcher) writeInstruction(paneID string, sess session.Session,
 	)
 }
 
-// agmsgPresent reports whether agmsg is present on host, and whether that
-// question could be answered at all (checked=false means "couldn't tell this
-// tick, try again next tick" — a transport error or an unreachable host, not
-// "not present"). For a remote host, the probe goes through a
-// dynamicBoardExecutor rather than a single findBoardExecutors candidate
-// directly: a session can still be registered (and report a normal State())
-// after its underlying connection has actually died, so trusting only the
-// first candidate could permanently and silently treat a bootstrap-eligible
-// host as unreachable even while some other pane on it is genuinely
-// live — see dynamicBoardExecutor's own comment in board.go for the full
-// rationale, which applies identically here.
+// agmsgPresent probes through shared host execution, independently of pane transport.
 func (b *bootstrapWatcher) agmsgPresent(ctx context.Context, paneID, host string) (present bool, checked bool) {
 	path, ok := b.resolvedPaths[host]
+	if !ok && b.resolvePath != nil {
+		probeCtx, cancel := context.WithTimeout(ctx, bootstrapProbeTimeout)
+		var err error
+		path, err = b.resolvePath(probeCtx, host)
+		cancel()
+		ok = err == nil
+		if ok {
+			b.resolvedPaths[host] = path
+		}
+	}
 	if !ok {
 		b.warnOnce(paneID, warnKindAgmsgPath,
 			fmt.Sprintf("agent board bootstrap: no resolved agmsg_path for host %q (pane %q)", host, paneID))
@@ -407,11 +417,10 @@ func (b *bootstrapWatcher) agmsgPresent(ctx context.Context, paneID, host string
 	}
 	b.clearWarning(paneID, warnKindAgmsgPath)
 
-	if host == boardHostIDLocal {
-		return board.LocalAgmsgPresent(path), true
+	executor := b.runnerForHost(host)
+	if executor == nil {
+		return false, false
 	}
-
-	executor := &dynamicBoardExecutor{manager: b.manager, paneHosts: b.paneHosts, host: host}
 	probeCtx, cancel := context.WithTimeout(ctx, bootstrapProbeTimeout)
 	defer cancel()
 	present, err := board.RemoteAgmsgPresent(probeCtx, executor, path)

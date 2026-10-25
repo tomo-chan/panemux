@@ -3,8 +3,7 @@ package board
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
+	"panemux/internal/host"
 	"strconv"
 	"strings"
 )
@@ -33,41 +32,24 @@ func readVersion(raw []byte) string {
 	return strings.TrimSpace(string(raw))
 }
 
-// LocalAgmsgVersion reads agmsg's VERSION from a local install root
-// (already ~-expanded). Returns "" when the file is absent or empty; an
-// error only when the file exists but cannot be read, which is a real
-// problem worth surfacing rather than silently treating as unknown.
-func LocalAgmsgVersion(agmsgPath string) (string, error) {
-	path := filepath.Join(agmsgPath, agmsgVersionFile)
-	// G304: operator-configured agmsg install path, same trust level as config.yaml.
-	raw, err := os.ReadFile(path) //nolint:gosec
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", fmt.Errorf("agmsg: reading %s: %w", path, err)
-	}
-	return readVersion(raw), nil
-}
-
 // remoteAgmsgVersionProbeScript mirrors remoteAgmsgPresenceProbeScript's
 // shape: fixed script text, with the only variable input arriving as a
 // positional parameter rather than interpolated into the script. It always
 // exits 0 and prints nothing when the file is absent, so a missing VERSION
 // is distinguishable from a transport failure (which surfaces as a non-nil
-// error from RunBoardCommand) rather than being conflated with it.
+// error from Runner.Run) rather than being conflated with it.
 const remoteAgmsgVersionProbeScript = `cat "$1" 2>/dev/null || true`
 const remoteAgmsgVersionProbeScriptName = "board-agmsg-version"
 
 // RemoteAgmsgVersion reads agmsg's VERSION from an install root on the host
 // reached through executor. Returns "" when absent, matching
-// LocalAgmsgVersion.
-func RemoteAgmsgVersion(ctx context.Context, executor BoardExecutor, agmsgPath string) (string, error) {
+// the local execution path.
+func RemoteAgmsgVersion(ctx context.Context, executor host.Runner, agmsgPath string) (string, error) {
 	versionPath := agmsgPath + "/" + agmsgVersionFile
 	args := []string{
 		"sh", "-c", remoteAgmsgVersionProbeScript, remoteAgmsgVersionProbeScriptName, versionPath,
 	}
-	out, err := executor.RunBoardCommand(ctx, args)
+	out, err := executor.Run(ctx, execArguments, args...)
 	if err != nil {
 		return "", fmt.Errorf("agmsg: reading remote %s: %w", versionPath, err)
 	}

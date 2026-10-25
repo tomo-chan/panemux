@@ -230,7 +230,7 @@ func (s *Service) probeHost(name string, conn Conn, at time.Time) {
 
 	s.mu.Lock()
 	delete(s.probing, name)
-	if s.probeCtx.Err() != nil || name != "" && (s.hosts[name] == nil || s.hosts[name].conn != conn) {
+	if s.probeCtx.Err() != nil || name != "" && s.execution.Current(name) != conn {
 		s.mu.Unlock()
 		return
 	}
@@ -283,12 +283,7 @@ func (s *Service) currentConn(name string) Conn {
 	if name == "" {
 		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if h := s.hosts[name]; h != nil {
-		return h.conn
-	}
-	return nil
+	return s.execution.Current(name)
 }
 
 // Availability is what is known about using each agent on a host ("" is

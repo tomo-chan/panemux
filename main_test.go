@@ -289,7 +289,7 @@ func TestStartSessionsFromConfig_AddsEveryPane(t *testing.T) {
 	var createdIDs []string
 	create := func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
 		createdIDs = append(createdIDs, pane.ID)
-		return &fakeBoardSession{id: pane.ID}, nil
+		return &fakeAgentSession{id: pane.ID}, nil
 	}
 
 	require.NoError(t, startSessionsFromConfig(twoPaneConfig(), mgr, create))
@@ -306,7 +306,7 @@ func TestStartSessionsFromConfig_OnePaneFails_OthersStillStart(t *testing.T) {
 		if pane.ID == "pane-a" {
 			return nil, errors.New("connection refused")
 		}
-		return &fakeBoardSession{id: pane.ID}, nil
+		return &fakeAgentSession{id: pane.ID}, nil
 	}
 
 	require.NoError(t, startSessionsFromConfig(twoPaneConfig(), mgr, create))
@@ -350,7 +350,7 @@ func TestStartSessionsFromConfig_PassesSSHConnections(t *testing.T) {
 	var seen map[string]config.SSHConnection
 	create := func(_ *config.PaneConfig, conns map[string]config.SSHConnection) (session.Session, error) {
 		seen = conns
-		return &fakeBoardSession{id: "x"}, nil
+		return &fakeAgentSession{id: "x"}, nil
 	}
 
 	require.NoError(t, startSessionsFromConfig(cfg, session.NewManager(), create))

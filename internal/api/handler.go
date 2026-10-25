@@ -28,6 +28,7 @@ import (
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/homedir"
+	"panemux/internal/hostexec"
 	"panemux/internal/portforward"
 	"panemux/internal/preview"
 	"panemux/internal/session"
@@ -47,6 +48,7 @@ type Handler struct {
 	boardCache             *board.BoardCache
 	gitInfoCacheBySession  map[string]gitInfoCacheEntry
 	tasks                  *tasks.Service
+	execution              *hostexec.Pool
 	taskRecords            *tasks.RecordStore
 	// pendingTaskLabels holds the labels of codex tasks started before
 	// their session IDs are known (issue #264).
@@ -203,6 +205,8 @@ func NewHandler(
 		previewRelays:         preview.NewRelays(),
 		previewHosts:          newPreviewHosts(),
 	}
+	options := taskServiceOptions(h)
+	h.execution = hostexec.New(hostexec.Options{Hosts: options.Hosts, Dial: options.Dial})
 	h.tasks = newTaskService(h)
 	h.taskRecords = tasks.NewRecordStore("")
 	h.pendingTaskLabels = tasks.NewPendingLabels(func() time.Time { return h.nowFn() }, log.Printf)
@@ -215,9 +219,7 @@ func NewHandler(
 	h.readDirFn = os.ReadDir
 	h.listLocalDirectoriesFn = h.listLocalDirectories
 	h.listRemoteDirectoriesFn = listRemoteDirectories
-	h.boardBroadcastFn = func(ctx context.Context, to []string, body string) ([]string, error) {
-		return boardRelay.Broadcast(ctx, board.SystemID, to, body)
-	}
+	h.SetBoard(boardCache, boardRelay)
 	h.commandHistoryFn = defaultCommandHistoryFn
 	return h
 }
@@ -1734,4 +1736,12 @@ func (h *Handler) localDirectoryHasChildren(path string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// SetBoard connects the board after host execution is composed, before serving requests.
+func (h *Handler) SetBoard(cache *board.BoardCache, relay *board.Relay) {
+	h.boardCache = cache
+	h.boardBroadcastFn = func(ctx context.Context, to []string, body string) ([]string, error) {
+		return relay.Broadcast(ctx, board.SystemID, to, body)
+	}
 }

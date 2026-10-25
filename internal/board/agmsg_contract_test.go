@@ -37,6 +37,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/board"
+	"panemux/internal/host"
+	"panemux/internal/hostexec"
 )
 
 // agmsgPathEnv names the install under test. Absent means skip: a
@@ -397,7 +399,7 @@ func TestAgmsgContract_JoinUsesThePaneIDVerbatim(t *testing.T) {
 
 // contractClient returns panemux's own local agmsg client, pointed at a
 // throwaway copy of a real install with a team already joined.
-func contractClient(t *testing.T, team string) (*board.LocalAgmsgClient, string) {
+func contractClient(t *testing.T, team string) (board.AgmsgClient, string) {
 	t.Helper()
 
 	root := contractInstall(t)
@@ -407,7 +409,9 @@ func contractClient(t *testing.T, team string) (*board.LocalAgmsgClient, string)
 	runScript(t, scripts, "join.sh", team, "pane-a", "claude-code", project, "--force")
 	runScript(t, scripts, "join.sh", team, "pane-b", "claude-code", project, "--force")
 
-	return board.NewLocalAgmsgClient(root), project
+	pool := hostexec.New(hostexec.Options{})
+	t.Cleanup(pool.Close)
+	return board.NewRemoteAgmsgClient(host.Local.BoardID(), root, host.Bind(pool, host.Local)), project
 }
 
 func contractCtx(t *testing.T) context.Context {

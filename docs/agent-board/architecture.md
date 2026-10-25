@@ -28,12 +28,13 @@ flowchart TB
     Command --> MCP --> API
     Relay --> Cache
     Relay --> LocalAgmsg
-    Relay -->|existing SSH transport| RemoteAgmsg
+    Relay -->|shared host execution port| RemoteAgmsg
     Agent --> RemoteAgmsg
 ```
 
-Panemux runs on one host. It reaches remote agmsg installations only through SSH connections that
-already back configured panes; it never installs or runs panemux remotely. The command center uses
+Panemux runs on one host. Both boards address that host and the `ssh_connections` keys through
+the same execution port and per-host command connection, even without a pane on that host.
+Pane sessions keep separate connections. Panemux never installs or runs itself remotely. The command center uses
 the same authenticated API as the browser, through a narrow MCP server, and never calls agmsg
 directly.
 
@@ -85,7 +86,9 @@ The package boundary enforces the ownership model:
 | Area | Responsibility |
 |---|---|
 | `internal/board` | agmsg adapter, relay, cache, cursors, bootstrap records, and own-send ledger |
-| `internal/session` | host identity, agent detection, and remote command capability for a pane |
+| `internal/host` | I/O-free host identity and fixed-script execution port |
+| `internal/hostexec` | local execution and shared per-host SSH connections, retry and disposal |
+| `internal/session` | terminal sessions, agent detection, and the SSH command transport adapter |
 | `internal/api`, `internal/ws`, `internal/server` | authenticated board REST and WebSocket surfaces |
 | `internal/commandcenter` | one-at-a-time headless Claude queries and command history |
 | `internal/boardmcp` | three board-only MCP tools backed by the authenticated REST API |
@@ -121,5 +124,5 @@ forged `_system` rows and to preserve identical repeated broadcasts.
 | agmsg | optional | installed separately by the operator |
 | agent process | optional | yes |
 
-Remote execution uses agmsg's installed scripts over the existing SSH transport. No panemux binary,
+Remote execution uses agmsg's installed scripts through the shared host execution port. No panemux binary,
 helper script, cache, or cursor is written to a remote host.

@@ -54,7 +54,7 @@ disables board integration for that host without affecting terminal service.
 a leading `~/` before remote shell quoting:
 
 - locally, against the local user's home directory;
-- remotely, against the remote user's home determined over the existing SSH connection.
+- remotely, against the remote user's home determined through the shared host execution port.
 
 Remote board commands run in a non-login, usually non-interactive shell. agmsg's dependencies
 (`bash`, `node`, and `sqlite3`) must therefore be available on that shell's `PATH`; availability in
@@ -62,8 +62,8 @@ an interactive profile is insufficient.
 
 ### Version coverage
 
-`board.TestedAgmsgVersion` is the version whose script behavior this repository verifies. Startup
-normalizes agmsg's common `VERSION` forms and warns when an installed release is outside the
+`board.TestedAgmsgVersion` is the version whose script behavior this repository verifies. The first
+successful host probe normalizes agmsg's common `VERSION` forms and warns when an installed release is outside the
 covered range. A warning never blocks startup.
 
 Coverage means the same major/minor line at or above the tested patch. Older patches, other

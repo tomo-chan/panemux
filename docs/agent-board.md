@@ -40,8 +40,8 @@ agmsg's scripts; it never reads agmsg's database or team files directly.
   transcript formats are not part of the contract.
 - **Use one messaging protocol.** Every board message uses agmsg. Panemux does not maintain a second
   Claude-only protocol.
-- **Use existing connections.** Remote operations reuse the pane's SSH transport; panemux starts no
-  additional listener.
+- **Share host execution.** Both boards use one command connection per `ssh_connections` key,
+  independently of pane sessions. Local execution uses the same script-execution port.
 - **Never install panemux on a remote host.** A remote host needs only an agmsg installation managed
   by the operator.
 - **Detect dependencies; do not install them.** Panemux skips unavailable agmsg backends and never

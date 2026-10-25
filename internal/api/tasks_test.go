@@ -1138,3 +1138,11 @@ func TestGetTasks_CarriesTheStateNoteOfTheTasksAgent(t *testing.T) {
 	assert.Equal(t, tasks.StateNote(resp.Tasks[0].Task), resp.Tasks[0].StateNote)
 	assert.NotEmpty(t, resp.Tasks[0].StateNote)
 }
+
+func TestReplacingTaskServicePreservesHandlerHostExecution(t *testing.T) {
+	h := NewHandler(defaultTestConfig(), session.NewManager(), nil, nil)
+	defer h.Close()
+	shared := h.HostExecution()
+	h.SetTaskService(tasks.New(tasks.Options{}))
+	require.Same(t, shared, h.HostExecution(), "the handler owns execution independently of its task consumer")
+}

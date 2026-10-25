@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -198,33 +197,6 @@ func TestStateSavesReportAFailureMidWrite(t *testing.T) {
 			assert.Empty(t, entries, "neither the target nor the temp file may survive a failed write")
 		})
 	}
-}
-
-// ── Running agmsg's own scripts ──────────────────────────────────────────────
-
-// The exec wrapper names the program it could not run, as its own prefix.
-//
-// The prefix, not a Contains: os/exec's own error is already
-// "fork/exec <path>: ...", so asserting that the path appears somewhere
-// would hold with the wrap deleted — verified, it does. Only the leading
-// "exec <path>: " is contributed by this function, so only a prefix check
-// distinguishes the wrap from the error it wraps.
-func TestExecLocalCommandNamesTheProgramItCouldNotRun(t *testing.T) {
-	const missing = "/nonexistent/agmsg/scripts/api.sh"
-
-	out, err := execLocalCommand(context.Background(), missing, "since")
-
-	require.Error(t, err)
-	assert.True(t, strings.HasPrefix(err.Error(), "exec "+missing+": "),
-		"want the wrap's own prefix, got %q", err.Error())
-	assert.Nil(t, out)
-}
-
-func TestExecLocalCommandReturnsStdoutOnSuccess(t *testing.T) {
-	out, err := execLocalCommand(context.Background(), "/bin/echo", "board output")
-
-	require.NoError(t, err)
-	assert.Equal(t, "board output\n", string(out))
 }
 
 // ── The relay's cursor state ─────────────────────────────────────────────────

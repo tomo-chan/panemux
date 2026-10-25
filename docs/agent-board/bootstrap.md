@@ -44,10 +44,11 @@ remove it through agmsg's own workflow.
 
 ### Failure and retry rules
 
-- After a host's agmsg path is resolved at startup, a missing installation or a failed presence
-  probe causes no PTY write and is retried on later polls.
-- If no remote board session is reachable while the path is resolved at startup, that host remains
-  unavailable until panemux restarts. See [Known limitations](limitations.md#availability-and-recovery).
+- Paths and presence are resolved through the shared host execution port, independently of the
+  pane's transport. A failed resolution or presence probe causes no PTY write and is retried on
+  later polls, including after an initially unreachable host recovers. Failed SSH dials share the
+  task board's 60-second cooldown and manual reconnect.
+- The onboarding instruction itself is still written to the detected pane's terminal.
 - Repeated warnings are emitted once per pane, session, and failure kind until that condition
   recovers. A later recurrence is logged again.
 - A zero-byte PTY write failure is retried up to three times.

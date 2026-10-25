@@ -36,7 +36,7 @@ Go server -------- REST APIs -------- browser workspace
     |     +-- SSH shell                    +-- Agent Board overlays
     |     +-- local tmux
     |     `-- tmux over SSH
-    +-- task collector (one SSH connection per host)
+    +-- shared host execution (task and agent boards; one SSH connection per host)
     |
     `------------ WebSocket terminal streams ---------^
 ```

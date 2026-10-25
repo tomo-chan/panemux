@@ -1152,6 +1152,39 @@ Rejected for now:
 
 ## Agent Board
 
+### One host identity and shared execution (2026-10-25, #438 / #439)
+
+Both boards use the panemux host plus the keys of `ssh_connections`. `internal/host` defines the
+I/O-free identity and fixed-script execution port; `internal/hostexec` owns local `sh -s` execution
+and one lazy SSH command connection per key. The task board no longer owns connection state, and
+Agent Board no longer executes through a pane's `BoardExecutor`. Scripts travel on stdin and
+variable values remain positional arguments quoted at the SSH boundary. Concurrent operations use
+separate exec channels; cancelling one preserves a healthy shared connection.
+
+Name equality (option A) determines an SSH pane's host. Comparing resolved hostname/user/port
+(option B) was rejected: separate configured names remain separate hosts, even for the same machine.
+A pane named only by OpenSSH configuration is excluded with a startup warning and guidance to add
+a name-only `ssh_connections` entry, rather than rejected by configuration validation.
+
+Connection recovery follows the task board contract: failed dial cooldown is 60 seconds, transport
+loss during use allows immediate redial, and manual reconnect discards shared state, including an
+in-flight dial. Lazy board probes let an initially unreachable host recover without restart or a
+pane on that host. Bootstrap resolves paths and checks presence through the same port, while its
+participation instruction remains a pane PTY write. Confirmed absent agmsg remains a relay skip;
+tool installation, global enablement and agmsg adapter consolidation belong to later stages.
+
+The API handler owns the shared pool independently of either board. A task service closes only a
+pool it constructed itself, so replacing a consumer does not tear down the board's connection.
+Board polling and bootstrap start missing connections without waiting for dial completion, retaining polling
+of all configured keys while preventing an unused unreachable key from stalling healthy hosts.
+Operator sends instead wait for connection establishment within their context, so a healthy host
+can receive a first send or a send immediately after reconnect. Repeated identical poll failures are logged on state change. The execution port checks current
+configured membership on every connection lookup, so removing a key cannot fall back to OpenSSH.
+
+Two existing task tests accessed private connection state. Their fixtures/waits now use observable
+connection availability; their assertions and tested behavior are unchanged, as agreed in #439.
+
+
 ### Compatibility is checked against a real agmsg release (2026-08-23, PR #176)
 
 Fixture tests could not detect false assumptions about `watch.sh` output or the shape of event-log

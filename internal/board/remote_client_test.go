@@ -17,7 +17,7 @@ type fakeBoardExecutor struct {
 	calls   [][]string
 }
 
-func (f *fakeBoardExecutor) RunBoardCommand(_ context.Context, args []string) ([]byte, error) {
+func (f *fakeBoardExecutor) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, args)
 	if f.err != nil {
 		return nil, f.err
@@ -70,7 +70,7 @@ func TestRemoteAgmsgClient_Send_MetacharacterBody_RoundTripsViaBase64(t *testing
 	require.Len(t, exec.calls, 1)
 
 	// The encoded token itself must be pure base64 alphabet — no
-	// metacharacter from body may leak into the argument RunBoardCommand
+	// metacharacter from body may leak into the argument Runner.Run
 	// receives.
 	sentToken := exec.calls[0][8]
 	assert.True(t, validBase64.MatchString(sentToken))

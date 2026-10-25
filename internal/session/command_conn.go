@@ -9,8 +9,8 @@ import (
 )
 
 // CommandConn is an SSH connection kept open to run short, non-interactive
-// commands, one exec channel each. The task dashboard holds one per
-// ssh_connections entry (internal/tasks) and reuses it across collections;
+// commands, one exec channel each. The shared host executor holds one per
+// ssh_connections entry and reuses it across both boards;
 // it is never shared with a pane, which keeps its own connection.
 type CommandConn struct {
 	client     *ssh.Client

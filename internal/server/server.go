@@ -46,7 +46,7 @@ var taskEventOptions = taskevents.Options{}
 // rather than panicking on a nil runner.
 func New(
 	cfg *config.Config, manager *session.Manager, boardCache *board.BoardCache, boardRelay *board.Relay,
-	commandRunner *commandcenter.Runner, frontendFS embed.FS,
+	commandRunner *commandcenter.Runner, frontendFS embed.FS, handlers ...*api.Handler,
 ) *Server {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -54,7 +54,12 @@ func New(
 	r.Use(corsMiddleware)
 	r.Use(securityHeadersMiddleware)
 
-	apiHandler := api.NewHandler(cfg, manager, boardCache, boardRelay)
+	var apiHandler *api.Handler
+	if len(handlers) > 0 {
+		apiHandler = handlers[0]
+	} else {
+		apiHandler = api.NewHandler(cfg, manager, boardCache, boardRelay)
+	}
 	apiHandler.SetCommandCenterAvailable(commandRunner != nil)
 	// Loopback forwards are process-wide state (they bind ports on this
 	// host), so the server owns the registry and closes it on shutdown.

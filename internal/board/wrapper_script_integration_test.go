@@ -29,7 +29,7 @@ func quoteArgsLikeSession(args []string) string {
 
 // TestSendBase64WrapperScript_RealShell_DecodesMetacharacterBody proves the
 // full round trip end to end: RemoteAgmsgClient.Send's argument list, once
-// single-quote-escaped exactly as internal/session's RunBoardCommand would
+// single-quote-escaped exactly as the host execution adapter would
 // escape it and handed to a real /bin/sh, decodes the base64-encoded body
 // back to its original bytes (including shell metacharacters) before the
 // stand-in send.sh script ever sees it — the property the whole
