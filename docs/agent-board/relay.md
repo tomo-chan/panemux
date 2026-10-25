@@ -53,9 +53,13 @@ contracts, not exactly-once delivery.
 Panemux is always in the cross-host data path. Hosts do not discover or connect directly to each
 other, and no additional listener is created.
 
-SSH connection establishment starts in the background: board operations return a connecting state
+SSH connection establishment starts in the background: polling and bootstrap return a connecting state
 without waiting for the dial. Later polls retry, so a pane-less unreachable host cannot consume a
 relay pass's timeout before healthy hosts are polled. Repeated identical poll errors are logged only
 when the failure state changes; a successful pass resets that suppression. All configured keys
 remain available to board execution, including hosts without a board pane. Rows still require a
 known pane sender on the source host.
+
+Operator sends wait for a missing SSH connection within the send context, including before the
+first poll and after reconnect or transport loss. Polling and bootstrap continue to use the
+non-waiting runner; all runners share the same connection pool.

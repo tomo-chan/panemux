@@ -74,6 +74,8 @@ Verification column values:
 | C439d | An unused SSH host is still connecting | Healthy hosts are polled without waiting for that dial; identical errors are logged on state change | `auto`: root — `TestBoardPendingDialDoesNotDelayHealthyHost`; `internal/board` — `TestPollLogsOnlyWhenFailureStateChanges` |
 | C439e | A configured host key is removed while the boards run | The execution port refuses further commands and dials even if the OpenSSH alias remains | `auto`: `internal/hostexec` — `TestRemovedHostCannotRunOrDialAgain` |
 
+| C439f | Sending before polling, after reconnect or after connection loss | A send waits for a successful dial within its context; polling still does not wait | `auto`: root — `TestBoardSendWaitsForDialBeforePollAndAfterConnectionLoss`, `TestBoardPendingDialDoesNotDelayHealthyHost` |
+
 ## D. Read the board
 
 | # | Scenario | Expected | Verification |

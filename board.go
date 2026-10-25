@@ -48,7 +48,9 @@ func setupBoard(
 			id := target.BoardID()
 			runner := host.Bind(execution.WithoutDialWait(), target)
 			runners[id] = runner
-			clients[id] = &hostAgmsgClient{id: id, path: cfg.AgentBoard.AgmsgPath, runner: runner}
+			clients[id] = &hostAgmsgClient{
+				id: id, path: cfg.AgentBoard.AgmsgPath, runner: runner, sendRunner: host.Bind(execution, target),
+			}
 		}
 	}
 	relay := board.NewRelay(cache, board.RelayConfig{
@@ -104,48 +106,78 @@ func resolveHostAgmsgPath(ctx context.Context, runner host.Runner, path string) 
 
 // hostAgmsgClient resolves a host lazily. Transport failures leave it retryable;
 // a confirmed absent install is remembered, without detecting updates or installing tools.
-// Initialization is serialized; established commands use independent exec channels.
+// Discovery is published once; probes leave the cache mutex free while doing I/O.
 type hostAgmsgClient struct {
-	client   board.AgmsgClient
-	runner   host.Runner
-	id, path string
-	mu       sync.Mutex
-	absent   bool
+	runner       host.Runner
+	sendRunner   host.Runner
+	resolvedPath *string
+	id, path     string
+	mu           sync.Mutex
+	absent       bool
 }
 
 func (c *hostAgmsgClient) HostID() string { return c.id }
-func (c *hostAgmsgClient) ready(ctx context.Context) (board.AgmsgClient, error) {
+func (c *hostAgmsgClient) ready(ctx context.Context, runner host.Runner) (board.AgmsgClient, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.client != nil || c.absent {
-		return c.client, nil
+	client, known := c.cachedClient(runner)
+	c.mu.Unlock()
+	if known {
+		return client, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, boardStartupProbeTimeout)
 	defer cancel()
-	path, err := resolveHostAgmsgPath(ctx, c.runner, c.path)
+	path, err := resolveHostAgmsgPath(ctx, runner, c.path)
 	if err != nil {
 		return nil, err
 	}
-	present, err := board.RemoteAgmsgPresent(ctx, c.runner, path)
+	present, err := board.RemoteAgmsgPresent(ctx, runner, path)
 	if err != nil {
 		return nil, fmt.Errorf("probe agmsg presence: %w", err)
 	}
 	if !present {
+		return c.finishProbe(runner, path, false, "", nil), nil
+	}
+	version, versionErr := board.RemoteAgmsgVersion(ctx, runner, path)
+	return c.finishProbe(runner, path, true, version, versionErr), nil
+}
+
+// cachedClient requires mu. The cache records discovery, not the execution lane.
+func (c *hostAgmsgClient) cachedClient(runner host.Runner) (board.AgmsgClient, bool) {
+	if c.absent {
+		return nil, true
+	}
+	if c.resolvedPath == nil {
+		return nil, false
+	}
+	return board.NewRemoteAgmsgClient(c.id, *c.resolvedPath, runner), true
+}
+
+// Probes run outside mu so a send waiting for SSH cannot block polling.
+// Concurrent successful discoveries publish one cache entry and one warning.
+func (c *hostAgmsgClient) finishProbe(
+	runner host.Runner, path string, present bool, version string, versionErr error,
+) board.AgmsgClient {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if client, known := c.cachedClient(runner); known {
+		return client
+	}
+	if !present {
 		c.absent = true
 		log.Printf("Warning: agent board: no agmsg installation at %q on host %q, skipping that host", path, c.id)
-		return nil, nil
+		return nil
 	}
-	version, err := board.RemoteAgmsgVersion(ctx, c.runner, path)
-	if err != nil {
-		log.Printf("Warning: agent board: reading agmsg version on host %q: %v", c.id, err)
+	if versionErr != nil {
+		log.Printf("Warning: agent board: reading agmsg version on host %q: %v", c.id, versionErr)
 	} else if warning := board.VersionMismatchWarning(c.id, version); warning != "" {
 		log.Printf("Warning: %s", warning)
 	}
-	c.client = board.NewRemoteAgmsgClient(c.id, path, c.runner)
-	return c.client, nil
+	c.resolvedPath = &path
+	return board.NewRemoteAgmsgClient(c.id, path, runner)
 }
+
 func (c *hostAgmsgClient) Since(ctx context.Context, team, after string, limit int) ([]board.Row, error) {
-	client, err := c.ready(ctx)
+	client, err := c.ready(ctx, c.runner)
 	if err != nil || client == nil {
 		return nil, err
 	}
@@ -156,7 +188,11 @@ func (c *hostAgmsgClient) Since(ctx context.Context, team, after string, limit i
 	return rows, nil
 }
 func (c *hostAgmsgClient) Send(ctx context.Context, team, from, to, body string) error {
-	client, err := c.ready(ctx)
+	runner := c.sendRunner
+	if runner == nil {
+		runner = c.runner
+	}
+	client, err := c.ready(ctx, runner)
 	if err != nil {
 		return err
 	}

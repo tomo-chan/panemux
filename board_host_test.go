@@ -30,6 +30,8 @@ func (c *boardCommandConn) Run(_ context.Context, cmd string, in io.Reader) ([]b
 	defer c.mu.Unlock()
 	c.calls++
 	switch {
+	case strings.Contains(cmd, "board-send"):
+		return nil, nil
 	case strings.Contains(cmd, "board-agmsg-presence"):
 		return []byte("yes"), nil
 	case strings.Contains(cmd, "board-agmsg-version"):
@@ -389,4 +391,137 @@ func TestBootstrapWithoutHostRunnerDoesNotWrite(t *testing.T) {
 	watcher.pollOnce(context.Background())
 	watcher.pollOnce(context.Background())
 	require.Empty(t, sess.writes)
+}
+
+func TestBoardSendWaitsForDialBeforePollAndAfterConnectionLoss(t *testing.T) {
+	for _, state := range []string{"initial", "reconnect", "dropped"} {
+		t.Run(state, func(t *testing.T) {
+			isolatedHome(t)
+			gate, started := make(chan struct{}), make(chan struct{}, 1)
+			if state != "initial" {
+				close(gate)
+			}
+			defer func() {
+				select {
+				case <-gate:
+				default:
+					close(gate)
+				}
+			}()
+			conn := &boardCommandConn{}
+			pool := hostexec.New(hostexec.Options{Hosts: func() []string { return []string{"dev"} },
+				Dial: func(string) (hostexec.Conn, error) { started <- struct{}{}; <-gate; return conn, nil }})
+			defer pool.Close()
+			pane := paneConfig("remote-agent", config.PaneAgentBoardConfig{Enabled: boolPtr(true)})
+			pane.Type, pane.Connection = "ssh", "dev"
+			cfg := boardEnabledConfig("/opt/agmsg", pane)
+			cfg.SSHConnections = map[string]config.SSHConnection{"dev": {}}
+			_, relay, _ := setupBoard(cfg, session.NewManager(), pool)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if state != "initial" {
+				_, err := pool.Connect(ctx, "dev")
+				require.NoError(t, err)
+				<-started
+				require.NoError(t, relay.Poll(ctx))
+				if state == "reconnect" {
+					require.NoError(t, pool.Reconnect("dev"))
+				} else {
+					_, err = pool.Run(ctx, "dev", "force transport failure")
+					require.Error(t, err)
+				}
+				gate = make(chan struct{})
+			}
+			done := make(chan error, 1)
+			go func() { _, err := relay.Broadcast(ctx, board.SystemID, []string{"remote-agent"}, "hello"); done <- err }()
+			select {
+			case <-started:
+			case <-ctx.Done():
+				t.Fatal("send did not start a dial")
+			}
+			select {
+			case err := <-done:
+				t.Fatalf("send returned before dial completion: %v", err)
+			default:
+			}
+			close(gate)
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-ctx.Done():
+				t.Fatal("send did not finish after dial completion")
+			}
+		})
+	}
+}
+
+func TestPollDoesNotWaitForSendInitialization(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	sender := hostRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if strings.Contains(strings.Join(args, " "), "board-agmsg-presence") {
+			close(started)
+			<-release
+			return []byte("yes"), nil
+		}
+		return nil, nil
+	})
+	poller := hostRunnerFunc(func(context.Context, string, ...string) ([]byte, error) {
+		return nil, hostexec.ErrConnecting
+	})
+	c := &hostAgmsgClient{id: "ssh:dev", path: "/opt/agmsg", runner: poller, sendRunner: sender}
+	sent := make(chan error, 1)
+	go func() { sent <- c.Send(context.Background(), "panemux", "pane-a", "pane-b", "hello") }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("send probe did not start")
+	}
+	polled := make(chan error, 1)
+	go func() { _, err := c.Since(context.Background(), "panemux", "", 10); polled <- err }()
+	finished := false
+	select {
+	case err := <-polled:
+		finished = true
+		require.ErrorIs(t, err, hostexec.ErrConnecting)
+	case <-time.After(100 * time.Millisecond):
+		t.Error("poll waited for the send initialization")
+	}
+	close(release)
+	require.NoError(t, <-sent)
+	if !finished {
+		<-polled
+	}
+}
+
+func TestConcurrentHostDiscoveryPublishesOneVersionWarning(t *testing.T) {
+	logs := captureBoardLog(t)
+	entered, release := make(chan struct{}, 2), make(chan struct{})
+	runner := hostRunnerFunc(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if strings.Contains(strings.Join(args, " "), "board-agmsg-presence") {
+			entered <- struct{}{}
+			<-release
+			return []byte("yes"), nil
+		}
+		return []byte("0.0.1"), nil
+	})
+	c := &hostAgmsgClient{id: "ssh:dev", path: "/opt/agmsg", runner: runner}
+	done := make(chan error, 2)
+	for range 2 {
+		go func() { _, err := c.Since(context.Background(), "panemux", "", 10); done <- err }()
+	}
+	<-entered
+	<-entered
+	close(release)
+	for range 2 {
+		require.NoError(t, <-done)
+	}
+	warning := board.VersionMismatchWarning("ssh:dev", "0.0.1")
+	require.Equal(t, 1, strings.Count(logs.String(), warning))
 }

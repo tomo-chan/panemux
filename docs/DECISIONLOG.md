@@ -1175,9 +1175,10 @@ tool installation, global enablement and agmsg adapter consolidation belong to l
 
 The API handler owns the shared pool independently of either board. A task service closes only a
 pool it constructed itself, so replacing a consumer does not tear down the board's connection.
-Board operations start missing connections without waiting for dial completion, retaining polling
+Board polling and bootstrap start missing connections without waiting for dial completion, retaining polling
 of all configured keys while preventing an unused unreachable key from stalling healthy hosts.
-Repeated identical poll failures are logged on state change. The execution port checks current
+Operator sends instead wait for connection establishment within their context, so a healthy host
+can receive a first send or a send immediately after reconnect. Repeated identical poll failures are logged on state change. The execution port checks current
 configured membership on every connection lookup, so removing a key cannot fall back to OpenSSH.
 
 Two existing task tests accessed private connection state. Their fixtures/waits now use observable
