@@ -1,11 +1,9 @@
-import React from 'react'
-import { HostTools } from './HostTools'
 import type { HostToolItemProps } from './HostToolItem'
 import type { HostMenuTool } from './HostTools'
 
-export type CodexHookItemProps = Omit<HostToolItemProps, 'tool'>
+type CodexHookActions = Pick<HostToolItemProps, 'load' | 'install' | 'setAuto'>
 
-export function codexHookTool(actions: Pick<CodexHookItemProps, 'load' | 'install' | 'setAuto'>): HostMenuTool {
+export function codexHookTool(actions: CodexHookActions): HostMenuTool {
   return {
     id: 'codex-hook',
     title: 'Codex input notifications',
@@ -16,7 +14,3 @@ export function codexHookTool(actions: Pick<CodexHookItemProps, 'load' | 'instal
     ...actions,
   }
 }
-
-export const CodexHookItem: React.FC<CodexHookItemProps> = ({ load, install, setAuto, ...props }) => (
-  <HostTools {...props} tools={[codexHookTool({ load, install, setAuto })]} />
-)

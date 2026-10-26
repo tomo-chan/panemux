@@ -1,10 +1,12 @@
 package hosttools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"github.com/stretchr/testify/require"
+	"log"
 	"os"
 	"panemux/internal/host"
 	"path/filepath"
@@ -13,11 +15,15 @@ import (
 
 type fakeTool struct {
 	fail               error
+	state              *State
 	checked, installed []host.Host
 }
 
 func (f *fakeTool) Check(_ context.Context, h host.Host) State {
 	f.checked = append(f.checked, h)
+	if f.state != nil {
+		return *f.state
+	}
 	return State{Status: Missing}
 }
 func (f *fakeTool) Install(_ context.Context, h host.Host) (State, error) {
@@ -141,4 +147,85 @@ func TestAfterCollectionWithoutSettingsOrAfterCloseDoesNotCheck(t *testing.T) {
 		_, err := s.Check(context.Background(), CodexHookTool, "unknown")
 		require.ErrorIs(t, err, ErrUnknownHost)
 	}
+}
+
+// Management owns these transitions; run them against a tool port fake so
+// package-scoped mutation checks verify the owner rather than an adapter.
+func TestServiceCodexAutomaticUpdateAndManualReset(t *testing.T) {
+	for _, name := range []host.Host{host.Local, "build-box"} {
+		for _, fails := range []bool{false, true} {
+			for _, defaultLog := range []bool{false, true} {
+				t.Run(fmt.Sprintf("host=%q/fails=%t/defaultLog=%t", name, fails, defaultLog), func(t *testing.T) {
+					tool := &fakeTool{state: &State{Status: Outdated}}
+					if fails {
+						tool.fail = errors.New("write refused")
+					}
+					var logs bytes.Buffer
+					options := Options{
+						Hosts:         func() []string { return []string{"build-box"} },
+						Tools:         map[ID]Tool{CodexHookTool: tool},
+						CodexHookAuto: NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json")),
+					}
+					if defaultLog {
+						writer := log.Writer()
+						log.SetOutput(&logs)
+						defer log.SetOutput(writer)
+					} else {
+						options.Logf = func(format string, args ...any) { fmt.Fprintf(&logs, format, args...) }
+					}
+					service := New(options)
+					defer service.Close()
+					require.NoError(t, service.SetCodexHookAuto(string(name), true))
+					got, err := service.Check(context.Background(), CodexHookTool, name)
+					require.NoError(t, err)
+					require.True(t, got.AutoUpdate)
+					require.Equal(t, !fails, got.AutoUpdated)
+					if fails {
+						require.Equal(t, Outdated, got.Status)
+						require.Equal(t, "write refused", got.AutoError)
+						require.Contains(t, logs.String(), "failed: write refused")
+					} else {
+						require.Equal(t, Installed, got.Status)
+						require.Empty(t, got.AutoError)
+						require.Contains(t, logs.String(), "updated it by itself")
+					}
+					label := string(name)
+					if name == host.Local {
+						label = "the panemux host"
+					}
+					require.Contains(t, logs.String(), "on "+label)
+					require.Equal(t, []host.Host{name}, tool.installed)
+					_, err = service.Check(context.Background(), CodexHookTool, name)
+					require.NoError(t, err)
+					require.Len(t, tool.installed, 1, "only one automatic attempt per process")
+					tool.fail = nil
+					manual, err := service.Install(context.Background(), CodexHookTool, name)
+					require.NoError(t, err)
+					require.Equal(t, State{Status: Installed, AutoUpdate: true}, manual, "manual install clears either outcome")
+					again, err := service.Check(context.Background(), CodexHookTool, name)
+					require.NoError(t, err)
+					require.Empty(t, again.AutoError)
+					require.False(t, again.AutoUpdated)
+					require.Len(t, tool.installed, 2, "manual install does not re-enable automatic retries")
+				})
+			}
+		}
+	}
+}
+
+func TestServiceCodexAutoSettingsErrors(t *testing.T) {
+	service := New(Options{})
+	defer service.Close()
+	require.ErrorIs(t, service.SetCodexHookAuto("unknown", true), ErrUnknownHost)
+	require.EqualError(t, service.SetCodexHookAuto("", true), "codex hook settings are not kept")
+	path := filepath.Join(t.TempDir(), "codex-hook.json")
+	require.NoError(t, os.WriteFile(path, []byte("{"), 0o600))
+	tool := &fakeTool{state: &State{Status: Outdated}}
+	broken := New(Options{Tools: map[ID]Tool{CodexHookTool: tool}, CodexHookAuto: NewCodexHookAutoStore(path)})
+	defer broken.Close()
+	require.ErrorContains(t, broken.SetCodexHookAuto("", true), "parsing codex hook settings file")
+	got, err := broken.Check(context.Background(), CodexHookTool, host.Local)
+	require.NoError(t, err)
+	require.Contains(t, got.AutoSettingsError, "parsing codex hook settings file")
+	require.Empty(t, tool.installed)
 }

@@ -133,6 +133,45 @@ describe('TaskDashboard host menu Codex input notifications (issue #396)', () =>
   })
 })
 
+describe('TaskDashboard tool-list wiring', () => {
+  //efficacy:exempt pins unchanged host-menu wiring; these cases also pass with the pre-refactor components
+  it.each(['', 'dev-server'])('keeps the absent-tool presentation for host %j', async (host) => {
+    const state = tasksState()
+    renderDashboard(state)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', {
+        name: host === '' ? 'Codex input notifications on Local' : 'Open a terminal on dev-server',
+      }))
+    })
+    expect(state.codexHook).toHaveBeenCalledWith(host)
+    if (host === '') {
+      expect(screen.getByText('No Codex found on Local')).toBeInTheDocument()
+    } else {
+      expect(screen.queryByRole('group', { name: 'Codex input notifications' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Type in pane: dev-server' })).toBeInTheDocument()
+    }
+  })
+
+  //efficacy:exempt pins unchanged host/action wiring; these cases also pass with the pre-refactor components
+  it.each(['', 'dev-server'])('forwards automatic-update actions for host %j', async (host) => {
+    const state = tasksState({
+      codexHook: vi.fn().mockResolvedValue({ ok: true, launched: { status: 'installed', auto_update: false } }),
+      setCodexHookAuto: vi.fn().mockResolvedValue({ ok: true, launched: { auto_update: true } }),
+    })
+    renderDashboard(state)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', {
+        name: host === '' ? 'Codex input notifications on Local' : 'Open a terminal on dev-server',
+      }))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Update automatically' }))
+    })
+    expect(state.setCodexHookAuto).toHaveBeenCalledWith(host, true)
+    expect(screen.getByRole('checkbox', { name: 'Update automatically' })).toBeChecked()
+  })
+})
+
 describe('TaskDashboard host Type in pane (issue #314)', () => {
   it('opens an ssh terminal in a popup, and closing it ends the terminal and returns to the chip', async () => {
     const state = tasksState()

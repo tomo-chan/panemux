@@ -1,11 +1,14 @@
 import { describe, it, expect, vi } from 'vitest'
 import { act, cleanup, render, screen, fireEvent } from '@testing-library/react'
-import { CodexHookItem } from './CodexHookItem'
-import type { CodexHookItemProps } from './CodexHookItem'
+import { HostTools } from './HostTools'
+import { codexHookTool } from './codexHookTool'
+import type { HostToolItemProps } from './HostToolItem'
 import type { CodexHook } from '../schemas'
 import type { TaskActionResult } from '../hooks/useTasks'
 
-function props(hook: CodexHook, overrides: Partial<CodexHookItemProps> = {}): CodexHookItemProps {
+type CodexToolProps = Omit<HostToolItemProps, 'tool'>
+
+function props(hook: CodexHook, overrides: Partial<CodexToolProps> = {}): CodexToolProps {
   return {
     host: 'gpu-box',
     load: vi.fn().mockResolvedValue({ ok: true, launched: hook }),
@@ -15,15 +18,15 @@ function props(hook: CodexHook, overrides: Partial<CodexHookItemProps> = {}): Co
   }
 }
 
-async function renderItem(p: CodexHookItemProps, alone = false) {
+async function renderItem(p: CodexToolProps, alone = false) {
   await act(async () => {
-    render(<CodexHookItem {...p} alone={alone} />)
+    render(<HostTools host={p.host} label={p.label} alone={alone} tools={[codexHookTool(p)]} />)
   })
 }
 
 const checkbox = () => screen.getByRole('checkbox', { name: 'Update automatically' })
 
-describe('CodexHookItem updating by itself (issue #402)', () => {
+describe('HostTools Codex hook updating by itself (issue #402)', () => {
   it('turns it on and off, starting from what the host has', async () => {
     const setAuto = vi.fn()
       .mockResolvedValueOnce({ ok: true, launched: { auto_update: true } })
@@ -121,7 +124,7 @@ describe('CodexHookItem updating by itself (issue #402)', () => {
     const offered: string[] = []
     for (const status of ['missing', 'outdated', 'installed', 'absent', 'unknown', 'invalid'] as const) {
       await act(async () => {
-        render(<CodexHookItem {...props({ status })} alone />)
+        render(<HostTools host="gpu-box" alone tools={[codexHookTool(props({ status }))]} />)
       })
       if (screen.queryByRole('checkbox')) offered.push(status)
       cleanup()
@@ -130,7 +133,7 @@ describe('CodexHookItem updating by itself (issue #402)', () => {
   })
 })
 
-describe('CodexHookItem (issue #396)', () => {
+describe('HostTools Codex hook (issue #396)', () => {
   it.each([
     ['missing', 'Install'],
     ['outdated', 'Update'],
