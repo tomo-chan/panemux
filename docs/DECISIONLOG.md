@@ -1171,6 +1171,12 @@ real-install contract tests move with them. Participation goldens also move unch
 cursor/ledger tests and the TLA+ transition table stay board-owned. Makefile contract execution,
 fixture-agent checks, coverage scope, and CI pin lookup/path selection follow the adapter package.
 
+The participation port also exposes adapter-owned diagnostic labels and a generic path-discovery
+error classification. Bootstrap keeps path and presence warning streaks independent, including
+path-failure → presence-failure transitions, while retaining the original operator-facing messages.
+Adapter retry, send-lane and concurrent discovery tests live with the adapter so package-scoped
+mutation testing exercises the owning package's behavior.
+
 The public `agmsg_path` key, default and validation results remain unchanged. The adapter owns the
 default path and validation and config delegates to it. Relay discovery still remembers absence;
 bootstrap independently caches paths and rechecks presence. The type-name documentation moves to

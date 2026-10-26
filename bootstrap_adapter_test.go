@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"panemux/internal/agmsg"
 	"panemux/internal/board"
 	"panemux/internal/host"
@@ -29,7 +30,7 @@ func (p *testParticipation) Available(ctx context.Context) (bool, error) {
 	if p.resolve != nil {
 		path, err := p.resolve(ctx, p.id)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("%w: %w", board.ErrParticipationPath, err)
 		}
 		p.Participation = agmsg.NewClient(agmsg.ClientConfig{HostID: p.id, Path: path, Runner: p.runner})
 		p.resolve = nil

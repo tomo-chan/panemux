@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -129,6 +130,7 @@ const (
 	warnKindIdentifier  = "identifier"
 	warnKindDetect      = "detect"
 	warnKindInstruction = "instruction"
+	warnKindPath        = "path"
 	warnKindProbe       = "presence-probe"
 	warnKindAbsent      = "messaging-absent"
 )
@@ -319,7 +321,8 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 	}
 	if !present {
 		b.warnOnce(paneID, warnKindAbsent, fmt.Sprintf(
-			"agent board bootstrap: messaging not found on host %q for pane %q, skipping bootstrap", host, paneID,
+			"agent board bootstrap: %s not found on host %q for pane %q, skipping bootstrap",
+			participant.Description().Name, host, paneID,
 		))
 		return
 	}
@@ -404,9 +407,16 @@ func (b *bootstrapWatcher) messagingPresent(ctx context.Context, paneID, host st
 	probeCtx, cancel := context.WithTimeout(ctx, bootstrapProbeTimeout)
 	defer cancel()
 	present, err := participant.Available(probeCtx)
+	description := participant.Description()
+	if errors.Is(err, board.ErrParticipationPath) {
+		b.warnOnce(paneID, warnKindPath, fmt.Sprintf(
+			"agent board bootstrap: no resolved %s for host %q (pane %q)", description.PathSetting, host, paneID))
+		return false, false
+	}
+	b.clearWarning(paneID, warnKindPath)
 	if err != nil {
 		b.warnOnce(paneID, warnKindProbe, fmt.Sprintf(
-			"agent board bootstrap: checking messaging presence on host %q (pane %q): %v", host, paneID, err))
+			"agent board bootstrap: checking %s presence on host %q (pane %q): %v", description.Name, host, paneID, err))
 		return false, false
 	}
 	b.clearWarning(paneID, warnKindProbe)

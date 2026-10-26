@@ -81,7 +81,7 @@ type boardMessagesResponse struct {
 }
 
 // GetBoardMessages returns board history newer than the since query
-// parameter (BoardCache's own local Seq, not an transport-native id — those
+// parameter (BoardCache's own local Seq, not a transport-native id — those
 // aren't comparable across hosts). Missing since defaults to 0.
 func (h *Handler) GetBoardMessages(w http.ResponseWriter, r *http.Request) {
 	since := int64(0)

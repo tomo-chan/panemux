@@ -6,6 +6,7 @@ package board
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"panemux/internal/agent"
 	"time"
 )
@@ -69,9 +70,21 @@ type JoinRequest struct {
 	Mode   string
 }
 
+// ErrParticipationPath marks a path-discovery failure, distinct from a presence
+// probe failure. Callers can suppress and recover their warning streaks separately.
+var ErrParticipationPath = errors.New("resolve messaging path")
+
+// ParticipationDescription names the operator-facing tool and its path setting.
+// The adapter owns these labels; board orchestration only formats their context.
+type ParticipationDescription struct {
+	Name        string
+	PathSetting string
+}
+
 // Participation supplies host availability and the instruction written to a pane.
 // Address validation is available before process detection or host I/O.
 type Participation interface {
+	Description() ParticipationDescription
 	ValidateAddress(team, paneID string) error
 	Available(context.Context) (bool, error)
 	JoinInstruction(context.Context, JoinRequest) (string, error)

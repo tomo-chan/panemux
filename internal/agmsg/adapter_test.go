@@ -111,3 +111,17 @@ func TestParticipationRetriesDiscoveryAndPresenceIndependentlyOfRelay(t *testing
 	assert.Equal(t, before, runner.homes, "successful path resolution is reused")
 	require.ErrorContains(t, client.Send(ctx, "panemux", "pane-a", "pane-b", "hello"), "not installed")
 }
+
+func TestAvailableClassifiesOnlyPathFailures(t *testing.T) {
+	sentinel := errors.New("offline")
+	for path, wantPathError := range map[string]bool{"~/agmsg": true, "/opt/agmsg": false} {
+		t.Run(path, func(t *testing.T) {
+			client := NewClient(ClientConfig{Path: path, Runner: &fakeBoardExecutor{err: sentinel}})
+			present, err := client.Available(context.Background())
+			assert.False(t, present)
+			require.ErrorIs(t, err, sentinel)
+			assert.Equal(t, wantPathError, errors.Is(err, board.ErrParticipationPath))
+			assert.Equal(t, board.ParticipationDescription{Name: "agmsg", PathSetting: "agmsg_path"}, client.Description())
+		})
+	}
+}

@@ -174,7 +174,7 @@ func TestBootstrapWatcher_AgmsgNotPresent_NoWrite_WarnsOnce(t *testing.T) {
 	// nothing about how many lines were written before it was, so an
 	// unconditional log.Printf beside it would keep that assertion green while
 	// three ticks produced three lines.
-	assert.Equal(t, 1, strings.Count(logs.String(), "messaging not found on host"),
+	assert.Equal(t, 1, strings.Count(logs.String(), "agmsg not found on host"),
 		"three ticks against a host with no agmsg must produce one warning, not three")
 	assert.True(t, w.warned["pane-a"].kinds[warnKindAbsent],
 		"and the suppression that produced that count is the absent-agmsg kind's")
@@ -251,7 +251,7 @@ func TestBootstrapWatcher_RemotePresenceCheckTransportError_DistinctFromNo(t *te
 
 	assert.Empty(t, sess.writes)
 	// Counted for the same reason as the absent-agmsg case above.
-	assert.Equal(t, 1, strings.Count(logs.String(), "checking messaging presence on host"),
+	assert.Equal(t, 1, strings.Count(logs.String(), "checking agmsg presence on host"),
 		"a transport error that keeps recurring must be warned about once per streak, not per tick")
 	assert.True(t, w.warned["pane-a"].kinds[warnKindProbe],
 		"and the suppression that produced that count is the presence-probe kind's")

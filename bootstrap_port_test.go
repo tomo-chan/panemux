@@ -20,6 +20,9 @@ type fakeParticipation struct {
 	present        bool
 }
 
+func (p *fakeParticipation) Description() board.ParticipationDescription {
+	return board.ParticipationDescription{Name: "transport", PathSetting: "transport_path"}
+}
 func (p *fakeParticipation) ValidateAddress(string, string) error { return p.addressErr }
 func (p *fakeParticipation) Available(context.Context) (bool, error) {
 	return p.present, p.availableErr

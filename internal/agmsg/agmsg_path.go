@@ -25,7 +25,7 @@ const remoteHomeProbeCmd = `printf '%s' "$HOME"`
 // Runner.Run call at all. Callers are expected to cache the result for
 // the life of a connection — this function itself makes no attempt to
 // cache, matching the adapter's existing per-call, stateless convention
-// (see AgmsgClient's own doc comments).
+// (see board.MessageClient).
 func ResolveRemoteAgmsgPath(ctx context.Context, executor host.Runner, path string) (string, error) {
 	if !strings.HasPrefix(path, "~/") {
 		return path, nil

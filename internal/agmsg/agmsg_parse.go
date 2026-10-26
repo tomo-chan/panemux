@@ -23,7 +23,7 @@ type agmsgMessageRow struct {
 const agmsgMessageSentType = "message_sent"
 
 // parseAgmsgMessageRows decodes JSONL output from `api.sh get teams <team>
-// messages`, tagging every row with host (which AgmsgClient/host it came
+// messages`, tagging every row with host (which source host it came
 // from — not part of agmsg's own schema). A line that isn't valid JSON, or
 // doesn't parse as a message_sent record, is skipped rather than failing
 // the whole poll — matching this repository's existing JSONL-tolerance

@@ -83,7 +83,8 @@ None of these files is a second message store.
 ## Package layout
 
 The package boundary enforces the ownership model. `MessageClient` supplies `HostID`, `Since`,
-and `Send`; `Participation` supplies availability, address validation, and an instruction from
+and `Send`; `Participation` supplies adapter-owned diagnostic labels, availability, address
+validation, and an instruction from
 `agent.ID`, team, pane ID, and mode. Relay, status aggregation, sender validation, and the bootstrap
 watcher depend on these ports. Root composition binds one adapter per host to the shared execution
 port; it does not resolve paths or construct participation text.

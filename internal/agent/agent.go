@@ -22,8 +22,8 @@ import (
 // carry. It never changes once stored data names it.
 type ID string
 
-// validName is the shape of an ID, an alias: lower
-// case, starting with a letter, words joined by single hyphens.
+// validName is the shape shared by IDs and aliases: lower case, starting
+// with a letter, with words joined by single hyphens.
 var validName = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
 
 // Valid reports whether id has the shape of an ID. It does not say whether
@@ -95,12 +95,10 @@ func (d Definition) Has(c Capability) bool {
 	return false
 }
 
-// Detection holds an agent's process rules: Agent Board's, which mirrors
-// board process detection, and the Task rule the task board and the pane header
-// share.
+// Detection holds the independent Board and Task process rules. The task
+// board and pane header share the Task rule.
 type Detection struct {
-	// Board finds the agent in a pane for Agent Board, using independent
-	// type.conf detect_proc.
+	// Board finds the agent in a pane for Agent Board participation polling.
 	Board *ProcessRule
 	// Task finds the agent's processes in a host's `ps` output for the task
 	// board, and the agent's session in a pane (MatchInteractiveSession).
@@ -109,7 +107,7 @@ type Detection struct {
 
 // ProcessRule matches a `ps` command line by its program's base name.
 type ProcessRule struct {
-	// VerifiedWith names the release the rule was last checked against.
+	// VerifiedWith records the release or verification date the rule was checked against.
 	VerifiedWith string
 	UnknownArgs  UnknownPolicy
 	// Patterns are lower-case base names; a trailing "*" matches any suffix.
@@ -190,8 +188,8 @@ type SessionKey struct {
 // key.
 func (k SessionKey) Valid() bool { return k.Agent.Valid() && k.SessionID != "" }
 
-// Validate checks that defs can form a registry: IDs, aliases and names
-// are well formed and unique across all of them, capabilities are known and
+// Validate checks that defs can form a registry: IDs and aliases are well
+// formed and unique across both sets, capabilities are known and
 // declared once, and every rule matches a declaration.
 func Validate(defs []Definition) error {
 	if len(defs) == 0 {

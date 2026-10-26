@@ -171,13 +171,19 @@ func (c *Client) participationRoot(ctx context.Context) (string, error) {
 	c.participationPath = path
 	return path, nil
 }
+func (c *Client) Description() board.ParticipationDescription {
+	return board.ParticipationDescription{Name: "agmsg", PathSetting: "agmsg_path"}
+}
 func (c *Client) ValidateAddress(team, paneID string) error {
-	return validateIdentifiers(team, paneID, paneID)
+	if err := validateIdentifiers(team, paneID, paneID); err != nil {
+		return fmt.Errorf("pane %q or team %q is not a valid agmsg identifier", paneID, team)
+	}
+	return nil
 }
 func (c *Client) Available(ctx context.Context) (bool, error) {
 	path, err := c.participationRoot(ctx)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("%w: %w", board.ErrParticipationPath, err)
 	}
 	return RemoteAgmsgPresent(ctx, c.runner, path)
 }

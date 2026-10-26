@@ -186,7 +186,7 @@ func TestBootstrapWarningsOfDifferentKindsDoNotSuppressEachOther(t *testing.T) {
 	w.pollOnce(context.Background())
 	w.pollOnce(context.Background())
 
-	assert.Contains(t, logs.String(), "messaging not found on host",
+	assert.Contains(t, logs.String(), "agmsg not found on host",
 		"the presence warning must not be suppressed by an earlier detection warning for the same pane")
 	assert.Empty(t, sess.writes)
 }

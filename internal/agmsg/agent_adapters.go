@@ -51,8 +51,8 @@ type boardJoin struct {
 	mode string
 }
 
-// boardAdaptersByType is boardAdapters keyed by agmsg type, the name a pane's
-// detection reports, checked against the registry when panemux starts.
+// boardAdaptersByType indexes the transport types used to render instructions.
+// The mapping is checked against registry declarations when panemux starts.
 var boardAdaptersByType = mustBoardAdapters(agent.All(), boardAdapters())
 
 func mustBoardAdapters(defs []agent.Definition, adapters []registeredBoard) map[string]boardAdapter {
@@ -67,9 +67,9 @@ func mustBoardAdapters(defs []agent.Definition, adapters []registeredBoard) map[
 	return byType
 }
 
-// boardAdapterFor is the adapter of the agent agmsgType names. Detection
-// reports only registered types, so the fallback — the steps every agent
-// shares and no claim — is never reached in practice.
+// boardAdapterFor chooses the steps for a transport type. JoinInstruction
+// converts a detected registry ID through the validated mapping first, so the
+// fallback — shared steps without an identity claim — is not used in practice.
 func boardAdapterFor(agmsgType string) boardAdapter {
 	if a, ok := boardAdaptersByType[agmsgType]; ok {
 		return a

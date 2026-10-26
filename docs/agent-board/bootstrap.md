@@ -65,3 +65,8 @@ Fresh local and SSH sessions are eligible again because panemux recreated their 
 
 This deliberately does not detect an agent process restart inside an otherwise unchanged pane. See
 [Known limitations](limitations.md#known-limitations).
+
+Path discovery and presence probes have independent warning streaks. Once path discovery succeeds,
+its warning clears even if the next presence probe fails. The participation port distinguishes a
+path failure and supplies operator-facing tool/setting labels; the adapter keeps the existing
+agmsg warning wording while the watcher remains transport-independent.
