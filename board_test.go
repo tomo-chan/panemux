@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"panemux/internal/agmsg"
 	"path/filepath"
 	"testing"
 
@@ -208,6 +209,6 @@ func installAgmsg(t *testing.T, root, version string) string {
 }
 
 func TestVersionMismatchWarning_DistinguishesMatchFromMismatch(t *testing.T) {
-	assert.Empty(t, board.VersionMismatchWarning("local", board.TestedAgmsgVersion))
-	assert.NotEmpty(t, board.VersionMismatchWarning("local", "0.0.1"))
+	assert.Empty(t, agmsg.VersionMismatchWarning("local", agmsg.TestedAgmsgVersion))
+	assert.NotEmpty(t, agmsg.VersionMismatchWarning("local", "0.0.1"))
 }

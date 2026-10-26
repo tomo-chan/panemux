@@ -55,7 +55,7 @@ func TestBoardCache_RecordStatus_SetsUpdatedAt(t *testing.T) {
 func TestBoardCache_AppendMessage_AssignsIncreasingSeq(t *testing.T) {
 	c := NewBoardCache()
 	c.AppendMessage(Row{ID: "1", Host: "host-a", Body: "first"})
-	c.AppendMessage(Row{ID: "1", Host: "host-b", Body: "second"}) // colliding agmsg ID, different host
+	c.AppendMessage(Row{ID: "1", Host: "host-b", Body: "second"}) // colliding message transport ID, different host
 
 	rows := c.MessagesSince(0)
 	require.Len(t, rows, 2)

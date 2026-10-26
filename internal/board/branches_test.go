@@ -15,7 +15,7 @@ import (
 	"panemux/internal/fileops"
 )
 
-// agmsg's output is a stream of JSON lines written by a program panemux does
+// message transport's output is a stream of JSON lines written by a program panemux does
 // not control, on a host it may not own. Everything here is about what
 // happens when that stream, or the files panemux keeps beside it, is not
 // what was expected — and about not turning any of it into a fatal error,
@@ -46,55 +46,7 @@ func brokenParent(t *testing.T, name string) string {
 	return filepath.Join(notADir, name)
 }
 
-// ── Parsing agmsg's output ───────────────────────────────────────────────────
-
-// Three kinds of line are skipped rather than parsed, and each is ordinary
-// rather than exceptional: a trailing blank line from any writer that
-// terminates its output, a line agmsg wrote that this version does not
-// understand, and a row of some other type sharing the same stream.
-//
-// The rows are interleaved so that each skip is followed by a good row. That
-// is what separates skipping from stopping: a `break` in place of any of the
-// three `continue`s would also produce no bad rows, while silently dropping
-// everything after the first one.
-func TestParseAgmsgMessageRowsSkipsWhatItCannotUseAndKeepsGoing(t *testing.T) {
-	data := []byte("" +
-		`{"type":"message_sent","id":"1","team":"panemux","from":"a","to":"b","body":"first"}` + "\n" +
-		"\n" +
-		`{"type":"message_sent","id":"2","team":"panemux","from":"a","to":"b","body":"after a blank line"}` + "\n" +
-		"this is not json at all\n" +
-		`{"type":"message_sent","id":"3","team":"panemux","from":"a","to":"b","body":"after a bad line"}` + "\n" +
-		`{"type":"agent_joined","id":"x","team":"panemux","from":"a","to":"b","body":"ignored"}` + "\n" +
-		`{"type":"message_sent","id":"4","team":"panemux","from":"a","to":"b","body":"after another type"}` + "\n")
-
-	rows := parseAgmsgMessageRows(data, "host-a")
-
-	var bodies []string
-	for _, r := range rows {
-		bodies = append(bodies, r.Body)
-	}
-	assert.Equal(t, []string{"first", "after a blank line", "after a bad line", "after another type"}, bodies,
-		"each skipped line must cost only itself, never the rows behind it")
-}
-
-// A version string that is not three numbers is not a version. Both halves
-// matter: a non-numeric component and a negative one are equally not a
-// release, and accepting either would let the mismatch warning compare
-// nonsense and stay silent when it should not.
-func TestParseAgmsgReleaseRejectsNonNumericAndNegativeComponents(t *testing.T) {
-	for _, version := range []string{"1.x.3", "1.2.z", "1.-2.3", "-1.2.3"} {
-		t.Run(version, func(t *testing.T) {
-			_, ok := parseAgmsgRelease(version)
-			assert.False(t, ok, "%q is not a release", version)
-		})
-	}
-
-	got, ok := parseAgmsgRelease("1.2.3")
-	require.True(t, ok, "the rejection above must not be rejecting everything")
-	assert.Equal(t, agmsgRelease{major: 1, minor: 2, patch: 3}, got)
-}
-
-// ── The files panemux keeps beside agmsg ─────────────────────────────────────
+// ── The files panemux keeps beside message transport ─────────────────────────────────────
 
 // A missing file is the normal state before the first run and is not an
 // error. Every other read failure is, and folding the two together would let
@@ -237,17 +189,17 @@ func TestCursorsAreSortedByHost(t *testing.T) {
 // ── Relaying to another host ─────────────────────────────────────────────────
 
 // A pane mapped to a host the relay has no client for is a configuration the
-// operator can produce simply by adding a pane on a host where agmsg is not
+// operator can produce simply by adding a pane on a host where message transport is not
 // installed. The message is still recorded locally — the dashboard shows it —
 // and only the delivery is skipped, with a line naming both ends so the
 // operator can see which pane is unreachable and why.
 func TestRelaySkipsDeliveryToAHostWithNoClient(t *testing.T) {
 	logs := captureBoardLog(t)
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review"},
 	}}
 	cache := NewBoardCache()
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA},
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA},
 		map[string]string{"claude-a": "host-a", "codex-b": "host-unreachable"})
 
 	require.NoError(t, r.Poll(context.Background()),
@@ -264,12 +216,12 @@ func TestRelaySkipsDeliveryToAHostWithNoClient(t *testing.T) {
 // host would stop messages flowing between all the others.
 func TestRelayLogsAFailedSendAndKeepsPolling(t *testing.T) {
 	logs := captureBoardLog(t)
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review"},
 	}}
-	hostB := &fakeAgmsgClient{hostID: "host-b", sendErr: errors.New("ssh: connection refused")}
+	hostB := &fakeMessageClient{hostID: "host-b", sendErr: errors.New("ssh: connection refused")}
 	cache := NewBoardCache()
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA, "host-b": hostB},
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA, "host-b": hostB},
 		map[string]string{"claude-a": "host-a", "codex-b": "host-b"})
 
 	require.NoError(t, r.Poll(context.Background()),

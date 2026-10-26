@@ -1,4 +1,4 @@
-package main
+package agmsg
 
 import (
 	"fmt"
@@ -19,18 +19,19 @@ import (
 // declarations in step.
 func boardAdapters() []registeredBoard {
 	return []registeredBoard{
-		{id: agent.Claude, adapter: claudeBoard{}},
-		{id: agent.Codex, adapter: plainBoard{}},
-		{id: agent.Cursor, adapter: plainBoard{}},
-		{id: agent.Gemini, adapter: plainBoard{}},
-		{id: agent.GrokBuild, adapter: plainBoard{}},
-		{id: agent.OpenCode, adapter: plainBoard{}},
+		{id: agent.Claude, agmsgType: "claude-code", adapter: claudeBoard{}},
+		{id: agent.Codex, agmsgType: string(agent.Codex), adapter: plainBoard{}},
+		{id: agent.Cursor, agmsgType: string(agent.Cursor), adapter: plainBoard{}},
+		{id: agent.Gemini, agmsgType: string(agent.Gemini), adapter: plainBoard{}},
+		{id: agent.GrokBuild, agmsgType: string(agent.GrokBuild), adapter: plainBoard{}},
+		{id: agent.OpenCode, agmsgType: string(agent.OpenCode), adapter: plainBoard{}},
 	}
 }
 
 type registeredBoard struct {
-	adapter boardAdapter
-	id      agent.ID
+	adapter   boardAdapter
+	id        agent.ID
+	agmsgType string
 }
 
 // boardAdapter is what joining Agent Board differs in per agent.
@@ -59,13 +60,9 @@ func mustBoardAdapters(defs []agent.Definition, adapters []registeredBoard) map[
 	if err := validateBoardAdapters(defs, adapters); err != nil {
 		panic(err)
 	}
-	types := map[agent.ID]string{}
-	for _, d := range defs {
-		types[d.ID] = d.AgmsgType
-	}
 	byType := make(map[string]boardAdapter, len(adapters))
 	for _, r := range adapters {
-		byType[types[r.id]] = r.adapter
+		byType[r.agmsgType] = r.adapter
 	}
 	return byType
 }
@@ -89,6 +86,7 @@ func validateBoardAdapters(defs []agent.Definition, adapters []registeredBoard) 
 		known[d.ID] = d
 	}
 	seen := map[agent.ID]bool{}
+	types := map[string]bool{}
 	for _, r := range adapters {
 		d, ok := known[r.id]
 		switch {
@@ -99,6 +97,10 @@ func validateBoardAdapters(defs []agent.Definition, adapters []registeredBoard) 
 		case seen[r.id]:
 			return fmt.Errorf("board adapter %q is registered twice", r.id)
 		}
+		if !agent.ID(r.agmsgType).Valid() || types[r.agmsgType] {
+			return fmt.Errorf("board adapter %q has invalid or duplicate agmsg type %q", r.id, r.agmsgType)
+		}
+		types[r.agmsgType] = true
 		seen[r.id] = true
 	}
 	for _, d := range defs {

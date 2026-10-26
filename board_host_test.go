@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"io"
+	"panemux/internal/agmsg"
 	"panemux/internal/board"
 	"panemux/internal/config"
 	"panemux/internal/host"
@@ -179,10 +180,10 @@ func TestHostAgmsgClientRetriesProbesAndSends(t *testing.T) {
 					}
 					return []byte("yes"), nil
 				default:
-					return []byte(board.TestedAgmsgVersion), nil
+					return []byte(agmsg.TestedAgmsgVersion), nil
 				}
 			})
-			c := &hostAgmsgClient{id: "ssh:dev", path: "~/agmsg", runner: runner}
+			c := agmsg.NewClient(agmsg.ClientConfig{HostID: "ssh:dev", Path: "~/agmsg", Runner: runner})
 			_, err := c.Since(context.Background(), "panemux", "", 10)
 			if failure == "home" || failure == "presence" {
 				require.Error(t, err)
@@ -213,7 +214,7 @@ func TestBootstrapRecoversAfterPathResolutionFailure(t *testing.T) {
 	manager := session.NewManager()
 	manager.Add(sess)
 	attempts := 0
-	watcher := newBootstrapWatcher(bootstrapWatcherConfig{
+	watcher := newTestBootstrapWatcher(testBootstrapWatcherConfig{
 		Manager: manager, PaneHosts: map[string]string{"pane-a": "ssh:dev"}, Team: "panemux",
 		ResolvePath: func(context.Context, string) (string, error) {
 			attempts++
@@ -239,7 +240,7 @@ func TestHostPathResolutionUsesLocalRunner(t *testing.T) {
 	home := isolatedHome(t)
 	pool := hostexec.New(hostexec.Options{})
 	defer pool.Close()
-	path, err := resolveHostAgmsgPath(context.Background(), host.Bind(pool, host.Local), "~/agmsg")
+	path, err := agmsg.ResolveRemoteAgmsgPath(context.Background(), host.Bind(pool, host.Local), "~/agmsg")
 	require.NoError(t, err)
 	require.Equal(t, home+"/agmsg", path)
 }
@@ -275,7 +276,7 @@ func TestBoardPendingDialDoesNotDelayHealthyHost(t *testing.T) {
 }
 
 func TestHostAgmsgVersionWarningOnce(t *testing.T) {
-	for _, version := range []string{board.TestedAgmsgVersion, "0.0.1", ""} {
+	for _, version := range []string{agmsg.TestedAgmsgVersion, "0.0.1", ""} {
 		t.Run(version, func(t *testing.T) {
 			logs := captureBoardLog(t)
 			probes := 0
@@ -291,14 +292,14 @@ func TestHostAgmsgVersionWarningOnce(t *testing.T) {
 					return nil, nil
 				}
 			})
-			client := &hostAgmsgClient{id: "ssh:dev", path: "/opt/agmsg", runner: runner}
+			client := agmsg.NewClient(agmsg.ClientConfig{HostID: "ssh:dev", Path: "/opt/agmsg", Runner: runner})
 			require.Equal(t, "ssh:dev", client.HostID())
 			for range 2 {
 				_, err := client.Since(context.Background(), "panemux", "", 10)
 				require.NoError(t, err)
 			}
 			require.Equal(t, 1, probes)
-			warning := board.VersionMismatchWarning("ssh:dev", version)
+			warning := agmsg.VersionMismatchWarning("ssh:dev", version)
 			if version == "0.0.1" {
 				require.NotEmpty(t, warning)
 				require.Equal(t, 1, strings.Count(logs.String(), warning))
@@ -344,11 +345,11 @@ func TestHostAgmsgOperationErrors(t *testing.T) {
 					return []byte("yes"), nil
 				}
 				if strings.Contains(joined, "board-agmsg-version") {
-					return []byte(board.TestedAgmsgVersion), nil
+					return []byte(agmsg.TestedAgmsgVersion), nil
 				}
 				return nil, sentinel
 			})
-			c := &hostAgmsgClient{id: "ssh:dev", path: "/opt/agmsg", runner: runner}
+			c := agmsg.NewClient(agmsg.ClientConfig{HostID: "ssh:dev", Path: "/opt/agmsg", Runner: runner})
 			if operation == "read" {
 				_, err := c.Since(context.Background(), "panemux", "", 10)
 				require.ErrorIs(t, err, sentinel)
@@ -369,7 +370,7 @@ func TestSetupBoardBootstrapUsesSharedRunner(t *testing.T) {
 	sess := &fakeAgentSession{id: "pane-a", detectType: "codex", detectOK: true}
 	manager := session.NewManager()
 	manager.Add(sess)
-	cfg := boardEnabledConfig(installAgmsg(t, t.TempDir(), board.TestedAgmsgVersion),
+	cfg := boardEnabledConfig(installAgmsg(t, t.TempDir(), agmsg.TestedAgmsgVersion),
 		paneConfig("pane-a", config.PaneAgentBoardConfig{Enabled: boolPtr(true)}))
 	srv, _, watcher := buildServerServices(cfg, manager)
 	defer func() { require.NoError(t, srv.Shutdown(context.Background())) }()
@@ -383,7 +384,7 @@ func TestBootstrapWithoutHostRunnerDoesNotWrite(t *testing.T) {
 	sess := &fakeAgentSession{id: "pane-a", detectType: "codex", detectOK: true}
 	manager := session.NewManager()
 	manager.Add(sess)
-	watcher := newBootstrapWatcher(bootstrapWatcherConfig{
+	watcher := newTestBootstrapWatcher(testBootstrapWatcherConfig{
 		Manager: manager, PaneHosts: map[string]string{"pane-a": "ssh:dev"},
 		ResolvedPaths: map[string]string{"ssh:dev": "/opt/agmsg"}, Team: "panemux",
 		RunnerForHost: func(string) host.Runner { return nil },
@@ -475,7 +476,7 @@ func TestPollDoesNotWaitForSendInitialization(t *testing.T) {
 	poller := hostRunnerFunc(func(context.Context, string, ...string) ([]byte, error) {
 		return nil, hostexec.ErrConnecting
 	})
-	c := &hostAgmsgClient{id: "ssh:dev", path: "/opt/agmsg", runner: poller, sendRunner: sender}
+	c := agmsg.NewClient(agmsg.ClientConfig{HostID: "ssh:dev", Path: "/opt/agmsg", Runner: poller, SendRunner: sender})
 	sent := make(chan error, 1)
 	go func() { sent <- c.Send(context.Background(), "panemux", "pane-a", "pane-b", "hello") }()
 	select {
@@ -511,7 +512,7 @@ func TestConcurrentHostDiscoveryPublishesOneVersionWarning(t *testing.T) {
 		}
 		return []byte("0.0.1"), nil
 	})
-	c := &hostAgmsgClient{id: "ssh:dev", path: "/opt/agmsg", runner: runner}
+	c := agmsg.NewClient(agmsg.ClientConfig{HostID: "ssh:dev", Path: "/opt/agmsg", Runner: runner})
 	done := make(chan error, 2)
 	for range 2 {
 		go func() { _, err := c.Since(context.Background(), "panemux", "", 10); done <- err }()
@@ -522,6 +523,6 @@ func TestConcurrentHostDiscoveryPublishesOneVersionWarning(t *testing.T) {
 	for range 2 {
 		require.NoError(t, <-done)
 	}
-	warning := board.VersionMismatchWarning("ssh:dev", "0.0.1")
+	warning := agmsg.VersionMismatchWarning("ssh:dev", "0.0.1")
 	require.Equal(t, 1, strings.Count(logs.String(), warning))
 }

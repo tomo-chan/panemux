@@ -189,7 +189,7 @@ func runServer(
 	boardCtx, cancelBoard := context.WithCancel(context.Background())
 	defer cancelBoard()
 	// Skip the poll loop entirely when no host is reachable at all: with
-	// zero AgmsgClients every poll is a guaranteed no-op forever (nothing
+	// zero message clients every poll is a guaranteed no-op forever (nothing
 	// to read, nothing to relay), so starting it would just tick a ticker
 	// for the life of the process for no reason — including for the many
 	// panemux users who have never configured agent board at all.

@@ -15,10 +15,10 @@ import (
 
 type sentMessage struct{ Team, From, To, Body string }
 
-// fakeAgmsgClient is safe for concurrent use: the runLoop tests drive it
+// fakeMessageClient is safe for concurrent use: the runLoop tests drive it
 // from a background goroutine while the test goroutine polls its recorded
 // calls, so every field access goes through mu.
-type fakeAgmsgClient struct {
+type fakeMessageClient struct {
 	sinceErr    error
 	sendErr     error
 	hostID      string
@@ -28,32 +28,32 @@ type fakeAgmsgClient struct {
 	mu          sync.Mutex
 }
 
-func (f *fakeAgmsgClient) HostID() string { return f.hostID }
+func (f *fakeMessageClient) HostID() string { return f.hostID }
 
-func (f *fakeAgmsgClient) Since(_ context.Context, _, afterID string, limit int) ([]Row, error) {
+func (f *fakeMessageClient) Since(_ context.Context, _, afterID string, limit int) ([]Row, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sinceLimits = append(f.sinceLimits, limit)
 	if f.sinceErr != nil {
 		return nil, f.sinceErr
 	}
-	return filterRowsAfter(f.sinceRows, afterID), nil
+	return fakeRowsAfter(f.sinceRows, afterID), nil
 }
 
-func (f *fakeAgmsgClient) Send(_ context.Context, team, from, to, body string) error {
+func (f *fakeMessageClient) Send(_ context.Context, team, from, to, body string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sendCalls = append(f.sendCalls, sentMessage{Team: team, From: from, To: to, Body: body})
 	return f.sendErr
 }
 
-func (f *fakeAgmsgClient) sinceCallCount() int {
+func (f *fakeMessageClient) sinceCallCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.sinceLimits)
 }
 
-func newTestRelay(cache *BoardCache, clients map[string]AgmsgClient, paneHosts map[string]string) *Relay {
+func newTestRelay(cache *BoardCache, clients map[string]MessageClient, paneHosts map[string]string) *Relay {
 	return NewRelay(cache, RelayConfig{
 		Team: "panemux", Clients: clients, PaneHosts: paneHosts,
 		Limit: 100, BackfillLimit: 1000,
@@ -66,8 +66,8 @@ func TestRelay_Poll_NoKnownHosts_NoOp(t *testing.T) {
 }
 
 func TestRelay_Poll_AlreadyCanceledContext_ReturnsErrorImmediately(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a"}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-a": hostA}, nil)
+	hostA := &fakeMessageClient{hostID: "host-a"}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{"host-a": hostA}, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -78,12 +78,12 @@ func TestRelay_Poll_AlreadyCanceledContext_ReturnsErrorImmediately(t *testing.T)
 }
 
 func TestRelay_Poll_FromKnownLocalPane_ToKnownPaneSameHost_Appended(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "pane-a", To: "pane-b", Body: "hi"},
 	}}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"pane-a": "host-a", "pane-b": "host-a"}
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA}, paneHosts)
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 
@@ -94,13 +94,13 @@ func TestRelay_Poll_FromKnownLocalPane_ToKnownPaneSameHost_Appended(t *testing.T
 }
 
 func TestRelay_Poll_ToKnownPaneDifferentHost_RelaysAndAppendsOnce(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review"},
 	}}
-	hostB := &fakeAgmsgClient{hostID: "host-b"}
+	hostB := &fakeMessageClient{hostID: "host-b"}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"claude-a": "host-a", "codex-b": "host-b"}
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA, "host-b": hostB}, paneHosts)
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA, "host-b": hostB}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 
@@ -120,19 +120,19 @@ func TestRelay_Poll_ToKnownPaneDifferentHost_RelaysAndAppendsOnce(t *testing.T) 
 // known panes must reject it — the original pane isn't local to host B —
 // so it is not re-appended to history a second time.
 func TestRelay_Poll_RelayedRowNotDoubleCounted(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review"},
 	}}
-	hostB := &fakeAgmsgClient{hostID: "host-b"}
+	hostB := &fakeMessageClient{hostID: "host-b"}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"claude-a": "host-a", "codex-b": "host-b"}
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA, "host-b": hostB}, paneHosts)
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA, "host-b": hostB}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 	require.Len(t, hostB.sendCalls, 1)
 
-	// Simulate agmsg on host B actually having stored the relayed row, now
-	// visible to a later poll of host B with a host-B-scoped agmsg id.
+	// Simulate message transport on host B actually having stored the relayed row, now
+	// visible to a later poll of host B with a host-B-scoped message transport id.
 	hostB.sinceRows = append(hostB.sinceRows, Row{
 		ID: "1", Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review",
 	})
@@ -145,10 +145,10 @@ func TestRelay_Poll_RelayedRowNotDoubleCounted(t *testing.T) {
 }
 
 func TestRelay_Poll_FromSystemIDWithLedgerMatch_Accepted(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a"}
+	hostA := &fakeMessageClient{hostID: "host-a"}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"pane-a": "host-a"}
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA}, paneHosts)
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA}, paneHosts)
 
 	_, err := r.Broadcast(context.Background(), SystemID, []string{"pane-a"}, "hello from command center")
 	require.NoError(t, err)
@@ -165,12 +165,12 @@ func TestRelay_Poll_FromSystemIDWithLedgerMatch_Accepted(t *testing.T) {
 }
 
 func TestRelay_Poll_FromSystemIDWithNoLedgerMatch_DroppedAsForgery(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: SystemID, To: "pane-a", Body: "forged"},
 	}}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"pane-a": "host-a"}
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA}, paneHosts)
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 
@@ -178,10 +178,10 @@ func TestRelay_Poll_FromSystemIDWithNoLedgerMatch_DroppedAsForgery(t *testing.T)
 }
 
 func TestRelay_Poll_FromSystemIDWithExpiredLedgerEntry_DroppedAsForgery(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a"}
+	hostA := &fakeMessageClient{hostID: "host-a"}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"pane-a": "host-a"}
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA}, paneHosts)
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA}, paneHosts)
 	r.ledger.ttl = time.Millisecond
 
 	_, err := r.Broadcast(context.Background(), SystemID, []string{"pane-a"}, "hello")
@@ -198,12 +198,12 @@ func TestRelay_Poll_FromSystemIDWithExpiredLedgerEntry_DroppedAsForgery(t *testi
 }
 
 func TestRelay_Poll_FromUnknownPane_DroppedAndNotCached(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "stranger", To: "pane-a", Body: "hi"},
 	}}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"pane-a": "host-a"}
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA}, paneHosts)
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 
@@ -211,12 +211,12 @@ func TestRelay_Poll_FromUnknownPane_DroppedAndNotCached(t *testing.T) {
 }
 
 func TestRelay_Poll_ToSystemID_StatusBody_RecordsStatusAndAppendsHistory(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "pane-a", To: SystemID, Body: `{"kind":"board_status","state":"working"}`},
 	}}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"pane-a": "host-a"}
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA}, paneHosts)
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 
@@ -230,12 +230,12 @@ func TestRelay_Poll_ToSystemID_StatusBody_RecordsStatusAndAppendsHistory(t *test
 }
 
 func TestRelay_Poll_ToSystemID_NonStatusBody_AppendedAsOrdinaryMessage(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "pane-a", To: SystemID, Body: "just chatting"},
 	}}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"pane-a": "host-a"}
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA}, paneHosts)
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 
@@ -246,12 +246,12 @@ func TestRelay_Poll_ToSystemID_NonStatusBody_AppendedAsOrdinaryMessage(t *testin
 }
 
 func TestRelay_Poll_ToUnknownPane_DroppedAndNotCached(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "pane-a", To: "no-such-pane", Body: "hi"},
 	}}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"pane-a": "host-a"}
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA}, paneHosts)
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 
@@ -259,13 +259,13 @@ func TestRelay_Poll_ToUnknownPane_DroppedAndNotCached(t *testing.T) {
 }
 
 func TestRelay_Poll_ClientSinceError_LoggedAndDoesNotStopOtherHosts(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceErr: errors.New("agmsg down")}
-	hostB := &fakeAgmsgClient{hostID: "host-b", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceErr: errors.New("message transport down")}
+	hostB := &fakeMessageClient{hostID: "host-b", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "pane-b", To: "pane-b2", Body: "ok"},
 	}}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"pane-b": "host-b", "pane-b2": "host-b"}
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA, "host-b": hostB}, paneHosts)
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA, "host-b": hostB}, paneHosts)
 
 	err := r.Poll(context.Background())
 	require.Error(t, err)
@@ -276,8 +276,8 @@ func TestRelay_Poll_ClientSinceError_LoggedAndDoesNotStopOtherHosts(t *testing.T
 }
 
 func TestRelay_Poll_ColdStartUsesBackfillLimit_SubsequentUseSteadyStateLimit(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a"}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-a": hostA}, nil)
+	hostA := &fakeMessageClient{hostID: "host-a"}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{"host-a": hostA}, nil)
 
 	require.NoError(t, r.Poll(context.Background()))
 	require.NoError(t, r.Poll(context.Background()))
@@ -288,12 +288,12 @@ func TestRelay_Poll_ColdStartUsesBackfillLimit_SubsequentUseSteadyStateLimit(t *
 }
 
 func TestRelay_CursorPersistence_AcrossSimulatedRestart(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "pane-a", To: "pane-b", Body: "one"},
 	}}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"pane-a": "host-a", "pane-b": "host-a"}
-	r1 := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA}, paneHosts)
+	r1 := newTestRelay(cache, map[string]MessageClient{"host-a": hostA}, paneHosts)
 	require.NoError(t, r1.Poll(context.Background()))
 
 	persisted := r1.Cursors()
@@ -301,12 +301,12 @@ func TestRelay_CursorPersistence_AcrossSimulatedRestart(t *testing.T) {
 	assert.Equal(t, "1", persisted[0].Cursor)
 
 	// New relay instance ("restart"), seeded from the persisted cursor.
-	hostA2 := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA2 := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "pane-a", To: "pane-b", Body: "one"},
 		{ID: "2", Team: "panemux", From: "pane-a", To: "pane-b", Body: "two"},
 	}}
 	cache2 := NewBoardCache()
-	r2 := newTestRelay(cache2, map[string]AgmsgClient{"host-a": hostA2}, paneHosts)
+	r2 := newTestRelay(cache2, map[string]MessageClient{"host-a": hostA2}, paneHosts)
 	r2.LoadCursors(persisted)
 	require.NoError(t, r2.Poll(context.Background()))
 
@@ -320,17 +320,17 @@ func TestRelay_CursorPersistence_SuccessfulForwardCanDuplicateBeforePersist(t *t
 	// Simulates a crash between relaying and persisting the cursor: the
 	// same row is seen again on the next Poll and is delivered again, not
 	// silently deduplicated — the documented accepted tradeoff.
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "pane-a", To: "pane-b", Body: "one"},
 	}}
 	cache := NewBoardCache()
 	paneHosts := map[string]string{"pane-a": "host-a", "pane-b": "host-a"}
-	r := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA}, paneHosts)
+	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 	// Cursor deliberately NOT advanced/reloaded — simulate a crash before
 	// persistence by constructing a fresh relay with no cursor loaded.
-	r2 := newTestRelay(cache, map[string]AgmsgClient{"host-a": hostA}, paneHosts)
+	r2 := newTestRelay(cache, map[string]MessageClient{"host-a": hostA}, paneHosts)
 	require.NoError(t, r2.Poll(context.Background()))
 
 	rows := cache.MessagesSince(0)
@@ -338,12 +338,12 @@ func TestRelay_CursorPersistence_SuccessfulForwardCanDuplicateBeforePersist(t *t
 }
 
 func TestRelay_Poll_PersistCursorsCalledWithSnapshot(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "5", Team: "panemux", From: "pane-a", To: "pane-b", Body: "hi"},
 	}}
 	var captured []CursorEntry
 	r := NewRelay(NewBoardCache(), RelayConfig{
-		Team: "panemux", Clients: map[string]AgmsgClient{"host-a": hostA},
+		Team: "panemux", Clients: map[string]MessageClient{"host-a": hostA},
 		PaneHosts: map[string]string{"pane-a": "host-a", "pane-b": "host-a"},
 		Limit:     100, BackfillLimit: 1000,
 		PersistCursors: func(entries []CursorEntry) { captured = entries },
@@ -361,10 +361,10 @@ func TestRelay_Poll_NoNewRows_PersistCursorsNotCalled(t *testing.T) {
 	// cursor file — otherwise every panemux process writes to disk on every
 	// tick forever, including operators who have never configured any
 	// board-enabled pane at all.
-	hostA := &fakeAgmsgClient{hostID: "host-a"} // no sinceRows
+	hostA := &fakeMessageClient{hostID: "host-a"} // no sinceRows
 	persistCalls := 0
 	r := NewRelay(NewBoardCache(), RelayConfig{
-		Team: "panemux", Clients: map[string]AgmsgClient{"host-a": hostA},
+		Team: "panemux", Clients: map[string]MessageClient{"host-a": hostA},
 		Limit: 100, BackfillLimit: 1000,
 		PersistCursors: func([]CursorEntry) { persistCalls++ },
 	})
@@ -376,19 +376,19 @@ func TestRelay_Poll_NoNewRows_PersistCursorsNotCalled(t *testing.T) {
 }
 
 func TestRelay_Poll_NewRowThenSteadyState_PersistCursorsCalledOnceThenNotAgain(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "5", Team: "panemux", From: "pane-a", To: "pane-b", Body: "hi"},
 	}}
 	persistCalls := 0
 	r := NewRelay(NewBoardCache(), RelayConfig{
-		Team: "panemux", Clients: map[string]AgmsgClient{"host-a": hostA},
+		Team: "panemux", Clients: map[string]MessageClient{"host-a": hostA},
 		PaneHosts: map[string]string{"pane-a": "host-a", "pane-b": "host-a"},
 		Limit:     100, BackfillLimit: 1000,
 		PersistCursors: func([]CursorEntry) { persistCalls++ },
 	})
 
 	require.NoError(t, r.Poll(context.Background())) // sees row 5, cursor advances
-	require.NoError(t, r.Poll(context.Background())) // filterRowsAfter("5") -> nothing new
+	require.NoError(t, r.Poll(context.Background())) // fakeRowsAfter("5") -> nothing new
 
 	assert.Equal(t, 1, persistCalls, "cursor write must fire exactly once, only when it actually advanced")
 }
@@ -399,8 +399,8 @@ func TestRelay_HasClients_NoClients_False(t *testing.T) {
 }
 
 func TestRelay_HasClients_WithClients_True(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a"}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-a": hostA}, nil)
+	hostA := &fakeMessageClient{hostID: "host-a"}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{"host-a": hostA}, nil)
 	assert.True(t, r.HasClients())
 }
 
@@ -410,11 +410,11 @@ func TestRelay_Poll_HostOperationTimeout_DoesNotBlockOtherHosts(t *testing.T) {
 	// the per-host timeout, not block forever behind the stuck one. Uses a
 	// tiny injected OperationTimeout so this test doesn't need to actually
 	// wait out the real 10s production default.
-	blocked := &blockingAgmsgClient{hostID: "host-a"}
-	hostB := &fakeAgmsgClient{hostID: "host-b"}
+	blocked := &blockingMessageClient{hostID: "host-a"}
+	hostB := &fakeMessageClient{hostID: "host-b"}
 	r := NewRelay(NewBoardCache(), RelayConfig{
 		Team:             "panemux",
-		Clients:          map[string]AgmsgClient{"host-a": blocked, "host-b": hostB},
+		Clients:          map[string]MessageClient{"host-a": blocked, "host-b": hostB},
 		Limit:            100,
 		BackfillLimit:    1000,
 		OperationTimeout: 50 * time.Millisecond,
@@ -454,7 +454,7 @@ func TestRelay_OperationTimeout_UnsetOrNegative_FallsBackToTheDefault(t *testing
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			host := &deadlineCheckingAgmsgClient{
+			host := &deadlineCheckingMessageClient{
 				hostID: "host-a",
 				rows: []Row{
 					{ID: "1", Team: "panemux", From: "pane-a", To: "pane-b", Body: "hi"},
@@ -463,7 +463,7 @@ func TestRelay_OperationTimeout_UnsetOrNegative_FallsBackToTheDefault(t *testing
 			cache := NewBoardCache()
 			r := NewRelay(cache, RelayConfig{
 				Team:             "panemux",
-				Clients:          map[string]AgmsgClient{"host-a": host},
+				Clients:          map[string]MessageClient{"host-a": host},
 				PaneHosts:        map[string]string{"pane-a": "host-a", "pane-b": "host-a"},
 				Limit:            100,
 				BackfillLimit:    1000,
@@ -486,74 +486,74 @@ func TestRelay_OperationTimeout_UnsetOrNegative_FallsBackToTheDefault(t *testing
 	}
 }
 
-// deadlineCheckingAgmsgClient fails the way a real client would when handed an
+// deadlineCheckingMessageClient fails the way a real client would when handed an
 // already-expired context, and records how much budget its context carried, so
 // a test can tell "defaulted to hostOperationTimeout" from "left at zero".
-type deadlineCheckingAgmsgClient struct {
+type deadlineCheckingMessageClient struct {
 	hostID string
 	rows   []Row
 	budget time.Duration
 	mu     sync.Mutex
 }
 
-func (d *deadlineCheckingAgmsgClient) HostID() string { return d.hostID }
+func (d *deadlineCheckingMessageClient) HostID() string { return d.hostID }
 
-func (d *deadlineCheckingAgmsgClient) Since(ctx context.Context, _, afterID string, _ int) ([]Row, error) {
+func (d *deadlineCheckingMessageClient) Since(ctx context.Context, _, afterID string, _ int) ([]Row, error) {
 	if err := d.record(ctx); err != nil {
 		return nil, err
 	}
-	return filterRowsAfter(d.rows, afterID), nil
+	return fakeRowsAfter(d.rows, afterID), nil
 }
 
-func (d *deadlineCheckingAgmsgClient) Send(ctx context.Context, _, _, _, _ string) error {
+func (d *deadlineCheckingMessageClient) Send(ctx context.Context, _, _, _, _ string) error {
 	return d.record(ctx)
 }
 
 // record stores the remaining budget as it stands, unrounded: the caller
 // compares it with a tolerance, which is the honest way to assert on a value
 // that has already ticked down by the time the client sees it.
-func (d *deadlineCheckingAgmsgClient) record(ctx context.Context) error {
+func (d *deadlineCheckingMessageClient) record(ctx context.Context) error {
 	deadline, ok := ctx.Deadline()
 	if !ok {
-		return errors.New("deadlineCheckingAgmsgClient: call carried no deadline at all")
+		return errors.New("deadlineCheckingMessageClient: call carried no deadline at all")
 	}
 	remaining := time.Until(deadline)
 	d.mu.Lock()
 	d.budget = remaining
 	d.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("deadlineCheckingAgmsgClient: %w", err)
+		return fmt.Errorf("deadlineCheckingMessageClient: %w", err)
 	}
 	return nil
 }
 
-func (d *deadlineCheckingAgmsgClient) observedBudget() time.Duration {
+func (d *deadlineCheckingMessageClient) observedBudget() time.Duration {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.budget
 }
 
-// blockingAgmsgClient's Since never returns on its own — it only returns
+// blockingMessageClient's Since never returns on its own — it only returns
 // once ctx is done, so it can only be unblocked by a caller-side timeout.
-type blockingAgmsgClient struct {
+type blockingMessageClient struct {
 	hostID string
 }
 
-func (b *blockingAgmsgClient) HostID() string { return b.hostID }
+func (b *blockingMessageClient) HostID() string { return b.hostID }
 
-func (b *blockingAgmsgClient) Since(ctx context.Context, _, _ string, _ int) ([]Row, error) {
+func (b *blockingMessageClient) Since(ctx context.Context, _, _ string, _ int) ([]Row, error) {
 	<-ctx.Done()
-	return nil, fmt.Errorf("blockingAgmsgClient: %w", ctx.Err())
+	return nil, fmt.Errorf("blockingMessageClient: %w", ctx.Err())
 }
 
-func (b *blockingAgmsgClient) Send(ctx context.Context, _, _, _, _ string) error {
+func (b *blockingMessageClient) Send(ctx context.Context, _, _, _, _ string) error {
 	<-ctx.Done()
-	return fmt.Errorf("blockingAgmsgClient: %w", ctx.Err())
+	return fmt.Errorf("blockingMessageClient: %w", ctx.Err())
 }
 
 func TestRelay_Broadcast_KnownPanesSingleHost_Delivered(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a"}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-a": hostA}, map[string]string{
+	hostA := &fakeMessageClient{hostID: "host-a"}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{"host-a": hostA}, map[string]string{
 		"pane-a": "host-a", "pane-b": "host-a",
 	})
 
@@ -564,9 +564,9 @@ func TestRelay_Broadcast_KnownPanesSingleHost_Delivered(t *testing.T) {
 }
 
 func TestRelay_Broadcast_KnownPanesAcrossTwoHosts_Delivered(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a"}
-	hostB := &fakeAgmsgClient{hostID: "host-b"}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-a": hostA, "host-b": hostB}, map[string]string{
+	hostA := &fakeMessageClient{hostID: "host-a"}
+	hostB := &fakeMessageClient{hostID: "host-b"}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{"host-a": hostA, "host-b": hostB}, map[string]string{
 		"pane-a": "host-a", "pane-b": "host-b",
 	})
 
@@ -578,8 +578,8 @@ func TestRelay_Broadcast_KnownPanesAcrossTwoHosts_Delivered(t *testing.T) {
 }
 
 func TestRelay_Broadcast_OneUnknownPane_AllOrNothing(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a"}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-a": hostA}, map[string]string{
+	hostA := &fakeMessageClient{hostID: "host-a"}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{"host-a": hostA}, map[string]string{
 		"pane-a": "host-a",
 	})
 
@@ -593,9 +593,9 @@ func TestRelay_Broadcast_OneUnknownPane_AllOrNothing(t *testing.T) {
 }
 
 func TestRelay_Broadcast_SendFailurePartway_ReportsPartialDelivery(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a"}
-	hostB := &fakeAgmsgClient{hostID: "host-b", sendErr: errors.New("ssh: connection lost")}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-a": hostA, "host-b": hostB}, map[string]string{
+	hostA := &fakeMessageClient{hostID: "host-a"}
+	hostB := &fakeMessageClient{hostID: "host-b", sendErr: errors.New("ssh: connection lost")}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{"host-a": hostA, "host-b": hostB}, map[string]string{
 		"pane-a": "host-a", "pane-b": "host-b",
 	})
 
@@ -612,8 +612,8 @@ func TestRelay_Broadcast_SendFailure_OwnSendLedgerEntryForgotten(t *testing.T) {
 	// From == SystemID row with the same to/body within that window and
 	// have it accepted as legitimate, even though nothing was ever
 	// actually delivered.
-	hostB := &fakeAgmsgClient{hostID: "host-b", sendErr: errors.New("ssh: connection lost")}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-b": hostB}, map[string]string{
+	hostB := &fakeMessageClient{hostID: "host-b", sendErr: errors.New("ssh: connection lost")}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{"host-b": hostB}, map[string]string{
 		"pane-b": "host-b",
 	})
 
@@ -629,8 +629,8 @@ func TestRelay_Broadcast_SendSucceeds_OwnSendLedgerEntryStillMatchable(t *testin
 	// Contrast case for the regression above: a *successful* Send's ledger
 	// entry must remain matchable, since that's the normal path a real
 	// relayed-back row is validated against.
-	hostB := &fakeAgmsgClient{hostID: "host-b"}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-b": hostB}, map[string]string{
+	hostB := &fakeMessageClient{hostID: "host-b"}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{"host-b": hostB}, map[string]string{
 		"pane-b": "host-b",
 	})
 
@@ -649,8 +649,8 @@ func TestRelay_Broadcast_DuplicateSuccessfulBroadcast_BothRowsAcceptedOnPollback
 	// from-validation — a duplicate is ordinary input (a user or the
 	// command center re-sending the same text), not an attack, and must
 	// not silently lose the second occurrence from history.
-	hostB := &fakeAgmsgClient{hostID: "host-b"}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-b": hostB}, map[string]string{
+	hostB := &fakeMessageClient{hostID: "host-b"}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{"host-b": hostB}, map[string]string{
 		"pane-b": "host-b",
 	})
 
@@ -666,7 +666,7 @@ func TestRelay_Broadcast_DuplicateSuccessfulBroadcast_BothRowsAcceptedOnPollback
 }
 
 func TestRelay_Broadcast_UnreachableHost_Error(t *testing.T) {
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{}, map[string]string{"pane-a": "host-a"})
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{}, map[string]string{"pane-a": "host-a"})
 
 	delivered, err := r.Broadcast(context.Background(), SystemID, []string{"pane-a"}, "hello")
 	require.Error(t, err)
@@ -674,8 +674,8 @@ func TestRelay_Broadcast_UnreachableHost_Error(t *testing.T) {
 }
 
 func TestRelay_RunLoop_PollsImmediatelyThenOnEachTick(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a"}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-a": hostA}, nil)
+	hostA := &fakeMessageClient{hostID: "host-a"}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{"host-a": hostA}, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	tick := make(chan time.Time)
@@ -700,8 +700,8 @@ func TestRelay_RunLoop_PollsImmediatelyThenOnEachTick(t *testing.T) {
 }
 
 func TestRelay_RunLoop_PollErrorLoggedNotPanicked(t *testing.T) {
-	hostA := &fakeAgmsgClient{hostID: "host-a", sinceErr: errors.New("agmsg down")}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{"host-a": hostA}, nil)
+	hostA := &fakeMessageClient{hostID: "host-a", sinceErr: errors.New("message transport down")}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{"host-a": hostA}, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	tick := make(chan time.Time)
@@ -720,8 +720,8 @@ func TestRelay_RunLoop_PollErrorLoggedNotPanicked(t *testing.T) {
 
 func TestPollLogsOnlyWhenFailureStateChanges(t *testing.T) {
 	logs := captureBoardLog(t)
-	client := &fakeAgmsgClient{hostID: "dev", sinceErr: errors.New("offline")}
-	relay := NewRelay(NewBoardCache(), RelayConfig{Clients: map[string]AgmsgClient{"dev": client}})
+	client := &fakeMessageClient{hostID: "dev", sinceErr: errors.New("offline")}
+	relay := NewRelay(NewBoardCache(), RelayConfig{Clients: map[string]MessageClient{"dev": client}})
 	relay.pollLogged(context.Background())
 	relay.pollLogged(context.Background())
 	require.Equal(t, 1, strings.Count(logs.String(), "poll error:"))
@@ -730,4 +730,14 @@ func TestPollLogsOnlyWhenFailureStateChanges(t *testing.T) {
 	client.sinceErr = errors.New("offline")
 	relay.pollLogged(context.Background())
 	require.Equal(t, 2, strings.Count(logs.String(), "poll error:"))
+}
+
+// fakeRowsAfter models the port cursor contract for relay tests.
+func fakeRowsAfter(rows []Row, after string) []Row {
+	for i := len(rows) - 1; i >= 0; i-- {
+		if rows[i].ID == after {
+			return rows[i+1:]
+		}
+	}
+	return rows
 }

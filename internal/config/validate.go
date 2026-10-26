@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"panemux/internal/agmsg"
 	"regexp"
 	"slices"
 	"strings"
@@ -302,8 +303,8 @@ func validateAgentBoard(ab AgentBoardConfig) []string {
 	if ab.Team == reservedSystemID {
 		errs = append(errs, fmt.Sprintf("agent_board.team must not be the reserved id %q", reservedSystemID))
 	}
-	if path := ab.AgmsgPath; path != "" && !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "~/") {
-		errs = append(errs, fmt.Sprintf("agent_board.agmsg_path %q must be an absolute path or start with ~/", path))
+	if err := agmsg.ValidatePath(ab.AgmsgPath); err != nil {
+		errs = append(errs, err.Error())
 	}
 	return errs
 }

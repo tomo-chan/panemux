@@ -1,16 +1,13 @@
 package main
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"log"
+	"panemux/internal/agmsg"
 	"panemux/internal/board"
 	"panemux/internal/config"
 	"panemux/internal/host"
 	"panemux/internal/hostexec"
 	"panemux/internal/session"
-	"sync"
 	"time"
 )
 
@@ -19,7 +16,6 @@ const (
 	defaultBoardPollLimit     = 200
 	defaultBoardBackfillLimit = 1000
 	boardHostIDLocal          = "local"
-	boardStartupProbeTimeout  = 10 * time.Second
 )
 
 // setupBoard separates host execution from pane eligibility. A client is retained
@@ -41,16 +37,17 @@ func setupBoard(
 		}
 		paneHosts[pane.ID] = target.BoardID()
 	}
-	clients := map[string]board.AgmsgClient{}
-	runners := map[string]host.Runner{}
+	clients := map[string]board.MessageClient{}
+	participants := map[string]board.Participation{}
 	if len(paneHosts) > 0 {
 		for _, target := range execution.Names() {
 			id := target.BoardID()
 			runner := host.Bind(execution.WithoutDialWait(), target)
-			runners[id] = runner
-			clients[id] = &hostAgmsgClient{
-				id: id, path: cfg.AgentBoard.AgmsgPath, runner: runner, sendRunner: host.Bind(execution, target),
-			}
+			client := agmsg.NewClient(agmsg.ClientConfig{
+				HostID: id, Path: cfg.AgentBoard.AgmsgPath, Runner: runner, SendRunner: host.Bind(execution, target),
+			})
+			clients[id] = client
+			participants[id] = client
 		}
 	}
 	relay := board.NewRelay(cache, board.RelayConfig{
@@ -66,11 +63,10 @@ func setupBoard(
 	}
 	bootstrap := newBootstrapWatcher(bootstrapWatcherConfig{
 		Manager: manager, PaneHosts: paneHosts,
-		PaneModes:     func() map[string]string { return currentPaneModes(cfg) },
-		RunnerForHost: func(id string) host.Runner { return runners[id] },
-		ResolvePath: func(ctx context.Context, id string) (string, error) {
-			return resolveHostAgmsgPath(ctx, runners[id], cfg.AgentBoard.AgmsgPath)
-		}, Team: cfg.AgentBoard.Team, Persist: persistBootstrapState})
+		PaneModes:            func() map[string]string { return currentPaneModes(cfg) },
+		ParticipationForHost: func(id string) board.Participation { return participants[id] },
+		Team:                 cfg.AgentBoard.Team, Persist: persistBootstrapState,
+	})
 	if path, err := board.DefaultBootstrapStateFilePath(); err == nil {
 		if ids, err := board.LoadBootstrapState(path); err == nil {
 			bootstrap.LoadPersistedState(ids)
@@ -96,115 +92,6 @@ func boardHostForPane(cfg *config.Config, pane *config.PaneConfig) (host.Host, b
 	}
 	return host.Local, true
 }
-func resolveHostAgmsgPath(ctx context.Context, runner host.Runner, path string) (string, error) {
-	resolved, err := board.ResolveRemoteAgmsgPath(ctx, runner, path)
-	if err != nil {
-		return "", fmt.Errorf("resolve host agmsg path: %w", err)
-	}
-	return resolved, nil
-}
-
-// hostAgmsgClient resolves a host lazily. Transport failures leave it retryable;
-// a confirmed absent install is remembered, without detecting updates or installing tools.
-// Discovery is published once; probes leave the cache mutex free while doing I/O.
-type hostAgmsgClient struct {
-	runner       host.Runner
-	sendRunner   host.Runner
-	resolvedPath *string
-	id, path     string
-	mu           sync.Mutex
-	absent       bool
-}
-
-func (c *hostAgmsgClient) HostID() string { return c.id }
-func (c *hostAgmsgClient) ready(ctx context.Context, runner host.Runner) (board.AgmsgClient, error) {
-	c.mu.Lock()
-	client, known := c.cachedClient(runner)
-	c.mu.Unlock()
-	if known {
-		return client, nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, boardStartupProbeTimeout)
-	defer cancel()
-	path, err := resolveHostAgmsgPath(ctx, runner, c.path)
-	if err != nil {
-		return nil, err
-	}
-	present, err := board.RemoteAgmsgPresent(ctx, runner, path)
-	if err != nil {
-		return nil, fmt.Errorf("probe agmsg presence: %w", err)
-	}
-	if !present {
-		return c.finishProbe(runner, path, false, "", nil), nil
-	}
-	version, versionErr := board.RemoteAgmsgVersion(ctx, runner, path)
-	return c.finishProbe(runner, path, true, version, versionErr), nil
-}
-
-// cachedClient requires mu. The cache records discovery, not the execution lane.
-func (c *hostAgmsgClient) cachedClient(runner host.Runner) (board.AgmsgClient, bool) {
-	if c.absent {
-		return nil, true
-	}
-	if c.resolvedPath == nil {
-		return nil, false
-	}
-	return board.NewRemoteAgmsgClient(c.id, *c.resolvedPath, runner), true
-}
-
-// Probes run outside mu so a send waiting for SSH cannot block polling.
-// Concurrent successful discoveries publish one cache entry and one warning.
-func (c *hostAgmsgClient) finishProbe(
-	runner host.Runner, path string, present bool, version string, versionErr error,
-) board.AgmsgClient {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if client, known := c.cachedClient(runner); known {
-		return client
-	}
-	if !present {
-		c.absent = true
-		log.Printf("Warning: agent board: no agmsg installation at %q on host %q, skipping that host", path, c.id)
-		return nil
-	}
-	if versionErr != nil {
-		log.Printf("Warning: agent board: reading agmsg version on host %q: %v", c.id, versionErr)
-	} else if warning := board.VersionMismatchWarning(c.id, version); warning != "" {
-		log.Printf("Warning: %s", warning)
-	}
-	c.resolvedPath = &path
-	return board.NewRemoteAgmsgClient(c.id, path, runner)
-}
-
-func (c *hostAgmsgClient) Since(ctx context.Context, team, after string, limit int) ([]board.Row, error) {
-	client, err := c.ready(ctx, c.runner)
-	if err != nil || client == nil {
-		return nil, err
-	}
-	rows, err := client.Since(ctx, team, after, limit)
-	if err != nil {
-		return nil, fmt.Errorf("read host messages: %w", err)
-	}
-	return rows, nil
-}
-func (c *hostAgmsgClient) Send(ctx context.Context, team, from, to, body string) error {
-	runner := c.sendRunner
-	if runner == nil {
-		runner = c.runner
-	}
-	client, err := c.ready(ctx, runner)
-	if err != nil {
-		return err
-	}
-	if client == nil {
-		return errors.New("agmsg is not installed on host")
-	}
-	if err := client.Send(ctx, team, from, to, body); err != nil {
-		return fmt.Errorf("send host message: %w", err)
-	}
-	return nil
-}
-
 func persistBoardCursors(entries []board.CursorEntry) {
 	path, err := board.DefaultCursorFilePath()
 	if err != nil {

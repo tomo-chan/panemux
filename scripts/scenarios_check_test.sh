@@ -97,7 +97,7 @@ expect 0 "a bare script name with no directory is not resolved" \
 
 # A path written relative to the test that owns it, as G1 does.
 expect 0 "a path relative to the test that uses it resolves" \
-	'| X13 | Something | Works | `auto`: `internal/board/agmsg_fixture_test.go` against `testdata/agmsg-v1.2.0/` |'
+	'| X13 | Something | Works | `auto`: `internal/agmsg/agmsg_fixture_test.go` against `testdata/agmsg-v1.2.0/` |'
 
 # A rename that APPENDS is the common one (TestFoo -> TestFoo_RemoteVariant),
 # and a row naming the old name is exactly the rot this gate exists to catch.

@@ -27,8 +27,9 @@ flowchart TB
     API --> Command
     Command --> MCP --> API
     Relay --> Cache
-    Relay --> LocalAgmsg
-    Relay -->|shared host execution port| RemoteAgmsg
+    Relay -->|message port| Adapter["internal/agmsg adapter"]
+    Adapter --> LocalAgmsg
+    Adapter -->|shared host execution port| RemoteAgmsg
     Agent --> RemoteAgmsg
 ```
 
@@ -81,11 +82,17 @@ None of these files is a second message store.
 
 ## Package layout
 
-The package boundary enforces the ownership model:
+The package boundary enforces the ownership model. `MessageClient` supplies `HostID`, `Since`,
+and `Send`; `Participation` supplies availability, address validation, and an instruction from
+`agent.ID`, team, pane ID, and mode. Relay, status aggregation, sender validation, and the bootstrap
+watcher depend on these ports. Root composition binds one adapter per host to the shared execution
+port; it does not resolve paths or construct participation text.
+
 
 | Area | Responsibility |
 |---|---|
-| `internal/board` | agmsg adapter, relay, cache, cursors, bootstrap records, and own-send ledger |
+| `internal/board` | messaging and participation ports, relay, cache, cursors, bootstrap records, and own-send ledger |
+| `internal/agmsg` | agmsg adapter: script calls, paths, versions, parsing, participation instructions, and agent type mapping |
 | `internal/host` | I/O-free host identity and fixed-script execution port |
 | `internal/hostexec` | local execution and shared per-host SSH connections, retry and disposal |
 | `internal/session` | terminal sessions, agent detection, and the SSH command transport adapter |
@@ -93,8 +100,8 @@ The package boundary enforces the ownership model:
 | `internal/commandcenter` | one-at-a-time headless Claude queries and command history |
 | `internal/boardmcp` | three board-only MCP tools backed by the authenticated REST API |
 
-Only `internal/board` may invoke agmsg scripts. Other packages use its API or the authenticated
-panemux API; this prevents agmsg-specific behavior and escaping rules from spreading through the
+Only `internal/agmsg` may invoke agmsg scripts. Board logic uses `MessageClient` and
+`Participation`, defined by `internal/board`; this prevents agmsg-specific behavior and escaping rules from spreading through the
 system.
 
 The relay is the sole writer to board status/history. Broadcasts send immediately but appear in

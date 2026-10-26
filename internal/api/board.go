@@ -34,7 +34,7 @@ type boardStatusResponse struct {
 }
 
 // GetBoardStatus returns a snapshot of the board's in-memory status cache.
-// No AgmsgClient call happens on this request — the relay is what keeps
+// No MessageClient call happens on this request — the relay is what keeps
 // the cache current (see docs/agent-board.md's Architecture section).
 func (h *Handler) GetBoardStatus(w http.ResponseWriter, r *http.Request) {
 	snapshot := h.boardCache.StatusSnapshot()
@@ -81,7 +81,7 @@ type boardMessagesResponse struct {
 }
 
 // GetBoardMessages returns board history newer than the since query
-// parameter (BoardCache's own local Seq, not an agmsg-native id — those
+// parameter (BoardCache's own local Seq, not an transport-native id — those
 // aren't comparable across hosts). Missing since defaults to 0.
 func (h *Handler) GetBoardMessages(w http.ResponseWriter, r *http.Request) {
 	since := int64(0)

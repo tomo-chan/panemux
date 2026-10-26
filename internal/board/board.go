@@ -1,15 +1,16 @@
 // Package board implements Agent Board: cross-pane Claude/Codex messaging
-// and status aggregation built entirely on agmsg (github.com/fujibee/agmsg).
+// and status aggregation through consumer-owned messaging ports.
 // See docs/agent-board.md for the full design this package implements.
 package board
 
 import (
 	"context"
 	"encoding/json"
+	"panemux/internal/agent"
 	"time"
 )
 
-// SystemID is the reserved agmsg identity panemux's own relay and command
+// SystemID is the reserved message transport identity panemux's own relay and command
 // center use as their from/to for status reports and broadcasts. It is
 // deliberately not derived from the product name so a future rename of the
 // application would not need to change it. internal/config independently
@@ -25,12 +26,12 @@ const SystemID = "_system"
 // "kind": "board_status" is required, not merely permitted.
 const statusKind = "board_status"
 
-// Row is a single agmsg message, either an ordinary cross-pane message or a
+// Row is a single host message, either an ordinary cross-pane message or a
 // status self-report addressed to SystemID.
 type Row struct {
 	At   time.Time
-	ID   string // agmsg's own id, host-scoped — NOT globally unique, NOT assumed numeric
-	Host string // which AgmsgClient/host this row came from
+	ID   string // message transport's own id, host-scoped — NOT globally unique, NOT assumed numeric
+	Host string // which MessageClient/host this row came from
 	Team string
 	From string
 	To   string
@@ -50,20 +51,30 @@ type Status struct {
 	Summary   string
 }
 
-// AgmsgClient is the only interface in panemux allowed to call agmsg's
-// scripts. LocalAgmsgClient and RemoteAgmsgClient are its two
-// implementations.
-type AgmsgClient interface {
+// MessageClient is the message transport required by the relay. IDs are opaque,
+// host-local cursors; implementations return rows in source order after afterID.
+// A missing cursor may replay the bounded window. Sends support identities that
+// are not members of the destination host's roster.
+type MessageClient interface {
 	HostID() string
-	// Send always passes --force. There is no non-forced Send: every
-	// board-originated message needs to reach a to/from identity that is
-	// not guaranteed to be in the destination team's roster.
 	Send(ctx context.Context, team, from, to, body string) error
-	// Since has no true "after" primitive to call into (api.sh has no such
-	// flag). It calls `api.sh get teams <team> messages --limit <limit>`
-	// and returns only rows whose ID sorts after afterID; the caller must
-	// treat the possibility of dropped rows as expected, not exceptional.
 	Since(ctx context.Context, team, afterID string, limit int) ([]Row, error)
+}
+
+// JoinRequest describes one pane joining board messaging.
+type JoinRequest struct {
+	Agent  agent.ID
+	Team   string
+	PaneID string
+	Mode   string
+}
+
+// Participation supplies host availability and the instruction written to a pane.
+// Address validation is available before process detection or host I/O.
+type Participation interface {
+	ValidateAddress(team, paneID string) error
+	Available(context.Context) (bool, error)
+	JoinInstruction(context.Context, JoinRequest) (string, error)
 }
 
 type statusPayload struct {

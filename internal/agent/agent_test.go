@@ -32,9 +32,9 @@ func TestProcessRuleMatch(t *testing.T) {
 
 func TestMatchBoardProcess(t *testing.T) {
 	cases := map[string]string{
-		"claude":                  "claude-code",
-		"claude-code":             "claude-code",
-		"claude-beta --model x":   "claude-code",
+		"claude":                  "claude",
+		"claude-code":             "claude",
+		"claude-beta --model x":   "claude",
 		"codex":                   "codex",
 		"codex-nightly":           "codex",
 		"cursor-agent":            "cursor",
@@ -57,7 +57,7 @@ func TestMatchBoardProcess(t *testing.T) {
 	for command, want := range cases {
 		d, ok := MatchBoardProcess(command)
 		assert.Equal(t, want != "", ok, command)
-		assert.Equal(t, want, d.AgmsgType, command)
+		assert.Equal(t, want, string(d.ID), command)
 	}
 }
 
@@ -239,7 +239,7 @@ func TestRegisteredUnknownArgsPolicies(t *testing.T) {
 			assert.Equal(t, Accept, d.Detection.Task.UnknownArgs, d.ID)
 		}
 		if d.Detection.Board != nil {
-			assert.Equal(t, "agmsg v1.1.13", d.Detection.Board.VerifiedWith, d.ID)
+			assert.Equal(t, boardDetectionVerified, d.Detection.Board.VerifiedWith, d.ID)
 		}
 	}
 	codex, _ := Lookup(Codex)

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"panemux/internal/agent"
 	"strconv"
 	"strings"
 	"sync"
@@ -178,13 +179,13 @@ func (s *TmuxLocalSession) GetActiveWorkdirs() ([]string, error) {
 	return tmuxLocalActiveWorkdirs(s.tmuxSession)
 }
 
-// DetectInteractiveAgentType reports the agmsg type name of any live agent
+// DetectInteractiveAgent reports the agent ID of any live agent
 // process currently running under this tmux pane — see AgentTypeDetector.
-func (s *TmuxLocalSession) DetectInteractiveAgentType() (string, bool, error) {
-	return tmuxLocalDetectInteractiveAgentType(s.tmuxSession)
+func (s *TmuxLocalSession) DetectInteractiveAgent() (agent.ID, bool, error) {
+	return tmuxLocalDetectInteractiveAgent(s.tmuxSession)
 }
 
-func tmuxLocalDetectInteractiveAgentType(tmuxSession string) (string, bool, error) {
+func tmuxLocalDetectInteractiveAgent(tmuxSession string) (agent.ID, bool, error) {
 	target, err := validateTmuxSessionName(tmuxSession)
 	if err != nil {
 		return "", false, err
@@ -213,8 +214,8 @@ func tmuxLocalDetectInteractiveAgentType(tmuxSession string) (string, bool, erro
 		return "", false, err
 	}
 
-	_, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, pid)
-	return agmsgType, ok, nil
+	_, agentID, ok := newestKnownAgentTypeDescendantPID(processes, pid)
+	return agentID, ok, nil
 }
 
 func tmuxLocalActiveWorkdirs(tmuxSession string) ([]string, error) {

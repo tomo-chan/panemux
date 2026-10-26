@@ -1,8 +1,9 @@
-package board
+package agmsg
 
 import (
 	"bytes"
 	"encoding/json"
+	"panemux/internal/board"
 	"time"
 )
 
@@ -27,8 +28,8 @@ const agmsgMessageSentType = "message_sent"
 // doesn't parse as a message_sent record, is skipped rather than failing
 // the whole poll — matching this repository's existing JSONL-tolerance
 // convention (see internal/session/local.go's forEachJSONLRecord).
-func parseAgmsgMessageRows(data []byte, host string) []Row {
-	var rows []Row
+func parseAgmsgMessageRows(data []byte, host string) []board.Row {
+	var rows []board.Row
 	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
@@ -42,7 +43,7 @@ func parseAgmsgMessageRows(data []byte, host string) []Row {
 			continue
 		}
 		at, _ := time.Parse(time.RFC3339, raw.At)
-		rows = append(rows, Row{
+		rows = append(rows, board.Row{
 			ID:   raw.ID,
 			Host: host,
 			Team: raw.Team,
@@ -83,7 +84,7 @@ func parseAgmsgMessageRows(data []byte, host string) []Row {
 // the window is re-delivered rather than skipped. This may duplicate a
 // successful forward and self-corrects on the next poll; it does not imply
 // retries for failed forwards. See docs/agent-board/relay.md.
-func filterRowsAfter(rows []Row, afterID string) []Row {
+func filterRowsAfter(rows []board.Row, afterID string) []board.Row {
 	if afterID == "" {
 		return rows
 	}

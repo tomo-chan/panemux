@@ -20,19 +20,17 @@ func TestRegisteredAgents(t *testing.T) {
 	assert.Equal(t, definitionIDs(append(shipped(), fixtureAgents()...)), definitionIDs(registered()))
 
 	want := map[ID]struct {
-		agmsg string
-		caps  []Capability
+		caps []Capability
 	}{
-		Claude:    {"claude-code", []Capability{Detect, Collect, Launch, Resume, Workdir, Summary, Board}},
-		Codex:     {"codex", []Capability{Detect, Collect, Launch, Resume, Workdir, Summary, Board}},
-		Cursor:    {"cursor", []Capability{Detect, Board}},
-		Gemini:    {"gemini", []Capability{Detect, Board}},
-		GrokBuild: {"grok-build", []Capability{Detect, Board}},
-		OpenCode:  {"opencode", []Capability{Detect, Board}},
+		Claude:    {[]Capability{Detect, Collect, Launch, Resume, Workdir, Summary, Board}},
+		Codex:     {[]Capability{Detect, Collect, Launch, Resume, Workdir, Summary, Board}},
+		Cursor:    {[]Capability{Detect, Board}},
+		Gemini:    {[]Capability{Detect, Board}},
+		GrokBuild: {[]Capability{Detect, Board}},
+		OpenCode:  {[]Capability{Detect, Board}},
 	}
 	for _, d := range shipped() {
 		w := want[d.ID]
-		assert.Equal(t, w.agmsg, d.AgmsgType, d.ID)
 		assert.Equal(t, w.caps, d.Capabilities, d.ID)
 		for _, c := range w.caps {
 			assert.True(t, d.Has(c), "%s declares %s", d.ID, c)
@@ -75,16 +73,6 @@ func TestLookupAndResolve(t *testing.T) {
 	}
 }
 
-func TestByAgmsgType(t *testing.T) {
-	d, ok := ByAgmsgType("claude-code")
-	require.True(t, ok)
-	assert.Equal(t, Claude, d.ID)
-	_, ok = ByAgmsgType("claude")
-	assert.False(t, ok, "claude is not an agmsg type")
-	_, ok = ByAgmsgType("")
-	assert.False(t, ok)
-}
-
 func validDef(id ID) Definition {
 	return Definition{
 		ID: id, DisplayName: string(id), Capabilities: []Capability{Detect, Workdir},
@@ -92,9 +80,8 @@ func validDef(id ID) Definition {
 	}
 }
 
-func boardDef(id ID, agmsg string) Definition {
+func boardDef(id ID) Definition {
 	d := validDef(id)
-	d.AgmsgType = agmsg
 	d.Capabilities = []Capability{Detect, Workdir, Board}
 	d.Detection.Board = &ProcessRule{Patterns: []string{string(id)}, UnknownArgs: Accept}
 	return d
@@ -141,8 +128,6 @@ func TestValidateRejectsNames(t *testing.T) {
 		"alias equals other ID":  {validDef("a"), aliased("b", "a")},
 		"alias collision":        {aliased("a", "x"), aliased("b", "x")},
 		"ID equals other alias":  {aliased("a", "b"), validDef("b")},
-		"duplicate agmsg type":   {boardDef("a", "t"), boardDef("b", "t")},
-		"invalid agmsg type":     {boardDef("a", "T T")},
 	})
 }
 
@@ -151,34 +136,24 @@ func TestValidateRejectsCapabilities(t *testing.T) {
 		"unknown capability":   {modDef("a", func(d *Definition) { d.Capabilities = append(d.Capabilities, "teleport") })},
 		"duplicate capability": {modDef("a", func(d *Definition) { d.Capabilities = append(d.Capabilities, Detect) })},
 		"no capabilities":      {modDef("a", func(d *Definition) { d.Capabilities = nil })},
-		"board without agmsg": {modDef("a", func(d *Definition) {
-			d.Capabilities = []Capability{Detect, Workdir, Board}
-			d.Detection.Board = &ProcessRule{Patterns: []string{"a"}, UnknownArgs: Accept}
-		})},
 		"board without rule": {modDef("a", func(d *Definition) {
-			d.AgmsgType = "a"
 			d.Capabilities = []Capability{Detect, Workdir, Board}
 		})},
 		"board rule undeclared": {modDef("a", func(d *Definition) {
-			d.AgmsgType = "a"
 			d.Detection.Board = &ProcessRule{Patterns: []string{"a"}, UnknownArgs: Accept}
 		})},
-		"agmsg type undeclared": {modDef("a", func(d *Definition) { d.AgmsgType = "a" })},
-		"detect without rule":   {modDef("a", func(d *Definition) { d.Detection = Detection{} })},
-		"rule without detect":   {modDef("a", func(d *Definition) { d.Capabilities = []Capability{Workdir, Launch} })},
+		"detect without rule": {modDef("a", func(d *Definition) { d.Detection = Detection{} })},
+		"rule without detect": {modDef("a", func(d *Definition) { d.Capabilities = []Capability{Workdir, Launch} })},
 		"collect without task": {modDef("a", func(d *Definition) {
 			d.Capabilities = []Capability{Detect, Collect, Board}
-			d.AgmsgType = "a"
 			d.Detection = Detection{Board: &ProcessRule{Patterns: []string{"a"}, UnknownArgs: Accept}}
 		})},
 		"task rule undeclared": {modDef("a", func(d *Definition) {
 			d.Capabilities = []Capability{Detect, Board}
-			d.AgmsgType = "a"
 			d.Detection.Board = &ProcessRule{Patterns: []string{"a"}, UnknownArgs: Accept}
 		})},
 		"workdir without rule": {modDef("a", func(d *Definition) {
 			d.Capabilities = []Capability{Detect, Workdir, Board}
-			d.AgmsgType = "a"
 			d.Detection = Detection{Board: &ProcessRule{Patterns: []string{"a"}, UnknownArgs: Accept}}
 		})},
 	})
@@ -186,12 +161,12 @@ func TestValidateRejectsCapabilities(t *testing.T) {
 
 func TestValidateRejectsRules(t *testing.T) {
 	withPatterns := func(patterns ...string) Definition {
-		d := boardDef("a", "a")
+		d := boardDef("a")
 		d.Detection.Board.Patterns = patterns
 		return d
 	}
 	withBoard := func(f func(*ProcessRule)) Definition {
-		d := boardDef("a", "a")
+		d := boardDef("a")
 		f(d.Detection.Board)
 		return d
 	}
@@ -219,7 +194,7 @@ func TestValidateRejectsRules(t *testing.T) {
 
 func TestValidateAccepts(t *testing.T) {
 	a := aliased("a", "a-cli")
-	b := boardDef("grok-build", "grok")
+	b := boardDef("grok-build")
 	b.Capabilities = append(b.Capabilities, Usage)
 	b.Detection.Board.Patterns = []string{"grok", "grok-*"}
 	b.Detection.Board.ExcludeTokens = []string{"-p"}
@@ -241,10 +216,10 @@ func TestNewRegistryPanicsOnInvalidDefinitions(t *testing.T) {
 // an exclude token makes it no agent's, rather than handing it to a later
 // agent whose patterns overlap.
 func TestMatchStopsAtFirstMatchingProgram(t *testing.T) {
-	first := boardDef("a", "a")
+	first := boardDef("a")
 	first.Detection.Board.Patterns = []string{"a-*"}
 	first.Detection.Board.ExcludeTokens = []string{"-p"}
-	second := boardDef("b", "b")
+	second := boardDef("b")
 	second.Detection.Board.Patterns = []string{"a-*"}
 	r := newRegistry([]Definition{first, second})
 
@@ -281,7 +256,7 @@ func TestMatchInteractiveSessionStopsAtFirstMatchingProgram(t *testing.T) {
 // What All and Lookup return shares nothing with the registry, rules
 // included.
 func TestDefinitionsAreDeepCopies(t *testing.T) {
-	for _, d := range []Definition{All()[0], must(Lookup(Claude)), must(ByAgmsgType("claude-code"))} {
+	for _, d := range []Definition{All()[0], must(Lookup(Claude))} {
 		d.Detection.Board.Patterns[0] = "mutated"
 		d.Detection.Board.ExcludeTokens[0] = "mutated"
 		d.Detection.Task.Process = func(string) bool { return false }

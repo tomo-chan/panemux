@@ -65,10 +65,10 @@ test-go:
 # It depends on build-frontend as coverage-go does: the root package is among
 # FIXTURE_AGENT_PKGS, and its //go:embed needs frontend/dist.
 FIXTURE_AGENT_TAG := panemux_fixture_agent
-FIXTURE_AGENT_PKGS := . ./internal/agent ./internal/session ./internal/tasks ./internal/api ./internal/server
+FIXTURE_AGENT_PKGS := ./internal/agmsg ./internal/agent ./internal/session ./internal/tasks ./internal/api ./internal/server
 FIXTURE_AGENT_RUN := ^Test(FixtureAgent|[A-Za-z]+_MatchTheRegistry$$|SummaryAdapters_Contract$$|CollectPrefilter_CoversEveryTaskRule$$|RegisteredDefinitionsAreValid$$|WorkdirAdaptersMatchDeclarations$$|APIContractFixtures_FixtureAgent$$)
 FIXTURE_AGENT_REQUIRED := \
-	.:TestBoardAdapters_MatchTheRegistry \
+	./internal/agmsg:TestBoardAdapters_MatchTheRegistry \
 	./internal/session:TestWorkdirAdaptersMatchDeclarations \
 	./internal/agent:TestRegisteredDefinitionsAreValid \
 	./internal/tasks:TestCollectAdapters_MatchTheRegistry \
@@ -344,7 +344,7 @@ test-hooks:
 #   make test-agmsg-contract AGMSG_PATH=~/.agents/skills/agmsg
 AGMSG_PATH ?=
 test-agmsg-contract:
-	PANEMUX_AGMSG_PATH="$(AGMSG_PATH)" go test ./internal/board/ -run 'TestAgmsgContract' -v -count=1
+	PANEMUX_AGMSG_PATH="$(AGMSG_PATH)" go test ./internal/agmsg/ -run 'TestAgmsgContract' -v -count=1
 
 # ── Model checking: TLA+ / TLC (issue #168, Tier 2) ───────────────────────────
 #
@@ -439,7 +439,7 @@ test-model-check:
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/agent/...,./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/host/...,./internal/hostexec/...,./internal/hosttools/...,./internal/codexhook/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,./internal/preview/...,./internal/testcap/...,.
+COVERAGE_PKGS := ./internal/agent/...,./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/agmsg/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/host/...,./internal/hostexec/...,./internal/hosttools/...,./internal/codexhook/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,./internal/preview/...,./internal/testcap/...,.
 
 coverage: coverage-go coverage-frontend
 
@@ -458,6 +458,7 @@ coverage-go: build-frontend
 	  ./internal/ws/... \
 	  ./internal/server/... \
 	  ./internal/board/... \
+	  ./internal/agmsg/... \
 	  ./internal/portforward/... \
 	  ./internal/commandcenter/... \
 	  ./internal/boardmcp/... \

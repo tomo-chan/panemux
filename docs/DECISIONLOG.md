@@ -1152,6 +1152,31 @@ Rejected for now:
 
 ## Agent Board
 
+### Isolate the board message transport (2026-10-26, #438 / #441)
+
+The user confirmed five implementation choices in #441. `internal/board` owns `MessageClient`
+(`HostID`, `Since`, `Send`) and `Participation` (availability, address validation, join instruction).
+Requests use registry `agent.ID`, team, pane ID, and mode; rows remain `board.Row`.
+`internal/agmsg` is the only adapter, executing through `host.Runner`. It owns script names,
+paths, JSONL parsing and cursor filtering, versions, participation prose, and agent-specific steps.
+This leaves relay, cache, sender validation, and bootstrap orchestration independent of agmsg.
+
+The adapter's agent-ID-to-type/participation table is checked at startup, as the previous root
+board adapter list was, and by table-driven tests for declarations, duplicates, and valid types.
+`Definition.AgmsgType` and reverse lookup are removed; session detection returns registry IDs.
+Detection rules stay in the registry, with their external provenance documented in the integration.
+
+Captured fixtures move unchanged to `internal/agmsg/testdata/agmsg-v1.2.0`; parser, cursor and
+real-install contract tests move with them. Participation goldens also move unchanged. Relay
+cursor/ledger tests and the TLA+ transition table stay board-owned. Makefile contract execution,
+fixture-agent checks, coverage scope, and CI pin lookup/path selection follow the adapter package.
+
+The public `agmsg_path` key, default and validation results remain unchanged. The adapter owns the
+default path and validation and config delegates to it. Relay discovery still remembers absence;
+bootstrap independently caches paths and rechecks presence. The type-name documentation moves to
+`docs/agent-board/agmsg-integration.md`, linked from the transport-independent registry docs.
+Enablement, installation, version/SHA pinning and automatic update PRs remain #435/#437 work.
+
 ### Host tool management and the Codex hook adapter (2026-10-26, #438 / #440)
 
 `internal/hosttools` owns host tool management and defines the `Tool` port: `Check` returns the

@@ -81,11 +81,11 @@ That is what makes **`agmsg-contract / contract`** safe to mark as a required ch
 
 ### Bumping the pinned agmsg version
 
-The pin is `board.TestedAgmsgVersion` in `internal/board/agmsg_version.go`, and the workflow reads it from that file rather than duplicating it. To bump it:
+The pin is `agmsg.TestedAgmsgVersion` in `internal/agmsg/agmsg_version.go`, and the workflow reads it from that file rather than duplicating it. To bump it:
 
 1. Update `TestedAgmsgVersion`.
-2. Recapture the Tier 1 fixtures at the new version and rename their directory to match — see `internal/board/testdata/agmsg-v1.2.0/README.md` and its `capture.sh`.
-3. Update `fixtureDir` (and the quoted fixture ids) in `internal/board/agmsg_fixture_test.go`.
+2. Recapture the Tier 1 fixtures at the new version and rename their directory to match — see `internal/agmsg/testdata/agmsg-v1.2.0/README.md` and its `capture.sh`.
+3. Update `fixtureDir` (and the quoted fixture ids) in `internal/agmsg/agmsg_fixture_test.go`.
 4. Push. The contract job runs against the new pin automatically, because step 1 touches a scoped path.
 
 A canary failure is a signal to investigate agmsg's changelog, not to bump the pin reflexively: the pinned version is the one panemux's prose and fixtures were verified against, and it keeps working until it is deliberately moved.

@@ -1,9 +1,10 @@
-package board
+package agmsg
 
 import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"panemux/internal/board"
 	"strings"
 	"testing"
 
@@ -114,11 +115,11 @@ func TestRemoteAgmsgClient_Send_ValidSystemIDIdentifier_Accepted(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("status"))
 	key := strings.Join([]string{
 		"sh", "-c", sendBase64WrapperScript, sendBase64WrapperScriptName,
-		"/opt/agmsg/scripts/send.sh", "panemux", "pane-a", SystemID, encoded,
+		"/opt/agmsg/scripts/send.sh", "panemux", "pane-a", board.SystemID, encoded,
 	}, "\x00")
 	exec.outputs[key] = []byte("")
 
-	err := c.Send(context.Background(), "panemux", "pane-a", SystemID, "status")
+	err := c.Send(context.Background(), "panemux", "pane-a", board.SystemID, "status")
 	assert.NoError(t, err)
 }
 

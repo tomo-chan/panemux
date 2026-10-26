@@ -1,10 +1,11 @@
-package board
+package agmsg
 
 import (
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"panemux/internal/board"
 	"panemux/internal/host"
 	"regexp"
 	"strconv"
@@ -65,7 +66,7 @@ func ValidAgmsgIdentifier(value string) bool {
 	return validAgmsgIdentifier.MatchString(value)
 }
 
-var _ AgmsgClient = (*RemoteAgmsgClient)(nil)
+var _ board.MessageClient = (*RemoteAgmsgClient)(nil)
 
 // RemoteAgmsgClient runs agmsg's scripts on a remote host over the SSH exec
 // channel the shared host.Runner already exposes.
@@ -109,7 +110,7 @@ func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body strin
 	return nil
 }
 
-func (c *RemoteAgmsgClient) Since(ctx context.Context, team, afterID string, limit int) ([]Row, error) {
+func (c *RemoteAgmsgClient) Since(ctx context.Context, team, afterID string, limit int) ([]board.Row, error) {
 	if err := validateAgmsgIdentifier("team", team); err != nil {
 		return nil, err
 	}

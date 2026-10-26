@@ -1,5 +1,5 @@
 // Package agent is panemux's registry of coding agents: each agent's stable
-// ID, display name, aliases, agmsg type name, the process rules that detect
+// ID, display name, aliases, the process rules that detect
 // it, and the capabilities it declares. Every other package asks this one
 // rather than naming an agent itself.
 //
@@ -22,7 +22,7 @@ import (
 // carry. It never changes once stored data names it.
 type ID string
 
-// validName is the shape of an ID, an alias and an agmsg type name: lower
+// validName is the shape of an ID, an alias: lower
 // case, starting with a letter, words joined by single hyphens.
 var validName = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
 
@@ -51,7 +51,7 @@ const (
 	Summary Capability = "summary"
 	// Usage: its usage limits and spend can be read (#345; no agent yet).
 	Usage Capability = "usage"
-	// Board: it can join Agent Board through agmsg.
+	// Board: it can join Agent Board through the message transport.
 	Board Capability = "board"
 )
 
@@ -78,9 +78,7 @@ const (
 type Definition struct {
 	ID          ID
 	DisplayName string
-	// AgmsgType is the agent's type name in agmsg, "" when agmsg has none.
-	AgmsgType string
-	Detection Detection
+	Detection   Detection
 	// Aliases are other names that refer to this agent, such as the
 	// "claude-code" path component of a Claude Code install.
 	Aliases      []string
@@ -98,10 +96,10 @@ func (d Definition) Has(c Capability) bool {
 }
 
 // Detection holds an agent's process rules: Agent Board's, which mirrors
-// agmsg's own detection, and the Task rule the task board and the pane header
+// board process detection, and the Task rule the task board and the pane header
 // share.
 type Detection struct {
-	// Board finds the agent in a pane for Agent Board, mirroring agmsg's own
+	// Board finds the agent in a pane for Agent Board, using independent
 	// type.conf detect_proc.
 	Board *ProcessRule
 	// Task finds the agent's processes in a host's `ps` output for the task
@@ -192,7 +190,7 @@ type SessionKey struct {
 // key.
 func (k SessionKey) Valid() bool { return k.Agent.Valid() && k.SessionID != "" }
 
-// Validate checks that defs can form a registry: IDs, aliases and agmsg types
+// Validate checks that defs can form a registry: IDs, aliases and names
 // are well formed and unique across all of them, capabilities are known and
 // declared once, and every rule matches a declaration.
 func Validate(defs []Definition) error {
@@ -215,18 +213,11 @@ func Validate(defs []Definition) error {
 			return err
 		}
 	}
-	agmsgTypes := map[string]bool{}
 	for _, d := range defs {
 		for _, alias := range d.Aliases {
 			if err := claim(alias, d.ID); err != nil {
 				return err
 			}
-		}
-		if d.AgmsgType != "" {
-			if !validName.MatchString(d.AgmsgType) || agmsgTypes[d.AgmsgType] {
-				return fmt.Errorf("agent %q: invalid or duplicate agmsg type %q", d.ID, d.AgmsgType)
-			}
-			agmsgTypes[d.AgmsgType] = true
 		}
 		if err := validateDefinition(d); err != nil {
 			return fmt.Errorf("agent %q: %w", d.ID, err)
@@ -257,7 +248,6 @@ func validateDefinition(d Definition) error {
 		present  bool
 	}{
 		{"detect needs a rule", seen[Detect], hasRule},
-		{"board needs an agmsg type", seen[Board], d.AgmsgType != ""},
 		{"board needs a board rule", seen[Board], det.Board != nil},
 		{"a task rule needs collect or workdir", seen[Collect] || seen[Workdir], det.Task != nil},
 	}

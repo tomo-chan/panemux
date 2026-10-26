@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/user"
+	"panemux/internal/agent"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -301,13 +302,13 @@ func TestIsInteractiveAgentCommand(t *testing.T) {
 func TestDetectAgmsgAgentType(t *testing.T) {
 	tests := []struct {
 		command  string
-		wantType string
+		wantType agent.ID
 		wantOK   bool
 	}{
-		{"claude", "claude-code", true},
-		{"/usr/local/bin/claude --resume", "claude-code", true},
-		{"claude-code", "claude-code", true},
-		{"claude-code-nightly", "claude-code", true}, // matches the claude-* wildcard
+		{"claude", "claude", true},
+		{"/usr/local/bin/claude --resume", "claude", true},
+		{"claude-code", "claude", true},
+		{"claude-code-nightly", "claude", true}, // matches the claude-* wildcard
 		{"claude -p", "", false},
 		{"claude --print", "", false},
 		{"codex", "codex", true},
@@ -328,7 +329,7 @@ func TestDetectAgmsgAgentType(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.command, func(t *testing.T) {
-			gotType, gotOK := detectAgmsgAgentType(tc.command)
+			gotType, gotOK := detectBoardAgent(tc.command)
 			assert.Equal(t, tc.wantOK, gotOK)
 			assert.Equal(t, tc.wantType, gotType)
 		})
@@ -342,10 +343,10 @@ func TestNewestKnownAgentTypeDescendantPID_FindsClaudeAmongOthers(t *testing.T) 
 		{PID: 140, PPID: 100, Command: "claude"},
 	}
 
-	pid, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, 100)
+	pid, agentID, ok := newestKnownAgentTypeDescendantPID(processes, 100)
 	require.True(t, ok)
 	assert.Equal(t, 140, pid)
-	assert.Equal(t, "claude-code", agmsgType)
+	assert.Equal(t, agent.Claude, agentID)
 }
 
 func TestNewestKnownAgentTypeDescendantPID_FindsGemini(t *testing.T) {
@@ -354,10 +355,10 @@ func TestNewestKnownAgentTypeDescendantPID_FindsGemini(t *testing.T) {
 		{PID: 150, PPID: 100, Command: "gemini"},
 	}
 
-	pid, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, 100)
+	pid, agentID, ok := newestKnownAgentTypeDescendantPID(processes, 100)
 	require.True(t, ok)
 	assert.Equal(t, 150, pid)
-	assert.Equal(t, "gemini", agmsgType)
+	assert.Equal(t, agent.ID("gemini"), agentID)
 }
 
 func TestNewestKnownAgentTypeDescendantPID_PrefersNewestAcrossTypes(t *testing.T) {
@@ -367,10 +368,10 @@ func TestNewestKnownAgentTypeDescendantPID_PrefersNewestAcrossTypes(t *testing.T
 		{PID: 160, PPID: 100, Command: "opencode"},
 	}
 
-	pid, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, 100)
+	pid, agentID, ok := newestKnownAgentTypeDescendantPID(processes, 100)
 	require.True(t, ok)
 	assert.Equal(t, 160, pid)
-	assert.Equal(t, "opencode", agmsgType)
+	assert.Equal(t, agent.ID("opencode"), agentID)
 }
 
 func TestNewestKnownAgentTypeDescendantPID_NoneFound(t *testing.T) {
@@ -379,10 +380,10 @@ func TestNewestKnownAgentTypeDescendantPID_NoneFound(t *testing.T) {
 		{PID: 110, PPID: 100, Command: "git status"},
 	}
 
-	pid, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, 100)
+	pid, agentID, ok := newestKnownAgentTypeDescendantPID(processes, 100)
 	assert.False(t, ok)
 	assert.Zero(t, pid)
-	assert.Empty(t, agmsgType)
+	assert.Empty(t, agentID)
 }
 
 func TestCodexSessionPath(t *testing.T) {
@@ -701,18 +702,18 @@ func TestParseClaudeProjectCWD_TrackedBackupTieBreakUsesAlphabeticalLastPath(t *
 	assert.Equal(t, filepath.Dir(worktreeFile), cwd)
 }
 
-func TestLocalSession_DetectInteractiveAgentType_NoPID_Error(t *testing.T) {
+func TestLocalSession_DetectInteractiveAgent_NoPID_Error(t *testing.T) {
 	sess := &LocalSession{pid: 0}
-	_, _, err := sess.DetectInteractiveAgentType()
+	_, _, err := sess.DetectInteractiveAgent()
 	assert.Error(t, err)
 }
 
-func TestLocalSession_DetectInteractiveAgentType_Present(t *testing.T) {
+func TestLocalSession_DetectInteractiveAgent_Present(t *testing.T) {
 	tests := []struct {
 		command  string
-		wantType string
+		wantType agent.ID
 	}{
-		{"claude", "claude-code"},
+		{"claude", "claude"},
 		{"gemini", "gemini"},
 		{"opencode", "opencode"},
 	}
@@ -729,15 +730,15 @@ func TestLocalSession_DetectInteractiveAgentType_Present(t *testing.T) {
 				}, nil
 			}
 
-			agmsgType, ok, err := sess.DetectInteractiveAgentType()
+			agentID, ok, err := sess.DetectInteractiveAgent()
 			require.NoError(t, err)
 			require.True(t, ok)
-			assert.Equal(t, tc.wantType, agmsgType)
+			assert.Equal(t, tc.wantType, agentID)
 		})
 	}
 }
 
-func TestLocalSession_DetectInteractiveAgentType_NoKnownAgent_False(t *testing.T) {
+func TestLocalSession_DetectInteractiveAgent_NoKnownAgent_False(t *testing.T) {
 	sess := &LocalSession{pid: 100}
 
 	original := listProcessesFn
@@ -749,13 +750,13 @@ func TestLocalSession_DetectInteractiveAgentType_NoKnownAgent_False(t *testing.T
 		}, nil
 	}
 
-	agmsgType, ok, err := sess.DetectInteractiveAgentType()
+	agentID, ok, err := sess.DetectInteractiveAgent()
 	require.NoError(t, err)
 	assert.False(t, ok)
-	assert.Empty(t, agmsgType)
+	assert.Empty(t, agentID)
 }
 
-func TestLocalSession_DetectInteractiveAgentType_ListProcessesError_Propagated(t *testing.T) {
+func TestLocalSession_DetectInteractiveAgent_ListProcessesError_Propagated(t *testing.T) {
 	sess := &LocalSession{pid: 100}
 	wantErr := errors.New("ps failed")
 
@@ -763,7 +764,7 @@ func TestLocalSession_DetectInteractiveAgentType_ListProcessesError_Propagated(t
 	t.Cleanup(func() { listProcessesFn = original })
 	listProcessesFn = func() ([]processInfo, error) { return nil, wantErr }
 
-	_, _, err := sess.DetectInteractiveAgentType()
+	_, _, err := sess.DetectInteractiveAgent()
 	require.Error(t, err)
 	assert.ErrorIs(t, err, wantErr)
 }
@@ -1642,7 +1643,7 @@ func TestDetectLocalShellDscl_NoUserShellLine_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "UserShell not found")
 }
 
-func TestTmuxLocalSession_DetectInteractiveAgentType_ClaudePresent(t *testing.T) {
+func TestTmuxLocalSession_DetectInteractiveAgent_ClaudePresent(t *testing.T) {
 	prevTmuxOutput := tmuxLocalOutputFn
 	prevListProcesses := listProcessesFn
 	t.Cleanup(func() {
@@ -1664,13 +1665,13 @@ func TestTmuxLocalSession_DetectInteractiveAgentType_ClaudePresent(t *testing.T)
 	}
 
 	sess := &TmuxLocalSession{tmuxSession: "demo"}
-	agmsgType, ok, err := sess.DetectInteractiveAgentType()
+	agentID, ok, err := sess.DetectInteractiveAgent()
 	require.NoError(t, err)
 	require.True(t, ok)
-	assert.Equal(t, "claude-code", agmsgType)
+	assert.Equal(t, agent.Claude, agentID)
 }
 
-func TestTmuxLocalSession_DetectInteractiveAgentType_NoKnownAgent_False(t *testing.T) {
+func TestTmuxLocalSession_DetectInteractiveAgent_NoKnownAgent_False(t *testing.T) {
 	prevTmuxOutput := tmuxLocalOutputFn
 	prevListProcesses := listProcessesFn
 	t.Cleanup(func() {
@@ -1689,10 +1690,10 @@ func TestTmuxLocalSession_DetectInteractiveAgentType_NoKnownAgent_False(t *testi
 	}
 
 	sess := &TmuxLocalSession{tmuxSession: "demo"}
-	agmsgType, ok, err := sess.DetectInteractiveAgentType()
+	agentID, ok, err := sess.DetectInteractiveAgent()
 	require.NoError(t, err)
 	assert.False(t, ok)
-	assert.Empty(t, agmsgType)
+	assert.Empty(t, agentID)
 }
 
 func TestTmuxLocalSessionGetActiveWorkdir_UsesPanePIDAndBaseCWD(t *testing.T) {

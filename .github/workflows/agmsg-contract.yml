@@ -30,7 +30,7 @@ name: agmsg-contract
 #     is retried every day until it is dealt with.
 #
 #   * On every pull request, against the PINNED version
-#     (board.TestedAgmsgVersion) — so a PR that actually bumps the pin
+#     (agmsg.TestedAgmsgVersion) — so a PR that actually bumps the pin
 #     cannot merge on a version whose real behavior differs.
 #
 # The PR trigger has no `paths:` filter on purpose. A path-filtered workflow
@@ -85,9 +85,9 @@ jobs:
           # The pin lives in Go source, as the single value the running
           # binary also warns against at startup. Reading it here keeps this
           # workflow from becoming a second place to update.
-          pinned="$(sed -n 's/^const TestedAgmsgVersion = "\(.*\)"$/\1/p' internal/board/agmsg_version.go)"
+          pinned="$(sed -n 's/^const TestedAgmsgVersion = "\(.*\)"$/\1/p' internal/agmsg/agmsg_version.go)"
           if [ -z "$pinned" ]; then
-            echo "could not read TestedAgmsgVersion from internal/board/agmsg_version.go" >&2
+            echo "could not read TestedAgmsgVersion from internal/agmsg/agmsg_version.go" >&2
             exit 1
           fi
           echo "pinned agmsg version: $pinned"
@@ -124,7 +124,7 @@ jobs:
               git fetch --quiet origin "$BASE_REF"
               changed="$(git diff --name-only "origin/$BASE_REF"...HEAD)"
               echo "changed files:"; echo "$changed"
-              if echo "$changed" | grep -qE '^(internal/board/(agmsg_version\.go|agmsg_parse\.go|agmsg_contract_test\.go|local_client\.go|testdata/)|Makefile|\.github/workflows/agmsg-contract\.yml)'; then
+              if echo "$changed" | grep -qE '^(internal/agmsg/|Makefile|\.github/workflows/agmsg-contract\.yml)'; then
                 echo "run=true" >> "$GITHUB_OUTPUT"
                 echo "agmsg_ref=v$pinned" >> "$GITHUB_OUTPUT"
                 echo "contract-relevant files changed; running against the pinned v$pinned"
@@ -250,7 +250,7 @@ jobs:
             echo
             if [ "$EVENT" = "schedule" ]; then
               echo "A failure here is an early warning against agmsg's latest release, not a gate:"
-              echo "the pinned version (\`board.TestedAgmsgVersion\`) is unchanged and panemux still"
+              echo "the pinned version (\`agmsg.TestedAgmsgVersion\`) is unchanged and panemux still"
               echo "runs against it. See docs/agent-board.md's agmsg compatibility contract."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

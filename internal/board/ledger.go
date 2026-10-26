@@ -27,7 +27,7 @@ type ownSendKey struct {
 // ownSendLedger is a short-lived, in-memory record of Send calls panemux
 // itself has issued (the broadcast handler and the command center), used
 // only to verify a row the relay later observes with From == SystemID
-// actually corresponds to one of panemux's own sends — send.sh --force
+// actually corresponds to one of panemux's own sends — the message transport
 // never checks From against a roster, so an ordinary board pane could
 // otherwise forge that identity. See docs/agent-board.md's Cross-host
 // relay and Security model sections.

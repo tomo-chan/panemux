@@ -1,7 +1,7 @@
 # Agent Registry
 
 `internal/agent` is the one place panemux names a coding agent. Every agent panemux recognizes is
-a `Definition` there: its stable ID, display name, aliases, agmsg type name, the process rules that
+a `Definition` there: its stable ID, display name, aliases, the process rules that
 detect it, and the capabilities it declares. Other packages ask the registry rather than spelling
 an agent's name or binary themselves.
 
@@ -10,14 +10,14 @@ later consumer can import it without a cycle.
 
 ## Registered agents
 
-| ID | Display name | Aliases | agmsg type | Capabilities |
-|---|---|---|---|---|
-| `claude` | Claude Code | `claude-code` | `claude-code` | detect, collect, launch, resume, workdir, summary, board |
-| `codex` | Codex | — | `codex` | detect, collect, launch, resume, workdir, summary, board |
-| `cursor` | Cursor | — | `cursor` | detect, board |
-| `gemini` | Gemini CLI | — | `gemini` | detect, board |
-| `grok-build` | Grok Build | — | `grok-build` | detect, board |
-| `opencode` | opencode | — | `opencode` | detect, board |
+| ID | Display name | Aliases | Capabilities |
+|---|---|---|---|
+| `claude` | Claude Code | `claude-code` | detect, collect, launch, resume, workdir, summary, board |
+| `codex` | Codex | — | detect, collect, launch, resume, workdir, summary, board |
+| `cursor` | Cursor | — | detect, board |
+| `gemini` | Gemini CLI | — | detect, board |
+| `grok-build` | Grok Build | — | detect, board |
+| `opencode` | opencode | — | detect, board |
 
 The order is the matching order: the first Board rule that matches a process names its type.
 The four detect-and-board agents are Agent Board's alone; the task board does not list them.
@@ -29,9 +29,9 @@ The four detect-and-board agents are Agent Board's alone; the task board does no
   shape only: a stored record may name an agent this build does not register.
 - **Aliases** are other names for the same agent — `claude-code` is the directory an npm install of
   Claude Code lives in. `agent.Resolve` maps an ID or an alias to its ID, exactly.
-- **agmsg type** is the agent's type name in agmsg's own scripts. `agent.ByAgmsgType` maps it back.
-- IDs, aliases and agmsg types share the same shape rule. IDs and aliases are unique across all of
-  them together; agmsg types are unique among themselves.
+- IDs and aliases share the same shape rule and are unique across both sets.
+- External messaging type names belong to the [agmsg adapter](agent-board/agmsg-integration.md#agent-type-mapping),
+  which validates its mapping against the registry's `board` declarations.
 
 ### Session keys
 
@@ -68,7 +68,7 @@ agent's name suggests.
 | `workdir` | Its working directory and conversation log can be resolved | a Task rule |
 | `summary` | Its sessions can be summarized | — |
 | `usage` | Its usage limits and spend can be read; declared by no agent yet (#345) | — |
-| `board` | It can join Agent Board through agmsg | an agmsg type and a Board rule |
+| `board` | It can join Agent Board through the message port | a Board rule |
 
 The registry holds declarations; the code behind each capability is in its consumer. `collect` is
 implemented by a collect adapter per agent, which `internal/tasks` defines in its own types and lists
@@ -115,15 +115,12 @@ summary's identity; raising it makes earlier summaries outdated. A source at its
 (`""`) adds nothing to it. A runner says in its own words when an answer came from a model other than
 the one it asked for, or says nothing.
 
-`board` is implemented by a board adapter per agent, which the root package defines in its own types
-and lists explicitly by ID in `boardAdapters` (`board_adapters.go`), checked against the registry when
-panemux starts. The onboarding instruction's shared steps — joining, sending, the status report and
-the delivery mode — are the same for every agent; an adapter supplies what differs, which today is
-only Claude Code's identity claim and its watcher replacement
-([agmsg integration](agent-board/agmsg-integration.md)). The capability is a contract with an external
-tool: it needs agmsg on the pane's host, which the bootstrap watcher checks before writing anything,
-and its agents are found by the Board rules, which mirror agmsg's own detection and stay apart from
-the other rules.
+`board` uses messaging and participation ports defined by `internal/board`. Session detection returns
+an `agent.ID` from the registry's Board rules. The external adapter supplies the transport type and
+participation instruction; its mapping must cover exactly the agents declaring `board`, checked
+at startup and in tests. See [agmsg integration](agent-board/agmsg-integration.md#agent-type-mapping)
+for that mapping and the per-agent onboarding requirements. A capability declaration does not mean
+the transport is installed on a host; bootstrap checks availability before writing to the pane.
 
 Which agents can be given a done or label record (`internal/tasks`'s `recordable`) is read from the
 `collect` declarations; a stored record of any other agent is kept and written back unchanged
@@ -140,7 +137,7 @@ capability is per release.
 
 Each detection rule records:
 
-- `VerifiedWith`, the release it was last checked against: `agmsg v1.1.13` for every Board rule,
+- `VerifiedWith`, the release or verification date it was last checked against: `interactive process rules checked 2026-08` for Board rules,
   `codex-cli 0.157.0` for codex's Task rule, and nothing recorded for the others.
 - `UnknownArgs`, what it does with an argument it does not know — a flag or subcommand a newer
   release added. Every registered rule is `accept`: an unknown argument counts as a session, so a
@@ -156,28 +153,28 @@ and makes that agent's `collect` `degraded` / `unknown_format` on that host
 
 ## Detection rules
 
-Two rule sets exist: the Board rules mirror agmsg's own detection, an external contract, and the Task
-rules are panemux's own, shared by the task board and the pane header. Within one rule set the agents
+Two rule sets exist: Board rules detect interactive agents for participation, while Task rules
+serve the task board and pane header. The [integration guide](agent-board/agmsg-integration.md#agent-type-mapping)
+records the external provenance of the Board rules. Within one rule set the agents
 are tried in registration order, and the first whose program matches decides: when the process is a
 headless run of that agent (a Board exclude token among the arguments, or a Task rule's process that
 is not interactive) it is no agent's, even if a later agent's rule would also match the program.
 
 | Rule | Used by | Matches |
 |---|---|---|
-| Board | Agent Board's agent-type polling (`AgentTypeDetector`) | Program base name against patterns (a trailing `*` matches any suffix), no exclude token among the arguments. Mirrors agmsg's own `type.conf` `detect_proc`. |
+| Board | Agent Board's agent-type polling (`AgentTypeDetector`) | Program base name against patterns (a trailing `*` matches any suffix), no exclude token among the arguments. |
 | Task | The task board's collection, and a pane's active working directory (`ActiveWorkdirGetter`, through `MatchInteractiveSession` among the agents that declare `workdir`) | Claude Code: a path component of the program, or of the script a `node`, `bun` or `deno` interpreter runs, is `claude` or `claude-code`, and it is not `-p`/`--print`. codex: base name `codex`, and its first positional argument is not a non-interactive subcommand. |
 
-The Board exclude tokens are `-p` and `--print` for Claude Code and `exec` for codex. agmsg documents
-no headless invocation for the other four agents, so their Board rules have none. The Task rule reads
+The Board exclude tokens are `-p` and `--print` for Claude Code and `exec` for codex. No headless
+invocation is verified for the other four agents, so their Board rules have none. The Task rule reads
 codex's arguments as codex does: options that take a value (`-m`, `-c`, `-p`/`--profile`, `-C`, …)
 are skipped with their value, so `codex -m x exec` is headless and `codex -p exec` is not; `-i/--image`
 takes every argument up to the next option, so `codex -i a.png review` is a session. Because a
 path component of the program decides for Claude Code, a program such as `/opt/claude/bin/codex` is
 Claude Code's.
 
-agmsg itself does no process detection for antigravity, copilot or hermes, and agmsg-app is the
-desktop app's own user, so none of them is registered; an operator on one of them joins agmsg by
-hand ([bootstrap](agent-board/bootstrap.md)).
+Only registered agents with Board rules are detected. Messaging type names and explicit-only
+integrations are described in the [adapter guide](agent-board/agmsg-integration.md#agent-type-mapping).
 
 ## Adding an agent
 

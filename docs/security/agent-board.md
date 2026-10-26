@@ -5,7 +5,8 @@
 
 ### Agent board remote writes
 
-Panemux may invoke only operator-installed agmsg scripts through the shared host execution port
+Only `internal/agmsg`, the adapter of the board-owned message and participation ports, may invoke
+operator-installed agmsg scripts through the shared host execution port
 (local `sh -s` or the per-host SSH command connection). It
 must never install panemux, agmsg, or persistent helper scripts on a remote host.
 
