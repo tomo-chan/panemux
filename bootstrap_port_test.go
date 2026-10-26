@@ -78,3 +78,18 @@ func TestBootstrapUsesOnlyTheParticipationPort(t *testing.T) {
 		})
 	}
 }
+
+func TestBootstrapWithoutAParticipationLookupDoesNotWrite(t *testing.T) {
+	manager := session.NewManager()
+	pane := &fakeAgentSession{id: "pane-a", detectType: string(agent.Claude), detectOK: true}
+	manager.Add(pane)
+	watcher := newBootstrapWatcher(bootstrapWatcherConfig{
+		Manager: manager, PaneHosts: map[string]string{"pane-a": "host-a"}, Team: "team-a",
+	})
+	watcher.pollOnce(context.Background())
+	watcher.pollOnce(context.Background())
+	assert.Empty(t, pane.writes)
+	present, checked := watcher.messagingPresent(context.Background(), "pane-a", "host-a")
+	assert.False(t, present)
+	assert.False(t, checked)
+}

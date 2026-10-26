@@ -55,17 +55,6 @@ func validateAgmsgIdentifier(label, value string) error {
 	return nil
 }
 
-// ValidAgmsgIdentifier reports whether value is safe to use as an agmsg
-// team/from/to identifier — the same regex-allowlist Runner.Run calls
-// already enforce internally via validateAgmsgIdentifier. Exported so
-// callers outside internal/board (bootstrap.go) can reject a pane ID or
-// team name up front, before it is ever embedded in a command line the
-// agent itself will type and execute — see docs/agent-board.md's Bootstrap
-// flow section.
-func ValidAgmsgIdentifier(value string) bool {
-	return validAgmsgIdentifier.MatchString(value)
-}
-
 var _ board.MessageClient = (*RemoteAgmsgClient)(nil)
 
 // RemoteAgmsgClient runs agmsg's scripts on a remote host over the SSH exec
@@ -96,6 +85,7 @@ func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body strin
 	}
 
 	encoded := base64.StdEncoding.EncodeToString([]byte(body))
+	//coverage:exempt StdEncoding always emits this alphabet; retain the defensive allowlist at the command sink
 	if !validBase64.MatchString(encoded) {
 		return errors.New("agmsg: encoded body failed base64 allowlist validation")
 	}

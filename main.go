@@ -182,7 +182,7 @@ func loadConfig(opts cliOptions, loader configLoader) (*config.Config, error) {
 
 func runServer(
 	srv *server.Server, manager *session.Manager, boardRelay *board.Relay, boardBootstrap *bootstrapWatcher,
-) {
+) { //coverage:exempt process-lifetime signal loop; buildServerServices tests the wiring
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 

@@ -321,7 +321,7 @@ func TestBootstrapWatcher_NoAgentTypeDetectorCapability_NoOp(t *testing.T) {
 // TestBootstrapWatcher_InvalidPaneIDOrTeam_SkipsBootstrap is the regression
 // test for embedding an unvalidated identifier into the onboarding
 // instruction's shell command lines: a pane ID or team outside agmsg's own
-// identifier alphabet (board.ValidAgmsgIdentifier) can never be addressed
+// identifier alphabet (validated by the participation port) can never be addressed
 // correctly by the relay even if the write succeeded, so bootstrap must
 // refuse rather than write a broken instruction.
 func TestBootstrapWatcher_InvalidPaneIDOrTeam_SkipsBootstrap(t *testing.T) {

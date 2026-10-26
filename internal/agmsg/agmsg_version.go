@@ -187,6 +187,7 @@ func coveredByTestedVersion(installed string) bool {
 		return false
 	}
 	want, ok := parseAgmsgRelease(TestedAgmsgVersion)
+	//coverage:exempt the tested-version pin is a valid build-time constant; malformed installed versions are tested
 	if !ok {
 		return false
 	}
