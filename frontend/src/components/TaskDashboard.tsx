@@ -12,7 +12,8 @@ import { useTaskInput } from '../hooks/useTaskInput'
 import type { TaskInputOrigin } from '../hooks/useTaskInput'
 import { TaskInputPopup } from './TaskInputPopup'
 import { HostConnectDialog } from './HostConnectDialog'
-import { CodexHookItem } from './CodexHookItem'
+import { codexHookTool } from './codexHookTool'
+import { HostTools } from './HostTools'
 import { HostTerminalPopup } from './HostTerminalPopup'
 import { useHostTerminal } from '../hooks/useHostTerminal'
 import { loadTaskTerminalMaximized, saveTaskTerminalMaximized } from '../utils/taskTerminalPrefs'
@@ -796,12 +797,10 @@ const HostChip: React.FC<HostChipProps> = ({ host, running, onReconnect, menu })
             onTypeIn={(type, tmuxSession) => menu.onTypeIn(type, tmuxSession, chipRef.current)}
             terminal={terminal}
             codexHook={
-              <CodexHookItem
+              <HostTools
                 host={host.name}
                 label={label}
-                load={menu.codexHook}
-                install={menu.installCodexHook}
-                setAuto={menu.setCodexHookAuto}
+                tools={[codexHookTool({ load: menu.codexHook, install: menu.installCodexHook, setAuto: menu.setCodexHookAuto })]}
                 alone={!terminal}
               />
             }

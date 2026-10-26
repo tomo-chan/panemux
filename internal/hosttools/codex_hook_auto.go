@@ -1,4 +1,4 @@
-package tasks
+package hosttools
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 
 	"panemux/internal/fileops"
 	"panemux/internal/homedir"
+	hostpkg "panemux/internal/host"
 )
 
 // Updating a host's codex permission hook by itself (issue #402). On a host
@@ -114,7 +115,7 @@ type codexHookAuto struct {
 
 // SetCodexHookAuto turns updating host's hook by itself on or off.
 func (s *Service) SetCodexHookAuto(host string, on bool) error {
-	if err := s.checkHost(host); err != nil {
+	if err := s.checkHost(hostpkg.Host(host)); err != nil {
 		return err
 	}
 	if s.opts.CodexHookAuto == nil {
@@ -125,7 +126,7 @@ func (s *Service) SetCodexHookAuto(host string, on bool) error {
 
 // withCodexHookAuto adds to got whether the host's hook is updated by itself
 // and what came of doing so.
-func (s *Service) withCodexHookAuto(host string, got CodexHook) CodexHook {
+func (s *Service) withCodexHookAuto(host string, got State) State {
 	if s.opts.CodexHookAuto == nil {
 		return got
 	}
@@ -143,9 +144,9 @@ func (s *Service) withCodexHookAuto(host string, got CodexHook) CodexHook {
 
 // autoUpdateCodexHook updates the hook got describes when the host has it
 // turned on, it shows Update, and this process has not tried already.
-func (s *Service) autoUpdateCodexHook(ctx context.Context, host string, got CodexHook) CodexHook {
+func (s *Service) autoUpdateCodexHook(ctx context.Context, host string, got State) State {
 	got = s.withCodexHookAuto(host, got)
-	if !got.AutoUpdate || got.Status != CodexHookOutdated {
+	if !got.AutoUpdate || got.Status != Outdated {
 		return got
 	}
 	s.mu.Lock()
@@ -204,9 +205,29 @@ func (s *Service) checkCodexHookAfterStart(host string) {
 	if on, err := s.opts.CodexHookAuto.Enabled(host); err != nil || !on {
 		return
 	}
-	s.summaryWG.Add(1)
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.runs.Add(1)
+	s.mu.Unlock()
 	go func() {
-		defer s.summaryWG.Done()
-		s.autoUpdateCodexHook(s.summaryCtx, host, s.checkCodexHook(s.summaryCtx, host))
+		defer s.runs.Done()
+		s.autoUpdateCodexHook(s.ctx, host, s.checkCodexHook(s.ctx, host))
 	}()
+}
+
+func resolveRecordsWriteTarget(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	dest, err := os.Readlink(path)
+	if err != nil {
+		return path
+	}
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join(filepath.Dir(path), dest)
+	}
+	return dest
 }

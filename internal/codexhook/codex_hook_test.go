@@ -1,4 +1,4 @@
-package tasks
+package codexhook
 
 import (
 	"bytes"
@@ -19,6 +19,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/homedir"
+	"panemux/internal/host"
+	"panemux/internal/hostexec"
+	"panemux/internal/hosttools"
 	"panemux/internal/session"
 )
 
@@ -150,7 +153,7 @@ func codexHookOutput(hook []byte, executable bool, hooksJSON []byte) []byte {
 // the status it reads as.
 type statusCase struct {
 	name    string
-	want    CodexHookStatus
+	want    hosttools.Status
 	wantErr string
 	runErr  error
 	out     []byte
@@ -165,39 +168,39 @@ var (
 func TestCodexHookStatus(t *testing.T) {
 	hook, registered := testHook, testRegistered
 	checkCodexHookStatuses(t, []statusCase{
-		{name: "no codex", out: []byte("::codex none\n"), want: CodexHookAbsent},
-		{name: "nothing installed", out: codexHookOutput(nil, false, nil), want: CodexHookMissing},
-		{name: "hooks.json without it", out: codexHookOutput(nil, false, []byte(`{"hooks":{}}`)), want: CodexHookMissing},
-		{name: "installed", out: codexHookOutput(hook, true, registered), want: CodexHookInstalled},
+		{name: "no codex", out: []byte("::codex none\n"), want: hosttools.Absent},
+		{name: "nothing installed", out: codexHookOutput(nil, false, nil), want: hosttools.Missing},
+		{name: "hooks.json without it", out: codexHookOutput(nil, false, []byte(`{"hooks":{}}`)), want: hosttools.Missing},
+		{name: "installed", out: codexHookOutput(hook, true, registered), want: hosttools.Installed},
 		{
 			name: "a login banner before the output is ignored",
 			out:  append([]byte("Welcome\n::not ours\n"), codexHookOutput(hook, true, registered)...),
-			want: CodexHookInstalled,
+			want: hosttools.Installed,
 		},
-		{name: "older hook", out: codexHookOutput([]byte("#!/bin/sh\nexit 0\n"), true, registered), want: CodexHookOutdated},
-		{name: "hook not executable", out: codexHookOutput(hook, false, registered), want: CodexHookOutdated},
-		{name: "hook not registered", out: codexHookOutput(hook, true, nil), want: CodexHookOutdated},
-		{name: "registered without the hook", out: codexHookOutput(nil, false, registered), want: CodexHookOutdated},
+		{name: "older hook", out: codexHookOutput([]byte("#!/bin/sh\nexit 0\n"), true, registered), want: hosttools.Outdated},
+		{name: "hook not executable", out: codexHookOutput(hook, false, registered), want: hosttools.Outdated},
+		{name: "hook not registered", out: codexHookOutput(hook, true, nil), want: hosttools.Outdated},
+		{name: "registered without the hook", out: codexHookOutput(nil, false, registered), want: hosttools.Outdated},
 		{
 			name:    "unreadable hooks.json",
 			out:     codexHookOutput(hook, true, []byte(`{"hooks":`)),
-			want:    CodexHookInvalid,
+			want:    hosttools.Invalid,
 			wantErr: "~/.codex/hooks.json is not valid JSON",
 		},
 		{
 			name: "an empty hooks.json is a file, not none", out: codexHookOutput(hook, true, []byte{}),
-			want: CodexHookInvalid, wantErr: "is not valid JSON",
+			want: hosttools.Invalid, wantErr: "is not valid JSON",
 		},
-		{name: "host fails", runErr: errors.New("boom"), want: CodexHookUnknown, wantErr: "boom"},
+		{name: "host fails", runErr: errors.New("boom"), want: hosttools.Unknown, wantErr: "boom"},
 		{
 			name: "a hooks.json too large to read",
 			out:  []byte("::home /remote/home/demo\n::none\n::large 2000000\n::end\n"),
-			want: CodexHookInvalid, wantErr: "~/.codex/hooks.json is larger than 1 MiB",
+			want: hosttools.Invalid, wantErr: "~/.codex/hooks.json is larger than 1 MiB",
 		},
 		{
 			name: "a hook file too large to read is not ours",
 			out:  []byte("::home /remote/home/demo\n::large 2000000\n::none\n::end\n"),
-			want: CodexHookOutdated,
+			want: hosttools.Outdated,
 		},
 	})
 }
@@ -206,7 +209,7 @@ func TestCodexHookCheckDoesNotReadALargeHooksJSON(t *testing.T) {
 	home := codexHome(t, `{"x":"`+strings.Repeat("a", codexHookMaxRead)+`"}`)
 	homedir.SetForTest(t, home)
 	var out []byte
-	s := New(Options{
+	s := newTestService(testOptions{
 		Hosts: func() []string { return nil },
 		RunLocal: func(ctx context.Context, script string) ([]byte, error) {
 			var err error
@@ -216,7 +219,7 @@ func TestCodexHookCheckDoesNotReadALargeHooksJSON(t *testing.T) {
 	})
 	defer s.Close()
 	got := codexHookStatus(t, s, "")
-	assert.Equal(t, CodexHookInvalid, got.Status)
+	assert.Equal(t, hosttools.Invalid, got.Status)
 	assert.Contains(t, got.Error, "larger than 1 MiB")
 	assert.Less(t, len(out), 4096, "the file is not printed")
 }
@@ -224,20 +227,20 @@ func TestCodexHookCheckDoesNotReadALargeHooksJSON(t *testing.T) {
 func TestCodexHookStatusOfOutputCutShort(t *testing.T) {
 	const early = "ended early"
 	checkCodexHookStatuses(t, []statusCase{
-		{name: "no output", out: []byte(""), want: CodexHookUnknown, wantErr: early},
-		{name: "only the home line", out: []byte("::home /remote/home/demo\n"), want: CodexHookUnknown, wantErr: early},
-		{name: "the home line cut short", out: []byte("::home /remote/home/demo"), want: CodexHookUnknown, wantErr: early},
+		{name: "no output", out: []byte(""), want: hosttools.Unknown, wantErr: early},
+		{name: "only the home line", out: []byte("::home /remote/home/demo\n"), want: hosttools.Unknown, wantErr: early},
+		{name: "the home line cut short", out: []byte("::home /remote/home/demo"), want: hosttools.Unknown, wantErr: early},
 		{
 			name: "a file cut short", out: []byte("::home /remote/home/demo\n::file 900 x\n#!/bin/sh\n"),
-			want: CodexHookUnknown, wantErr: early,
+			want: hosttools.Unknown, wantErr: early,
 		},
 		{
 			name: "content shorter than its size", out: []byte("::home /remote/home/demo\n::file 3 x\nabc"),
-			want: CodexHookUnknown, wantErr: early,
+			want: hosttools.Unknown, wantErr: early,
 		},
 		{
 			name: "no end marker", out: bytes.TrimSuffix(codexHookOutput(testHook, true, testRegistered), []byte("::end\n")),
-			want: CodexHookUnknown, wantErr: early,
+			want: hosttools.Unknown, wantErr: early,
 		},
 	})
 }
@@ -246,7 +249,7 @@ func checkCodexHookStatuses(t *testing.T, cases []statusCase) {
 	t.Helper()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := New(Options{
+			s := newTestService(testOptions{
 				Hosts:    func() []string { return nil },
 				RunLocal: func(context.Context, string) ([]byte, error) { return tc.out, tc.runErr },
 			})
@@ -264,12 +267,12 @@ func checkCodexHookStatuses(t *testing.T, cases []statusCase) {
 }
 
 func TestCodexHookUnknownHost(t *testing.T) {
-	s := New(Options{Hosts: func() []string { return []string{"build-box"} }})
+	s := newTestService(testOptions{Hosts: func() []string { return []string{"build-box"} }})
 	defer s.Close()
 	_, err := s.InstallCodexHook(context.Background(), "elsewhere")
-	require.ErrorIs(t, err, ErrUnknownHost)
+	require.ErrorIs(t, err, hosttools.ErrUnknownHost)
 	_, err = s.CodexHook(context.Background(), "elsewhere")
-	require.ErrorIs(t, err, ErrUnknownHost)
+	require.ErrorIs(t, err, hosttools.ErrUnknownHost)
 }
 
 // codexHome is a HOME with ~/.codex, and hooks.json when given.
@@ -287,13 +290,13 @@ func TestInstallCodexHookLocal(t *testing.T) {
 	existing := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/bin/true"}]}]},"feature":true}`
 	home := codexHome(t, existing)
 	homedir.SetForTest(t, home)
-	s := New(Options{Hosts: func() []string { return nil }})
+	s := newTestService(testOptions{Hosts: func() []string { return nil }})
 	defer s.Close()
 
-	assert.Equal(t, CodexHookMissing, codexHookStatus(t, s, "").Status)
+	assert.Equal(t, hosttools.Missing, codexHookStatus(t, s, "").Status)
 	got, err := s.InstallCodexHook(context.Background(), "")
 	require.NoError(t, err)
-	assert.Equal(t, CodexHook{Status: CodexHookInstalled}, got)
+	assert.Equal(t, hosttools.State{Status: hosttools.Installed}, got)
 
 	assertCodexHookInstalled(t, home)
 	hooksJSON, err := os.ReadFile(filepath.Join(home, ".codex", "hooks.json"))
@@ -304,7 +307,7 @@ func TestInstallCodexHookLocal(t *testing.T) {
 	// Installing again changes nothing.
 	got, err = s.InstallCodexHook(context.Background(), "")
 	require.NoError(t, err)
-	assert.Equal(t, CodexHookInstalled, got.Status)
+	assert.Equal(t, hosttools.Installed, got.Status)
 	again, err := os.ReadFile(filepath.Join(home, ".codex", "hooks.json"))
 	require.NoError(t, err)
 	assert.Equal(t, string(hooksJSON), string(again))
@@ -318,13 +321,13 @@ func TestInstallCodexHookUpdatesTheScriptOnly(t *testing.T) {
 	require.NoError(t, os.WriteFile(command, []byte("#!/bin/sh\nexit 0\n"), 0o600))
 	hooksJSON := `{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"` + command + `","timeout":1}]}]}}`
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "hooks.json"), []byte(hooksJSON), 0o600))
-	s := New(Options{Hosts: func() []string { return nil }})
+	s := newTestService(testOptions{Hosts: func() []string { return nil }})
 	defer s.Close()
 
-	assert.Equal(t, CodexHookOutdated, codexHookStatus(t, s, "").Status)
+	assert.Equal(t, hosttools.Outdated, codexHookStatus(t, s, "").Status)
 	got, err := s.InstallCodexHook(context.Background(), "")
 	require.NoError(t, err)
-	assert.Equal(t, CodexHookInstalled, got.Status)
+	assert.Equal(t, hosttools.Installed, got.Status)
 	after, err := os.ReadFile(filepath.Join(home, ".codex", "hooks.json"))
 	require.NoError(t, err)
 	assert.Equal(t, hooksJSON, string(after), "a registered hook leaves hooks.json as it was")
@@ -334,12 +337,12 @@ func TestInstallCodexHookUpdatesTheScriptOnly(t *testing.T) {
 func TestInstallCodexHookCreatesHooksJSON(t *testing.T) {
 	home := codexHome(t, "")
 	homedir.SetForTest(t, home)
-	s := New(Options{Hosts: func() []string { return nil }})
+	s := newTestService(testOptions{Hosts: func() []string { return nil }})
 	defer s.Close()
 
 	got, err := s.InstallCodexHook(context.Background(), "")
 	require.NoError(t, err)
-	assert.Equal(t, CodexHookInstalled, got.Status)
+	assert.Equal(t, hosttools.Installed, got.Status)
 	assertCodexHookInstalled(t, home)
 }
 
@@ -347,10 +350,10 @@ func TestInstallCodexHookRefusesUnreadableHooksJSON(t *testing.T) {
 	for _, bad := range []string{`{"hooks":`, `{"hooks":{"PermissionRequest":"x"}}`} {
 		home := codexHome(t, bad)
 		homedir.SetForTest(t, home)
-		s := New(Options{Hosts: func() []string { return nil }})
+		s := newTestService(testOptions{Hosts: func() []string { return nil }})
 
 		got := codexHookStatus(t, s, "")
-		assert.Equal(t, CodexHookInvalid, got.Status)
+		assert.Equal(t, hosttools.Invalid, got.Status)
 		_, err := s.InstallCodexHook(context.Background(), "")
 		require.Error(t, err)
 		assert.Equal(t, got.Error, err.Error())
@@ -364,7 +367,7 @@ func TestInstallCodexHookRefusesUnreadableHooksJSON(t *testing.T) {
 }
 
 func TestInstallCodexHookWithoutCodex(t *testing.T) {
-	s := New(Options{
+	s := newTestService(testOptions{
 		Hosts:    func() []string { return nil },
 		RunLocal: func(context.Context, string) ([]byte, error) { return []byte("::codex none\n"), nil },
 	})
@@ -379,7 +382,7 @@ func TestInstallCodexHookReportsAFailedWrite(t *testing.T) {
 	homedir.SetForTest(t, home)
 	// ~/.local is a file, so ~/.local/bin cannot be made.
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".local"), nil, 0o600))
-	s := New(Options{Hosts: func() []string { return nil }})
+	s := newTestService(testOptions{Hosts: func() []string { return nil }})
 	defer s.Close()
 	_, err := s.InstallCodexHook(context.Background(), "")
 	require.Error(t, err)
@@ -402,7 +405,7 @@ func TestInstallCodexHookReportsAnUncreatableCodexDirectory(t *testing.T) {
 	codexPath := filepath.Join(bin, "codex")
 	require.NoError(t, os.WriteFile(codexPath, []byte("#!/bin/sh\n"), 0o700)) //nolint:gosec // G306: an executable fixture
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	s := New(Options{Hosts: func() []string { return nil }})
+	s := newTestService(testOptions{Hosts: func() []string { return nil }})
 	defer s.Close()
 	_, err := s.InstallCodexHook(context.Background(), "")
 	require.Error(t, err)
@@ -413,7 +416,7 @@ func TestInstallCodexHookOverSSHReportsWhyItFailed(t *testing.T) {
 	home := codexHome(t, "")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".local"), nil, 0o600))
 	conn := &shConn{home: home}
-	s := New(Options{
+	s := newTestService(testOptions{
 		Hosts: func() []string { return []string{"build-box"} },
 		Dial:  func(string) (Conn, error) { return conn, nil },
 	})
@@ -430,7 +433,7 @@ func TestInstallCodexHookKeepsHooksJSONWhenTheWriteFails(t *testing.T) {
 	// 40 blocks fit the hook script but not hooks.json, in 512- or
 	// 1024-byte blocks.
 	conn := &shConn{home: home, prefix: "ulimit -f 40\n"}
-	s := New(Options{
+	s := newTestService(testOptions{
 		Hosts: func() []string { return []string{"build-box"} },
 		Dial:  func(string) (Conn, error) { return conn, nil },
 	})
@@ -455,7 +458,7 @@ func TestInstallCodexHookWritesThroughALink(t *testing.T) {
 	require.NoError(t, os.WriteFile(target, []byte(`{}`), 0o600))
 	require.NoError(t, os.Symlink(target, filepath.Join(home, ".codex", "hooks.json")))
 	homedir.SetForTest(t, home)
-	s := New(Options{Hosts: func() []string { return nil }})
+	s := newTestService(testOptions{Hosts: func() []string { return nil }})
 	defer s.Close()
 	_, err := s.InstallCodexHook(context.Background(), "")
 	require.NoError(t, err)
@@ -496,7 +499,7 @@ func (c *shConn) Close() error               { return nil }
 func TestInstallCodexHookOverSSH(t *testing.T) {
 	home := codexHome(t, `{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"/bin/other"}]}]}}`)
 	conn := &shConn{home: home}
-	s := New(Options{
+	s := newTestService(testOptions{
 		Hosts: func() []string { return []string{"build-box"} },
 		Dial:  func(string) (Conn, error) { return conn, nil },
 		RunLocal: func(context.Context, string) ([]byte, error) {
@@ -505,10 +508,10 @@ func TestInstallCodexHookOverSSH(t *testing.T) {
 	})
 	defer s.Close()
 
-	assert.Equal(t, CodexHookMissing, codexHookStatus(t, s, "build-box").Status)
+	assert.Equal(t, hosttools.Missing, codexHookStatus(t, s, "build-box").Status)
 	got, err := s.InstallCodexHook(context.Background(), "build-box")
 	require.NoError(t, err)
-	assert.Equal(t, CodexHookInstalled, got.Status)
+	assert.Equal(t, hosttools.Installed, got.Status)
 	assertCodexHookInstalled(t, home, `{"type":"command","command":"/bin/other"}`)
 	for _, cmd := range conn.cmds {
 		assert.Equal(t, "sh -s", cmd, "only the literal command crosses the remote shell")
@@ -555,7 +558,7 @@ func mustJSON(t *testing.T, v any) []byte {
 	return data
 }
 
-func codexHookStatus(t *testing.T, s *Service, host string) CodexHook {
+func codexHookStatus(t *testing.T, s *testService, host string) hosttools.State {
 	t.Helper()
 	got, err := s.CodexHook(context.Background(), host)
 	require.NoError(t, err)
@@ -565,20 +568,22 @@ func codexHookStatus(t *testing.T, s *Service, host string) CodexHook {
 func TestCodexHookOnAHostStillConnecting(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
-	s := New(Options{
+	s := newTestService(testOptions{
 		Hosts:       func() []string { return []string{"build-box"} },
 		Dial:        func(string) (Conn, error) { <-release; return nil, errors.New("closed") },
 		HostTimeout: 20 * time.Millisecond,
 	})
 	defer s.Close()
 	got := codexHookStatus(t, s, "build-box")
-	assert.Equal(t, CodexHook{Status: CodexHookUnknown, Error: "build-box is still connecting"}, got)
+	assert.Equal(t, hosttools.State{Status: hosttools.Unknown, Error: "build-box is still connecting"}, got)
 }
 
 func TestInstallCodexHookWithoutRandomness(t *testing.T) {
 	home := codexHome(t, "")
 	homedir.SetForTest(t, home)
-	s := New(Options{Hosts: func() []string { return nil }, Rand: iotest.ErrReader(errors.New("no entropy"))})
+	s := newTestService(testOptions{
+		Hosts: func() []string { return nil }, Rand: iotest.ErrReader(errors.New("no entropy")),
+	})
 	defer s.Close()
 	_, err := s.InstallCodexHook(context.Background(), "")
 	require.ErrorContains(t, err, "no entropy")
@@ -616,7 +621,7 @@ func TestCodexHookWriteError(t *testing.T) {
 
 func TestInstallCodexHookReportsAFailedRun(t *testing.T) {
 	calls := 0
-	s := New(Options{
+	s := newTestService(testOptions{
 		Hosts: func() []string { return nil },
 		RunLocal: func(context.Context, string) ([]byte, error) {
 			calls++
@@ -642,7 +647,7 @@ func TestInstallCodexHookKeepsTheNewContentWhenTheCopyFails(t *testing.T) {
 		"echo 'cat: write error: No space left on device' >&2; exit 1;;\nesac\nexec /bin/cat \"$@\"\n"
 	require.NoError(t, os.WriteFile(filepath.Join(bin, "cat"), []byte(fakeCat), 0o700)) //nolint:gosec // test fixture
 	conn := &shConn{home: home, prefix: "PATH='" + bin + "':$PATH\n"}
-	s := New(Options{
+	s := newTestService(testOptions{
 		Hosts: func() []string { return []string{"build-box"} },
 		Dial:  func(string) (Conn, error) { return conn, nil },
 	})
@@ -668,7 +673,7 @@ func TestInstallCodexHookRefusesAReadOnlyHooksJSON(t *testing.T) {
 	hooksJSON := filepath.Join(home, ".codex", "hooks.json")
 	require.NoError(t, os.Chmod(hooksJSON, 0o400))
 	homedir.SetForTest(t, home)
-	s := New(Options{Hosts: func() []string { return nil }})
+	s := newTestService(testOptions{Hosts: func() []string { return nil }})
 	defer s.Close()
 	_, err := s.InstallCodexHook(context.Background(), "")
 	require.Error(t, err)
@@ -680,4 +685,36 @@ func TestInstallCodexHookRefusesAReadOnlyHooksJSON(t *testing.T) {
 	left, dirErr := os.ReadDir(filepath.Join(home, ".codex"))
 	require.NoError(t, dirErr)
 	require.Len(t, left, 1, "no temporary file is left")
+}
+
+type executorFunc func(context.Context, host.Host, string, ...string) ([]byte, error)
+
+func (f executorFunc) Run(ctx context.Context, h host.Host, script string, args ...string) ([]byte, error) {
+	return f(ctx, h, script, args...)
+}
+
+func TestCodexHookExecutionErrorsKeepTheirMessages(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			"timeout", &hostexec.RunError{Err: context.DeadlineExceeded, TimedOut: true},
+			"codex hook check on build-box did not finish within 1s",
+		},
+		{"command", &hostexec.RunError{Err: errors.New("exit status 1")}, "run codex hook check on build-box: exit status 1"},
+		{"connection", errors.New("connection lost"), "connection lost"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			adapter := New(Options{HostTimeout: time.Second,
+				Execution: executorFunc(func(context.Context, host.Host, string, ...string) ([]byte, error) {
+					return nil, tc.err
+				}),
+			})
+			got := adapter.Check(context.Background(), "build-box")
+			require.Equal(t, hosttools.Unknown, got.Status)
+			require.Equal(t, tc.want, got.Error)
+		})
+	}
 }

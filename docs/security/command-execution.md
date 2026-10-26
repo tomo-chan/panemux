@@ -239,7 +239,7 @@ config, or a remote host into a command string:
   `cmd.Dir` after `sanitizeGitExecDir`, and `gh` receives the branch and repository as discrete
   argv elements. The `--json` field list is a constant (`prTaskFields`), not a value from anywhere.
 
-The codex permission hook (`internal/tasks/codex_permission_hook.sh`,
+The codex permission hook (`internal/codexhook/codex_permission_hook.sh`,
 [behavior](../behavior/tasks.md#codex-permission-requests)) is a constant script panemux embeds;
 panemux never runs it. It takes from codex's stdin only `session_id` and
 `turn_id`, and only when they are hex digits and dashes, so neither can name a path outside
@@ -250,10 +250,10 @@ answers allow or deny. The collection only prints the records with `cat` (codex'
 constant fragment of its collect adapter like the others), and the Go side accepts a row
 only when both IDs are UUIDs.
 
-**Installing the hook** (`internal/tasks/codex_hook.go`, issue #396). `GET` and
+**Installing the hook** (`internal/codexhook/codex_hook.go`, issue #396). `GET` and
 `POST /api/tasks/codex-hook` take only a host name, which must be the panemux host or an
-`ssh_connections` key (`checkHost`); the browser supplies no path, command or content. Both run
-through `runHostScript`, exactly as the collection does: locally `sh -s`, remotely the literal
+`ssh_connections` key (`hosttools.Service.checkHost`); the browser supplies no path, command or content. Both run
+through the adapter and the shared host execution port, as the collection does: locally `sh -s`, remotely the literal
 `sh -s`, the script on stdin.
 
 - **The check** is the constant `codexHookReadScript`. It tests for `~/.codex` and `codex` on the
@@ -269,7 +269,7 @@ through `runHostScript`, exactly as the collection does: locally `sh -s`, remote
   host user's own value in the host user's own file, which codex runs as that user.
 - **A `hooks.json` panemux cannot read** as codex does is never written, and the hook is not written
   either. panemux never edits codex's trust of the hook; the person reviews it in `/hooks`.
-- **Updating by itself** (`codex_hook_auto.go`, issue #402) runs the same check and install, with
+- **Updating by itself** (`internal/hosttools/codex_hook_auto.go`, issue #402) runs the same check and install, with
   nothing from the browser but the host name: `POST /api/tasks/codex-hook/auto-update` only stores
   that host name in `~/.config/panemux/codex-hook.json` through `fileops.AtomicWrite`. The install
   then runs, at most once per host per process, only for a host listed there whose hook the check

@@ -1,30 +1,26 @@
 import React, { useEffect, useRef, useState } from 'react'
-import type { CodexHook, CodexHookAuto } from '../schemas'
+import type { CodexHook as HostToolState, CodexHookAuto as HostToolAuto } from '../schemas'
 import type { TaskActionResult } from '../hooks/useTasks'
 
-// The Codex input notifications item of a host's menu (issue #396): whether
-// the host's codex has panemux's permission hook, and Install or Update. A
-// host without codex shows nothing; one that could not be checked says so
-// rather than being taken for a host without codex. Update automatically
-// (issue #402) has panemux run Update by itself when the hook differs.
+export interface HostToolItemProps {
+  tool: ToolDefinition
 
-export interface CodexHookItemProps {
   host: string
   /** The host's name as the menu shows it. */
   label?: string
-  load: (host: string) => Promise<TaskActionResult<CodexHook>>
-  install: (host: string) => Promise<TaskActionResult<CodexHook>>
-  setAuto: (host: string, enabled: boolean) => Promise<TaskActionResult<CodexHookAuto>>
-  /** The item is all the menu has: a host without codex says so. */
+  load: (host: string) => Promise<TaskActionResult<HostToolState>>
+  install: (host: string) => Promise<TaskActionResult<HostToolState>>
+  setAuto: (host: string, enabled: boolean) => Promise<TaskActionResult<HostToolAuto>>
+  /** The item is all the menu has: a host without the tool says so. */
   alone?: boolean
 }
 
 type Phase =
   | { phase: 'loading' }
-  | { phase: 'ready'; hook: CodexHook }
+  | { phase: 'ready'; hook: HostToolState }
   | { phase: 'failed'; error: string }
 
-export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host, load, install, setAuto, alone = false }) => {
+export const HostToolItem: React.FC<HostToolItemProps> = ({ tool, host, label = host, load, install, setAuto, alone = false }) => {
   const [state, setState] = useState<Phase>({ phase: 'loading' })
   const [installing, setInstalling] = useState(false)
   const [installed, setInstalled] = useState(false)
@@ -60,7 +56,7 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
     })
   }
 
-  const toggleAuto = (hook: CodexHook) => {
+  const toggleAuto = (hook: HostToolState) => {
     setSaving(true)
     setSaveError(null)
     void setAuto(host, !hook.auto_update).then(async (result) => {
@@ -93,14 +89,14 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
   } else {
     switch (state.hook.status) {
       case 'absent':
-        detail = <span className="td-muted">No Codex found on {label}</span>
+        detail = <span className="td-muted">{tool.absent(label)}</span>
         break
       case 'missing':
         detail = <span className="td-muted">Not installed</span>
         action = 'Install'
         break
       case 'outdated':
-        detail = <span className="td-muted">Differs from this panemux's hook</span>
+        detail = <span className="td-muted">{tool.outdated}</span>
         action = 'Update'
         break
       case 'installed':
@@ -119,14 +115,14 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
   }
 
   return (
-    <fieldset className="td-host-menu-codex" aria-label="Codex input notifications">
+    <fieldset className="td-host-menu-codex" aria-label={tool.title}>
       <div className="td-host-menu-codex-row">
-        <span>Codex input notifications</span>
+        <span>{tool.title}</span>
         {action && (
           <button
             type="button"
             className="td-btn td-btn-sm"
-            aria-label={`${action} Codex input notifications on ${label}`}
+            aria-label={`${action} ${tool.title} on ${label}`}
             disabled={installing || saving}
             onClick={run}
           >
@@ -148,7 +144,7 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
       )}
       {hook?.auto_updated && !installed && (
         <div role="status" className="td-muted">
-          Updated automatically. Trust it in codex's /hooks before it runs.
+          {tool.autoUpdatedNotice}
         </div>
       )}
       {hook?.auto_error && (
@@ -168,7 +164,7 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
       )}
       {installed && (
         <div role="status" className="td-muted">
-          Trust it in codex's /hooks before it runs.
+          {tool.installedNotice}
         </div>
       )}
       {installError && (
@@ -178,4 +174,14 @@ export const CodexHookItem: React.FC<CodexHookItemProps> = ({ host, label = host
       )}
     </fieldset>
   )
+}
+
+// Tool-specific copy is supplied by the adapter, while menu behavior is shared.
+export interface ToolDefinition {
+  id: string
+  title: string
+  absent: (label: string) => string
+  outdated: string
+  installedNotice: string
+  autoUpdatedNotice: string
 }

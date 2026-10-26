@@ -419,7 +419,7 @@ does write:
 
 ### Codex permission requests
 
-A codex `PermissionRequest` command hook (`internal/tasks/codex_permission_hook.sh`, a POSIX `sh`
+A codex `PermissionRequest` command hook (`internal/codexhook/codex_permission_hook.sh`, a POSIX `sh`
 script) records each approval request, so the session shows as `wait` and the
 [input-wait notification](task-events.md) fires. It is installed on each host whose codex should be
 watched from the host's menu ([Opening a host](#opening-a-host)), and then trusted in codex's `/hooks`
@@ -477,7 +477,7 @@ review there.
   trusting again), or `Could not update automatically:` and the reason, which is not tried again until
   panemux restarts. `Update` can still be pressed; once it succeeds, the message is cleared. Both
   outcomes are also written to the server log.
-- **By hand.** Copy `internal/tasks/codex_permission_hook.sh` to a path of the user's on the host,
+- **By hand.** Copy `internal/codexhook/codex_permission_hook.sh` to a path of the user's on the host,
   make it executable, add an entry like the one above with that path to the host's
   `~/.codex/hooks.json`, and trust it in `/hooks`. The menu knows only its own path: a hook
   installed at another path shows `Not installed`, and `Install` adds panemux's entry beside it, so
@@ -508,6 +508,10 @@ review there.
   that needed no person can show as a wait until its turn ends or `Input given` is pressed. Codex
   records nothing when the person answers in the pane, so the wait stays until one of those.
   Without the hook nothing changes.
+
+Tool management lives in `internal/hosttools`; `internal/codexhook` implements its tool port over
+the shared host execution port. The task collector only notifies management after a successful
+collection. The existing `/api/tasks/codex-hook` routes and JSON remain the host menu contract.
 
 ### Where a task runs
 

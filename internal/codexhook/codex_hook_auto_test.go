@@ -1,4 +1,4 @@
-package tasks
+package codexhook
 
 import (
 	"context"
@@ -12,11 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/homedir"
+	"panemux/internal/host"
+	"panemux/internal/hosttools"
 )
 
 func TestCodexHookAutoStoreKeepsTheHostsAcrossRestarts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "panemux", "codex-hook.json")
-	store := NewCodexHookAutoStore(path)
+	store := hosttools.NewCodexHookAutoStore(path)
 	on, err := store.Enabled("")
 	require.NoError(t, err)
 	assert.False(t, on, "off without a file")
@@ -27,7 +29,7 @@ func TestCodexHookAutoStoreKeepsTheHostsAcrossRestarts(t *testing.T) {
 	require.NoError(t, store.Set("other", true))
 	require.NoError(t, store.Set("other", false))
 
-	restarted := NewCodexHookAutoStore(path)
+	restarted := hosttools.NewCodexHookAutoStore(path)
 	for host, want := range map[string]bool{"": true, "build-box": true, "other": false, "never": false} {
 		got, readErr := restarted.Enabled(host)
 		require.NoError(t, readErr)
@@ -50,12 +52,12 @@ func TestCodexHookAutoStoreKeepsTheHostsAcrossRestarts(t *testing.T) {
 func TestCodexHookAutoStoreDefaultPath(t *testing.T) {
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
-	require.NoError(t, NewCodexHookAutoStore("").Set("", true))
+	require.NoError(t, hosttools.NewCodexHookAutoStore("").Set("", true))
 	_, err := os.Stat(filepath.Join(home, ".config", "panemux", "codex-hook.json"))
 	require.NoError(t, err)
 
 	homedir.SetFailingForTest(t, os.ErrNotExist)
-	_, err = NewCodexHookAutoStore("").Enabled("")
+	_, err = hosttools.NewCodexHookAutoStore("").Enabled("")
 	require.Error(t, err)
 }
 
@@ -67,7 +69,7 @@ func TestCodexHookAutoStoreLeavesAFileItCannotReadAlone(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "codex-hook.json")
 			require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
-			store := NewCodexHookAutoStore(path)
+			store := hosttools.NewCodexHookAutoStore(path)
 			_, err := store.Enabled("")
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "codex hook settings file")
@@ -115,26 +117,30 @@ func (c *countingRunLocal) count() int {
 	return c.writes
 }
 
-func autoService(t *testing.T, store *CodexHookAutoStore, run func(context.Context, string) ([]byte, error)) *Service {
+func autoService(
+	t *testing.T, store *hosttools.CodexHookAutoStore, run func(context.Context, string) ([]byte, error),
+) *testService {
 	t.Helper()
-	s := New(Options{Hosts: func() []string { return nil }, RunLocal: run, CodexHookAuto: store, Logf: t.Logf})
+	s := newTestService(testOptions{
+		Hosts: func() []string { return nil }, RunLocal: run, CodexHookAuto: store, Logf: t.Logf,
+	})
 	t.Cleanup(s.Close)
 	return s
 }
 
 func TestCodexHookUpdatesByItselfOnlyWhenTurnedOn(t *testing.T) {
 	_, hookPath := outdatedCodexHome(t)
-	store := NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
+	store := hosttools.NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
 	runs := &countingRunLocal{}
 	s := autoService(t, store, runs.run)
 
 	got := codexHookStatus(t, s, "")
-	assert.Equal(t, CodexHook{Status: CodexHookOutdated}, got, "off by default")
+	assert.Equal(t, hosttools.State{Status: hosttools.Outdated}, got, "off by default")
 	assert.Zero(t, runs.count())
 
 	require.NoError(t, s.SetCodexHookAuto("", true))
 	got = codexHookStatus(t, s, "")
-	assert.Equal(t, CodexHook{Status: CodexHookInstalled, AutoUpdate: true, AutoUpdated: true}, got)
+	assert.Equal(t, hosttools.State{Status: hosttools.Installed, AutoUpdate: true, AutoUpdated: true}, got)
 	data, err := os.ReadFile(hookPath)
 	require.NoError(t, err)
 	assert.Equal(t, codexPermissionHook, string(data))
@@ -142,19 +148,19 @@ func TestCodexHookUpdatesByItselfOnlyWhenTurnedOn(t *testing.T) {
 	// A manual Update afterwards forgets what was done by itself.
 	got, err = s.InstallCodexHook(context.Background(), "")
 	require.NoError(t, err)
-	assert.Equal(t, CodexHook{Status: CodexHookInstalled, AutoUpdate: true}, got)
+	assert.Equal(t, hosttools.State{Status: hosttools.Installed, AutoUpdate: true}, got)
 	assert.Equal(t, 1, runs.count())
 }
 
 func TestCodexHookDoesNotInstallByItself(t *testing.T) {
 	home := codexHome(t, "")
 	homedir.SetForTest(t, home)
-	store := NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
+	store := hosttools.NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
 	require.NoError(t, store.Set("", true))
 	runs := &countingRunLocal{}
 	s := autoService(t, store, runs.run)
 
-	assert.Equal(t, CodexHook{Status: CodexHookMissing, AutoUpdate: true}, codexHookStatus(t, s, ""))
+	assert.Equal(t, hosttools.State{Status: hosttools.Missing, AutoUpdate: true}, codexHookStatus(t, s, ""))
 	assert.Zero(t, runs.count(), "a host without the hook is never installed to")
 }
 
@@ -164,13 +170,13 @@ func TestCodexHookUpdateByItselfThatFailsIsNotRepeated(t *testing.T) {
 	// write fails.
 	require.NoError(t, os.Remove(hookPath))
 	require.NoError(t, os.Mkdir(hookPath, 0o700))
-	store := NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
+	store := hosttools.NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
 	require.NoError(t, store.Set("", true))
 	runs := &countingRunLocal{}
 	s := autoService(t, store, runs.run)
 
 	got := codexHookStatus(t, s, "")
-	assert.Equal(t, CodexHookOutdated, got.Status)
+	assert.Equal(t, hosttools.Outdated, got.Status)
 	assert.True(t, got.AutoUpdate)
 	assert.False(t, got.AutoUpdated)
 	assert.Contains(t, got.AutoError, "install the codex hook")
@@ -187,20 +193,15 @@ func TestCodexHookUpdateByItselfThatFailsIsNotRepeated(t *testing.T) {
 
 func TestCodexHookUpdatesByItselfAfterTheFirstCollection(t *testing.T) {
 	_, hookPath := outdatedCodexHome(t)
-	store := NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
+	store := hosttools.NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
 	require.NoError(t, store.Set("", true))
 	runs := &countingRunLocal{}
-	collections := 0
 	s := autoService(t, store, func(ctx context.Context, script string) ([]byte, error) {
-		if script == collectScript || script == attentionScript {
-			collections++
-			return attentionOutput(), nil
-		}
 		return runs.run(ctx, script)
 	})
 
-	s.Collect(context.Background())
-	s.waitSummaries()
+	s.manager.AfterCollection(host.Local)
+	s.manager.Wait()
 	data, err := os.ReadFile(hookPath)
 	require.NoError(t, err)
 	assert.Equal(t, codexPermissionHook, string(data), "updated without the menu")
@@ -208,22 +209,18 @@ func TestCodexHookUpdatesByItselfAfterTheFirstCollection(t *testing.T) {
 
 	// Later collections check nothing more.
 	require.NoError(t, os.WriteFile(hookPath, []byte("#!/bin/sh\n"), 0o600))
-	s.CollectAttention(context.Background())
-	s.waitSummaries()
-	assert.Equal(t, 2, collections)
+	s.manager.AfterCollection(host.Local)
+	s.manager.Wait()
 	assert.Equal(t, 1, runs.count())
 }
 
 func TestCodexHookChecksOnceAfterStart(t *testing.T) {
 	homedir.SetForTest(t, codexHome(t, ""))
-	store := NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
+	store := hosttools.NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
 	require.NoError(t, store.Set("", true))
 	var mu sync.Mutex
 	checks := 0
 	s := autoService(t, store, func(ctx context.Context, script string) ([]byte, error) {
-		if script == collectScript || script == attentionScript {
-			return attentionOutput(), nil
-		}
 		if script == codexHookReadScript {
 			mu.Lock()
 			checks++
@@ -232,12 +229,12 @@ func TestCodexHookChecksOnceAfterStart(t *testing.T) {
 		return runLocal(ctx, script)
 	})
 
-	s.Collect(context.Background())
-	s.waitSummaries()
-	s.CollectAttention(context.Background())
-	s.waitSummaries()
-	s.Collect(context.Background())
-	s.waitSummaries()
+	s.manager.AfterCollection(host.Local)
+	s.manager.Wait()
+	s.manager.AfterCollection(host.Local)
+	s.manager.Wait()
+	s.manager.AfterCollection(host.Local)
+	s.manager.Wait()
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Equal(t, 1, checks, "only the first collection is followed by a check")
@@ -245,30 +242,30 @@ func TestCodexHookChecksOnceAfterStart(t *testing.T) {
 
 func TestCodexHookChecksNothingAfterACollectionWhenTurnedOff(t *testing.T) {
 	outdatedCodexHome(t)
-	store := NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
+	store := hosttools.NewCodexHookAutoStore(filepath.Join(t.TempDir(), "codex-hook.json"))
 	var scripts []string
 	s := autoService(t, store, func(_ context.Context, script string) ([]byte, error) {
 		scripts = append(scripts, script)
-		return attentionOutput(), nil
+		return nil, nil
 	})
-	collectAndProbe(s)
-	s.waitSummaries()
-	assert.Equal(t, []string{collectScript, probeScript}, scripts, "the collection and the agent probe, no hook check")
+	s.manager.AfterCollection(host.Local)
+	s.manager.Wait()
+	assert.Empty(t, scripts, "no hook check after a collection when turned off")
 }
 
 func TestCodexHookAutoSettingErrors(t *testing.T) {
-	s := New(Options{Hosts: func() []string { return nil }})
+	s := newTestService(testOptions{Hosts: func() []string { return nil }})
 	defer s.Close()
-	require.ErrorIs(t, s.SetCodexHookAuto("nope", true), ErrUnknownHost)
+	require.ErrorIs(t, s.SetCodexHookAuto("nope", true), hosttools.ErrUnknownHost)
 	require.Error(t, s.SetCodexHookAuto("", true), "no store, nothing kept")
 
 	path := filepath.Join(t.TempDir(), "codex-hook.json")
 	require.NoError(t, os.WriteFile(path, []byte("{"), 0o600))
 	home := codexHome(t, "")
 	homedir.SetForTest(t, home)
-	bad := autoService(t, NewCodexHookAutoStore(path), runLocal)
+	bad := autoService(t, hosttools.NewCodexHookAutoStore(path), runLocal)
 	got := codexHookStatus(t, bad, "")
-	assert.Equal(t, CodexHookMissing, got.Status)
+	assert.Equal(t, hosttools.Missing, got.Status)
 	assert.False(t, got.AutoUpdate)
 	assert.Empty(t, got.AutoError, "no update was tried")
 	assert.Contains(t, got.AutoSettingsError, "codex hook settings file", "a settings file that cannot be read says so")
@@ -276,7 +273,7 @@ func TestCodexHookAutoSettingErrors(t *testing.T) {
 
 func TestCodexHookAutoStoreReportsAFileItCannotOpen(t *testing.T) {
 	path := t.TempDir() // a directory where the file should be
-	_, err := NewCodexHookAutoStore(path).Enabled("")
+	_, err := hosttools.NewCodexHookAutoStore(path).Enabled("")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reading codex hook settings file")
 }

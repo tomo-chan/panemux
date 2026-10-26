@@ -1,14 +1,22 @@
-package tasks
+// Package codexhook adapts Codex permission hook checks and installation to host tools.
+package codexhook
 
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	_ "embed" // codexPermissionHook
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"panemux/internal/host"
+	"panemux/internal/hostexec"
+	"panemux/internal/hosttools"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The codex permission hook a host's menu installs (issue #396): the script
@@ -22,34 +30,6 @@ var codexPermissionHook string
 
 // codexHookFile is where the hook is installed, under the host's HOME.
 const codexHookFile = ".local/bin/panemux-codex-permission-hook.sh"
-
-// CodexHookStatus is whether a host's codex has panemux's permission hook.
-type CodexHookStatus string
-
-// Codex hook statuses. Absent is a host without codex, where there is
-// nothing to install; Unknown is a host that could not be checked, which is
-// never taken to mean absent.
-const (
-	CodexHookAbsent    CodexHookStatus = "absent"
-	CodexHookMissing   CodexHookStatus = "missing"
-	CodexHookInstalled CodexHookStatus = "installed"
-	CodexHookOutdated  CodexHookStatus = "outdated"
-	CodexHookInvalid   CodexHookStatus = "invalid"
-	CodexHookUnknown   CodexHookStatus = "unknown"
-)
-
-// CodexHook is a host's codex hook status, and why for Invalid and Unknown.
-// AutoUpdate is whether the host's hook is updated by itself (issue #402);
-// AutoUpdated that this process did so, AutoError why that failed, and
-// AutoSettingsError why the setting could not be read.
-type CodexHook struct {
-	Status            CodexHookStatus `json:"status"`
-	Error             string          `json:"error,omitempty"`
-	AutoError         string          `json:"auto_error,omitempty"`
-	AutoSettingsError string          `json:"auto_settings_error,omitempty"`
-	AutoUpdate        bool            `json:"auto_update"`
-	AutoUpdated       bool            `json:"auto_updated,omitempty"`
-}
 
 // codexHookReadScript prints the host's HOME, the hook file and hooks.json,
 // each as `::file <bytes> <x or ->` and its content, `::large <bytes>` for one
@@ -127,60 +107,41 @@ const codexHookStatusLine = "::status "
 type codexHookState struct {
 	// err says why for Invalid and Unknown.
 	err    error
-	status CodexHookStatus
+	status hosttools.Status
 	// merged is hooks.json with the hook registered; registered is whether
 	// it already was.
 	merged     []byte
 	registered bool
 }
 
-// CodexHook reports whether the host's codex has the permission hook,
-// updating it first when it is to be updated by itself. The only error is
-// ErrUnknownHost; a host that cannot be checked is Unknown.
-func (s *Service) CodexHook(ctx context.Context, host string) (CodexHook, error) {
-	if err := s.checkHost(host); err != nil {
-		return CodexHook{}, err
-	}
-	return s.autoUpdateCodexHook(ctx, host, s.checkCodexHook(ctx, host)), nil
+func (s *Adapter) Check(ctx context.Context, target host.Host) hosttools.State {
+	name := string(target)
+	return s.checkCodexHook(ctx, name)
 }
 
-func (s *Service) checkCodexHook(ctx context.Context, host string) CodexHook {
+func (s *Adapter) checkCodexHook(ctx context.Context, host string) hosttools.State {
 	state := s.readCodexHook(ctx, host)
-	got := CodexHook{Status: state.status}
+	got := hosttools.State{Status: state.status}
 	if state.err != nil {
 		got.Error = state.err.Error()
 	}
 	return got
 }
 
-// InstallCodexHook installs or updates the host's permission hook and
-// returns the status read back afterwards. A host without codex, or whose
-// hooks.json cannot be read as expected, is left untouched.
-func (s *Service) InstallCodexHook(ctx context.Context, host string) (CodexHook, error) {
-	if err := s.checkHost(host); err != nil {
-		return CodexHook{}, err
-	}
-	got, err := s.installCodexHook(ctx, host)
-	if err != nil {
-		return CodexHook{}, err
-	}
-	s.forgetCodexHookAuto(host)
-	return s.withCodexHookAuto(host, got), nil
-}
-
-func (s *Service) installCodexHook(ctx context.Context, host string) (CodexHook, error) {
+func (s *Adapter) Install(ctx context.Context, target host.Host) (hosttools.State, error) {
+	host := string(target)
 	state := s.readCodexHook(ctx, host)
 	switch {
 	case state.err != nil:
-		return CodexHook{}, state.err
-	case state.status == CodexHookAbsent:
-		return CodexHook{}, fmt.Errorf("no codex on %s", hostName(host))
-	case state.status == CodexHookInstalled:
-		return CodexHook{Status: CodexHookInstalled}, nil
+		return hosttools.State{}, state.err
+	case state.status == hosttools.Absent:
+		return hosttools.State{}, fmt.Errorf("no codex on %s", hostName(host))
+	case state.status == hosttools.Installed:
+		return hosttools.State{Status: hosttools.Installed}, nil
 	}
 	tag, err := newHeredocTag(s.opts.Rand)
 	if err != nil {
-		return CodexHook{}, err
+		return hosttools.State{}, err
 	}
 	// A registered hook leaves hooks.json alone, so the host's own file
 	// never goes into a heredoc: what does is registerCodexHook's indented
@@ -194,10 +155,10 @@ func (s *Service) installCodexHook(ctx context.Context, host string) (CodexHook,
 	defer cancel()
 	out, err := s.runHostScript(runCtx, host, script, "codex hook install")
 	if err != nil {
-		return CodexHook{}, err
+		return hosttools.State{}, err
 	}
 	if err := codexHookWriteError(out); err != nil {
-		return CodexHook{}, fmt.Errorf("install the codex hook on %s: %w", hostName(host), err)
+		return hosttools.State{}, fmt.Errorf("install the codex hook on %s: %w", hostName(host), err)
 	}
 	return s.checkCodexHook(ctx, host), nil
 }
@@ -220,39 +181,39 @@ func codexHookWriteError(out []byte) error {
 	return fmt.Errorf("exit status %s", status)
 }
 
-func (s *Service) readCodexHook(ctx context.Context, host string) codexHookState {
+func (s *Adapter) readCodexHook(ctx context.Context, host string) codexHookState {
 	ctx, cancel := context.WithTimeout(ctx, s.opts.HostTimeout)
 	defer cancel()
 	out, err := s.runHostScript(ctx, host, codexHookReadScript, "codex hook check")
-	if errors.Is(err, errConnecting) {
+	if errors.Is(err, hostexec.ErrConnecting) {
 		err = fmt.Errorf("%s is still connecting", hostName(host))
 	}
 	if err != nil {
-		return codexHookState{status: CodexHookUnknown, err: err}
+		return codexHookState{status: hosttools.Unknown, err: err}
 	}
 	home, files, err := parseCodexHookOutput(out)
 	if err != nil {
-		return codexHookState{status: CodexHookUnknown, err: err}
+		return codexHookState{status: hosttools.Unknown, err: err}
 	}
 	if files == nil {
-		return codexHookState{status: CodexHookAbsent}
+		return codexHookState{status: hosttools.Absent}
 	}
 	hook, hooksJSON := files[0], files[1]
 	if hooksJSON.large {
-		return codexHookState{status: CodexHookInvalid, err: errors.New("~/.codex/hooks.json is larger than 1 MiB")}
+		return codexHookState{status: hosttools.Invalid, err: errors.New("~/.codex/hooks.json is larger than 1 MiB")}
 	}
 	merged, registered, err := registerCodexHook(hooksJSON.data, home+"/"+codexHookFile)
 	if err != nil {
-		return codexHookState{status: CodexHookInvalid, err: fmt.Errorf("~/.codex/hooks.json %w", err)}
+		return codexHookState{status: hosttools.Invalid, err: fmt.Errorf("~/.codex/hooks.json %w", err)}
 	}
 	state := codexHookState{merged: merged, registered: registered}
 	switch {
 	case hook.data == nil && !hook.large && !registered:
-		state.status = CodexHookMissing
+		state.status = hosttools.Missing
 	case string(hook.data) == codexPermissionHook && hook.executable && registered:
-		state.status = CodexHookInstalled
+		state.status = hosttools.Installed
 	default:
-		state.status = CodexHookOutdated
+		state.status = hosttools.Outdated
 	}
 	return state
 }
@@ -395,4 +356,53 @@ func codexHookRegistered(groups []json.RawMessage, command string) bool {
 		}
 	}
 	return false
+}
+
+// Options injects execution, randomness and the existing per-operation timeout.
+type Options struct {
+	Execution   host.Executor
+	Rand        io.Reader
+	HostTimeout time.Duration
+}
+
+type Adapter struct{ opts Options }
+
+var _ hosttools.Tool = (*Adapter)(nil)
+
+func New(opts Options) *Adapter {
+	if opts.Rand == nil {
+		opts.Rand = rand.Reader
+	}
+	if opts.HostTimeout <= 0 {
+		opts.HostTimeout = 15 * time.Second
+	}
+	return &Adapter{opts: opts}
+}
+func hostName(name string) string {
+	if name == "" {
+		return "the panemux host"
+	}
+	return name
+}
+func newHeredocTag(r io.Reader) (string, error) {
+	var b [16]byte
+	if _, err := io.ReadFull(r, b[:]); err != nil {
+		return "", fmt.Errorf("generate heredoc tag: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+func (s *Adapter) runHostScript(ctx context.Context, name, script, what string) ([]byte, error) {
+	out, err := s.opts.Execution.Run(ctx, host.Host(name), script)
+	if err != nil {
+		var runErr *hostexec.RunError
+		if errors.As(err, &runErr) {
+			if runErr.TimedOut {
+				return nil, fmt.Errorf("%s on %s did not finish within %s", what, name, s.opts.HostTimeout)
+			}
+			return nil, fmt.Errorf("run %s on %s: %w", what, name, err)
+		}
+		return nil, err //nolint:wrapcheck // preserve connection setup errors
+	}
+	return out, nil
 }
