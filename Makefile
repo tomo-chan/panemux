@@ -62,8 +62,8 @@ test-go:
 # run untagged above. Each FIXTURE_AGENT_REQUIRED test (<package>:<test>) must
 # be among those the pattern selects, so a renamed contract test fails the run
 # rather than dropping out of it, and so does a package none of it matches.
-# It depends on build-frontend as coverage-go does: the root package is among
-# FIXTURE_AGENT_PKGS, and its //go:embed needs frontend/dist.
+# The frontend build stays a prerequisite, matching the complete Go gate
+# and ensuring embedded frontend assets are available to fixture setup.
 FIXTURE_AGENT_TAG := panemux_fixture_agent
 FIXTURE_AGENT_PKGS := ./internal/agmsg ./internal/agent ./internal/session ./internal/tasks ./internal/api ./internal/server
 FIXTURE_AGENT_RUN := ^Test(FixtureAgent|[A-Za-z]+_MatchTheRegistry$$|SummaryAdapters_Contract$$|CollectPrefilter_CoversEveryTaskRule$$|RegisteredDefinitionsAreValid$$|WorkdirAdaptersMatchDeclarations$$|APIContractFixtures_FixtureAgent$$)

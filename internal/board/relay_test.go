@@ -734,6 +734,9 @@ func TestPollLogsOnlyWhenFailureStateChanges(t *testing.T) {
 
 // fakeRowsAfter models the port cursor contract for relay tests.
 func fakeRowsAfter(rows []Row, after string) []Row {
+	if after == "" {
+		return rows
+	}
 	for i := len(rows) - 1; i >= 0; i-- {
 		if rows[i].ID == after {
 			return rows[i+1:]
