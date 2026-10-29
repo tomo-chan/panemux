@@ -70,6 +70,7 @@ export default defineConfig({
     },
     {
       command: 'sh ./e2e/run-panemux-e2e.sh agent-board.yml 4174',
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
       url: AGENT_BOARD_BASE_URL,
       cwd: '.',
       reuseExistingServer: !process.env.CI,
@@ -77,6 +78,7 @@ export default defineConfig({
     },
     {
       command: 'sh ./e2e/run-panemux-agent-board-e2e.sh',
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
       url: AGENT_BOARD_AGMSG_BASE_URL,
       cwd: '.',
       reuseExistingServer: !process.env.CI,
@@ -84,6 +86,7 @@ export default defineConfig({
     },
     {
       command: 'sh ./e2e/run-panemux-command-center-e2e.sh',
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
       url: COMMAND_CENTER_BASE_URL,
       cwd: '.',
       reuseExistingServer: !process.env.CI,

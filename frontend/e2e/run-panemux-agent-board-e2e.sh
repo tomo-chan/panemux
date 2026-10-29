@@ -17,7 +17,15 @@ E2E_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 E2E_HOME=$(mktemp -d "${TMPDIR:-/tmp}/panemux-e2e-agmsg-home.XXXXXX") || exit 1
 export E2E_HOME
-trap 'find "$E2E_HOME" -depth -delete' EXIT
+E2E_SERVER_PID=""
+e2e_cleanup() {
+    if [ -n "$E2E_SERVER_PID" ]; then
+        kill -TERM "$E2E_SERVER_PID" 2>/dev/null || true
+        wait "$E2E_SERVER_PID" 2>/dev/null || true
+    fi
+    find "$E2E_HOME" -depth -delete
+}
+trap e2e_cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 E2E_AGMSG_DIR="$E2E_HOME/.agents/skills/agmsg"
@@ -39,4 +47,9 @@ E2E_STATUS_BODY='{"kind":"board_status","state":"working","cwd":"/workspace/user
 "$E2E_AGMSG_DIR/scripts/send.sh" "$E2E_TEAM" board-main board-worker \
     'Handing the dashboard panel over for review.' --force
 
-sh "$E2E_DIR/run-panemux-e2e.sh" agent-board-agmsg.yml 4175
+sh "$E2E_DIR/run-panemux-e2e.sh" agent-board-agmsg.yml 4175 &
+E2E_SERVER_PID=$!
+status=0
+wait "$E2E_SERVER_PID" || status=$?
+E2E_SERVER_PID=""
+exit "$status"

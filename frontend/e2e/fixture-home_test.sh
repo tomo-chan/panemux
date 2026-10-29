@@ -14,11 +14,16 @@ cat > "$work/bin/go" <<'SH'
 case "$1:${2:-}" in
  env:GOPATH) printf /tmp/fixture-gopath ;;
  env:GOMODCACHE) printf /tmp/fixture-modcache ;;
- *) printf '%s\n%s\n' "$HOME" "$GOCACHE" > "$FIXTURE_RECORD"; exit "$FIXTURE_EXIT" ;;
+ *) printf '%s\n%s\n' "$HOME" "$GOCACHE" > "$FIXTURE_RECORD"
+    if [ "$FIXTURE_EXIT" = hold ]; then
+      trap 'exit 0' TERM INT
+      while :; do sleep 1; done
+    fi
+    exit "$FIXTURE_EXIT" ;;
 esac
 SH
 chmod +x "$work/bin/go" "$work/bin/make"
-for config in agent-board.yml agent-board-agmsg.yml; do
+for config in agent-board.yml agent-board-agmsg.yml command-center.yml; do
  printf 'fixture\n' > "$work/repo/frontend/e2e/$config"
 done
 for wrapper in run-panemux-e2e.sh run-panemux-agent-board-e2e.sh; do
@@ -34,3 +39,13 @@ for wrapper in run-panemux-e2e.sh run-panemux-agent-board-e2e.sh; do
  done
 done
 echo 'fixture-home: success/failure cleanup and shared GOCACHE pass'
+
+if command -v python3 >/dev/null 2>&1; then
+    (cd "$here/../.." && scripts/runtime-shell.sh --run node --experimental-strip-types --input-type=module -e '
+import config from "./frontend/playwright.config.ts";
+process.stdout.write(JSON.stringify(config.webServer));
+') > "$work/servers.json"
+    python3 "$here/fixture-home-shutdown_test.py" "$work"
+else
+    echo 'skip fixture process-group shutdown checks: python3 unavailable'
+fi

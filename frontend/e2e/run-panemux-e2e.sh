@@ -51,18 +51,30 @@ rmdir "$E2E_BUILD_LOCK"
 trap - EXIT INT TERM
 
 E2E_OWNED_HOME=""
+E2E_SERVER_PID=""
+E2E_BOARD_FIXTURE=""
+e2e_cleanup() {
+    if [ -n "$E2E_SERVER_PID" ]; then
+        kill -TERM "$E2E_SERVER_PID" 2>/dev/null || true
+        wait "$E2E_SERVER_PID" 2>/dev/null || true
+    fi
+    if [ -n "$E2E_OWNED_HOME" ]; then
+        find "$E2E_OWNED_HOME" -depth -delete
+    fi
+}
 
 # Board fixtures must not discover the developer's real agmsg installation.
 case "$E2E_CONFIG_NAME" in
     agent-board*.yml|command-center.yml)
+        E2E_BOARD_FIXTURE=1
+        trap e2e_cleanup EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
         export GOPATH="$(go env GOPATH)"
         export GOMODCACHE="$(go env GOMODCACHE)"
         if [ -z "${E2E_HOME:-}" ]; then
             E2E_HOME=$(mktemp -d "${TMPDIR:-/tmp}/panemux-e2e-home.XXXXXX") || exit 1
             E2E_OWNED_HOME="$E2E_HOME"
-            trap 'find "$E2E_OWNED_HOME" -depth -delete' EXIT
-            trap 'exit 130' INT
-            trap 'exit 143' TERM
         fi
         export HOME="$E2E_HOME"
         unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
@@ -72,8 +84,12 @@ esac
 . frontend/e2e/stand-ins.sh
 e2e_stand_ins_first "${E2E_STAND_INS:-}" || exit 1
 # Keep the owning shell alive so EXIT cleans its HOME after the child exits.
-if [ -n "$E2E_OWNED_HOME" ]; then
-    go run ${E2E_TAGS:+-tags "$E2E_TAGS"} . --config "$E2E_CONFIG_PATH" --port "$E2E_PORT"
-    exit $?
+if [ -n "$E2E_BOARD_FIXTURE" ]; then
+    go run ${E2E_TAGS:+-tags "$E2E_TAGS"} . --config "$E2E_CONFIG_PATH" --port "$E2E_PORT" &
+    E2E_SERVER_PID=$!
+    status=0
+    wait "$E2E_SERVER_PID" || status=$?
+    E2E_SERVER_PID=""
+    exit "$status"
 fi
 exec go run ${E2E_TAGS:+-tags "$E2E_TAGS"} . --config "$E2E_CONFIG_PATH" --port "$E2E_PORT"

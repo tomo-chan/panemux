@@ -400,3 +400,29 @@ func TestBootstrapForgetsInstructionWhenPaneChangesHost(t *testing.T) {
 		})
 	}
 }
+
+func TestBootstrapSkipsHostRemovedBetweenParticipationSnapshots(t *testing.T) {
+	isolatedHome(t)
+	pane := paneConfig("agent")
+	pane.Type, pane.Connection = "ssh", "removed"
+	cfg := boardEnabledConfig(pane)
+	cfg.SSHConnections = map[string]config.SSHConnection{"removed": {}}
+	manager := session.NewManager()
+	sess := &fakeAgentSession{id: "agent", detectType: "codex", detectOK: true}
+	manager.Add(sess)
+	pool := hostexec.New(hostexec.Options{})
+	defer pool.Close()
+	snapshots := 0
+	read := func(visit func(*config.Config)) {
+		snapshots++
+		if snapshots == 2 {
+			delete(cfg.SSHConnections, "removed")
+		}
+		visit(cfg)
+	}
+	cache, _, watcher := setupBoard(cfg, manager, pool, read)
+	watcher.pollOnce(context.Background())
+	require.Equal(t, 2, snapshots)
+	require.Empty(t, sess.writes)
+	require.False(t, cache.ParticipationSnapshot()["agent"].Instructed)
+}

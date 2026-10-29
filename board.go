@@ -96,6 +96,7 @@ func configuredBoardPanes(cfg *config.Config, warn bool) map[string]string {
 	return paneHosts
 }
 
+// Live routing is scheduled only for boards enabled at startup.
 func newBoardRouting(readConfig func(func(*config.Config)), execution *hostexec.Pool) func() board.Routing {
 	var clientsMu sync.Mutex
 	clients := map[host.Host]*agmsg.Client{}
@@ -103,9 +104,6 @@ func newBoardRouting(readConfig func(func(*config.Config)), execution *hostexec.
 		result := board.Routing{PaneHosts: map[string]string{}, Clients: map[string]board.MessageClient{}}
 		targets := []host.Host{}
 		readConfig(func(current *config.Config) {
-			if !current.AgentBoard.Enabled {
-				return
-			}
 			targets = append(targets, host.Local)
 			for name := range current.SSHConnections {
 				targets = append(targets, host.Host(name))
