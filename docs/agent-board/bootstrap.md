@@ -7,8 +7,10 @@
 Each pane opts in with `agent_board.enabled: true`. The team and agmsg path are shared instance
 settings; pane-level team overrides do not exist.
 
-Panemux polls opted-in panes for an interactive agent type that agmsg itself marks as reliably
-process-detectable: `claude-code`, `codex`, `cursor`, `gemini`, `grok-build`, or `opencode`. The
+The bootstrap watcher polls opted-in panes for a registered interactive agent ID, using process
+rules that were verified against the messaging integration. It asks the board participation port
+for availability, address validation, and the instruction; only the adapter knows agmsg.
+The supported registry IDs are `claude`, `codex`, `cursor`, `gemini`, `grok-build`, or `opencode`. The
 process rules are the Board rules in the [agent registry](../agent-registry.md#detection-rules).
 Explicit-only and desktop agent types are not guessed.
 
@@ -63,3 +65,8 @@ Fresh local and SSH sessions are eligible again because panemux recreated their 
 
 This deliberately does not detect an agent process restart inside an otherwise unchanged pane. See
 [Known limitations](limitations.md#known-limitations).
+
+Path discovery and presence probes have independent warning streaks. Once path discovery succeeds,
+its warning clears even if the next presence probe fails. The participation port distinguishes a
+path failure and supplies operator-facing tool/setting labels; the adapter keeps the existing
+agmsg warning wording while the watcher remains transport-independent.

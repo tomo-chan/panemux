@@ -17,8 +17,7 @@ end to end; it is the example below.
    definitions, then `fixtureAgents()` — is the whole registry.
 2. Declare only the capabilities it has, with the rule each one needs
    ([Capabilities](../agent-registry.md#capabilities)).
-3. Run the `internal/agent` tests. `Validate` rejects a malformed or duplicate ID, alias or agmsg
-   type, an alias that collides with another name, an unknown or repeated capability, and a
+3. Run the `internal/agent` tests. `Validate` rejects a malformed or duplicate ID or alias, an alias that collides with another name, an unknown or repeated capability, and a
    capability whose rule is missing (or a rule whose capability is). The package builds its
    registry when it loads, so an invalid registration also stops panemux at startup.
 4. `TestRegisteredAgents` pins the registered set and order; update it in the same change.
@@ -26,6 +25,9 @@ end to end; it is the example below.
    names, and give the capability's contract test what it asks of a new adapter (a summary adapter
    needs a contract sample). Each list is checked against the registry when panemux starts, so a
    declaration without its adapter, or an adapter without its declaration, stops it.
+   For `board`, add the ID-to-type entry and any participation difference in the
+   [message adapter](../agent-board/agmsg-integration.md#agent-type-mapping); keep transport type
+   names out of the registry and session detection.
 6. Name its CLI like its ID. The launch script and the availability probe find an agent's CLI by its
    ID, so an agent whose CLI is named otherwise cannot be launched or probed yet
    ([#428](https://github.com/tomo-chan/panemux/issues/428)).
@@ -44,7 +46,7 @@ end to end; it is the example below.
 | `resume` | `resumeAdapter` (`internal/tasks/launch_adapters.go`) | `resumeAdapters` | `TestLaunchAdapters_MatchTheRegistry` | `tasks[].actions.resume`; the Resume button; `POST /api/tasks/resume` |
 | `summary` | `summarySource` and `summaryRunner` (`internal/tasks/summary_adapters.go`) | `summaryAdapters` | `TestSummaryAdapters_MatchTheRegistry`, `TestSummaryAdapters_Contract` | `tasks[].actions.summary` and `tasks[].summary`; the Work section and Summarize |
 | `workdir` | `workdirAdapter` (`internal/session/workdir.go`) | `workdirAdapters` | `TestWorkdirAdaptersMatchDeclarations` | A pane's working directory and log follow its agent's session |
-| `board` | `boardAdapter` (`board_adapters.go`) | `boardAdapters` | `TestBoardAdapters_MatchTheRegistry` | It can join Agent Board |
+| `board` | `MessageClient` / `Participation` (`internal/board`), implemented by `internal/agmsg` | agent ID → transport type and participation differences (`internal/agmsg/agent_adapters.go`) | `TestBoardAdapters_MatchTheRegistry` | It can join Agent Board |
 | `usage` | — (declared by no agent yet, [#345](https://github.com/tomo-chan/panemux/issues/345)) | — | — | — |
 
 An absent capability is absent everywhere: no availability row, no action on its tasks, no button,

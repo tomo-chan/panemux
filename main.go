@@ -182,14 +182,14 @@ func loadConfig(opts cliOptions, loader configLoader) (*config.Config, error) {
 
 func runServer(
 	srv *server.Server, manager *session.Manager, boardRelay *board.Relay, boardBootstrap *bootstrapWatcher,
-) {
+) { //coverage:exempt process-lifetime signal loop; buildServerServices tests the wiring
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	boardCtx, cancelBoard := context.WithCancel(context.Background())
 	defer cancelBoard()
 	// Skip the poll loop entirely when no host is reachable at all: with
-	// zero AgmsgClients every poll is a guaranteed no-op forever (nothing
+	// zero message clients every poll is a guaranteed no-op forever (nothing
 	// to read, nothing to relay), so starting it would just tick a ticker
 	// for the life of the process for no reason — including for the many
 	// panemux users who have never configured agent board at all.

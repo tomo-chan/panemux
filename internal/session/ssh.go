@@ -1034,9 +1034,9 @@ func (s *SSHSession) GetActiveWorkdirs() ([]string, error) {
 	)
 }
 
-// DetectInteractiveAgentType reports the agmsg type name of any live agent
+// DetectInteractiveAgent reports the agent ID of any live agent
 // process currently running on this SSH connection — see AgentTypeDetector.
-func (s *SSHSession) DetectInteractiveAgentType() (string, bool, error) {
+func (s *SSHSession) DetectInteractiveAgent() (agent.ID, bool, error) {
 	return detectRemoteAgentTypeFromSessionFactory(func() (sshSessionRunner, error) {
 		return s.client.NewSession()
 	})
@@ -1100,7 +1100,7 @@ func activeRemoteWorkdirs(runner sshSessionRunner, logScope, baseCWD string, roo
 // primitive: it stops at "which agent type is present", skipping the
 // transcript/workdir resolution activeRemoteWorkdirsFromSessionFactory does
 // afterward — cheap enough to poll frequently.
-func detectRemoteAgentTypeFromSessionFactory(newRunner func() (sshSessionRunner, error)) (string, bool, error) {
+func detectRemoteAgentTypeFromSessionFactory(newRunner func() (sshSessionRunner, error)) (agent.ID, bool, error) {
 	rootRunner, err := newRunner()
 	if err != nil {
 		return "", false, fmt.Errorf("new ssh session for remote shell pid: %w", err)
@@ -1115,7 +1115,7 @@ func detectRemoteAgentTypeFromSessionFactory(newRunner func() (sshSessionRunner,
 	return detectRemoteAgentType(outputFromSessionFactory(newRunner), rootPID)
 }
 
-func detectRemoteAgentType(run remoteOutputFunc, rootPID int) (string, bool, error) {
+func detectRemoteAgentType(run remoteOutputFunc, rootPID int) (agent.ID, bool, error) {
 	out, err := run(sshListProcessesCmd)
 	if err != nil {
 		return "", false, fmt.Errorf("list remote processes: %w", err)
@@ -1124,8 +1124,8 @@ func detectRemoteAgentType(run remoteOutputFunc, rootPID int) (string, bool, err
 	if err != nil {
 		return "", false, err
 	}
-	_, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, rootPID)
-	return agmsgType, ok, nil
+	_, agentID, ok := newestKnownAgentTypeDescendantPID(processes, rootPID)
+	return agentID, ok, nil
 }
 
 func activeRemoteWorkdirsWithOutput(

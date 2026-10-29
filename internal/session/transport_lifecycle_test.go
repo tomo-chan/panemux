@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"panemux/internal/agent"
 	"strings"
 	"sync"
 	"testing"
@@ -396,10 +397,10 @@ func TestSSHSessionExecMethodsUseRealChannelsAndParseResponses(t *testing.T) {
 	cwd, err := sess.GetCWD()
 	require.NoError(t, err)
 	assert.Equal(t, "/workspace/project", cwd)
-	agentType, ok, err := sess.DetectInteractiveAgentType()
+	agentType, ok, err := sess.DetectInteractiveAgent()
 	require.NoError(t, err)
 	assert.True(t, ok)
-	assert.Equal(t, "gemini", agentType)
+	assert.Equal(t, agent.ID("gemini"), agentType)
 	workdirs, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
 	assert.Empty(t, workdirs)
@@ -492,10 +493,10 @@ func TestTmuxSSHSessionExecMethodsUseRealChannelsAndParseResponses(t *testing.T)
 	cwd, err := sess.GetCWD()
 	require.NoError(t, err)
 	assert.Equal(t, "/workspace/tmux-project", cwd)
-	agentType, ok, err := sess.DetectInteractiveAgentType()
+	agentType, ok, err := sess.DetectInteractiveAgent()
 	require.NoError(t, err)
 	assert.True(t, ok)
-	assert.Equal(t, "gemini", agentType)
+	assert.Equal(t, agent.ID("gemini"), agentType)
 	workdirs, err := sess.GetActiveWorkdirs()
 	require.NoError(t, err)
 	assert.Empty(t, workdirs)

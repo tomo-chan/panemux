@@ -4,7 +4,8 @@
 
 ## Integration with agmsg
 
-Panemux uses agmsg's public scripts and never reads its database or team files. The required
+`internal/agmsg` implements the board-owned message and participation ports. It owns all script
+contracts, path resolution, parsing, versions, and participation text. Panemux uses agmsg's public scripts and never reads its database or team files. The required
 contract is:
 
 | Operation | Script contract |
@@ -62,7 +63,7 @@ an interactive profile is insufficient.
 
 ### Version coverage
 
-`board.TestedAgmsgVersion` is the version whose script behavior this repository verifies. The first
+`agmsg.TestedAgmsgVersion` is the version whose script behavior this repository verifies. The first
 successful host probe normalizes agmsg's common `VERSION` forms and warns when an installed release is outside the
 covered range. A warning never blocks startup.
 
@@ -78,8 +79,10 @@ Pane identity is always the pane ID, never the project path. Two same-type agent
 would otherwise be discovered by agmsg as the same subscription set and could receive each other's
 messages.
 
-What differs per agent in onboarding is its board adapter's (`boardAdapters` in `board_adapters.go`,
-one per agent that declares `board` in the [agent registry](../agent-registry.md#capabilities)). For
+The adapter owns each agent's transport type and onboarding differences (`internal/agmsg/agent_adapters.go`).
+At package initialization it checks that every agent declaring `board` has exactly one entry, that
+no other agent has one, and that transport type names are valid and unique. Tests cover the same
+matrix. Session detection returns registry IDs; conversion happens only inside the adapter. For
 `claude-code`, the only adapter that claims an identity, bootstrap follows agmsg's act-as protocol:
 
 1. join with the pane ID;
@@ -94,3 +97,25 @@ writes the common steps alone, and agent types in the same project
 directory can still cross-receive. Claims are made only during bootstrap, so restarting an agent
 inside the same unchanged pane does not automatically claim again. These bounds are documented in
 [Known limitations](limitations.md#known-limitations).
+
+## Agent type mapping
+
+| Agent ID | agmsg type |
+|---|---|
+| `claude` | `claude-code` |
+| `codex` | `codex` |
+| `cursor` | `cursor` |
+| `gemini` | `gemini` |
+| `grok-build` | `grok-build` |
+| `opencode` | `opencode` |
+
+Board process patterns retain the detection behavior checked against agmsg v1.1.13's
+`type.conf` `detect_proc` keys in 2026-08. This provenance belongs to the integration, while the
+registry owns transport-independent process matching. Explicit-only types (antigravity, copilot,
+hermes) and the desktop agmsg-app are not detected as board agents.
+
+Configuration retains `agent_board.agmsg_path` and its existing default and validation results.
+The adapter owns the default path and validation, which `internal/config` delegates to it. No tool
+installation or enablement policy is added here. Relay discovery remembers confirmed absence;
+bootstrap separately caches successful path resolution and rechecks presence on every eligible
+tick, so a later manually installed tool can still participate.

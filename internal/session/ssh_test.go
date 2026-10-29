@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"panemux/internal/agent"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -826,10 +827,10 @@ func TestDetectRemoteAgentTypeFromSessionFactory_FindsGemini(t *testing.T) {
 		return &fakeSSHRunner{outputs: outputs}, nil
 	}
 
-	agmsgType, ok, err := detectRemoteAgentTypeFromSessionFactory(factory)
+	agentID, ok, err := detectRemoteAgentTypeFromSessionFactory(factory)
 	require.NoError(t, err)
 	require.True(t, ok)
-	assert.Equal(t, "gemini", agmsgType)
+	assert.Equal(t, agent.ID("gemini"), agentID)
 }
 
 func TestDetectRemoteAgentTypeFromSessionFactory_IgnoresHeadlessCodex(t *testing.T) {
@@ -841,10 +842,10 @@ func TestDetectRemoteAgentTypeFromSessionFactory_IgnoresHeadlessCodex(t *testing
 		return &fakeSSHRunner{outputs: outputs}, nil
 	}
 
-	agmsgType, ok, err := detectRemoteAgentTypeFromSessionFactory(factory)
+	agentID, ok, err := detectRemoteAgentTypeFromSessionFactory(factory)
 	require.NoError(t, err)
 	assert.False(t, ok)
-	assert.Empty(t, agmsgType)
+	assert.Empty(t, agentID)
 }
 
 func TestDetectRemoteAgentTypeFromSessionFactory_ShellPIDError_Propagated(t *testing.T) {
@@ -976,7 +977,7 @@ func TestTmuxSSHActiveWorkdirFromSessionFactory_UsesSeparateRunners(t *testing.T
 	assert.Equal(t, 4, index)
 }
 
-func TestTmuxSSHDetectInteractiveAgentTypeFromSessionFactory_FindsOpencode(t *testing.T) {
+func TestTmuxSSHDetectInteractiveAgentFromSessionFactory_FindsOpencode(t *testing.T) {
 	outputs := map[string][]byte{
 		"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
 		sshListProcessesCmd: []byte(" 220 1 zsh\n 240 220 opencode\n"),
@@ -985,13 +986,13 @@ func TestTmuxSSHDetectInteractiveAgentTypeFromSessionFactory_FindsOpencode(t *te
 		return &fakeSSHRunner{outputs: outputs}, nil
 	}
 
-	agmsgType, ok, err := tmuxSSHDetectInteractiveAgentTypeFromSessionFactory(factory, "demo")
+	agentID, ok, err := tmuxSSHDetectInteractiveAgentFromSessionFactory(factory, "demo")
 	require.NoError(t, err)
 	require.True(t, ok)
-	assert.Equal(t, "opencode", agmsgType)
+	assert.Equal(t, agent.ID("opencode"), agentID)
 }
 
-func TestTmuxSSHDetectInteractiveAgentTypeFromSessionFactory_NoKnownAgent(t *testing.T) {
+func TestTmuxSSHDetectInteractiveAgentFromSessionFactory_NoKnownAgent(t *testing.T) {
 	outputs := map[string][]byte{
 		"tmux display-message -p -t 'demo' '#{pane_pid}\t#{pane_current_path}'": []byte("220\t/repo/main\n"),
 		sshListProcessesCmd: []byte(" 220 1 zsh\n 230 220 git status\n"),
@@ -1000,10 +1001,10 @@ func TestTmuxSSHDetectInteractiveAgentTypeFromSessionFactory_NoKnownAgent(t *tes
 		return &fakeSSHRunner{outputs: outputs}, nil
 	}
 
-	agmsgType, ok, err := tmuxSSHDetectInteractiveAgentTypeFromSessionFactory(factory, "demo")
+	agentID, ok, err := tmuxSSHDetectInteractiveAgentFromSessionFactory(factory, "demo")
 	require.NoError(t, err)
 	assert.False(t, ok)
-	assert.Empty(t, agmsgType)
+	assert.Empty(t, agentID)
 }
 
 func TestRemoteGitContext_ReturnsBranchAndRepo(t *testing.T) {

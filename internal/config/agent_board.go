@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"panemux/internal/agmsg"
 	"path/filepath"
 	"strings"
 
@@ -15,7 +16,7 @@ import (
 
 const (
 	defaultAgentBoardTeam = "panemux"
-	defaultAgmsgPath      = "~/.agents/skills/agmsg"
+	defaultAgmsgPath      = agmsg.DefaultPath
 
 	agentBoardModeMonitor = "monitor"
 	agentBoardModeTurn    = "turn"
@@ -23,7 +24,7 @@ const (
 	agentBoardModeOff     = "off"
 
 	// reservedSystemID is the sentinel identity panemux's own relay and
-	// command center use as their agmsg from/to. It is deliberately not
+	// command center use as their message from/to. It is deliberately not
 	// derived from the product name, since the application could be
 	// renamed without this reserved identity needing to change.
 	reservedSystemID = "_system"

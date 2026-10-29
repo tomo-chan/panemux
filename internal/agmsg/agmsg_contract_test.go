@@ -1,4 +1,4 @@
-package board_test
+package agmsg_test
 
 // Tier 2 of docs/agent-board.md's agmsg compatibility contract: the
 // behaviors panemux depends on, asserted against a REAL agmsg install
@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"panemux/internal/agmsg"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -399,7 +400,7 @@ func TestAgmsgContract_JoinUsesThePaneIDVerbatim(t *testing.T) {
 
 // contractClient returns panemux's own local agmsg client, pointed at a
 // throwaway copy of a real install with a team already joined.
-func contractClient(t *testing.T, team string) (board.AgmsgClient, string) {
+func contractClient(t *testing.T, team string) (board.MessageClient, string) {
 	t.Helper()
 
 	root := contractInstall(t)
@@ -411,7 +412,7 @@ func contractClient(t *testing.T, team string) (board.AgmsgClient, string) {
 
 	pool := hostexec.New(hostexec.Options{})
 	t.Cleanup(pool.Close)
-	return board.NewRemoteAgmsgClient(host.Local.BoardID(), root, host.Bind(pool, host.Local)), project
+	return agmsg.NewRemoteAgmsgClient(host.Local.BoardID(), root, host.Bind(pool, host.Local)), project
 }
 
 func contractCtx(t *testing.T) context.Context {
@@ -606,8 +607,8 @@ func TestAgmsgContract_InstalledVersionDoesNotFalselyWarn(t *testing.T) {
 		t.Skipf("install has no VERSION file: %v", err)
 	}
 	installed := strings.TrimSpace(string(data))
-	t.Logf("install root VERSION reads %q; board.TestedAgmsgVersion pins %q",
-		installed, board.TestedAgmsgVersion)
+	t.Logf("install root VERSION reads %q; agmsg.TestedAgmsgVersion pins %q",
+		installed, agmsg.TestedAgmsgVersion)
 
 	// Strip only the decoration install.sh adds — a leading "v" and a
 	// `git describe` "-<commits>-g<sha>[-dirty]" tail — and see what
@@ -619,12 +620,12 @@ func TestAgmsgContract_InstalledVersionDoesNotFalselyWarn(t *testing.T) {
 	if i := strings.Index(bare, "-"); i >= 0 {
 		bare = bare[:i]
 	}
-	if bare != board.TestedAgmsgVersion {
+	if bare != agmsg.TestedAgmsgVersion {
 		t.Skipf("install is %s, not the pinned %s; this assertion is about the pinned version's own provenance forms",
-			installed, board.TestedAgmsgVersion)
+			installed, agmsg.TestedAgmsgVersion)
 	}
 
-	assert.Empty(t, board.VersionMismatchWarning("host-a", installed),
+	assert.Empty(t, agmsg.VersionMismatchWarning("host-a", installed),
 		"an install of the pinned version must not be warned about, "+
 			"whatever provenance form install.sh wrote into VERSION (found %q)", installed)
 }

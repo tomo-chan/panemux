@@ -608,17 +608,8 @@ func (c *Data) expandPaths() {
 	if active, ok := c.ActiveWorkspace(); ok {
 		c.Layout = active.Layout
 	}
-	// AgentBoard.AgmsgPath is deliberately NOT expanded here: it names a
-	// path on whichever host it ends up used against (local or, via SSH,
-	// any number of remote hosts), so there is no single "the" home
-	// directory to expand a leading ~/ against at config-load time — that
-	// used to expand it against panemux's own local home unconditionally,
-	// silently breaking every remote host whose home directory differs (see
-	// docs/agent-board.md's "~ in agmsg_path is expanded by panemux, never
-	// left for the remote shell to expand" section). Expansion happens per
-	// host instead, at AgmsgClient construction time in board.go: locally
-	// via homedir.Dir(), remotely via board.ResolveRemoteAgmsgPath's
-	// SSH $HOME probe.
+	// AgentBoard.AgmsgPath names a directory on each target host. The adapter
+	// resolves it on that host; configuration never expands it locally.
 }
 
 func expandPanesCwd(children []LayoutChild) {
@@ -647,7 +638,7 @@ func ExpandPanePaths(pane *PaneConfig) {
 // against whatever directory panemux was started in and so silently names the
 // wrong file rather than failing where an operator can see it. Leaving the ~/
 // in place is the diagnosable answer, and the one board.go's
-// expandLocalAgmsgPath already describes itself as matching.
+// Message adapter path resolution uses the same home-directory convention.
 func expandTilde(path string) string {
 	if !strings.HasPrefix(path, "~/") {
 		return path

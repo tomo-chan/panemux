@@ -17,7 +17,7 @@
 #                       their importers
 #   <pkg>/testdata/...  that package's go vet, golangci-lint and go test
 #   panemux_fixture_agent files  their package's go vet with that tag, and
-#                       make test-go-fixture-agent, after building the frontend
+#                       make test-go-fixture-agent (internal packages only)
 #   frontend/src TS     tsc --noEmit, vitest related on the changed modules
 #   testdata/api-contract  the frontend contract test that parses those fixtures
 #   scripts/<x>.sh      scripts/<x>_test.sh, and the tmpdir guard for any .sh
@@ -138,9 +138,6 @@ add_go_pkg() {
 	if has_fixture_agent_files "$1"; then
 		add "go-vet-fixture-agent ./$1"
 		add fixture-agent-tests
-		# make test-go-fixture-agent tests the root package, whose
-		# //go:embed needs frontend/dist.
-		add build-frontend
 	fi
 	[ "$1" = . ] && add build-frontend
 	return 0

@@ -26,9 +26,9 @@ type CachedRow struct {
 // BoardCache is the in-memory, panemux-owned view of recent board activity.
 // Only the relay (added in a later phase) writes to it, as a side effect of
 // its own polling; dashboard-facing endpoints only ever read it, never
-// calling AgmsgClient directly at request time. Seq is BoardCache's own
+// calling MessageClient directly at request time. Seq is BoardCache's own
 // monotonically increasing, panemux-local sequence number — assigned here
-// because agmsg IDs from different hosts are not comparable or even
+// because message transport IDs from different hosts are not comparable or even
 // guaranteed non-colliding with each other.
 type BoardCache struct {
 	status     map[string]Status

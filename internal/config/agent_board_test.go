@@ -260,6 +260,7 @@ func TestValidate_AgmsgPath_TildePrefixed_NoError(t *testing.T) {
 	assert.NoError(t, cfg.Validate())
 }
 
+//efficacy:exempt only updates a path-discovery comment; this refactor intentionally preserves config defaults
 func TestNormalizeAgentBoard_DefaultsTeamAndAgmsgPath(t *testing.T) {
 	tokenPath := filepath.Join(t.TempDir(), "token")
 	cfg, err := loadWithAuthTokenPath(t, validConfigYAML, tokenPath)
@@ -270,7 +271,7 @@ func TestNormalizeAgentBoard_DefaultsTeamAndAgmsgPath(t *testing.T) {
 	// whichever host (local, or any number of remote SSH hosts) it ends up
 	// used against, so there is no single home directory to expand a
 	// leading ~/ against at config-load time. Expansion happens per host at
-	// AgmsgClient construction time in board.go instead — see
+	// adapter path discovery time instead — see
 	// docs/agent-board.md's "~ in agmsg_path is expanded by panemux" section.
 	assert.Equal(t, "~/.agents/skills/agmsg", cfg.AgentBoard.AgmsgPath)
 }

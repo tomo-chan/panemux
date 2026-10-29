@@ -1,4 +1,4 @@
-package board
+package agmsg
 
 import (
 	"context"
@@ -24,8 +24,8 @@ const remoteHomeProbeCmd = `printf '%s' "$HOME"`
 // with ~/ (e.g. already absolute) is returned unchanged, with no
 // Runner.Run call at all. Callers are expected to cache the result for
 // the life of a connection — this function itself makes no attempt to
-// cache, matching internal/board's existing per-call, stateless convention
-// (see AgmsgClient's own doc comments).
+// cache, matching the adapter's existing per-call, stateless convention
+// (see board.MessageClient).
 func ResolveRemoteAgmsgPath(ctx context.Context, executor host.Runner, path string) (string, error) {
 	if !strings.HasPrefix(path, "~/") {
 		return path, nil

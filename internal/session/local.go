@@ -190,12 +190,12 @@ func (s *LocalSession) GetActiveWorkdirs() ([]string, error) {
 	return resolveInteractiveAgentWorkdirs(processes, pid, baseCWD)
 }
 
-// DetectInteractiveAgentType reports the agmsg type name of any live agent
+// DetectInteractiveAgent reports the agent ID of any live agent
 // process currently running as a descendant of this pane's shell, among
 // the registered agents with a Board rule. It skips the transcript/workdir resolution
 // GetActiveWorkdirs does, so it's cheap enough to poll frequently — see
 // AgentTypeDetector.
-func (s *LocalSession) DetectInteractiveAgentType() (string, bool, error) {
+func (s *LocalSession) DetectInteractiveAgent() (agent.ID, bool, error) {
 	if s.pid == 0 {
 		return "", false, errors.New("session has no PID")
 	}
@@ -205,8 +205,8 @@ func (s *LocalSession) DetectInteractiveAgentType() (string, bool, error) {
 		return "", false, err
 	}
 
-	_, agmsgType, ok := newestKnownAgentTypeDescendantPID(processes, s.pid)
-	return agmsgType, ok, nil
+	_, agentID, ok := newestKnownAgentTypeDescendantPID(processes, s.pid)
+	return agentID, ok, nil
 }
 
 func getPIDCWD(pid int) (string, error) {
@@ -303,25 +303,25 @@ func newestInteractiveAgentDescendantPID(processes []processInfo, rootPID int) (
 	return newestMatchingDescendantPID(processes, rootPID, isInteractiveAgentCommand)
 }
 
-// detectAgmsgAgentType reports the agmsg type name of command, if a
-// registered agent's Board rule — which mirrors agmsg's own type.conf
+// detectBoardAgent reports the agent ID of command, if a
+// registered agent's Board rule — which mirrors the board process rules
 // detect_proc — matches it.
-func detectAgmsgAgentType(command string) (string, bool) {
+func detectBoardAgent(command string) (agent.ID, bool) {
 	d, ok := agent.MatchBoardProcess(command)
-	return d.AgmsgType, ok
+	return d.ID, ok
 }
 
 // newestKnownAgentTypeDescendantPID is AgentTypeDetector's primitive: like
 // newestInteractiveAgentDescendantPID, but matches any
 // registered Board rule (not just claude/codex) and reports which type
 // matched, since Agent Board's bootstrap instruction differs by type.
-func newestKnownAgentTypeDescendantPID(processes []processInfo, rootPID int) (pid int, agmsgType string, ok bool) {
+func newestKnownAgentTypeDescendantPID(processes []processInfo, rootPID int) (pid int, agentID agent.ID, ok bool) {
 	children := childProcessMap(processes)
 	stack := append([]processInfo(nil), children[rootPID]...)
 
 	if proc, found := processByPID(processes, rootPID); found {
-		if t, matched := detectAgmsgAgentType(proc.Command); matched {
-			pid, agmsgType, ok = rootPID, t, true
+		if t, matched := detectBoardAgent(proc.Command); matched {
+			pid, agentID, ok = rootPID, t, true
 		}
 	}
 
@@ -330,21 +330,21 @@ func newestKnownAgentTypeDescendantPID(processes []processInfo, rootPID int) (pi
 		stack = stack[:len(stack)-1]
 		stack = append(stack, children[proc.PID]...)
 
-		if t, matched := detectAgmsgAgentType(proc.Command); matched {
+		if t, matched := detectBoardAgent(proc.Command); matched {
 			// `>=` here is killable, but only by input the OS cannot
 			// produce: two matching processes sharing a PID, where the
-			// agmsgType reported would differ (the PID would not). A test
+			// agentID reported would differ (the PID would not). A test
 			// for it would have to fabricate that snapshot and then pin
 			// whichever type the traversal happens to reach first — an
 			// accident of stack order, not designed behavior. Issue #190.
 			//mutation:exempt[CONDITIONALS_BOUNDARY] unreachable — killable only by a fabricated snapshot with a duplicate PID
 			if !ok || proc.PID > pid {
-				pid, agmsgType, ok = proc.PID, t, true
+				pid, agentID, ok = proc.PID, t, true
 			}
 		}
 	}
 
-	return pid, agmsgType, ok
+	return pid, agentID, ok
 }
 
 func newestMatchingDescendantPID(processes []processInfo, rootPID int, match func(string) bool) (int, bool) {

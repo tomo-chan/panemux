@@ -46,7 +46,7 @@ func TestPollOnceSkipsAPersistedPaneThatNoLongerExists(t *testing.T) {
 	manager.Add(survivor)
 	t.Cleanup(manager.CloseAll)
 
-	w := newBootstrapWatcher(bootstrapWatcherConfig{
+	w := newTestBootstrapWatcher(testBootstrapWatcherConfig{
 		Manager:       manager,
 		PaneHosts:     map[string]string{"pane-b": boardHostIDLocal},
 		PaneModes:     func() map[string]string { return nil },
@@ -286,7 +286,7 @@ func TestClearingOneWarningKindLeavesTheOthersSuppressed(t *testing.T) {
 // lookup that never happened. Hence the second return value.
 func TestAgmsgPresentReportsUncheckedWhenTheHostHasNoResolvedPath(t *testing.T) {
 	logs := captureBootstrapLog(t)
-	w := newBootstrapWatcher(bootstrapWatcherConfig{
+	w := newTestBootstrapWatcher(testBootstrapWatcherConfig{
 		Manager:       session.NewManager(),
 		PaneHosts:     map[string]string{"pane-a": "workstation"},
 		PaneModes:     func() map[string]string { return nil },
@@ -294,15 +294,14 @@ func TestAgmsgPresentReportsUncheckedWhenTheHostHasNoResolvedPath(t *testing.T) 
 		Team:          "panemux",
 	})
 
-	present, checked := w.agmsgPresent(context.Background(), "pane-a", "workstation")
+	present, checked := w.messagingPresent(context.Background(), "pane-a", "workstation")
 
 	assert.False(t, present)
 	assert.False(t, checked, "an unresolved path is not evidence of absence")
-	assert.Contains(t, logs.String(), `no resolved agmsg_path for host "workstation"`)
-	assert.Contains(t, logs.String(), `pane "pane-a"`)
+	assert.Empty(t, logs.String())
 
 	before := logs.Len()
-	_, _ = w.agmsgPresent(context.Background(), "pane-a", "workstation")
+	_, _ = w.messagingPresent(context.Background(), "pane-a", "workstation")
 	assert.Equal(t, before, logs.Len(),
 		"the warning is once per pane — a poll loop would otherwise repeat it forever")
 }
@@ -313,6 +312,5 @@ func TestAgmsgPresentReportsUncheckedWhenTheHostHasNoResolvedPath(t *testing.T) 
 func TestNewLocalWatcherRegistersTheLocalHost(t *testing.T) {
 	w := newLocalWatcher(session.NewManager(), "/tmp/sample-agmsg", "panemux", nil)
 
-	require.Contains(t, w.resolvedPaths, boardHostIDLocal)
-	assert.Equal(t, "/tmp/sample-agmsg", w.resolvedPaths[boardHostIDLocal])
+	require.NotNil(t, w.participationForHost)
 }

@@ -2,14 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
-	"strings"
 	"time"
 
+	"panemux/internal/agent"
 	"panemux/internal/board"
-	"panemux/internal/host"
 	"panemux/internal/session"
 )
 
@@ -49,7 +49,7 @@ const (
 
 // bootstrapWatcherConfig is the precomputed, static input the bootstrap
 // watcher needs. Building it (which panes are board-enabled, which host each
-// lives on, each pane's configured mode, each host's resolved agmsg_path) is
+// lives on, each pane's configured mode, and participation ports) is
 // the caller's job (board.go's setupBoard) — bootstrapWatcher itself takes
 // no dependency on internal/config, mirroring board.RelayConfig's own
 // existing dependency direction (see relay.go's RelayConfig comment).
@@ -59,17 +59,15 @@ type bootstrapWatcherConfig struct {
 	// PaneModes is a function, not a map, because a pane's mode can change
 	// while panemux runs — the pane settings dialog writes it straight into
 	// config.yaml. A snapshot taken at startup meant a mode set to "both"
-	// never reached the instruction, so agmsg's own delivery stayed off.
-	PaneModes     func() map[string]string
-	ResolvedPaths map[string]string
-	RunnerForHost func(string) host.Runner
-	ResolvePath   func(context.Context, string) (string, error)
-	Persist       func(paneIDs []string)
-	Team          string
+	// never reached the instruction, so message delivery stayed off.
+	PaneModes            func() map[string]string
+	ParticipationForHost func(string) board.Participation
+	Persist              func(paneIDs []string)
+	Team                 string
 }
 
-// bootstrapWatcher polls board-enabled panes for a newly-started, agmsg-
-// detectable coding-agent process and writes a one-time onboarding
+// bootstrapWatcher polls board-enabled panes for a newly-started, detectable
+// coding-agent process and writes a one-time onboarding
 // instruction into that pane's PTY. See docs/agent-board.md's Bootstrap flow
 // section for the full design.
 //
@@ -77,15 +75,13 @@ type bootstrapWatcherConfig struct {
 // goroutine driving runLoop — nothing else ever reads or writes this
 // watcher's state.
 type bootstrapWatcher struct {
-	manager       *session.Manager
-	paneHosts     map[string]string
-	paneModes     func() map[string]string
-	resolvedPaths map[string]string
-	runnerForHost func(string) host.Runner
-	resolvePath   func(context.Context, string) (string, error)
-	persist       func(paneIDs []string)
-	bootstrapped  map[string]session.Session
-	pending       map[string]session.Session
+	manager              *session.Manager
+	paneHosts            map[string]string
+	paneModes            func() map[string]string
+	participationForHost func(string) board.Participation
+	persist              func(paneIDs []string)
+	bootstrapped         map[string]session.Session
+	pending              map[string]session.Session
 	// givenUp holds panes checkPane will never attempt to write to again for
 	// the life of the current session object: either a Write returned a
 	// nonzero-but-short n (any retry would type on top of an already
@@ -131,33 +127,29 @@ type warnedPane struct {
 // one another. Each names a distinct condition a pane can be in, so a pane
 // can hit several of them in sequence and each still gets reported once.
 const (
-	warnKindIdentifier = "identifier"
-	warnKindDetect     = "detect"
-	warnKindAgmsgPath  = "agmsg-path"
-	warnKindProbe      = "presence-probe"
-	warnKindAbsent     = "agmsg-absent"
+	warnKindIdentifier  = "identifier"
+	warnKindDetect      = "detect"
+	warnKindInstruction = "instruction"
+	warnKindPath        = "path"
+	warnKindProbe       = "presence-probe"
+	warnKindAbsent      = "messaging-absent"
 )
 
 // newBootstrapWatcher returns a bootstrapWatcher ready to have persisted
 // state loaded (LoadPersistedState) and then be polled or run.
 func newBootstrapWatcher(cfg bootstrapWatcherConfig) *bootstrapWatcher {
-	if cfg.ResolvedPaths == nil {
-		cfg.ResolvedPaths = map[string]string{}
-	}
 	return &bootstrapWatcher{
-		manager:       cfg.Manager,
-		paneHosts:     cfg.PaneHosts,
-		paneModes:     cfg.PaneModes,
-		resolvedPaths: cfg.ResolvedPaths,
-		runnerForHost: cfg.RunnerForHost,
-		resolvePath:   cfg.ResolvePath,
-		team:          cfg.Team,
-		persist:       cfg.Persist,
-		bootstrapped:  map[string]session.Session{},
-		pending:       map[string]session.Session{},
-		givenUp:       map[string]session.Session{},
-		writeAttempts: map[string]int{},
-		warned:        map[string]warnedPane{},
+		manager:              cfg.Manager,
+		paneHosts:            cfg.PaneHosts,
+		paneModes:            cfg.PaneModes,
+		participationForHost: cfg.ParticipationForHost,
+		team:                 cfg.Team,
+		persist:              cfg.Persist,
+		bootstrapped:         map[string]session.Session{},
+		pending:              map[string]session.Session{},
+		givenUp:              map[string]session.Session{},
+		writeAttempts:        map[string]int{},
+		warned:               map[string]warnedPane{},
 	}
 }
 
@@ -278,18 +270,12 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 		return
 	}
 
-	// A pane ID or team that doesn't match agmsg's own identifier alphabet
-	// (internal/board.ValidAgmsgIdentifier — the same allowlist
-	// RemoteAgmsgClient already enforces before any Runner.Run call)
-	// can never be bootstrapped correctly: it would either break the shell
-	// command the onboarding instruction tells the agent to run, or join
-	// agmsg under an identity the relay can never address back. Skip and
-	// warn once rather than write a broken instruction.
-	if !board.ValidAgmsgIdentifier(paneID) || !board.ValidAgmsgIdentifier(b.team) {
-		b.warnOnce(paneID, warnKindIdentifier, fmt.Sprintf(
-			"agent board bootstrap: pane %q or team %q is not a valid agmsg identifier, skipping bootstrap",
-			paneID, b.team,
-		))
+	participant := b.participant(host)
+	if participant == nil {
+		return
+	}
+	if err := participant.ValidateAddress(b.team, paneID); err != nil {
+		b.warnOnce(paneID, warnKindIdentifier, fmt.Sprintf("agent board bootstrap: %v, skipping bootstrap", err))
 		delete(b.pending, paneID)
 		return
 	}
@@ -300,7 +286,7 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 		delete(b.pending, paneID)
 		return
 	}
-	agmsgType, detected, err := detector.DetectInteractiveAgentType()
+	agentID, detected, err := detector.DetectInteractiveAgent()
 	if err != nil {
 		// Warned once per failing streak, not once per tick: detection runs
 		// a command inside the pane, so it keeps failing for as long as the
@@ -329,19 +315,34 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 		return
 	}
 
-	present, checked := b.agmsgPresent(ctx, paneID, host)
+	present, checked := b.messagingPresent(ctx, paneID, host)
 	if !checked {
 		return
 	}
 	if !present {
 		b.warnOnce(paneID, warnKindAbsent, fmt.Sprintf(
-			"agent board bootstrap: agmsg not found on host %q for pane %q, skipping bootstrap", host, paneID,
+			"agent board bootstrap: %s not found on host %q for pane %q, skipping bootstrap",
+			participant.Description().Name, host, paneID,
 		))
 		return
 	}
 	b.clearWarning(paneID, warnKindAbsent)
 
-	instruction := buildBootstrapInstruction(b.resolvedPaths[host], b.team, paneID, agmsgType, b.modeFor(paneID))
+	b.joinPane(ctx, participant, paneID, agentID, sess)
+}
+
+func (b *bootstrapWatcher) joinPane(
+	ctx context.Context, participant board.Participation, paneID string, agentID agent.ID, sess session.Session,
+) {
+	instruction, err := participant.JoinInstruction(ctx, board.JoinRequest{
+		Agent: agentID, Team: b.team, PaneID: paneID, Mode: b.modeFor(paneID),
+	})
+	if err != nil {
+		b.warnOnce(paneID, warnKindInstruction, fmt.Sprintf(
+			"agent board bootstrap: creating participation instruction for pane %q: %v", paneID, err))
+		return
+	}
+	b.clearWarning(paneID, warnKindInstruction)
 	b.writeInstruction(paneID, sess, instruction)
 }
 
@@ -397,37 +398,25 @@ func (b *bootstrapWatcher) writeInstruction(paneID string, sess session.Session,
 	)
 }
 
-// agmsgPresent probes through shared host execution, independently of pane transport.
-func (b *bootstrapWatcher) agmsgPresent(ctx context.Context, paneID, host string) (present bool, checked bool) {
-	path, ok := b.resolvedPaths[host]
-	if !ok && b.resolvePath != nil {
-		probeCtx, cancel := context.WithTimeout(ctx, bootstrapProbeTimeout)
-		var err error
-		path, err = b.resolvePath(probeCtx, host)
-		cancel()
-		ok = err == nil
-		if ok {
-			b.resolvedPaths[host] = path
-		}
-	}
-	if !ok {
-		b.warnOnce(paneID, warnKindAgmsgPath,
-			fmt.Sprintf("agent board bootstrap: no resolved agmsg_path for host %q (pane %q)", host, paneID))
-		return false, false
-	}
-	b.clearWarning(paneID, warnKindAgmsgPath)
-
-	executor := b.runnerForHost(host)
-	if executor == nil {
+// messagingPresent probes the host without depending on pane transport.
+func (b *bootstrapWatcher) messagingPresent(ctx context.Context, paneID, host string) (bool, bool) {
+	participant := b.participant(host)
+	if participant == nil {
 		return false, false
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, bootstrapProbeTimeout)
 	defer cancel()
-	present, err := board.RemoteAgmsgPresent(probeCtx, executor, path)
+	present, err := participant.Available(probeCtx)
+	description := participant.Description()
+	if errors.Is(err, board.ErrParticipationPath) {
+		b.warnOnce(paneID, warnKindPath, fmt.Sprintf(
+			"agent board bootstrap: no resolved %s for host %q (pane %q)", description.PathSetting, host, paneID))
+		return false, false
+	}
+	b.clearWarning(paneID, warnKindPath)
 	if err != nil {
 		b.warnOnce(paneID, warnKindProbe, fmt.Sprintf(
-			"agent board bootstrap: checking agmsg presence on host %q (pane %q): %v", host, paneID, err,
-		))
+			"agent board bootstrap: checking %s presence on host %q (pane %q): %v", description.Name, host, paneID, err))
 		return false, false
 	}
 	b.clearWarning(paneID, warnKindProbe)
@@ -494,66 +483,9 @@ func (b *bootstrapWatcher) persistBootstrapped() {
 	b.persist(ids)
 }
 
-// runsAgmsgMonitor reports whether a Monitor-based watcher is running for a
-// pane in this mode, and therefore whether re-arming one is the right move.
-// turn delivers through a Stop hook with no watcher to replace, and off
-// means the operator asked for no automatic delivery at all — starting one
-// would contradict the setting.
-func runsAgmsgMonitor(mode string) bool {
-	return mode == "" || mode == boardModeMonitor || mode == boardModeBoth
-}
-
-// buildBootstrapInstruction builds the one-time onboarding instruction
-// written into a pane's PTY. It tells the agent to invoke agmsg's own
-// scripts (join.sh/actas-claim.sh/watch.sh/send.sh/delivery.sh) directly
-// with their verified positional-argument signatures, rather than agmsg's
-// slash-command shorthand (`/agmsg ...` or `$agmsg ...` depending on agent
-// type — the prefix itself differs per agmsg's own per-type `cmd_prefix`
-// driver setting, so hardcoding either one would silently be wrong for the
-// other half of agmsg's supported agent types). agmsgType is the
-// agmsg-recognized type string session.AgentTypeDetector reported (e.g.
-// "claude-code", "gemini") and is passed as each script's own `<type>`
-// argument. mode is the pane's agent_board.mode config value ("" is treated
-// the same as "monitor": agmsg's own default already behaves like monitor
-// without any explicit delivery.sh call).
-//
-// Step numbers are generated rather than written literally because the
-// exclusivity step is the agent's board adapter's to write, and most write
-// none — see docs/agent-board.md's "Two panes in one project directory".
-func buildBootstrapInstruction(agmsgPath, team, paneID, agmsgType, mode string) string {
-	var b strings.Builder
-	step := 0
-	nextStep := func() int { step++; return step }
-	b.WriteString("Please set up Agent Board messaging for this session using agmsg's own scripts\n")
-	b.WriteString("directly (not the /agmsg or $agmsg slash-command, since its exact prefix differs\n")
-	b.WriteString("by agent type):\n")
-	fmt.Fprintf(&b, "%d. Join the agmsg team %q by running:\n", nextStep(), team)
-	fmt.Fprintf(&b, "   %s/scripts/join.sh %q %q %q \"$(pwd)\" --force\n", agmsgPath, team, paneID, agmsgType)
-	b.WriteString("   Use exactly that agent_id — not a name of your own choosing — since every cross-pane\n")
-	b.WriteString("   and relay address in Agent Board assumes from/to values are pane IDs.\n")
-	boardAdapterFor(agmsgType).writeIdentityClaim(&b, boardJoin{
-		agmsgPath: agmsgPath, paneID: paneID, agmsgType: agmsgType, mode: mode,
-	}, nextStep)
-	fmt.Fprintf(&b, "%d. From now on, send every board-related message (status reports and messages\n", nextStep())
-	b.WriteString("   to other panes) with:\n")
-	fmt.Fprintf(&b, "   %s/scripts/send.sh %q %q \"<to>\" \"<body>\" --force\n", agmsgPath, team, paneID)
-	fmt.Fprintf(&b, "%d. Self-report your status to \"_system\" using that same send.sh invocation,\n", nextStep())
-	b.WriteString("   with a JSON body shaped exactly like:\n")
-	b.WriteString("   {\"kind\":\"board_status\",\"state\":\"working|idle|waiting\",\"cwd\":\"...\",\"branch\":\"...\",\n")
-	b.WriteString("   \"repo\":\"...\",\"pr_url\":\"...\",\"last_tool\":\"...\",\"summary\":\"...\"}\n")
-	b.WriteString("   Omit fields you don't currently have.\n")
-	b.WriteString("   \"summary\" is the field a person reads to tell your pane apart from every other\n")
-	b.WriteString("   pane on the board, so always include it: one short sentence, in plain language,\n")
-	b.WriteString("   saying what you are working on right now (e.g. \"Fixing the flaky relay test\").\n")
-	b.WriteString("   Not your last tool call, not a summary of the whole session. When you are\n")
-	b.WriteString("   blocked, say what you are blocked on.\n")
-	b.WriteString("   Send an update when starting a new task, when finishing one, and whenever you\n")
-	b.WriteString("   become blocked or go idle — not on a timer.\n")
-	if mode == boardModeTurn || mode == boardModeBoth {
-		fmt.Fprintf(&b, "%d. Also run:\n", nextStep())
-		fmt.Fprintf(&b, "   %s/scripts/delivery.sh set %q %q \"$(pwd)\"\n", agmsgPath, mode, agmsgType)
-		b.WriteString("   This prints an AGMSG-DIRECTIVE: block — read it and follow its instructions exactly;\n")
-		b.WriteString("   it configures how you receive incoming board messages from now on.\n")
+func (b *bootstrapWatcher) participant(host string) board.Participation {
+	if b.participationForHost == nil {
+		return nil
 	}
-	return b.String()
+	return b.participationForHost(host)
 }

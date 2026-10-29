@@ -14,24 +14,24 @@ import (
 // hostOperationTimeout bounds every individual Since/Send call the relay
 // makes against one host. Poll's own ctx is process-lifetime (canceled only
 // on shutdown), so without a per-operation bound one unresponsive host
-// (dead SSH connection, wedged agmsg process) would stall pollHost — and
+// (dead SSH connection, wedged message transport process) would stall pollHost — and
 // therefore every other host queued behind it in the same Poll pass, since
 // hosts are polled sequentially — indefinitely instead of just for this one
 // poll cycle.
 const hostOperationTimeout = 10 * time.Second
 
 // RelayConfig is the static, precomputed input the relay needs. Building it
-// (which hosts exist, which AgmsgClient reaches each, which board-enabled
+// (which hosts exist, which MessageClient reaches each, which board-enabled
 // pane IDs live on which host) is the caller's job — internal/board does
 // not import internal/config or internal/session, mirroring
-// AgmsgClient/host.Runner's own existing dependency direction.
+// MessageClient/host.Runner's own existing dependency direction.
 type RelayConfig struct {
-	Clients        map[string]AgmsgClient // keyed by AgmsgClient.HostID()
-	PaneHosts      map[string]string      // board-enabled pane ID -> host (a key into Clients)
+	Clients        map[string]MessageClient // keyed by MessageClient.HostID()
+	PaneHosts      map[string]string        // board-enabled pane ID -> host (a key into Clients)
 	PersistCursors func(entries []CursorEntry)
 	Team           string
-	Limit          int // steady-state --limit
-	BackfillLimit  int // cold-start --limit
+	Limit          int // steady-state row limit
+	BackfillLimit  int // cold-start row limit
 	// OperationTimeout bounds every individual Since/Send call against one
 	// host. Zero (the default for every real caller) falls back to
 	// hostOperationTimeout; tests that need to exercise the timeout itself
@@ -39,18 +39,18 @@ type RelayConfig struct {
 	OperationTimeout time.Duration
 }
 
-// Relay is panemux's own agmsg poller: it reads every known host's agmsg
+// Relay is panemux's message poller: it reads every known host's transport
 // team, updates BoardCache, and relays cross-host messages. See
 // docs/agent-board.md's Cross-host relay section for the full design this
 // implements.
 type Relay struct {
 	cache         *BoardCache
 	ledger        *ownSendLedger
-	clients       map[string]AgmsgClient
+	clients       map[string]MessageClient
 	paneHosts     map[string]string
 	hostPanes     map[string]map[string]bool // host -> set of board-enabled pane IDs on that host
 	persist       func([]CursorEntry)
-	cursors       map[string]string // host -> agmsg-native cursor id (opaque; see filterRowsAfter)
+	cursors       map[string]string // host -> host-local opaque cursor ID
 	team          string
 	lastPollError string
 	limit         int
@@ -115,7 +115,7 @@ func (r *Relay) Cursors() []CursorEntry {
 	return entries
 }
 
-// HasClients reports whether the relay knows of at least one agmsg-reachable
+// HasClients reports whether the relay knows of at least one message transport-reachable
 // host. Callers can use this to skip starting the poll loop altogether when
 // there is nothing to poll — see main.go's use of this before starting Run.
 func (r *Relay) HasClients() bool {
@@ -199,9 +199,9 @@ func (r *Relay) pollHost(ctx context.Context, host string, limit int) (bool, err
 }
 
 // lastRowID returns the cursor to store after a poll: the id of the LAST
-// row api.sh returned, which is the newest one, since the response is
-// ordered by agmsg's own native counter. It never parses or compares the id
-// — see filterRowsAfter for why agmsg's ids admit neither. An empty
+// row the transport returned, which is the newest one, since the response is
+// ordered by a transport-native counter. IDs are opaque: the relay never parses
+// or compares them. An empty
 // response leaves the previous cursor in place.
 func lastRowID(rows []Row, prev string) string {
 	if len(rows) == 0 {
@@ -218,7 +218,7 @@ func lastRowID(rows []Row, prev string) string {
 //  3. to doesn't resolve to a known pane -> drop+log, never cached (same as
 //     an invalid from).
 //  4. to resolves to a known pane -> appended to history; relayed via
-//     AgmsgClient.Send (always --force) only when the destination host
+//     MessageClient.Send only when the destination host
 //     differs from sourceHost.
 //
 // A row this method relays to another host keeps its original From (the
@@ -370,7 +370,7 @@ func (r *Relay) Broadcast(ctx context.Context, from string, to []string, body st
 	return delivered, nil
 }
 
-func sortedHostKeys(m map[string]AgmsgClient) []string {
+func sortedHostKeys(m map[string]MessageClient) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

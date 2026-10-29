@@ -1,4 +1,4 @@
-package board
+package agmsg
 
 import (
 	"context"
@@ -28,7 +28,7 @@ func quoteArgsLikeSession(args []string) string {
 }
 
 // TestSendBase64WrapperScript_RealShell_DecodesMetacharacterBody proves the
-// full round trip end to end: RemoteAgmsgClient.Send's argument list, once
+// full round trip end to end: RemoteMessageClient.Send's argument list, once
 // single-quote-escaped exactly as the host execution adapter would
 // escape it and handed to a real /bin/sh, decodes the base64-encoded body
 // back to its original bytes (including shell metacharacters) before the
@@ -46,7 +46,7 @@ func TestSendBase64WrapperScript_RealShell_DecodesMetacharacterBody(t *testing.T
 	capturePath := filepath.Join(dir, "captured-argv")
 	sendStub := filepath.Join(dir, "send.sh")
 
-	// A stand-in for agmsg's real send.sh: dumps its argv, NUL-separated,
+	// A stand-in for message transport's real send.sh: dumps its argv, NUL-separated,
 	// to capturePath so the test can inspect exactly what it received.
 	stubScript := "#!/bin/sh\nprintf '%s\\0' \"$@\" > " + shellQuoteForTest(capturePath) + "\n"
 	//nolint:gosec // G306: test fixture needs the exec bit

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"panemux/internal/agent"
 	"regexp"
 	"strconv"
 	"strings"
@@ -284,11 +285,11 @@ func (s *TmuxSSHSession) GetActiveWorkdirs() ([]string, error) {
 	)
 }
 
-// DetectInteractiveAgentType reports the agmsg type name of any live agent
+// DetectInteractiveAgent reports the agent ID of any live agent
 // process currently running under the active remote tmux pane — see
 // AgentTypeDetector.
-func (s *TmuxSSHSession) DetectInteractiveAgentType() (string, bool, error) {
-	return tmuxSSHDetectInteractiveAgentTypeFromSessionFactory(
+func (s *TmuxSSHSession) DetectInteractiveAgent() (agent.ID, bool, error) {
+	return tmuxSSHDetectInteractiveAgentFromSessionFactory(
 		func() (sshSessionRunner, error) {
 			return s.client.NewSession()
 		},
@@ -296,9 +297,9 @@ func (s *TmuxSSHSession) DetectInteractiveAgentType() (string, bool, error) {
 	)
 }
 
-func tmuxSSHDetectInteractiveAgentTypeFromSessionFactory(
+func tmuxSSHDetectInteractiveAgentFromSessionFactory(
 	newRunner func() (sshSessionRunner, error), tmuxSession string,
-) (string, bool, error) {
+) (agent.ID, bool, error) {
 	paneRunner, err := newRunner()
 	if err != nil {
 		return "", false, fmt.Errorf("new ssh session for active tmux pane info: %w", err)
