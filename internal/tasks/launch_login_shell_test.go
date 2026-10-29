@@ -224,11 +224,15 @@ func TestLaunchScript_CodexGetsItsDirectoryOnThePathTheRCSet(t *testing.T) {
 
 			require.NoError(t, parseLaunchOutput(h.run(t, script, shell)))
 
-			// The host's own /etc/profile may add directories between the two.
-			path := h.lines(t, "codex.path")
-			require.Len(t, path, 1)
-			assert.True(t, strings.HasPrefix(path[0], rcBin+":"), "the rc's PATH is kept: %s", path[0])
-			assert.True(t, strings.HasSuffix(path[0], ":"+h.bin+":"+h.bin), "codex's directory comes last: %s", path[0])
+			// The host's own /etc/profile may add directories of its own
+			// anywhere in between (a CI runner's appends /snap/bin).
+			lines := h.lines(t, "codex.path")
+			require.Len(t, lines, 1)
+			path := strings.Split(lines[0], ":")
+			require.GreaterOrEqual(t, len(path), 3, lines[0])
+			assert.Equal(t, rcBin, path[0], "the rc's PATH is kept: %s", lines[0])
+			assert.Contains(t, path[1:len(path)-1], h.bin, "the PATH the rc started from is kept: %s", lines[0])
+			assert.Equal(t, h.bin, path[len(path)-1], "codex's directory comes last: %s", lines[0])
 			assert.Equal(t, []string{cwd}, h.lines(t, "codex.pwd"))
 		})
 	}
