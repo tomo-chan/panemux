@@ -248,6 +248,7 @@ describe('useBoardStatus', () => {
     const { result } = renderHook(() => useBoardStatus({ enabled: true, token: 'tok' }))
     await act(async () => {})
     expect(result.current.statuses.main?.state).toBe('working')
+    expect(result.current.participation).toEqual({})
 
     window.fetch = fetchRouter({
       status: () => ({ ok: true, json: () => Promise.resolve({ participation: {}, statuses: 'not-a-map' }) } as Response),
@@ -261,6 +262,7 @@ describe('useBoardStatus', () => {
 
     expect(result.current.error).not.toBeNull()
     expect(result.current.statuses.main?.state).toBe('working')
+    expect(result.current.participation).toEqual({})
   })
 
   it('stops polling while the tab is hidden', async () => {

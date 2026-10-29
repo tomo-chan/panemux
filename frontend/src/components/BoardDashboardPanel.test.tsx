@@ -37,6 +37,7 @@ describe('BoardDashboardPanel', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
   it('renders a pane status card from the statuses fixture', async () => {
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
@@ -66,6 +67,7 @@ describe('BoardDashboardPanel', () => {
   })
 
 
+  //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
   it('renders a card with every optional field omitted without crashing', async () => {
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
@@ -79,6 +81,7 @@ describe('BoardDashboardPanel', () => {
     expect(await screen.findByText('main')).toBeDefined()
   })
 
+  //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
   it('renders an unrecognized state string without crashing', async () => {
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
@@ -94,6 +97,7 @@ describe('BoardDashboardPanel', () => {
     expect(await screen.findByText('something-new')).toBeDefined()
   })
 
+  //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
   it('shows a stale pill for a status older than 5 minutes', async () => {
     const old = new Date(Date.now() - 10 * 60 * 1000).toISOString()
     vi.stubGlobal('fetch', fetchRouter({
@@ -108,6 +112,7 @@ describe('BoardDashboardPanel', () => {
     expect(await screen.findByText('stale')).toBeDefined()
   })
 
+  //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
   it('does not show a stale pill for a recent status', async () => {
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
@@ -209,6 +214,7 @@ describe('BoardDashboardPanel', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
   it('restores focus to the previously focused element when it closes', async () => {
     const trigger = document.createElement('button')
     document.body.appendChild(trigger)
@@ -326,6 +332,7 @@ describe('BoardDashboardPanel work summaries', () => {
     expect(summary.style.overflow).toBe('hidden')
   })
 
+  //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
   it('shows the pane title next to the ID so the column is readable', async () => {
     renderPanel({ 'pane-1755': { updated_at: new Date().toISOString() } }, [{ id: 'pane-1755', title: 'Board Main' }])
 
@@ -333,6 +340,7 @@ describe('BoardDashboardPanel work summaries', () => {
     expect(screen.getByText('Board Main')).toBeDefined()
   })
 
+  //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
   it('falls back to the ID alone when a pane has no title', async () => {
     renderPanel({ 'pane-1755': { updated_at: new Date().toISOString() } }, [{ id: 'pane-1755' }])
 

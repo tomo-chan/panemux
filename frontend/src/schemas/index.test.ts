@@ -1224,21 +1224,21 @@ describe('BoardStatusEntrySchema', () => {
         quiet: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' },
       },
     })
-    expect(result.success).toBe(true)
+    expect(result).toMatchObject({ success: true, data: { participation: {} } })
   })
 })
 
 describe('BoardStatusResponseSchema', () => {
   it('accepts an empty statuses map', () => {
     const result = BoardStatusResponseSchema.safeParse({ participation: {}, statuses: {} })
-    expect(result.success).toBe(true)
+    expect(result).toMatchObject({ success: true, data: { participation: {} } })
   })
 
   it('accepts a populated statuses map keyed by pane id', () => {
     const result = BoardStatusResponseSchema.safeParse({
       participation: {}, statuses: { main: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' } },
     })
-    expect(result.success).toBe(true)
+    expect(result).toMatchObject({ success: true, data: { participation: {} } })
   })
 
   it('rejects statuses given as an array instead of a map', () => {
@@ -1246,6 +1246,7 @@ describe('BoardStatusResponseSchema', () => {
       participation: {}, statuses: [{ updated_at: '2026-08-14T12:00:00Z' }],
     })
     expect(result.success).toBe(false)
+    expect(BoardStatusResponseSchema.safeParse({ statuses: {} }).success).toBe(false)
   })
 
   it('rejects a response missing statuses', () => {
@@ -1336,6 +1337,7 @@ describe('BoardMessagesResponseSchema', () => {
     expect(result.success).toBe(false)
   })
 
+  //efficacy:exempt adjacent removed pane-config tests changed attribution; the message epoch contract is unchanged
   it('rejects a response missing epoch', () => {
     // epoch is what lets a client notice the server-side cache restarted and
     // renumbered its seq values; without it a stale cursor silently freezes

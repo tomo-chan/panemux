@@ -345,6 +345,8 @@ func TestGlobalBoardIncludesShellAddressesAndPublishesParticipation(t *testing.T
 	require.False(t, state.Instructed)
 	watcher.pollOnce(context.Background())
 	require.True(t, cache.ParticipationSnapshot()["agent"].Instructed)
+	require.False(t, cache.ParticipationSnapshot()["shell"].Instructed)
+	require.Empty(t, cache.ParticipationSnapshot()["shell"].AgentType)
 	agentSession.detectOK = false
 	watcher.pollOnce(context.Background())
 	require.Empty(t, cache.ParticipationSnapshot()["agent"].AgentType)
