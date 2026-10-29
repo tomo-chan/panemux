@@ -32,7 +32,7 @@ func TestBootstrapPreservesSeparatePathAndPresenceWarnings(t *testing.T) {
 	watcher := newBootstrapWatcher(bootstrapWatcherConfig{
 		ParticipationForHost: func(string) board.Participation { return client },
 	})
-	pathWarning := `agent board bootstrap: no resolved agmsg_path for host "ssh:dev" (pane "pane-a")`
+	pathWarning := `agent board bootstrap: no resolved agmsg installation path for host "ssh:dev" (pane "pane-a")`
 	probeWarning := `agent board bootstrap: checking agmsg presence on host "ssh:dev" (pane "pane-a"): ` +
 		`agmsg: checking remote scripts/api.sh presence: presence offline`
 	probe := func() {

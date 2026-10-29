@@ -26,7 +26,7 @@ func setupBoard(
 	cache := board.NewBoardCache()
 	paneHosts := map[string]string{}
 	for _, pane := range cfg.AllPanes() {
-		if pane.AgentBoard.Enabled == nil || !*pane.AgentBoard.Enabled {
+		if !cfg.AgentBoard.Enabled {
 			continue
 		}
 		target, ok := boardHostForPane(cfg, pane)
@@ -36,6 +36,7 @@ func setupBoard(
 			continue
 		}
 		paneHosts[pane.ID] = target.BoardID()
+		cache.RecordParticipation(pane.ID, target.BoardID(), "", false)
 	}
 	clients := map[string]board.MessageClient{}
 	participants := map[string]board.Participation{}
@@ -44,7 +45,7 @@ func setupBoard(
 			id := target.BoardID()
 			runner := host.Bind(execution.WithoutDialWait(), target)
 			client := agmsg.NewClient(agmsg.ClientConfig{
-				HostID: id, Path: cfg.AgentBoard.AgmsgPath, Runner: runner, SendRunner: host.Bind(execution, target),
+				HostID: id, Runner: runner, SendRunner: host.Bind(execution, target),
 			})
 			clients[id] = client
 			participants[id] = client
@@ -66,6 +67,7 @@ func setupBoard(
 		PaneModes:            func() map[string]string { return currentPaneModes(cfg) },
 		ParticipationForHost: func(id string) board.Participation { return participants[id] },
 		Team:                 cfg.AgentBoard.Team, Persist: persistBootstrapState,
+		Observe: cache.RecordParticipation,
 	})
 	if path, err := board.DefaultBootstrapStateFilePath(); err == nil {
 		if ids, err := board.LoadBootstrapState(path); err == nil {
@@ -79,8 +81,8 @@ func setupBoard(
 func currentPaneModes(cfg *config.Config) map[string]string {
 	modes := map[string]string{}
 	for _, p := range cfg.AllPanes() {
-		if p.AgentBoard.Enabled != nil && *p.AgentBoard.Enabled {
-			modes[p.ID] = p.AgentBoard.Mode
+		if cfg.AgentBoard.Enabled {
+			modes[p.ID] = cfg.AgentBoard.Mode
 		}
 	}
 	return modes

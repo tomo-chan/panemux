@@ -1,4 +1,32 @@
 {
+  "participation": {
+    "pane-build": {
+      "agent_type": "",
+      "host": "",
+      "instructed": false,
+      "last_report": "2026-01-01T00:00:00Z",
+      "pane_id": "pane-build"
+    },
+    "pane-detected": {
+      "agent_type": "codex",
+      "host": "ssh:build",
+      "instructed": false,
+      "pane_id": "pane-detected"
+    },
+    "pane-editor": {
+      "agent_type": "claude",
+      "host": "local",
+      "instructed": true,
+      "last_report": "2026-01-01T00:00:00Z",
+      "pane_id": "pane-editor"
+    },
+    "pane-shell": {
+      "agent_type": "",
+      "host": "local",
+      "instructed": false,
+      "pane_id": "pane-shell"
+    }
+  },
   "statuses": {
     "pane-build": {
       "state": "idle",

@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import {
   DisplayConfigSchema,
+  AgentBoardConfigSchema,
   HostSessionNameSchema,
   HostTerminalSchema,
   GitInfoSchema,
@@ -1218,7 +1219,7 @@ describe('BoardStatusEntrySchema', () => {
 
   it('keeps every other pane readable when one pane reports a very long summary', () => {
     const result = BoardStatusResponseSchema.safeParse({
-      statuses: {
+      participation: {}, statuses: {
         chatty: { updated_at: '2026-08-14T12:00:00Z', summary: 'x'.repeat(10000) },
         quiet: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' },
       },
@@ -1229,20 +1230,20 @@ describe('BoardStatusEntrySchema', () => {
 
 describe('BoardStatusResponseSchema', () => {
   it('accepts an empty statuses map', () => {
-    const result = BoardStatusResponseSchema.safeParse({ statuses: {} })
+    const result = BoardStatusResponseSchema.safeParse({ participation: {}, statuses: {} })
     expect(result.success).toBe(true)
   })
 
   it('accepts a populated statuses map keyed by pane id', () => {
     const result = BoardStatusResponseSchema.safeParse({
-      statuses: { main: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' } },
+      participation: {}, statuses: { main: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' } },
     })
     expect(result.success).toBe(true)
   })
 
   it('rejects statuses given as an array instead of a map', () => {
     const result = BoardStatusResponseSchema.safeParse({
-      statuses: [{ updated_at: '2026-08-14T12:00:00Z' }],
+      participation: {}, statuses: [{ updated_at: '2026-08-14T12:00:00Z' }],
     })
     expect(result.success).toBe(false)
   })
@@ -1344,66 +1345,19 @@ describe('BoardMessagesResponseSchema', () => {
   })
 })
 
-describe('PaneConfigSchema agent_board round-trip', () => {
-  // Regression test for silent config loss: the layout tree is parsed with
-  // this schema and PUT back wholesale on any edit, so a field the schema
-  // drops is deleted from config.yaml by an unrelated action — verified
-  // against a real server, where one browser-shaped layout PUT removed a
-  // pane's agent_board entirely and turned the dashboard off.
-  it('preserves agent_board through a parse', () => {
-    const pane = {
-      id: 'api',
-      type: 'local' as const,
-      title: 'API',
-      agent_board: { enabled: true, mode: 'turn' as const },
-    }
-
-    const parsed = PaneConfigSchema.parse(pane)
-
-    expect(parsed.agent_board).toEqual({ enabled: true, mode: 'turn' })
-  })
-
-  it('accepts a pane with no agent_board at all', () => {
-    const parsed = PaneConfigSchema.parse({ id: 'api', type: 'local' })
-    expect(parsed.agent_board).toBeUndefined()
-  })
-
-  it('accepts every mode the backend validates', () => {
+describe('global board configuration', () => {
+  it('validates the global settings and rejects unknown modes and nonboolean flags', () => {
+    const config = { enabled: true, team: 'panemux', mode: 'monitor', agmsg_auto_update: false }
     for (const mode of ['monitor', 'turn', 'both', 'off']) {
-      const parsed = PaneConfigSchema.parse({ id: 'api', type: 'local', agent_board: { enabled: true, mode } })
-      expect(parsed.agent_board?.mode).toBe(mode)
+      expect(AgentBoardConfigSchema.safeParse({ ...config, mode }).success).toBe(true)
+    }
+    for (const invalid of [{ mode: 'watch' }, { enabled: 'yes' }, { agmsg_auto_update: 1 }]) {
+      expect(AgentBoardConfigSchema.safeParse({ ...config, ...invalid }).success).toBe(false)
     }
   })
-
-  it('rejects a mode the backend does not know', () => {
-    const result = PaneConfigSchema.safeParse({
-      id: 'api',
-      type: 'local',
-      agent_board: { enabled: true, mode: 'watch' },
-    })
-    expect(result.success).toBe(false)
-  })
-
-  it('rejects a non-boolean enabled', () => {
-    const result = PaneConfigSchema.safeParse({ id: 'api', type: 'local', agent_board: { enabled: 'yes' } })
-    expect(result.success).toBe(false)
-  })
-
-  //efficacy:exempt not a test this branch changed. The gate attributes it
-  // because the describe block added at the end of this file follows it, and a
-  // case's range runs to the next declaration. Its subject is agent_board
-  // round-tripping, which this branch does not touch.
-  it('survives a full layout parse, not just a bare pane', () => {
-    const layout = {
-      direction: 'horizontal' as const,
-      children: [
-        { size: 100, pane: { id: 'api', type: 'local' as const, agent_board: { enabled: true, mode: 'both' as const } } },
-      ],
-    }
-
-    const parsed = LayoutNodeSchema.parse(layout)
-
-    expect(parsed.children[0].pane?.agent_board).toEqual({ enabled: true, mode: 'both' })
+  it('does not round trip removed pane-level settings', () => {
+    const parsed = PaneConfigSchema.parse({ id: 'a', type: 'local', agent_board: { enabled: true } })
+    expect(parsed).not.toHaveProperty('agent_board')
   })
 })
 

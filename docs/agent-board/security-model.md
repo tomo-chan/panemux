@@ -42,7 +42,7 @@ host are therefore trusted; Agent Board does not provide end-to-end encryption.
 
 agmsg's `--force` permits arbitrary sender names. The relay accepts:
 
-- a pane sender only on the host that owns that board-enabled pane: the local host for local
+- a pane sender only on the host that owns that configured pane: the local host for local
   panes, or the exact `ssh_connections` key named by an SSH pane; a `~/.ssh/config`-only pane has
   no board host and its rows are rejected as unknown senders;
 - `_system` only when the row matches a recent panemux-originated send in the own-send ledger.
@@ -58,8 +58,20 @@ accepted under panemux's existing same-user trust model.
 ### Command center authority
 
 The command center has the same bearer-token gate as the board API and can address every
-board-enabled pane. Its subprocess receives only the three board MCP tools, isolated settings, an
+configured pane. Its subprocess receives only the three board MCP tools, isolated settings, an
 empty working directory, and sandboxing. It receives neither shell nor filesystem access.
 
 A delivered message is not pre-authorized action. The receiving agent's normal approval and safety
 rules continue to apply.
+
+### Global participation consent
+
+Top-level enablement authorizes participation instructions to all detected agent panes on hosts
+with agmsg. Global `turn` and `both` modes allow agmsg to write project-local hooks. Disabling
+Agent Board does not remove those files. Sender validation now accepts every configured pane
+on its owning host, including shells that have never been detected as agents or bootstrapped.
+The same-host, same-user trust boundary is unchanged, but more configured identities can be
+impersonated by a process inside that boundary. Visibility in the dashboard grants no authority.
+
+The installer follow-up will require trust in panemux's pinned agmsg commit on every target host,
+including unattended updates. That capability is not implemented in this part.

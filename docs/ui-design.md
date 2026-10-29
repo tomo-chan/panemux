@@ -208,7 +208,7 @@ This model deliberately favors spatial predictability over hidden container sele
 
 The frontend now uses modal dialogs for higher-friction configuration tasks, rather than trying to compress all editing into inline chrome.
 
-![The Pane Settings modal centred over a dimmed workspace, with type, shell, working directory and title fields, the Agent Board options, and Cancel and Save buttons.](images/pane-settings.png)
+![The Pane Settings modal centred over a dimmed workspace, with type, shell, working directory and title fields, and Cancel and Save buttons.](images/pane-settings.png)
 
 ### Keyboard behaviour, shared by every modal
 
@@ -652,8 +652,9 @@ Agent Board reuses the existing modal, panel, color, status, and focus-restorati
 - Opens from the Agent Board button or `Cmd/Ctrl+Shift+B`; both are absent when the capability is
   disabled.
 - Appears as a right-side overlay and closes by button, backdrop, or `Escape`.
-- Lists the union of configured board panes and panes still reporting. A configured pane with no
-  report remains visible as `not joined`; a removed pane with a report does not disappear silently.
+- Lists panes with a detected agent or a status report. Idle shells remain hidden until reporting.
+  A detected pane without a report shows `agent detected` or `instruction sent`; neither claims a
+  successful join. Pane Settings has no board controls; global enablement and mode live in YAML.
 - Shows pane ID, title, state, summary, last tool, and report age. It does not show self-reported
   repository, branch, or PR values because the pane header already provides panemux-derived values.
 - Treats state as free text and maps known states to the existing status palette: `working` green,

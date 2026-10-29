@@ -15,10 +15,10 @@ panemux_runtime "$panemux_toolchain_root" || exit 1
 
 E2E_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Must match agent-board-agmsg.yml's agent_board.agmsg_path.
-E2E_AGMSG_DIR=/tmp/panemux-e2e-agmsg
+E2E_HOME=$(mktemp -d "${TMPDIR:-/tmp}/panemux-e2e-agmsg-home.XXXXXX") || exit 1
+export E2E_HOME
+E2E_AGMSG_DIR="$E2E_HOME/.agents/skills/agmsg"
 
-rm -rf "$E2E_AGMSG_DIR"
 mkdir -p "$E2E_AGMSG_DIR/scripts"
 cp "$E2E_DIR/fixtures/agmsg/scripts/api.sh" "$E2E_AGMSG_DIR/scripts/api.sh"
 cp "$E2E_DIR/fixtures/agmsg/scripts/send.sh" "$E2E_AGMSG_DIR/scripts/send.sh"

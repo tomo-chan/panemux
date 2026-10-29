@@ -35,10 +35,9 @@ func TestSetupBoard_ReturnsNonNilBootstrapWatcher(t *testing.T) {
 // identical errors in the first 25 seconds — which buries the one line
 // naming the cause in precisely the situation the README calls the most
 // likely first failure.
-func boolPtr(v bool) *bool { return &v }
 
-func paneConfig(id string, board config.PaneAgentBoardConfig) *config.PaneConfig {
-	return &config.PaneConfig{ID: id, Type: "local", AgentBoard: board}
+func paneConfig(id string) *config.PaneConfig {
+	return &config.PaneConfig{ID: id, Type: "local"}
 }
 
 func configWithPanes(panes ...*config.PaneConfig) *config.Config {
@@ -59,50 +58,12 @@ func configWithPanes(panes ...*config.PaneConfig) *config.Config {
 }
 
 func TestCurrentPaneModes(t *testing.T) {
-	tests := []struct {
-		want  map[string]string
-		name  string
-		panes []*config.PaneConfig
-	}{
-		{
-			name:  "no panes at all",
-			panes: nil,
-			want:  map[string]string{},
-		},
-		{
-			name:  "enabled pane contributes its mode",
-			panes: []*config.PaneConfig{paneConfig("a", config.PaneAgentBoardConfig{Enabled: boolPtr(true), Mode: "auto"})},
-			want:  map[string]string{"a": "auto"},
-		},
-		{
-			name:  "explicitly disabled pane is omitted",
-			panes: []*config.PaneConfig{paneConfig("a", config.PaneAgentBoardConfig{Enabled: boolPtr(false), Mode: "auto"})},
-			want:  map[string]string{},
-		},
-		{
-			name:  "an unset Enabled pointer is not enabled",
-			panes: []*config.PaneConfig{paneConfig("a", config.PaneAgentBoardConfig{Mode: "auto"})},
-			want:  map[string]string{},
-		},
-		{
-			name:  "an enabled pane with no mode still appears, with the empty mode",
-			panes: []*config.PaneConfig{paneConfig("a", config.PaneAgentBoardConfig{Enabled: boolPtr(true)})},
-			want:  map[string]string{"a": ""},
-		},
-		{
-			name: "a mix reports only the enabled panes",
-			panes: []*config.PaneConfig{
-				paneConfig("a", config.PaneAgentBoardConfig{Enabled: boolPtr(true), Mode: "auto"}),
-				paneConfig("b", config.PaneAgentBoardConfig{Enabled: boolPtr(false), Mode: "manual"}),
-				paneConfig("c", config.PaneAgentBoardConfig{Enabled: boolPtr(true), Mode: "manual"}),
-			},
-			want: map[string]string{"a": "auto", "c": "manual"},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, currentPaneModes(configWithPanes(tc.panes...)))
-		})
+	cfg := configWithPanes(paneConfig("a"), paneConfig("b"))
+	assert.Empty(t, currentPaneModes(cfg))
+	cfg.AgentBoard.Enabled = true
+	for _, mode := range []string{"monitor", "turn", "both", "off"} {
+		cfg.AgentBoard.Mode = mode
+		assert.Equal(t, map[string]string{"a": mode, "b": mode}, currentPaneModes(cfg))
 	}
 }
 
@@ -196,8 +157,11 @@ func TestPersistBootstrapState_UnwritableLocation_DoesNotPanic(t *testing.T) {
 // installAgmsg creates the shape the presence probe looks for: an install
 // root carrying scripts/api.sh. version, when non-empty, is written to the
 // VERSION file agmsg's own installer maintains.
-func installAgmsg(t *testing.T, root, version string) string {
+func installAgmsg(t *testing.T, version string) string {
 	t.Helper()
+	home, err := homedir.Dir()
+	require.NoError(t, err)
+	root := filepath.Join(home, ".agents", "skills", "agmsg")
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "scripts"), 0o700))
 	// The presence probe only checks this file, so a non-executable stub is
 	// enough — and gosec's G306 wants 0600 or less even on a fixture.

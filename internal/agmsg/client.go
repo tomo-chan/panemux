@@ -9,21 +9,12 @@ import (
 	"log"
 	"panemux/internal/board"
 	"panemux/internal/host"
-	"strings"
 	"sync"
 	"time"
 )
 
 const boardStartupProbeTimeout = 10 * time.Second
 const DefaultPath = "~/.agents/skills/agmsg"
-
-// ValidatePath preserves the public configuration contract.
-func ValidatePath(path string) error {
-	if path != "" && !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "~/") {
-		return fmt.Errorf("agent_board.agmsg_path %q must be an absolute path or start with ~/", path)
-	}
-	return nil
-}
 
 // ClientConfig binds a message transport to one host. Polling does not wait for
 // a pending dial; sends can use the waiting execution lane independently.
@@ -172,7 +163,7 @@ func (c *Client) participationRoot(ctx context.Context) (string, error) {
 	return path, nil
 }
 func (c *Client) Description() board.ParticipationDescription {
-	return board.ParticipationDescription{Name: "agmsg", PathSetting: "agmsg_path"}
+	return board.ParticipationDescription{Name: "agmsg", PathSetting: "agmsg installation path"}
 }
 func (c *Client) ValidateAddress(team, paneID string) error {
 	if err := validateIdentifiers(team, paneID, paneID); err != nil {

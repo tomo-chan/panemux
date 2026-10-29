@@ -111,7 +111,7 @@ history entries.
 
 ### Relay invariants
 
-- A row is accepted only when its sender is a board-enabled pane on the source host, or a
+- A row is accepted only when its sender is a configured pane on the source host, or a
   ledger-matched panemux send attributed to `_system`.
 - Status rows update the cache and are not forwarded to another host.
 - Same-host messages remain within that host's agmsg installation.

@@ -8,8 +8,7 @@ import {
 } from './agent-board-helpers'
 
 // Runs against the agent-board.yml fixture (playwright.config.ts's
-// chromium-agent-board project): one pane with agent_board.enabled: true and
-// an agmsg_path that deliberately points at a directory containing no agmsg
+// chromium-agent-board project): global enablement with no agmsg under its fake HOME
 // installation. That is the realistic first-run state — panemux never
 // installs agmsg itself (see docs/security.md) — so the board cache stays
 // empty and the dashboard renders its empty states, against a real server.
@@ -42,23 +41,12 @@ test('opens the dashboard with the keyboard shortcut while a terminal pane holds
   await expect(boardDialog(page)).toBeHidden()
 })
 
-test('lists a board-enabled pane as not joined when no agmsg installation exists', async ({ page }) => {
+test('omits idle shells when no agent or report exists', async ({ page }) => {
   await gotoAndReadSessionToken(page)
   await boardOpenButton(page).click()
-
-  const panel = boardDialog(page)
-  // The fixture's one pane has agent_board.enabled but no agmsg to report
-  // through, which is exactly the state the "not joined" pill exists for:
-  // before, this pane rendered as nothing at all, indistinguishable from a
-  // pane that was never put on the board.
-  await expect(panel.getByText('board-main')).toBeVisible()
-  await expect(panel.getByText('not joined')).toBeVisible()
-  await expect(panel.getByText('No messages yet.')).toBeVisible()
-  // A missing agmsg installation is not an API failure: /api/board/status
-  // and /api/board/messages both answer 200 from an empty cache, so no
-  // error banner belongs in this state.
-  await expect(panel).not.toContainText('Failed to load board status')
-  await expect(panel).not.toContainText('Not authorized to view the agent board.')
+  const panel = page.getByRole('dialog', { name: 'Agent board' })
+  await expect(panel.getByText('No agent detected or status reported yet.')).toBeVisible()
+  await expect(panel.getByText('board-main', { exact: true })).toHaveCount(0)
 })
 
 test('polls the board API with a bearer token only while the dashboard is open', async ({ page }) => {

@@ -7,10 +7,6 @@
         "children": [
           {
             "pane": {
-              "agent_board": {
-                "enabled": true,
-                "mode": "both"
-              },
               "cwd": "/workspace/user/project",
               "id": "pane-editor",
               "shell": "/bin/sh",
@@ -25,7 +21,6 @@
             "children": [
               {
                 "pane": {
-                  "agent_board": {},
                   "connection": "build-box",
                   "cwd": "/remote/home/demo",
                   "id": "pane-build",
@@ -36,7 +31,6 @@
               },
               {
                 "pane": {
-                  "agent_board": {},
                   "connection": "build-box",
                   "id": "pane-logs",
                   "title": "Logs",
@@ -60,7 +54,6 @@
         "children": [
           {
             "pane": {
-              "agent_board": {},
               "id": "pane-scratch",
               "tmux_session": "scratch",
               "type": "tmux"
@@ -70,10 +63,6 @@
         ],
         "direction": "horizontal",
         "pane": {
-          "agent_board": {
-            "enabled": true,
-            "mode": "monitor"
-          },
           "connection": "build-box",
           "cwd": "/workspace/user/project",
           "id": "pane-scratch",
@@ -93,7 +82,6 @@
         "children": [
           {
             "pane": {
-              "agent_board": {},
               "id": "pane-solo",
               "title": "Solo",
               "type": "local"

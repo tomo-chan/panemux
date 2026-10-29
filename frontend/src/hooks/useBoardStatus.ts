@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BoardMessage, BoardMessagesResponseSchema, BoardStatusEntry, BoardStatusResponseSchema } from '../schemas'
+import { BoardParticipation, BoardMessage, BoardMessagesResponseSchema, BoardStatusEntry, BoardStatusResponseSchema } from '../schemas'
 
 const BOARD_STATUS_POLL_INTERVAL_MS = 5000
 const MAX_MESSAGES = 500
@@ -10,6 +10,7 @@ interface UseBoardStatusOptions {
 }
 
 export interface UseBoardStatusResult {
+  participation: Record<string, BoardParticipation>
   statuses: Record<string, BoardStatusEntry>
   messages: BoardMessage[]
   error: string | null
@@ -26,6 +27,7 @@ function errorMessageForStatus(status: number): string {
 // snapshot, while GET /api/board/messages?since=<seq> is incremental against
 // panemux's own monotonic cursor (not an agmsg-native id).
 export function useBoardStatus({ enabled, token }: UseBoardStatusOptions): UseBoardStatusResult {
+  const [participation, setParticipation] = useState<Record<string, BoardParticipation>>({})
   const [statuses, setStatuses] = useState<Record<string, BoardStatusEntry>>({})
   const [messages, setMessages] = useState<BoardMessage[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -58,7 +60,7 @@ export function useBoardStatus({ enabled, token }: UseBoardStatusOptions): UseBo
         statusError = errorMessageForStatus(res.status)
       } else {
         const data = BoardStatusResponseSchema.parse(await res.json())
-        if (!cancelledRef.current) setStatuses(data.statuses)
+        if (!cancelledRef.current) { setStatuses(data.statuses); setParticipation(data.participation) }
       }
     } catch {
       statusError = 'Failed to load board status.'
@@ -150,5 +152,5 @@ export function useBoardStatus({ enabled, token }: UseBoardStatusOptions): UseBo
     }
   }, [enabled, token, isVisible, poll])
 
-  return { statuses, messages, error }
+  return { statuses, participation, messages, error }
 }

@@ -11,7 +11,6 @@ import (
 
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
-	"panemux/internal/config"
 )
 
 // loopbackIPv4 is the literal IPv4 loopback host string, as it appears in a
@@ -30,7 +29,8 @@ type boardStatusEntry struct {
 }
 
 type boardStatusResponse struct {
-	Statuses map[string]boardStatusEntry `json:"statuses"`
+	Statuses      map[string]boardStatusEntry        `json:"statuses"`
+	Participation map[string]board.PaneParticipation `json:"participation"`
 }
 
 // GetBoardStatus returns a snapshot of the board's in-memory status cache.
@@ -38,7 +38,10 @@ type boardStatusResponse struct {
 // the cache current (see docs/agent-board.md's Architecture section).
 func (h *Handler) GetBoardStatus(w http.ResponseWriter, r *http.Request) {
 	snapshot := h.boardCache.StatusSnapshot()
-	resp := boardStatusResponse{Statuses: make(map[string]boardStatusEntry, len(snapshot))}
+	resp := boardStatusResponse{
+		Statuses:      make(map[string]boardStatusEntry, len(snapshot)),
+		Participation: h.boardCache.ParticipationSnapshot(),
+	}
 	for paneID, s := range snapshot {
 		resp.Statuses[paneID] = boardStatusEntry{
 			State:     s.State,
@@ -203,21 +206,6 @@ type boardSessionTokenResponse struct {
 	AgentBoardEnabled    bool   `json:"agent_board_enabled"`
 }
 
-// agentBoardEnabledAnyPane reports whether at least one pane in cfg has
-// agent_board.enabled: true. command_center_enabled alone can't gate the
-// dashboard UI: a config can enable agent_board without the command center,
-// and vice versa. This is recomputed on every request rather than cached at
-// Handler construction, matching the rest of this handler's read-cfg-live
-// pattern (see GetBoardSessionToken's own use of h.cfg.Server.AuthToken).
-func agentBoardEnabledAnyPane(cfg *config.Config) bool {
-	for _, pane := range cfg.AllPanes() {
-		if pane.AgentBoard.Enabled != nil && *pane.AgentBoard.Enabled {
-			return true
-		}
-	}
-	return false
-}
-
 // GetBoardSessionToken lets the same-origin dashboard learn the bearer
 // token panemux generated or was configured with, so its own JavaScript can
 // authenticate the /api/board/* requests and the /ws/board/command
@@ -267,7 +255,7 @@ func (h *Handler) GetBoardSessionToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.cfgMu.RLock()
-	agentBoardEnabled := agentBoardEnabledAnyPane(h.cfg)
+	agentBoardEnabled := h.cfg.AgentBoard.Enabled
 	h.cfgMu.RUnlock()
 	writeJSON(w, boardSessionTokenResponse{
 		Token:                h.cfg.Server.AuthToken,

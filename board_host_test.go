@@ -77,7 +77,7 @@ func TestBoardHostWithoutPanesSharesTaskConnectionAndRecovers(t *testing.T) {
 			return c, nil
 		}})
 	t.Cleanup(p.Close)
-	cfg := boardEnabledConfig("/opt/agmsg", paneConfig("local-agent", config.PaneAgentBoardConfig{Enabled: boolPtr(true)}))
+	cfg := boardEnabledConfig(paneConfig("local-agent"))
 	cfg.SSHConnections = map[string]config.SSHConnection{"dev": {}}
 	_, relay, _ := setupBoard(cfg, session.NewManager(), p)
 	_, err := p.Connect(context.Background(), "dev")
@@ -118,10 +118,10 @@ func TestBoardPaneHostMatchesOnlyConfiguredName(t *testing.T) {
 func TestBoardExcludedPaneWarnsWithConfigurationRemedy(t *testing.T) {
 	isolatedHome(t)
 	logs := captureBoardLog(t)
-	pane := paneConfig("excluded", config.PaneAgentBoardConfig{Enabled: boolPtr(true)})
+	pane := paneConfig("excluded")
 	pane.Type = "ssh"
 	pane.Connection = "ssh-config-only"
-	cfg := boardEnabledConfig("/opt/agmsg", pane)
+	cfg := boardEnabledConfig(pane)
 	p := hostexec.New(hostexec.Options{})
 	defer p.Close()
 	_, relay, bootstrap := setupBoard(cfg, session.NewManager(), p)
@@ -200,7 +200,7 @@ func TestBoardPendingDialDoesNotDelayHealthyHost(t *testing.T) {
 	defer pool.Close()
 	_, err := pool.Connect(context.Background(), "b-live")
 	require.NoError(t, err)
-	cfg := boardEnabledConfig("/opt/agmsg", paneConfig("local-agent", config.PaneAgentBoardConfig{Enabled: boolPtr(true)}))
+	cfg := boardEnabledConfig(paneConfig("local-agent"))
 	_, relay, _ := setupBoard(cfg, session.NewManager(), pool)
 	for range 2 {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -239,14 +239,14 @@ func TestSetupBoardBootstrapUsesSharedRunner(t *testing.T) {
 	sess := &fakeAgentSession{id: "pane-a", detectType: "codex", detectOK: true}
 	manager := session.NewManager()
 	manager.Add(sess)
-	cfg := boardEnabledConfig(installAgmsg(t, t.TempDir(), agmsg.TestedAgmsgVersion),
-		paneConfig("pane-a", config.PaneAgentBoardConfig{Enabled: boolPtr(true)}))
+	installAgmsg(t, agmsg.TestedAgmsgVersion)
+	cfg := boardEnabledConfig(paneConfig("pane-a"))
 	srv, _, watcher := buildServerServices(cfg, manager)
 	defer func() { require.NoError(t, srv.Shutdown(context.Background())) }()
 	watcher.pollOnce(context.Background())
 	watcher.pollOnce(context.Background())
 	require.Len(t, sess.writes, 1)
-	require.Contains(t, string(sess.writes[0]), cfg.AgentBoard.AgmsgPath)
+	require.Contains(t, string(sess.writes[0]), "/.agents/skills/agmsg/scripts/join.sh")
 }
 
 func TestBootstrapWithoutHostRunnerDoesNotWrite(t *testing.T) {
@@ -282,9 +282,9 @@ func TestBoardSendWaitsForDialBeforePollAndAfterConnectionLoss(t *testing.T) {
 			pool := hostexec.New(hostexec.Options{Hosts: func() []string { return []string{"dev"} },
 				Dial: func(string) (hostexec.Conn, error) { started <- struct{}{}; <-gate; return conn, nil }})
 			defer pool.Close()
-			pane := paneConfig("remote-agent", config.PaneAgentBoardConfig{Enabled: boolPtr(true)})
+			pane := paneConfig("remote-agent")
 			pane.Type, pane.Connection = "ssh", "dev"
-			cfg := boardEnabledConfig("/opt/agmsg", pane)
+			cfg := boardEnabledConfig(pane)
 			cfg.SSHConnections = map[string]config.SSHConnection{"dev": {}}
 			_, relay, _ := setupBoard(cfg, session.NewManager(), pool)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -323,4 +323,34 @@ func TestBoardSendWaitsForDialBeforePollAndAfterConnectionLoss(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGlobalBoardIncludesShellAddressesAndPublishesParticipation(t *testing.T) {
+	isolatedHome(t)
+	installAgmsg(t, agmsg.TestedAgmsgVersion)
+	manager := session.NewManager()
+	agentSession := &fakeAgentSession{id: "agent", detectType: "codex", detectOK: true}
+	manager.Add(agentSession)
+	cfg := boardEnabledConfig(paneConfig("agent"), paneConfig("shell"))
+	remote := paneConfig("remote-shell")
+	remote.Type, remote.Connection = "ssh", "build"
+	cfg.Workspaces.Items[0].Layout.Children = append(cfg.Workspaces.Items[0].Layout.Children,
+		config.LayoutChild{Pane: remote})
+	cfg.SSHConnections = map[string]config.SSHConnection{"build": {}}
+	cache, _, watcher := setupTestBoard(t, cfg, manager)
+	require.Equal(t, map[string]string{"agent": "local", "shell": "local", "remote-shell": "ssh:build"}, watcher.paneHosts)
+	watcher.pollOnce(context.Background())
+	state := cache.ParticipationSnapshot()["agent"]
+	require.Equal(t, "codex", state.AgentType)
+	require.False(t, state.Instructed)
+	watcher.pollOnce(context.Background())
+	require.True(t, cache.ParticipationSnapshot()["agent"].Instructed)
+	agentSession.detectOK = false
+	watcher.pollOnce(context.Background())
+	require.Empty(t, cache.ParticipationSnapshot()["agent"].AgentType)
+	require.True(t, cache.ParticipationSnapshot()["agent"].Instructed)
+	cfg.AgentBoard.Enabled = false
+	_, relay, disabled := setupTestBoard(t, cfg, manager)
+	require.False(t, relay.HasClients())
+	require.False(t, disabled.HasWork())
 }

@@ -113,7 +113,7 @@ Common uses:
 ![A local pane split in two: on the left its terminal, which printed the path of an HTML mock; on the right the preview of that mock, under a header naming the host "local" and the file's path, with Reload, Open in new tab and Close.](docs/images/preview.png)
 - **Open VS Code** from supported panes using the pane header action. Like pane Git/PR metadata, this can prefer the live worktree of an interactive `codex` or `claude` session and keeps the last valid sibling worktree pinned after the agent exits until a newer valid context is detected.
 
-![The Pane Settings dialog open over the workspace for a local pane, with fields for type, shell, working directory and title, a "Join the agent board" checkbox, and a message delivery mode.](docs/images/pane-settings.png)
+![The Pane Settings dialog open over the workspace for a local pane, with fields for type, shell, working directory and title.](docs/images/pane-settings.png)
 
 ### Notifications and attention prompts
 
@@ -188,7 +188,7 @@ the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux is test
 blocking. agmsg promises compatibility only for reading through `scripts/api.sh`, while panemux also
 depends on `send.sh`, `join.sh` and `delivery.sh`, so a different version may work or may misbehave. panemux never installs, updates, or
 manages agmsg; it only detects an existing installation by looking for `scripts/api.sh` under the
-configured path. If it isn't there, panemux logs one warning naming the host and the path it looked in,
+fixed `~/.agents/skills/agmsg` location. If it isn't there, panemux logs one warning naming the host and the path it looked in,
 and skips that host — panes there simply stay off the board, and nothing else about them changes.
 
 The command center additionally needs the `claude` CLI on the machine running panemux. It does **not**
@@ -211,8 +211,10 @@ command_center:
     enabled: true            # default false
 
 agent_board:
-    team: panemux                      # shared agmsg team for all board-enabled panes
-    agmsg_path: ~/.agents/skills/agmsg # ~ is expanded per host, including remote hosts
+    team: panemux                      # shared agmsg team for all participating panes
+    enabled: true                     # default false; all configured panes
+    mode: monitor                     # monitor | turn | both | off
+    agmsg_auto_update: false           # reserved; installer follows in #435
 
 workspaces:
     items:
@@ -224,18 +226,16 @@ workspaces:
                 - pane:
                     id: api          # this id becomes the pane's agmsg identity
                     type: local
-                    agent_board:
-                        enabled: true
-                        mode: monitor  # monitor (default) | turn | both | off
                   size: 50
 ```
 
 Pane ids become board addresses, so give them names you will recognize (`api`, `web`, `infra`) rather
 than `pane-1`. `_system` is reserved and rejected at config validation.
 
-You do not have to edit YAML for this: **Pane Settings** in the pane header has a *Join the agent
-board* checkbox and, once ticked, a *Message delivery* picker for the mode. Changes there are saved
-to `config.yaml` like any other pane setting.
+Set enablement and mode in the top-level YAML block. Pane Settings has no board controls.
+Enabling Agent Board consents to participation instructions for every detected agent on hosts
+with agmsg. With `turn` or `both`, that consent includes project-local hook writes. Removed
+pane-level `agent_board` and `agent_board.agmsg_path` settings cause migration errors.
 
 ### How a pane joins
 
@@ -243,7 +243,7 @@ Joining is automatic — you do not run anything by hand.
 
 1. Start your agent in the pane as usual (`claude`, `codex`, `cursor-agent`, `gemini`, `grok`, or
    `opencode`). panemux polls every 5s and needs to see it on two consecutive polls.
-2. panemux confirms agmsg exists at `agmsg_path` on that pane's host.
+2. panemux confirms agmsg exists at `~/.agents/skills/agmsg` on that pane's host.
 3. It writes a **one-time instruction into the pane's terminal**, asking the agent to run agmsg's
    `join.sh` using the pane id as its agmsg agent id, and from then on to send board messages with
    `send.sh` and to self-report its status periodically.
@@ -314,7 +314,7 @@ Nothing showing up? In order of likelihood:
 
 - **agmsg isn't where panemux looked.** The startup log carries one
   `no agmsg installation at "<path>" on host "<host>"` warning per affected host. Confirm
-  `<agmsg_path>/scripts/api.sh` exists there.
+  `~/.agents/skills/agmsg/scripts/api.sh` exists there.
 - **The agent wasn't detected.** Headless invocations are deliberately ignored (`claude -p`,
   `codex exec`), so the agent must be running interactively in the pane.
 - **The agent hasn't reported yet.** Status is entirely self-reported; panemux computes nothing. A

@@ -16,18 +16,20 @@ export const BoardModeSchema = z.enum(['monitor', 'turn', 'both', 'off'])
 
 export type BoardMode = z.infer<typeof BoardModeSchema>
 
-export const PaneAgentBoardConfigSchema = z.object({
-  enabled: z.boolean().optional(),
-  mode: BoardModeSchema.optional(),
+export const AgentBoardConfigSchema = z.object({
+  enabled: z.boolean(),
+  mode: BoardModeSchema,
+  agmsg_auto_update: z.boolean(),
+  team: z.string(),
 })
 
-export type PaneAgentBoardConfig = z.infer<typeof PaneAgentBoardConfigSchema>
+export type AgentBoardConfig = z.infer<typeof AgentBoardConfigSchema>
 
 // Every field the backend's config.PaneConfig carries must appear here.
 // Zod strips unknown keys, and the layout tree is read, parsed, and PUT back
 // wholesale on any edit — a split, a move, even a debounced resize — so a
 // field missing from this schema is silently deleted from the user's
-// config.yaml by an unrelated action. agent_board was lost exactly that way.
+// config.yaml by an unrelated action.
 export const PaneConfigSchema = z.object({
   id: z.string().min(1),
   type: z.enum(['local', 'ssh', 'tmux', 'ssh_tmux']),
@@ -38,7 +40,6 @@ export const PaneConfigSchema = z.object({
   tmux_session: z.string().max(256).optional(),
   show_header: z.boolean().optional(),
   show_status_bar: z.boolean().optional(),
-  agent_board: PaneAgentBoardConfigSchema.optional(),
 })
 
 export type PaneConfig = z.infer<typeof PaneConfigSchema>
@@ -360,7 +361,17 @@ export const BoardStatusEntrySchema = z.object({
 
 export type BoardStatusEntry = z.infer<typeof BoardStatusEntrySchema>
 
+export const BoardParticipationSchema = z.object({
+  pane_id: z.string(),
+  host: z.string(),
+  agent_type: z.string(),
+  instructed: z.boolean(),
+  last_report: z.string().optional(),
+})
+export type BoardParticipation = z.infer<typeof BoardParticipationSchema>
+
 export const BoardStatusResponseSchema = z.object({
+  participation: z.record(z.string(), BoardParticipationSchema),
   statuses: z.record(z.string(), BoardStatusEntrySchema),
 })
 

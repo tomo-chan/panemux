@@ -529,6 +529,9 @@ var contractFixtures = map[string]contractFixture{
 			Summary:  "Adding the schema round-trip",
 		})
 		e.cache.RecordStatus("pane-build", board.Status{State: "idle"})
+		e.cache.RecordParticipation("pane-editor", "local", "claude", true)
+		e.cache.RecordParticipation("pane-detected", "ssh:build", "codex", false)
+		e.cache.RecordParticipation("pane-shell", "local", "", false)
 
 		rr := e.do(t, http.MethodGet, "/api/board/status", "")
 		require.Equal(t, http.StatusOK, rr.Code)
@@ -842,7 +845,6 @@ func seedRichLayout(cfg *config.Config) {
 					ID: "pane-editor", Type: "local", Shell: "/bin/sh",
 					Cwd: "/workspace/user/project", Title: "Editor",
 					ShowHeader: &enabled, ShowStatusBar: &hidden,
-					AgentBoard: config.PaneAgentBoardConfig{Enabled: &enabled, Mode: "both"},
 				},
 			},
 			{
@@ -881,7 +883,6 @@ func seedRichLayout(cfg *config.Config) {
 				ID: "pane-scratch", Type: "tmux", TmuxSession: "scratch", Title: "Scratch",
 				Shell: "/bin/sh", Cwd: "/workspace/user/project", Connection: "build-box",
 				ShowHeader: &enabled, ShowStatusBar: &hidden,
-				AgentBoard: config.PaneAgentBoardConfig{Enabled: &enabled, Mode: "monitor"},
 			},
 			Children: []config.LayoutChild{
 				{Size: 100, Pane: &config.PaneConfig{ID: "pane-scratch", Type: "tmux", TmuxSession: "scratch"}},

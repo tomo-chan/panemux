@@ -63,6 +63,7 @@ type bootstrapWatcherConfig struct {
 	PaneModes            func() map[string]string
 	ParticipationForHost func(string) board.Participation
 	Persist              func(paneIDs []string)
+	Observe              func(paneID, host, agentType string, instructed bool)
 	Team                 string
 }
 
@@ -75,6 +76,7 @@ type bootstrapWatcherConfig struct {
 // goroutine driving runLoop — nothing else ever reads or writes this
 // watcher's state.
 type bootstrapWatcher struct {
+	observe              func(string, string, string, bool)
 	manager              *session.Manager
 	paneHosts            map[string]string
 	paneModes            func() map[string]string
@@ -140,6 +142,7 @@ const (
 func newBootstrapWatcher(cfg bootstrapWatcherConfig) *bootstrapWatcher {
 	return &bootstrapWatcher{
 		manager:              cfg.Manager,
+		observe:              cfg.Observe,
 		paneHosts:            cfg.PaneHosts,
 		paneModes:            cfg.PaneModes,
 		participationForHost: cfg.ParticipationForHost,
@@ -260,13 +263,9 @@ func (b *bootstrapWatcher) modeFor(paneID string) string {
 // implements.
 func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 	sess, ok := b.sessionFor(paneID)
+	detectedKind := ""
+	defer b.observePane(paneID, host, &detectedKind, sess)
 	if !ok {
-		return
-	}
-	if existing, alreadyBootstrapped := b.bootstrapped[paneID]; alreadyBootstrapped && existing == sess {
-		return
-	}
-	if existing, gaveUp := b.givenUp[paneID]; gaveUp && existing == sess {
 		return
 	}
 
@@ -304,6 +303,10 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 		delete(b.pending, paneID)
 		return
 	}
+	detectedKind = string(agentID)
+	if b.bootstrapped[paneID] == sess || b.givenUp[paneID] == sess {
+		return
+	}
 
 	// Debounce: only proceed once the same session has been seen with an
 	// active, known agent type on two consecutive ticks. This is a partial
@@ -329,6 +332,12 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 	b.clearWarning(paneID, warnKindAbsent)
 
 	b.joinPane(ctx, participant, paneID, agentID, sess)
+}
+
+func (b *bootstrapWatcher) observePane(paneID, host string, kind *string, sess session.Session) {
+	if b.observe != nil {
+		b.observe(paneID, host, *kind, sess != nil && b.bootstrapped[paneID] == sess)
+	}
 }
 
 func (b *bootstrapWatcher) joinPane(

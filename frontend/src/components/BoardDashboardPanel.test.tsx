@@ -10,7 +10,7 @@ function fetchRouter(handlers: {
     const url = String(input)
     if (url.startsWith('/api/board/status')) {
       return Promise.resolve(
-        handlers.status ? handlers.status() : ({ ok: true, json: async () => ({ statuses: {} }) } as Response),
+        handlers.status ? handlers.status() : ({ ok: true, json: async () => ({ participation: {}, statuses: {} }) } as Response),
       )
     }
     if (url.startsWith('/api/board/messages')) {
@@ -42,7 +42,7 @@ describe('BoardDashboardPanel', () => {
       status: () => ({
         ok: true,
         json: async () => ({
-          statuses: {
+          participation: {}, statuses: {
             main: {
               updated_at: new Date().toISOString(),
               state: 'working',
@@ -70,7 +70,7 @@ describe('BoardDashboardPanel', () => {
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
         ok: true,
-        json: async () => ({ statuses: { main: { updated_at: new Date().toISOString() } } }),
+        json: async () => ({ participation: {}, statuses: { main: { updated_at: new Date().toISOString() } } }),
       } as Response),
     }))
 
@@ -84,7 +84,7 @@ describe('BoardDashboardPanel', () => {
       status: () => ({
         ok: true,
         json: async () => ({
-          statuses: { main: { updated_at: new Date().toISOString(), state: 'something-new' } },
+          participation: {}, statuses: { main: { updated_at: new Date().toISOString(), state: 'something-new' } },
         }),
       } as Response),
     }))
@@ -99,7 +99,7 @@ describe('BoardDashboardPanel', () => {
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
         ok: true,
-        json: async () => ({ statuses: { main: { updated_at: old, state: 'idle' } } }),
+        json: async () => ({ participation: {}, statuses: { main: { updated_at: old, state: 'idle' } } }),
       } as Response),
     }))
 
@@ -112,7 +112,7 @@ describe('BoardDashboardPanel', () => {
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
         ok: true,
-        json: async () => ({ statuses: { main: { updated_at: new Date().toISOString(), state: 'idle' } } }),
+        json: async () => ({ participation: {}, statuses: { main: { updated_at: new Date().toISOString(), state: 'idle' } } }),
       } as Response),
     }))
 
@@ -145,7 +145,7 @@ describe('BoardDashboardPanel', () => {
   it('shows the empty states when there are no statuses or messages', async () => {
     render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={vi.fn()} />)
 
-    expect(await screen.findByText('No pane has agent board enabled yet.')).toBeDefined()
+    expect(await screen.findByText('No agent detected or status reported yet.')).toBeDefined()
     expect(screen.getByText('No messages yet.')).toBeDefined()
   })
 
@@ -240,21 +240,17 @@ describe('BoardDashboardPanel connection and activity', () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) =>
       Promise.resolve({
         ok: true,
-        json: async () => (String(url).includes('/status') ? { statuses } : { messages: [], epoch: 'e' }),
+        json: async () => (String(url).includes('/status') ? { participation: {}, statuses } : { messages: [], epoch: 'e' }),
       }),
     ))
     render(<BoardDashboardPanel isOpen token="tok" boardPanes={boardPanes} onClose={vi.fn()} />)
   }
 
-  // The point of the board is telling you whether a pane is actually on it.
-  // Listing only panes that already reported made "configured but never
-  // joined" indistinguishable from "not configured at all".
-  it('lists a board-enabled pane that has never reported', async () => {
+  it('does not list configured shells without detection or reports', async () => {
     renderPanel({}, [{ id: 'api' }, { id: 'web' }])
-
-    expect(await screen.findByText('api')).toBeDefined()
-    expect(screen.getByText('web')).toBeDefined()
-    expect(screen.getAllByText('not joined')).toHaveLength(2)
+    await screen.findByText('No agent detected or status reported yet.')
+    expect(screen.queryByText('api')).toBeNull()
+    expect(screen.queryByText('web')).toBeNull()
   })
 
   it('shows what a joined pane is doing', async () => {
@@ -285,7 +281,7 @@ describe('BoardDashboardPanel connection and activity', () => {
 
   it('keeps the empty state when no pane is board-enabled', async () => {
     renderPanel({}, [])
-    expect(await screen.findByText('No pane has agent board enabled yet.')).toBeDefined()
+    expect(await screen.findByText('No agent detected or status reported yet.')).toBeDefined()
   })
 })
 
@@ -303,7 +299,7 @@ describe('BoardDashboardPanel work summaries', () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) =>
       Promise.resolve({
         ok: true,
-        json: async () => (String(url).includes('/status') ? { statuses } : { messages: [], epoch: 'e' }),
+        json: async () => (String(url).includes('/status') ? { participation: {}, statuses } : { messages: [], epoch: 'e' }),
       }),
     ))
     render(<BoardDashboardPanel isOpen token="tok" boardPanes={boardPanes} onClose={vi.fn()} />)
@@ -331,14 +327,14 @@ describe('BoardDashboardPanel work summaries', () => {
   })
 
   it('shows the pane title next to the ID so the column is readable', async () => {
-    renderPanel({}, [{ id: 'pane-1755', title: 'Board Main' }])
+    renderPanel({ 'pane-1755': { updated_at: new Date().toISOString() } }, [{ id: 'pane-1755', title: 'Board Main' }])
 
     expect(await screen.findByText('pane-1755')).toBeDefined()
     expect(screen.getByText('Board Main')).toBeDefined()
   })
 
   it('falls back to the ID alone when a pane has no title', async () => {
-    renderPanel({}, [{ id: 'pane-1755' }])
+    renderPanel({ 'pane-1755': { updated_at: new Date().toISOString() } }, [{ id: 'pane-1755' }])
 
     expect(await screen.findByText('pane-1755')).toBeDefined()
   })

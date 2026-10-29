@@ -18,6 +18,9 @@
 - Broadcast delivery is immediate, but dashboard history is updated only when the relay polls the
   row back. The visible lag is at most one poll interval under normal operation.
 
+Configured shell panes are valid senders and recipients on their owning hosts even when they
+never receive a participation instruction. The UI lists only detected agents or reporting panes.
+
 ### Delivery guarantees
 
 - Cross-host forwarding is best-effort. A missing destination client or failed send is not retried:
