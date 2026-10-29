@@ -1,4 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
+import {
+  AGENT_BOARD_BASE_URL,
+  AGENT_BOARD_AGMSG_BASE_URL,
+  COMMAND_CENTER_BASE_URL,
+  ownedHomeServers,
+} from './e2e/fixture-servers'
 
 // Some environments (CI images and sandboxes with a preinstalled browser)
 // ship a Chromium build whose revision differs from the one this Playwright
@@ -13,15 +19,12 @@ const chromium = {
   ...(chromiumExecutablePath ? { launchOptions: { executablePath: chromiumExecutablePath } } : {}),
 }
 
-// Each fixture config needs its own panemux process: whether a pane has
-// agent_board.enabled is read from the config file at startup, and the
+// Each fixture config needs its own panemux process: Agent Board enablement
+// is read from the config file at startup, and the
 // Agent Board dashboard UI is gated on it (GET /api/session-token's
 // agent_board_enabled flag), so "enabled" and "not enabled" cannot be two
 // states of one server.
 const DEFAULT_BASE_URL = 'http://127.0.0.1:4173'
-const AGENT_BOARD_BASE_URL = 'http://127.0.0.1:4174'
-const AGENT_BOARD_AGMSG_BASE_URL = 'http://127.0.0.1:4175'
-const COMMAND_CENTER_BASE_URL = 'http://127.0.0.1:4176'
 // core-multiplexer.spec.ts mutates the layout (split, close, resize, workspace
 // CRUD), so it cannot share a server with specs that assert on the default
 // fixture's panes and tabs.
@@ -68,30 +71,12 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
-    {
-      command: 'sh ./e2e/run-panemux-e2e.sh agent-board.yml 4174',
-      gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
-      url: AGENT_BOARD_BASE_URL,
+    ...ownedHomeServers.map(server => ({
+      ...server,
       cwd: '.',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
-    },
-    {
-      command: 'sh ./e2e/run-panemux-agent-board-e2e.sh',
-      gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
-      url: AGENT_BOARD_AGMSG_BASE_URL,
-      cwd: '.',
-      reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
-    },
-    {
-      command: 'sh ./e2e/run-panemux-command-center-e2e.sh',
-      gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
-      url: COMMAND_CENTER_BASE_URL,
-      cwd: '.',
-      reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
-    },
+    })),
     {
       command: 'sh ./e2e/run-panemux-e2e.sh core-multiplexer.yml 4177',
       url: CORE_MULTIPLEXER_BASE_URL,

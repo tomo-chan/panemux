@@ -42,8 +42,8 @@ echo 'fixture-home: success/failure cleanup and shared GOCACHE pass'
 
 if command -v python3 >/dev/null 2>&1; then
     (cd "$here/../.." && scripts/runtime-shell.sh --run node --experimental-strip-types --input-type=module -e '
-import config from "./frontend/playwright.config.ts";
-process.stdout.write(JSON.stringify(config.webServer));
+import { ownedHomeServers } from "./frontend/e2e/fixture-servers.ts";
+process.stdout.write(JSON.stringify(ownedHomeServers));
 ') > "$work/servers.json"
     python3 "$here/fixture-home-shutdown_test.py" "$work"
 else
