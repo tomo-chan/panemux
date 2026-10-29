@@ -78,8 +78,11 @@ esac
 exit 2
 `
 
+// stubClaude records its arguments, its directory and PANEMUX_TEST_RC, the
+// variable the login shell tests' rc files export.
 const stubClaude = `#!/bin/sh
 printf '%s\0' "$@" > "$STUB_LOG/claude.args"
+printf '%s\n' "${PANEMUX_TEST_RC-}" > "$STUB_LOG/claude.rc"
 pwd > "$STUB_LOG/claude.pwd"
 `
 

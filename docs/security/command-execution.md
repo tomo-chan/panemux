@@ -461,6 +461,34 @@ command as separate arguments executes it directly (tmux 2.0 and later; verified
 argument holding `$(id)`, `; echo`, and a quote, all of which arrived unchanged). The `--` keeps an
 argument from being read as a tmux option.
 
+**The agent's command runs through the user's own shell, which parses only a constant.** So that what
+the user's rc files export (an `ANTHROPIC_API_KEY` in `~/.bashrc`, issue #445) reaches the agent as
+it reaches one typed into a pane, the command tmux runs is
+`<$SHELL> -lic 'exec "$@"' <$SHELL> <sh> -c <the agent's fixed command> sh <arguments…>`: the user's
+shell, started as a login and interactive shell the way tmux starts a pane's shell, is given the
+literal `exec "$@"` as its command string and nothing else to parse. The agent's fixed `sh -c`
+command and its positional parameters (the prompt file, the resolved binary, the session ID, the
+working directory) follow as arguments, which `"$@"` hands on unchanged; checked with an argument
+holding `$(id)` and a leading `-` under bash 5.2, dash 0.5.12, zsh 5.9, ksh 93u+m/1.0.8 and mksh R59.
+No request value is in any string a shell parses, as before.
+
+- **Which shell.** `$SHELL` is the host user's own login shell, read by the script on the host — the
+  value the binary lookup above already runs — not a Go `os.Getenv` value flowing into
+  `exec.Command`. It is used only when it is an absolute path to an executable regular file whose
+  name is `bash`, `zsh`, `sh`, `dash`, `ksh` or `mksh`: fish's `-c` takes its arguments as `$argv`
+  and csh's has another syntax, so the same constant would not hand them on. Any other value, unset
+  included, leaves the command as it was: `sh -c <the agent's fixed command> …`, with no rc read.
+- **Which `sh`.** The `sh` after the user's shell is the absolute path `command -v sh` found before
+  the rc ran, so an rc that changes `PATH` cannot choose the interpreter of the agent's command.
+- **What the rc can do.** The rc files are the host user's own code, run with the user's own rights,
+  as they are each time a pane opens a shell there; running them adds no capability the user does
+  not already have. They run before the agent's command, which then changes to the working
+  directory and, for codex, appends codex's directory to the `PATH` the rc set, so neither is
+  undone by the rc. The agent's process is still the pane's process: each stage `exec`s the next.
+- **No secret passes through panemux.** panemux neither reads the key nor passes it in an argument,
+  a file or tmux's environment: `tmux new-session -e NAME=value` would have put it in the tmux
+  server's process arguments, readable in `ps` for as long as the server runs.
+
 **No request value goes to a tmux option that tmux expands.** `-c` looks like a plain directory
 argument but is a format: tmux 3.4 turned `/…/proj#Sx` and `/…/a##b` into other paths, found them
 missing, and started the command in the home directory — reported as success, with the script's own
@@ -473,7 +501,7 @@ one is installed, and the stand-in tmux the other tests use refuses `-c` outrigh
 `tmux new-session -c` in `internal/session` has the same property and is outside this section.)
 
 **A resume can add a window to an existing session of the task's name**
-(`tmux new-window -t "=<name>:" -- sh -c …`), with the same arguments as a new session. The script is
+(`tmux new-window -t "=<name>:" -- <command…>`), with the same arguments as a new session. The script is
 told whether it may with a fixed `yes`/`no` that `Service.Resume` sets from the collection it has
 just made: only when no running task was found inside that tmux session. Nothing already in the
 session is replaced or killed. Because that decision rests on a collection made before the launch,
@@ -482,7 +510,7 @@ collects only after the first has launched, sees its claude, and is refused rath
 second claude to the same conversation.
 
 **The first instruction reaches claude as a file, then as one argument after `--`.** The script writes
-it to a `mktemp` file created under `umask 077`, and the tmux command is a fixed
+it to a `mktemp` file created under `umask 077`, and the tmux command ends in a fixed
 `sh -c 'p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; exec "$2" "--session-id=$3" -- "$p"'`
 whose positional parameters are the file, the resolved claude path, the session ID and the working
 directory. Command substitution's result is

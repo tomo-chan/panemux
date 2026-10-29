@@ -155,6 +155,19 @@ type launchParams struct {
 //     whose help lists no --no-daemon is refused before anything starts: it
 //     would exit at once on the option, in a tmux session that ends with it,
 //     while the launch reported success.
+//   - The agent's command runs through the user's own shell, started as a
+//     login and interactive shell as tmux starts a pane's shell, so what the
+//     user's rc files export (an ANTHROPIC_API_KEY in ~/.bashrc) reaches the
+//     agent as it reaches one typed into a pane (issue #445). The shell is
+//     given only the fixed command `exec "$@"`, and the `sh -c` of the
+//     agent's command follows as its arguments: the rc runs first, then that
+//     command reads the prompt file, changes to the working directory and
+//     sets codex's PATH. Only a $SHELL that is an absolute path to an
+//     executable named bash, zsh, sh, dash, ksh or mksh is used, the shells
+//     whose `-c` was checked to hand the arguments over as "$@"; sh goes as
+//     the absolute path found here, so an rc that changes PATH cannot change
+//     which sh runs the command. Any other $SHELL starts the agent's command
+//     directly, and no rc is read.
 //   - tmux receives the command as separate arguments after "--", which tmux
 //     runs without a shell (tmux 2.0 and later). The working directory is not
 //     given to tmux's -c, which expands its value as a format ("#S", "##"),
@@ -198,9 +211,22 @@ case $bin in
 esac
 [ -f "$bin" ] && [ -x "$bin" ] || { say "error no-$agent"; exit 0; }
 {{AGENT_COMMANDS}}
+set -- sh
+case ${SHELL:-} in
+/*)
+  case ${SHELL##*/} in
+  bash|zsh|sh|dash|ksh|mksh)
+    shpath=$(command -v sh 2>/dev/null)
+    case $shpath in
+    /*) [ -f "$SHELL" ] && [ -x "$SHELL" ] && set -- "$SHELL" -lic 'exec "$@"' "$SHELL" "$shpath" ;;
+    esac
+    ;;
+  esac
+  ;;
+esac
 if tmux has-session -t "=$name" 2>/dev/null; then
   if [ "$mode" = resume ] && [ "$reuse" = yes ]; then
-    tmux new-window -t "=$name:" -- sh -c "$resume" sh "$cwd" "$bin" "$sid" 2>/dev/null ||
+    tmux new-window -t "=$name:" -- "$@" -c "$resume" sh "$cwd" "$bin" "$sid" 2>/dev/null ||
       { say 'error tmux-failed'; exit 0; }
     say ok
     exit 0
@@ -209,7 +235,7 @@ if tmux has-session -t "=$name" 2>/dev/null; then
   exit 0
 fi
 if [ "$mode" = resume ]; then
-  tmux new-session -d -s "$name" -- sh -c "$resume" sh "$cwd" "$bin" "$sid" 2>/dev/null ||
+  tmux new-session -d -s "$name" -- "$@" -c "$resume" sh "$cwd" "$bin" "$sid" 2>/dev/null ||
     { say 'error tmux-failed'; exit 0; }
   say ok
   exit 0
@@ -219,7 +245,7 @@ f=$(mktemp "${TMPDIR:-/tmp}/panemux-task.XXXXXXXX" 2>/dev/null) || { say 'error 
 cat >"$f" <<'PANEMUX_PROMPT_{{TAG}}'
 {{PROMPT}}
 PANEMUX_PROMPT_{{TAG}}
-if ! tmux new-session -d -s "$name" -- sh -c "$run" sh "$f" "$bin" "$sid" "$cwd" 2>/dev/null; then
+if ! tmux new-session -d -s "$name" -- "$@" -c "$run" sh "$f" "$bin" "$sid" "$cwd" 2>/dev/null; then
   rm -f -- "$f"
   say 'error tmux-failed'
   exit 0
