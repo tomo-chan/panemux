@@ -771,3 +771,18 @@ func TestRelayUsesLiveRoutingForSenderAndDestination(t *testing.T) {
 	_, err = relay.Broadcast(context.Background(), SystemID, []string{"added"}, "hi")
 	require.Error(t, err)
 }
+
+func TestRelaySkipsAHostRemovedBetweenRoutingSnapshots(t *testing.T) {
+	client := &fakeMessageClient{hostID: "removed"}
+	first := true
+	relay := NewRelay(NewBoardCache(), RelayConfig{CurrentRouting: func() Routing {
+		if first {
+			first = false
+			return Routing{Clients: map[string]MessageClient{"removed": client}}
+		}
+		return Routing{}
+	}})
+	require.NoError(t, relay.Poll(context.Background()))
+	require.Zero(t, client.sinceCallCount())
+	require.Empty(t, relay.Cursors())
+}

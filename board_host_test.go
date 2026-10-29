@@ -380,3 +380,23 @@ func TestBoardTracksPanesAddedAndRemovedAfterStartup(t *testing.T) {
 	watcher.pollOnce(context.Background())
 	require.NotContains(t, cache.ParticipationSnapshot(), "added")
 }
+
+func TestBootstrapForgetsInstructionWhenPaneChangesHost(t *testing.T) {
+	for _, next := range []string{"host-a", "host-b", ""} {
+		t.Run(next, func(t *testing.T) {
+			current := map[string]string{}
+			if next != "" {
+				current["pane"] = next
+			}
+			watcher := newBootstrapWatcher(bootstrapWatcherConfig{
+				PaneHosts:        map[string]string{"pane": "host-a"},
+				CurrentPaneHosts: func() map[string]string { return current },
+			})
+			watcher.bootstrapped["pane"] = &fakeAgentSession{id: "pane"}
+			watcher.refreshPanes()
+			_, instructed := watcher.bootstrapped["pane"]
+			require.Equal(t, next == "host-a", instructed)
+			require.Equal(t, current, watcher.paneHosts)
+		})
+	}
+}
