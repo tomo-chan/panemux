@@ -72,3 +72,9 @@ Path discovery and presence probes have independent warning streaks. Once path d
 its warning clears even if the next presence probe fails. The participation port distinguishes a
 path failure and supplies operator-facing tool/setting labels; the adapter keeps the existing
 agmsg warning wording while the watcher remains transport-independent.
+
+Eligibility follows the live configuration under its lock. New panes are detected on subsequent
+ticks without restarting panemux; removal revokes the sender and destination address immediately
+for subsequent relay operations. Participation entries refresh each tick. Historical reports may
+remain visible after removal, but confer no routing authority. Detection continues for instructed
+panes; see [detection cost](limitations.md#detection-cost).

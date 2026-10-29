@@ -17,6 +17,9 @@ E2E_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 E2E_HOME=$(mktemp -d "${TMPDIR:-/tmp}/panemux-e2e-agmsg-home.XXXXXX") || exit 1
 export E2E_HOME
+trap 'find "$E2E_HOME" -depth -delete' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 E2E_AGMSG_DIR="$E2E_HOME/.agents/skills/agmsg"
 
 mkdir -p "$E2E_AGMSG_DIR/scripts"
@@ -36,4 +39,4 @@ E2E_STATUS_BODY='{"kind":"board_status","state":"working","cwd":"/workspace/user
 "$E2E_AGMSG_DIR/scripts/send.sh" "$E2E_TEAM" board-main board-worker \
     'Handing the dashboard panel over for review.' --force
 
-exec sh "$E2E_DIR/run-panemux-e2e.sh" agent-board-agmsg.yml 4175
+sh "$E2E_DIR/run-panemux-e2e.sh" agent-board-agmsg.yml 4175

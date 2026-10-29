@@ -125,8 +125,9 @@ func TestBoardExcludedPaneWarnsWithConfigurationRemedy(t *testing.T) {
 	p := hostexec.New(hostexec.Options{})
 	defer p.Close()
 	_, relay, bootstrap := setupBoard(cfg, session.NewManager(), p)
-	assert.False(t, relay.HasClients())
-	assert.False(t, bootstrap.HasWork())
+	assert.True(t, relay.HasClients())
+	assert.True(t, bootstrap.HasWork())
+	require.NotContains(t, bootstrap.paneHosts, "excluded")
 	assert.Contains(t, logs.String(), "ssh_connections")
 	assert.Contains(t, logs.String(), "ssh-config-only")
 }
@@ -201,6 +202,7 @@ func TestBoardPendingDialDoesNotDelayHealthyHost(t *testing.T) {
 	_, err := pool.Connect(context.Background(), "b-live")
 	require.NoError(t, err)
 	cfg := boardEnabledConfig(paneConfig("local-agent"))
+	cfg.SSHConnections = map[string]config.SSHConnection{"a-unused": {}, "b-live": {}}
 	_, relay, _ := setupBoard(cfg, session.NewManager(), pool)
 	for range 2 {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -355,4 +357,26 @@ func TestGlobalBoardIncludesShellAddressesAndPublishesParticipation(t *testing.T
 	_, relay, disabled := setupTestBoard(t, cfg, manager)
 	require.False(t, relay.HasClients())
 	require.False(t, disabled.HasWork())
+}
+
+func TestBoardTracksPanesAddedAndRemovedAfterStartup(t *testing.T) {
+	isolatedHome(t)
+	installAgmsg(t, agmsg.TestedAgmsgVersion)
+	cfg := boardEnabledConfig()
+	manager := session.NewManager()
+	cache, relay, watcher := setupTestBoard(t, cfg, manager)
+	require.True(t, watcher.HasWork(), "enabled board must keep watching an initially empty layout")
+	require.True(t, relay.HasClients())
+	added := &fakeAgentSession{id: "added", detectType: "codex", detectOK: true}
+	manager.Add(added)
+	cfg.Workspaces.Items[0].Layout.Children = []config.LayoutChild{{Pane: paneConfig("added")}}
+	watcher.pollOnce(context.Background())
+	watcher.pollOnce(context.Background())
+	require.Len(t, added.writes, 1)
+	require.True(t, cache.ParticipationSnapshot()["added"].Instructed)
+	cfg.Workspaces.Items[0].Layout.Children = nil
+	_, err := relay.Broadcast(context.Background(), board.SystemID, []string{"added"}, "removed")
+	require.ErrorContains(t, err, "unknown")
+	watcher.pollOnce(context.Background())
+	require.NotContains(t, cache.ParticipationSnapshot(), "added")
 }

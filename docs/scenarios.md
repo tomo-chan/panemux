@@ -52,9 +52,8 @@ Verification column values:
 | B5 | An invalid `agent_board.mode` | Startup fails validation; every valid value is accepted | `auto`: `internal/config` — `TestValidate_AgentBoardMode_InvalidValue_Error`, `TestValidate_AgentBoardMode_ValidValues_NoError` |
 | B6 | `agent_board.team` set to the reserved `_system` | Rejected | `auto`: `internal/config` — `TestValidate_AgentBoardTeam_ReservedSystemID_Error` |
 | B7 | Global delivery mode | All eligible panes use the same mode | `auto`: root — `TestCurrentPaneModes`, `TestBootstrapWatcherReadsModeLive` |
-
 | B8 | Removed pane board settings or path override | Startup reports a migration error | `auto`: `internal/config` — `TestRemovedBoardSettingsFailWithMigrationHelp` |
-| B9 | Configured shell addresses under global enablement | Local and SSH shell IDs are valid relay addresses even without agent detection | `auto`: root — `TestGlobalBoardIncludesShellAddressesAndPublishesParticipation` |
+| B9 | Configured shell addresses under global enablement | Local and SSH shell IDs are valid relay addresses even without agent detection | `auto`: root — `TestGlobalBoardIncludesShellAddressesAndPublishesParticipation`, `TestBoardTracksPanesAddedAndRemovedAfterStartup` |
 
 ## C. A pane joins the board
 

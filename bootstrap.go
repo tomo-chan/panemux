@@ -47,24 +47,25 @@ const (
 	boardModeBoth    = "both"
 )
 
-// bootstrapWatcherConfig is the precomputed, static input the bootstrap
+// bootstrapWatcherConfig supplies fixed or live inputs the bootstrap
 // watcher needs. Building it (which panes are board-enabled, which host each
 // lives on, each pane's configured mode, and participation ports) is
 // the caller's job (board.go's setupBoard) — bootstrapWatcher itself takes
 // no dependency on internal/config, mirroring board.RelayConfig's own
 // existing dependency direction (see relay.go's RelayConfig comment).
 type bootstrapWatcherConfig struct {
-	Manager   *session.Manager
-	PaneHosts map[string]string
+	CurrentPaneHosts  func() map[string]string
+	SyncParticipation func(map[string]string)
+	Manager           *session.Manager
+	PaneHosts         map[string]string
 	// PaneModes is a function, not a map, because a pane's mode can change
-	// while panemux runs — the pane settings dialog writes it straight into
-	// config.yaml. A snapshot taken at startup meant a mode set to "both"
-	// never reached the instruction, so message delivery stayed off.
+	// while panemux runs. The composition root reads this under the config lock.
 	PaneModes            func() map[string]string
 	ParticipationForHost func(string) board.Participation
 	Persist              func(paneIDs []string)
 	Observe              func(paneID, host, agentType string, instructed bool)
 	Team                 string
+	WatchEnabled         bool
 }
 
 // bootstrapWatcher polls board-enabled panes for a newly-started, detectable
@@ -76,6 +77,8 @@ type bootstrapWatcherConfig struct {
 // goroutine driving runLoop — nothing else ever reads or writes this
 // watcher's state.
 type bootstrapWatcher struct {
+	currentPaneHosts     func() map[string]string
+	syncParticipation    func(map[string]string)
 	observe              func(string, string, string, bool)
 	manager              *session.Manager
 	paneHosts            map[string]string
@@ -110,6 +113,7 @@ type bootstrapWatcher struct {
 	team             string
 	persistedPaneIDs []string
 	seeded           bool
+	watchEnabled     bool
 }
 
 // warnedPane is one pane's warning suppression: the kinds currently being
@@ -142,6 +146,9 @@ const (
 func newBootstrapWatcher(cfg bootstrapWatcherConfig) *bootstrapWatcher {
 	return &bootstrapWatcher{
 		manager:              cfg.Manager,
+		currentPaneHosts:     cfg.CurrentPaneHosts,
+		syncParticipation:    cfg.SyncParticipation,
+		watchEnabled:         cfg.WatchEnabled,
 		observe:              cfg.Observe,
 		paneHosts:            cfg.PaneHosts,
 		paneModes:            cfg.PaneModes,
@@ -163,11 +170,11 @@ func (b *bootstrapWatcher) LoadPersistedState(paneIDs []string) {
 	b.persistedPaneIDs = paneIDs
 }
 
-// HasWork reports whether there is any board-enabled pane to watch at all.
+// HasWork keeps enabled live configurations running even when there are no panes.
 // Callers use this to skip starting the poll loop entirely, mirroring
 // Relay.HasClients.
 func (b *bootstrapWatcher) HasWork() bool {
-	return len(b.paneHosts) > 0
+	return b.watchEnabled || len(b.paneHosts) > 0
 }
 
 // Run polls every interval until ctx is canceled, running one immediate
@@ -210,6 +217,7 @@ func (b *bootstrapWatcher) runLoop(ctx context.Context, tick <-chan time.Time) {
 // lifetime is unaffected either way (its new Session object won't match
 // whatever was seeded).
 func (b *bootstrapWatcher) pollOnce(ctx context.Context) {
+	b.refreshPanes()
 	if !b.seeded {
 		for _, paneID := range b.persistedPaneIDs {
 			sess, ok := b.manager.Get(paneID)
@@ -225,6 +233,26 @@ func (b *bootstrapWatcher) pollOnce(ctx context.Context) {
 	}
 	for paneID, host := range b.paneHosts {
 		b.checkPane(ctx, paneID, host)
+	}
+}
+
+func (b *bootstrapWatcher) refreshPanes() {
+	if b.currentPaneHosts == nil {
+		return
+	}
+	current := b.currentPaneHosts()
+	for id, host := range b.paneHosts {
+		if next, exists := current[id]; !exists || next != host {
+			delete(b.bootstrapped, id)
+			delete(b.pending, id)
+			delete(b.givenUp, id)
+			delete(b.writeAttempts, id)
+			delete(b.warned, id)
+		}
+	}
+	b.paneHosts = current
+	if b.syncParticipation != nil {
+		b.syncParticipation(current)
 	}
 }
 

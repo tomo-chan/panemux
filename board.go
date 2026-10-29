@@ -8,6 +8,7 @@ import (
 	"panemux/internal/host"
 	"panemux/internal/hostexec"
 	"panemux/internal/session"
+	"sync"
 	"time"
 )
 
@@ -22,37 +23,22 @@ const (
 // even when its host cannot be reached at startup; polling retries through the pool.
 func setupBoard(
 	cfg *config.Config, manager *session.Manager, execution *hostexec.Pool,
+	readers ...func(func(*config.Config)),
 ) (*board.BoardCache, *board.Relay, *bootstrapWatcher) {
 	cache := board.NewBoardCache()
-	paneHosts := map[string]string{}
-	for _, pane := range cfg.AllPanes() {
-		if !cfg.AgentBoard.Enabled {
-			continue
-		}
-		target, ok := boardHostForPane(cfg, pane)
-		if !ok {
-			log.Printf("Warning: agent board: pane %q is excluded; "+
-				"add an entry named %q to ssh_connections to enable its board", pane.ID, pane.Connection)
-			continue
-		}
-		paneHosts[pane.ID] = target.BoardID()
-		cache.RecordParticipation(pane.ID, target.BoardID(), "", false)
+	paneHosts := configuredBoardPanes(cfg, true)
+	cache.SyncParticipation(paneHosts)
+	readConfig := func(visit func(*config.Config)) { visit(cfg) }
+	if len(readers) > 0 {
+		readConfig = readers[0]
 	}
-	clients := map[string]board.MessageClient{}
-	participants := map[string]board.Participation{}
-	if len(paneHosts) > 0 {
-		for _, target := range execution.Names() {
-			id := target.BoardID()
-			runner := host.Bind(execution.WithoutDialWait(), target)
-			client := agmsg.NewClient(agmsg.ClientConfig{
-				HostID: id, Runner: runner, SendRunner: host.Bind(execution, target),
-			})
-			clients[id] = client
-			participants[id] = client
-		}
+	routing := newBoardRouting(readConfig, execution)
+	var liveRouting func() board.Routing
+	if cfg.AgentBoard.Enabled {
+		liveRouting = routing
 	}
 	relay := board.NewRelay(cache, board.RelayConfig{
-		Team: cfg.AgentBoard.Team, Clients: clients, PaneHosts: paneHosts,
+		Team: cfg.AgentBoard.Team, CurrentRouting: liveRouting, PaneHosts: paneHosts,
 		Limit: defaultBoardPollLimit, BackfillLimit: defaultBoardBackfillLimit, PersistCursors: persistBoardCursors,
 	})
 	if path, err := board.DefaultCursorFilePath(); err == nil {
@@ -64,9 +50,22 @@ func setupBoard(
 	}
 	bootstrap := newBootstrapWatcher(bootstrapWatcherConfig{
 		Manager: manager, PaneHosts: paneHosts,
-		PaneModes:            func() map[string]string { return currentPaneModes(cfg) },
-		ParticipationForHost: func(id string) board.Participation { return participants[id] },
-		Team:                 cfg.AgentBoard.Team, Persist: persistBootstrapState,
+		CurrentPaneHosts:  func() map[string]string { return routing().PaneHosts },
+		WatchEnabled:      cfg.AgentBoard.Enabled,
+		SyncParticipation: cache.SyncParticipation,
+		PaneModes: func() map[string]string {
+			var modes map[string]string
+			readConfig(func(current *config.Config) { modes = currentPaneModes(current) })
+			return modes
+		},
+		ParticipationForHost: func(id string) board.Participation {
+			client := routing().Clients[id]
+			if client == nil {
+				return nil
+			}
+			return client.(board.Participation)
+		},
+		Team: cfg.AgentBoard.Team, Persist: persistBootstrapState,
 		Observe: cache.RecordParticipation,
 	})
 	if path, err := board.DefaultBootstrapStateFilePath(); err == nil {
@@ -78,6 +77,54 @@ func setupBoard(
 	}
 	return cache, relay, bootstrap
 }
+func configuredBoardPanes(cfg *config.Config, warn bool) map[string]string {
+	paneHosts := map[string]string{}
+	for _, pane := range cfg.AllPanes() {
+		if !cfg.AgentBoard.Enabled {
+			continue
+		}
+		target, ok := boardHostForPane(cfg, pane)
+		if !ok {
+			if warn {
+				log.Printf("Warning: agent board: pane %q is excluded; "+
+					"add an entry named %q to ssh_connections to enable its board", pane.ID, pane.Connection)
+			}
+			continue
+		}
+		paneHosts[pane.ID] = target.BoardID()
+	}
+	return paneHosts
+}
+
+func newBoardRouting(readConfig func(func(*config.Config)), execution *hostexec.Pool) func() board.Routing {
+	var clientsMu sync.Mutex
+	clients := map[host.Host]*agmsg.Client{}
+	return func() board.Routing {
+		result := board.Routing{PaneHosts: map[string]string{}, Clients: map[string]board.MessageClient{}}
+		targets := []host.Host{}
+		readConfig(func(current *config.Config) {
+			if !current.AgentBoard.Enabled {
+				return
+			}
+			targets = append(targets, host.Local)
+			for name := range current.SSHConnections {
+				targets = append(targets, host.Host(name))
+			}
+			result.PaneHosts = configuredBoardPanes(current, false)
+		})
+		clientsMu.Lock()
+		defer clientsMu.Unlock()
+		for _, target := range targets {
+			if clients[target] == nil {
+				clients[target] = agmsg.NewClient(agmsg.ClientConfig{HostID: target.BoardID(),
+					Runner: host.Bind(execution.WithoutDialWait(), target), SendRunner: host.Bind(execution, target)})
+			}
+			result.Clients[target.BoardID()] = clients[target]
+		}
+		return result
+	}
+}
+
 func currentPaneModes(cfg *config.Config) map[string]string {
 	modes := map[string]string{}
 	for _, p := range cfg.AllPanes() {

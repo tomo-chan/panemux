@@ -332,7 +332,7 @@ describe('BoardDashboardPanel work summaries', () => {
     expect(summary.style.overflow).toBe('hidden')
   })
 
-  //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
+  //efficacy:exempt seeds a report because silent configured panes are hidden; title rendering itself is unchanged
   it('shows the pane title next to the ID so the column is readable', async () => {
     renderPanel({ 'pane-1755': { updated_at: new Date().toISOString() } }, [{ id: 'pane-1755', title: 'Board Main' }])
 
@@ -340,7 +340,7 @@ describe('BoardDashboardPanel work summaries', () => {
     expect(screen.getByText('Board Main')).toBeDefined()
   })
 
-  //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
+  //efficacy:exempt seeds a report because silent configured panes are hidden; title rendering itself is unchanged
   it('falls back to the ID alone when a pane has no title', async () => {
     renderPanel({ 'pane-1755': { updated_at: new Date().toISOString() } }, [{ id: 'pane-1755' }])
 

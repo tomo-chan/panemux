@@ -35,3 +35,19 @@ func (c *BoardCache) ParticipationSnapshot() map[string]PaneParticipation {
 	}
 	return result
 }
+
+// SyncParticipation follows eligible panes while preserving historical reports.
+func (c *BoardCache) SyncParticipation(panes map[string]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id := range c.participation {
+		if _, ok := panes[id]; !ok {
+			delete(c.participation, id)
+		}
+	}
+	for id, host := range panes {
+		if old, ok := c.participation[id]; !ok || old.Host != host {
+			c.participation[id] = PaneParticipation{PaneID: id, Host: host}
+		}
+	}
+}

@@ -25,3 +25,23 @@ func TestParticipationSnapshotTracksDetectionInstructionAndReport(t *testing.T) 
 	require.Empty(t, c.ParticipationSnapshot()["agent"].AgentType)
 	require.False(t, c.ParticipationSnapshot()["agent"].Instructed)
 }
+
+func TestParticipationTracksHostChangesAndRemovalWithoutDroppingReports(t *testing.T) {
+	c := NewBoardCache()
+	c.SyncParticipation(map[string]string{"pane": "host-a", "shell": "local"})
+	c.RecordParticipation("pane", "host-a", "codex", true)
+	c.RecordStatus("pane", Status{State: "working"})
+	c.SyncParticipation(map[string]string{"pane": "host-a"})
+	require.True(t, c.ParticipationSnapshot()["pane"].Instructed)
+	require.NotContains(t, c.ParticipationSnapshot(), "shell")
+	c.SyncParticipation(map[string]string{"pane": "host-b"})
+	state := c.ParticipationSnapshot()["pane"]
+	require.Equal(t, "host-b", state.Host)
+	require.False(t, state.Instructed)
+	require.Empty(t, state.AgentType)
+	require.NotNil(t, state.LastReport)
+	c.SyncParticipation(nil)
+	state = c.ParticipationSnapshot()["pane"]
+	require.Empty(t, state.Host)
+	require.NotNil(t, state.LastReport)
+}
