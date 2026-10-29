@@ -8,7 +8,7 @@ server:
 command_center:
     enabled: true
 agent_board:
-    enabled: true
+    enabled: false
     mode: monitor
     agmsg_auto_update: false
     team: panemux-e2e-cc
