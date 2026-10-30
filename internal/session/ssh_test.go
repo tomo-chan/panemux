@@ -186,8 +186,12 @@ func TestProxyCommandConn_CloseIsIdempotent(t *testing.T) {
 				}
 			}
 
-			// Every caller sees the outcome of the one real close, never
-			// "exec: Wait was already called".
+			// The one real close reaped the subprocess, and every caller sees
+			// its outcome, never "exec: Wait was already called".
+			require.NotNil(t, conn.(*proxyCommandConn).cmd.ProcessState, "subprocess was not waited for")
+			if errs[0] != nil {
+				assert.NotContains(t, errs[0].Error(), "Wait was already called")
+			}
 			for i := 1; i < closers; i++ {
 				assert.Equal(t, errs[0], errs[i], "close #%d", i)
 			}
