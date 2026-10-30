@@ -118,7 +118,8 @@ running is allowed to finish.
 
 Only an installed release older than the version pin is updated, using the same prerequisite,
 verified-source, archive and drain/pause path as manual Update. Eligibility is rechecked within
-the update reservation. Missing, newer, unknown and alternate installations are left alone.
+the update reservation and update-only intent is preserved through the adapter’s final probe,
+so an external removal cannot turn an automatic Update into Install. Missing, newer, unknown and alternate installations are left alone.
 Opting in never installs agmsg on an absent host and never downgrades it.
 
 Menus show a check/update in progress and ask to reopen for the result, retain automatic failure

@@ -47,6 +47,12 @@ type Tool interface {
 	Install(context.Context, host.Host) (State, error)
 }
 
+// UpdateTool preserves update-only intent through an adapter's final probe.
+// Global automatic updates never fall back to Install.
+type UpdateTool interface {
+	Update(context.Context, host.Host) (State, error)
+}
+
 var ErrUnknownHost = hostexec.ErrUnknownHost
 var ErrUnknownTool = errors.New("unknown tool")
 
@@ -181,6 +187,14 @@ func (s *Service) installWhen(
 			return got, nil
 		}
 	}
+	install := tool.Install
+	if eligible != nil {
+		updater, ok := tool.(UpdateTool)
+		if !ok {
+			return State{}, errors.New("tool does not support update without installation")
+		}
+		install = updater.Update
+	}
 	var checks []Prerequisite
 	if p, ok := tool.(PrerequisiteTool); ok {
 		checks = p.Prerequisites(h)
@@ -189,7 +203,7 @@ func (s *Service) installWhen(
 		return State{}, err
 	}
 	defer s.invalidate(id, h)
-	return tool.Install(ctx, h) //nolint:wrapcheck // preserve adapter errors
+	return install(ctx, h) //nolint:wrapcheck // preserve adapter errors
 }
 func hostName(name string) string {
 	if name == "" {

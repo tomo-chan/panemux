@@ -11,6 +11,8 @@ import (
 	"panemux/internal/hosttools"
 )
 
+const updateFlag = "--update"
+
 const TestedAgmsgCommit = "3c537a51bb76a23e312e7c27770df4a58ba794ff"
 
 // The marker matches v1.2.0 install.sh's own alternate-install discovery.
@@ -120,14 +122,26 @@ func (t *Tool) Prerequisites(h host.Host) []hosttools.Prerequisite {
 }
 
 func (t *Tool) Install(ctx context.Context, h host.Host) (hosttools.State, error) {
+	return t.install(ctx, h, false)
+}
+
+// Update uses the same installer path but cannot turn into a missing-copy Install.
+func (t *Tool) Update(ctx context.Context, h host.Host) (hosttools.State, error) {
+	return t.install(ctx, h, true)
+}
+
+func (t *Tool) install(ctx context.Context, h host.Host, updateOnly bool) (hosttools.State, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	state := t.Check(ctx, h)
 	mode := ""
 	switch state.Status {
 	case hosttools.Missing:
+		if updateOnly {
+			return state, fmt.Errorf("agmsg cannot be updated (%s): installation is missing", state.Status)
+		}
 	case hosttools.Outdated:
-		mode = "--update"
+		mode = updateFlag
 	default:
 		return state, fmt.Errorf("agmsg cannot be installed or updated (%s): %s", state.Status, state.Error)
 	}

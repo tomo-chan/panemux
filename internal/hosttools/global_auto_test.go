@@ -3,6 +3,7 @@ package hosttools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -33,6 +34,10 @@ func (f *globalAutoTool) Install(_ context.Context, h host.Host) (State, error) 
 	}
 	f.states[h] = State{Status: Installed, Version: "1.2.0"}
 	return f.states[h], nil
+}
+
+func (f *globalAutoTool) Update(ctx context.Context, h host.Host) (State, error) {
+	return f.Install(ctx, h)
 }
 
 func TestGlobalAutoChecksAllHostsAndOnlyUpdatesOutdated(t *testing.T) {
@@ -248,6 +253,52 @@ func TestGlobalAutoManualRetrySupersedesOlderCompletion(t *testing.T) {
 				require.Equal(t, "old automatic failure", got.AutoError)
 			} else {
 				require.Empty(t, got.AutoError)
+			}
+		})
+	}
+}
+
+func TestGlobalAutoRequiresUpdateOnlyAdapter(t *testing.T) {
+	state := State{Status: Outdated}
+	tool := &fakeTool{state: &state}
+	s := New(Options{
+		Tools:      map[ID]Tool{AgmsgTool: tool},
+		GlobalAuto: map[ID]func() bool{AgmsgTool: func() bool { return true }},
+	})
+	defer s.Close()
+	s.StartAutoUpdates(AgmsgTool)
+	s.Wait()
+	require.Empty(t, tool.installed)
+	got, err := s.Check(context.Background(), AgmsgTool, host.Local)
+	require.NoError(t, err)
+	require.Contains(t, got.AutoError, "update without installation")
+}
+
+func TestGlobalAutoRetainsProbeFailuresAndLogsOnlyFailures(t *testing.T) {
+	for _, state := range []State{
+		{Status: Missing}, {Status: Installed},
+		{Status: Unknown, Error: "cannot probe this host"},
+		{Status: Invalid, Error: "alternate installation needs cleanup"},
+	} {
+		t.Run(string(state.Status), func(t *testing.T) {
+			tool := &globalAutoTool{states: map[host.Host]State{host.Local: state}}
+			var messages []string
+			s := New(Options{
+				Tools:      map[ID]Tool{AgmsgTool: tool},
+				GlobalAuto: map[ID]func() bool{AgmsgTool: func() bool { return true }},
+				Logf:       func(format string, args ...any) { messages = append(messages, fmt.Sprintf(format, args...)) },
+			})
+			defer s.Close()
+			s.StartAutoUpdates(AgmsgTool)
+			s.Wait()
+			got, err := s.Check(context.Background(), AgmsgTool, host.Local)
+			require.NoError(t, err)
+			require.Equal(t, state.Error, got.AutoError)
+			if state.Error == "" {
+				require.Empty(t, messages)
+			} else {
+				require.Len(t, messages, 1)
+				require.Contains(t, messages[0], state.Error)
 			}
 		})
 	}
