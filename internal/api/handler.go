@@ -246,6 +246,14 @@ func (h *Handler) SetCommandCenterAvailable(available bool) {
 	h.commandCenterAvailable = available
 }
 
+// ReadBoardConfig lets composition derive board routing under the config lock.
+// The visitor must not retain pointers or call another Handler method.
+func (h *Handler) ReadBoardConfig(visit func(*config.Config)) {
+	h.cfgMu.RLock()
+	defer h.cfgMu.RUnlock()
+	visit(h.cfg)
+}
+
 // GetLayout returns the current layout configuration.
 func (h *Handler) GetLayout(w http.ResponseWriter, r *http.Request) {
 	h.cfgMu.RLock()

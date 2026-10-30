@@ -19,8 +19,10 @@ server:
 # setup steps, and note that agmsg must already be installed on every host
 # whose panes join — panemux never installs it.
 agent_board:
-  team: "panemux"                      # shared agmsg team for all board-enabled panes
-  agmsg_path: "~/.agents/skills/agmsg"  # ~/ is expanded per host, remote hosts included
+  enabled: false
+  mode: monitor
+  agmsg_auto_update: false  # reserved; no updates until the installer follow-up
+  team: "panemux"                      # shared agmsg team for all participating panes
 
 # ── Command center ────────────────────────────────────────────────────────────
 # Cmd/Ctrl+Shift+K opens a palette that asks a headless `claude` about the
@@ -223,15 +225,3 @@ workspaces:
               type: local
               shell: "/bin/zsh"
               title: "Ops Shell"
-              # ── Agent Board opt-in (per pane) ───────────────────────────
-              # The pane id doubles as this pane's board address, so prefer a
-              # name you will recognise. Also settable from Pane Settings in
-              # the UI, without editing this file.
-              agent_board:
-                enabled: true
-                # monitor (default) — status only; messages are NOT delivered
-                # turn / both      — messages delivered, but agmsg writes a
-                #                    hook file into the pane's project
-                #                    directory (see the README)
-                # off              — no automatic delivery
-                mode: monitor

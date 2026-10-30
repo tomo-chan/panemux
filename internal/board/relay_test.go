@@ -744,3 +744,45 @@ func fakeRowsAfter(rows []Row, after string) []Row {
 	}
 	return rows
 }
+
+func TestRelayUsesLiveRoutingForSenderAndDestination(t *testing.T) {
+	cache := NewBoardCache()
+	client := &fakeMessageClient{hostID: "host-a"}
+	panes := map[string]string{}
+	relay := NewRelay(cache, RelayConfig{Team: "team", Clients: map[string]MessageClient{"host-a": client},
+		CurrentRouting: func() Routing {
+			return Routing{PaneHosts: panes, Clients: map[string]MessageClient{"host-a": client}}
+		},
+	})
+	row := Row{Host: "host-a", Team: "team", From: "added", To: SystemID, Body: "hello"}
+	relay.processRow(context.Background(), "host-a", row)
+	require.Empty(t, cache.MessagesSince(0))
+	panes = map[string]string{"added": "host-a"}
+	relay.processRow(context.Background(), "host-a", row)
+	require.Len(t, cache.MessagesSince(0), 1)
+	_, err := relay.Broadcast(context.Background(), SystemID, []string{"added"}, "hi")
+	require.NoError(t, err)
+	panes = map[string]string{"added": "host-b"}
+	relay.processRow(context.Background(), "host-a", row)
+	require.Len(t, cache.MessagesSince(0), 1, "moving a pane revokes its old host")
+	panes = map[string]string{}
+	relay.processRow(context.Background(), "host-a", row)
+	require.Len(t, cache.MessagesSince(0), 1)
+	_, err = relay.Broadcast(context.Background(), SystemID, []string{"added"}, "hi")
+	require.Error(t, err)
+}
+
+func TestRelaySkipsAHostRemovedBetweenRoutingSnapshots(t *testing.T) {
+	client := &fakeMessageClient{hostID: "removed"}
+	first := true
+	relay := NewRelay(NewBoardCache(), RelayConfig{CurrentRouting: func() Routing {
+		if first {
+			first = false
+			return Routing{Clients: map[string]MessageClient{"removed": client}}
+		}
+		return Routing{}
+	}})
+	require.NoError(t, relay.Poll(context.Background()))
+	require.Zero(t, client.sinceCallCount())
+	require.Empty(t, relay.Cursors())
+}

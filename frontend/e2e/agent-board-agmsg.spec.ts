@@ -2,8 +2,8 @@ import { expect, test } from '@playwright/test'
 import { boardDialog, boardOpenButton, gotoAndReadSessionToken } from './agent-board-helpers'
 
 // Runs against the agent-board-agmsg.yml fixture (playwright.config.ts's
-// chromium-agent-board-agmsg project), whose agent_board.agmsg_path points
-// at the stub agmsg installation run-panemux-agent-board-e2e.sh seeds before
+// chromium-agent-board-agmsg project), whose fake HOME contains the fixed
+// agmsg installation run-panemux-agent-board-e2e.sh seeds before
 // starting the server.
 //
 // Only agmsg itself is stubbed, and only because it is a separate,
@@ -43,11 +43,8 @@ test('renders the pane status and message the relay read from the agmsg installa
   // The pane title sits beside the ID so a column of panes is readable.
   await expect(panel.getByText('Board Main', { exact: true })).toBeVisible()
 
-  // The fixture's second pane is board-enabled but never sends a status
-  // row, so it is listed as not joined rather than omitted — the whole
-  // point of listing configured panes, not just reporting ones.
-  await expect(panel.getByText('board-worker', { exact: true })).toBeVisible()
-  await expect(panel.getByText('not joined')).toHaveCount(1)
+  // An idle shell with no report or detected agent is omitted.
+  await expect(panel.getByText('board-worker', { exact: true })).toHaveCount(0)
 
   // The same fixture row also carries repo, branch, cwd and pr_url, which
   // the card deliberately does not render — panemux computes those itself

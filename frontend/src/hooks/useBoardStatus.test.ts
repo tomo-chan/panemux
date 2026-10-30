@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useBoardStatus } from './useBoardStatus'
 
 function statusResponse(statuses: Record<string, unknown> = {}) {
-  return { ok: true, json: () => Promise.resolve({ statuses }) } as Response
+  return { ok: true, json: () => Promise.resolve({ participation: {}, statuses }) } as Response
 }
 
 function messagesResponse(messages: unknown[] = [], epoch = 'epoch-1') {
@@ -248,9 +248,10 @@ describe('useBoardStatus', () => {
     const { result } = renderHook(() => useBoardStatus({ enabled: true, token: 'tok' }))
     await act(async () => {})
     expect(result.current.statuses.main?.state).toBe('working')
+    expect(result.current.participation).toEqual({})
 
     window.fetch = fetchRouter({
-      status: () => ({ ok: true, json: () => Promise.resolve({ statuses: 'not-a-map' }) } as Response),
+      status: () => ({ ok: true, json: () => Promise.resolve({ participation: {}, statuses: 'not-a-map' }) } as Response),
     })
     // Re-render is not needed: advance the existing interval instead so the
     // hook's own poll loop (not a fresh mount) performs the failing fetch.
@@ -261,6 +262,7 @@ describe('useBoardStatus', () => {
 
     expect(result.current.error).not.toBeNull()
     expect(result.current.statuses.main?.state).toBe('working')
+    expect(result.current.participation).toEqual({})
   })
 
   it('stops polling while the tab is hidden', async () => {

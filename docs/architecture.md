@@ -244,3 +244,8 @@ frames a localhost page. Behavior is in [the split preview](behavior/preview.md)
 - [UI design](ui-design.md) — workspace, pane, modal, attention, and Agent Board interactions.
 - [Quality gateway](quality-gateway.md) — how architectural contracts are verified.
 - [Decision log](DECISIONLOG.md) — tradeoffs and superseded approaches removed from this guide.
+
+Agent Board enablement and delivery mode are instance-wide. Its relay accepts all configured
+pane identities on their owning hosts; bootstrap supplies a synchronized participation snapshot
+for the authenticated status API. Dashboard membership is based on detected agents or reports.
+The agmsg installation location is fixed per host; the installer is a follow-up to #435's settings change.

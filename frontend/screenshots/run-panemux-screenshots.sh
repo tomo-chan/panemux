@@ -53,7 +53,7 @@ SHOT_ROOT="$(shot_root)"
 tmux_socket_path_check "$SHOT_ROOT/tmux"
 SHOT_HOME="$SHOT_ROOT/home"
 SHOT_PROJECT=/tmp/sample-project
-# Must match showcase.yml's agent_board.agmsg_path.
+# Legacy staging link; the fixed installation path is under SHOT_HOME.
 SHOT_AGMSG_DIR=/tmp/panemux-screenshots-agmsg
 
 # Held until panemux, which this shell execs into, exits.
@@ -66,7 +66,8 @@ shot_claim_dir "$SHOT_ROOT" home tmux panemux showcase.yml \
     "${SHOT_PROJECT##*/}" "${SHOT_AGMSG_DIR##*/}"
 shot_link_dir "$SHOT_PROJECT" "$SHOT_ROOT/${SHOT_PROJECT##*/}"
 shot_link_dir "$SHOT_AGMSG_DIR" "$SHOT_ROOT/${SHOT_AGMSG_DIR##*/}"
-mkdir -p "$SHOT_HOME" "$TMUX_TMPDIR"
+mkdir -p "$SHOT_HOME/.agents/skills" "$TMUX_TMPDIR"
+ln -s "$SHOT_ROOT/${SHOT_AGMSG_DIR##*/}" "$SHOT_HOME/.agents/skills/agmsg"
 chmod 700 "$TMUX_TMPDIR"
 
 # Built while HOME is still the real one, so npm and go use their usual

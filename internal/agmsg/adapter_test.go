@@ -38,16 +38,6 @@ func TestAdapterRejectsInvalidParticipationBeforeExecution(t *testing.T) {
 	}
 }
 
-func TestAdapterPathConfiguration(t *testing.T) {
-	assert.Equal(t, "~/.agents/skills/agmsg", DefaultPath)
-	for _, path := range []string{"", "/opt/agmsg", "~/tools/agmsg"} {
-		assert.NoError(t, ValidatePath(path))
-	}
-	for _, path := range []string{"relative", "~other/tools"} {
-		assert.Error(t, ValidatePath(path))
-	}
-}
-
 func TestAdapterMapsRegisteredIDsToTransportTypes(t *testing.T) {
 	for id, want := range map[agent.ID]string{
 		agent.Claude: "claude-code", agent.Codex: "codex", agent.Cursor: "cursor",
@@ -121,7 +111,8 @@ func TestAvailableClassifiesOnlyPathFailures(t *testing.T) {
 			assert.False(t, present)
 			require.ErrorIs(t, err, sentinel)
 			assert.Equal(t, wantPathError, errors.Is(err, board.ErrParticipationPath))
-			assert.Equal(t, board.ParticipationDescription{Name: "agmsg", PathSetting: "agmsg_path"}, client.Description())
+			want := board.ParticipationDescription{Name: "agmsg", PathSetting: "agmsg installation path"}
+			assert.Equal(t, want, client.Description())
 		})
 	}
 }

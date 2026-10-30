@@ -160,8 +160,9 @@ const fixtureless: Record<string, string> = {
 
   // Components. Each is reached, and therefore validated, through a response
   // schema above — naming a fixture for it as well would assert nothing new.
-  BoardModeSchema: 'component of PaneConfigSchema, via workspaces',
-  PaneAgentBoardConfigSchema: 'component of PaneConfigSchema, via workspaces',
+  BoardModeSchema: 'component of global YAML board configuration',
+  AgentBoardConfigSchema: 'global YAML settings; no REST config response exposes this object',
+  BoardParticipationSchema: 'component of BoardStatusResponseSchema',
   PaneConfigSchema: 'component of LayoutNodeSchema, via workspaces',
   LayoutChildSchema: 'component of LayoutNodeSchema, via workspaces',
   LayoutNodeSchema: 'component of WorkspaceSchema, via workspaces',

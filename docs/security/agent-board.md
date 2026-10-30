@@ -19,7 +19,7 @@ Remote commands must satisfy all of these rules:
   wrapper using positional parameters;
 - never interpolate caller-controlled data into wrapper or probe script text;
 - leave SQL escaping to agmsg and never construct SQL in panemux;
-- expand `~/` in `agmsg_path` to an absolute local or remote-home path before shell quoting.
+- expand `~/` in the fixed `~/.agents/skills/agmsg` location to an absolute local or remote-home path before shell quoting.
 
 Plain shell quoting is not sufficient evidence for the repository's CodeQL command-injection bar.
 The encoded-body path deliberately places an allowlist check before the exec sink, but no real
@@ -46,3 +46,14 @@ URLs must not become links without an explicit scheme allowlist: escaping text d
 The current dashboard shows `state`, `summary`, and `last_tool` as text. It intentionally omits the
 self-reported repository, branch, and PR URL. Any future attribute-valued rendering reopens this
 security sink and requires dedicated validation.
+
+### Global enablement and sender scope
+
+`agent_board.enabled` is a single instance-wide consent. Every configured pane whose host resolves
+is a valid relay identity, including a shell pane without a detected agent. The sender must still
+belong to the source host; `_system` still requires the own-send ledger. Increasing the number of
+allowed names does not strengthen same-user authentication. Agent detection and dashboard visibility
+are presentation and onboarding concerns, not sender authorization.
+
+Global `turn`/`both` modes allow onboarding to write project-local agmsg delivery hooks through the
+agent. These persist after disablement. The tool installer is a later part of #435.

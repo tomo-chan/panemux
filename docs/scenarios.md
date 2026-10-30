@@ -45,13 +45,15 @@ Verification column values:
 
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
-| B1 | No pane enables `agent_board` | No Agent Board entry point anywhere in the UI, and the shortcut does nothing | `auto`: `frontend/e2e/agent-board-disabled.spec.ts` (both tests) |
-| B2 | A pane enables `agent_board` | The Agent Board button appears and `Cmd/Ctrl+Shift+B` opens the panel | `auto`: `frontend/e2e/agent-board.spec.ts` |
-| B3 | Enabling the board through the pane settings dialog | The pane gains `agent_board.enabled`, and saving does not require a session restart | `auto`: `frontend/src/hooks/usePaneSettings.test.ts`, `frontend/src/components/PaneSettingsDialog.test.tsx` |
-| B4 | Editing the layout afterwards | A layout `PUT` does not delete the pane's `agent_board` block | `auto`: `frontend/src/schemas/index.test.ts` (the layout round-trip preserves it) |
+| B1 | Global `agent_board.enabled` is false | No Agent Board entry point anywhere in the UI, and the shortcut does nothing | `auto`: `frontend/e2e/agent-board-disabled.spec.ts` (both tests) |
+| B2 | Global `agent_board.enabled` is true | The Agent Board button appears and `Cmd/Ctrl+Shift+B` opens the panel | `auto`: `frontend/e2e/agent-board.spec.ts` |
+| B3 | Pane Settings with global board configuration | No pane-level board controls or saved board block | `auto`: `frontend/src/components/PaneSettingsDialog.test.tsx` |
+| B4 | Editing the layout afterwards | Global board configuration survives an unrelated layout save | `auto`: `internal/config` — `TestGlobalBoardSettingsPersistOnUnrelatedLayoutSave` |
 | B5 | An invalid `agent_board.mode` | Startup fails validation; every valid value is accepted | `auto`: `internal/config` — `TestValidate_AgentBoardMode_InvalidValue_Error`, `TestValidate_AgentBoardMode_ValidValues_NoError` |
 | B6 | `agent_board.team` set to the reserved `_system` | Rejected | `auto`: `internal/config` — `TestValidate_AgentBoardTeam_ReservedSystemID_Error` |
-| B7 | Changing a pane's mode after startup | The next bootstrap uses the new mode, read live rather than from a startup snapshot | `auto`: root package — `TestBootstrapWatcherReadsModeLive` |
+| B7 | Global delivery mode | All eligible panes use the same mode | `auto`: root — `TestCurrentPaneModes`, `TestBootstrapWatcherReadsModeLive` |
+| B8 | Removed pane board settings or path override | Startup reports a migration error | `auto`: `internal/config` — `TestRemovedBoardSettingsFailWithMigrationHelp` |
+| B9 | Configured shell addresses under global enablement | Local and SSH shell IDs are valid relay addresses even without agent detection | `auto`: root — `TestGlobalBoardIncludesShellAddressesAndPublishesParticipation`, `TestBoardTracksPanesAddedAndRemovedAfterStartup` |
 
 ## C. A pane joins the board
 
@@ -81,7 +83,7 @@ Verification column values:
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
 | D1 | A pane reports status | Its card shows state, summary, last tool and how long ago | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts` |
-| D2 | A board-enabled pane never reports | It is still listed, as `not joined` | `auto`: `frontend/e2e/agent-board.spec.ts`, `frontend/e2e/agent-board-agmsg.spec.ts` |
+| D2 | A configured shell has neither a detected agent nor a report | It is omitted; detected agents show instruction state | `auto`: `frontend/e2e/agent-board.spec.ts`, `frontend/e2e/agent-board-agmsg.spec.ts` |
 | D3 | A long summary | Rendered in full over several lines, not clipped to one | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts` (asserts the rendered height) |
 | D4 | repo / branch / PR | Not rendered, and the card contains no link | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts`, `frontend/src/components/BoardDashboardPanel.test.tsx` |
 | D5 | A cross-pane message arrives while the panel is open | It appears without reopening the panel | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts` |
@@ -112,7 +114,7 @@ Verification column values:
 ## F. Documentation
 
 Documentation is part of the product here: an operator cannot use Agent Board without following
-[README](../README.md#agent-board), because panemux never installs agmsg itself.
+[README](../README.md#agent-board), with global YAML settings and a per-host agmsg installation (the installer follows in #435).
 
 | # | Scenario | Expected | Verification |
 |---|---|---|---|

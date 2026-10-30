@@ -18,6 +18,9 @@
 - Broadcast delivery is immediate, but dashboard history is updated only when the relay polls the
   row back. The visible lag is at most one poll interval under normal operation.
 
+Configured shell panes are valid senders and recipients on their owning hosts even when they
+never receive a participation instruction. The UI lists only detected agents or reporting panes.
+
 ### Delivery guarantees
 
 - Cross-host forwarding is best-effort. A missing destination client or failed send is not retried:
@@ -75,3 +78,11 @@ known pane sender on the source host.
 Operator sends wait for a missing SSH connection within the send context, including before the
 first poll and after reconnect or transport loss. Polling and bootstrap continue to use the
 non-waiting runner; all runners share the same connection pool.
+
+### Detection cost
+
+With Agent Board enabled, every eligible configured pane is checked every five seconds, including
+already-instructed agents and plain shells. Local panes each request a process listing; tmux panes
+also query tmux, and SSH panes run a remote detection command. Process listings are currently not
+shared across panes. This steady-state work grows with the number of panes; detection does not
+stop after the participation instruction is sent because the API keeps the detected type current.

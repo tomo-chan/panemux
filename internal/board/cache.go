@@ -31,23 +31,25 @@ type CachedRow struct {
 // because message transport IDs from different hosts are not comparable or even
 // guaranteed non-colliding with each other.
 type BoardCache struct {
-	status     map[string]Status
-	now        func() time.Time
-	epoch      string
-	history    []CachedRow
-	nextSeq    int64
-	maxHistory int
-	mu         sync.RWMutex
+	participation map[string]PaneParticipation
+	status        map[string]Status
+	now           func() time.Time
+	epoch         string
+	history       []CachedRow
+	nextSeq       int64
+	maxHistory    int
+	mu            sync.RWMutex
 }
 
 // NewBoardCache returns an empty BoardCache, as it is on every panemux
 // process start (the cache is never persisted to disk).
 func NewBoardCache() *BoardCache {
 	return &BoardCache{
-		status:     make(map[string]Status),
-		now:        time.Now,
-		epoch:      newCacheEpoch(),
-		maxHistory: defaultBoardCacheHistoryLimit,
+		participation: make(map[string]PaneParticipation),
+		status:        make(map[string]Status),
+		now:           time.Now,
+		epoch:         newCacheEpoch(),
+		maxHistory:    defaultBoardCacheHistoryLimit,
 	}
 }
 

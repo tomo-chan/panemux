@@ -56,16 +56,15 @@ type DisplayConfig struct {
 }
 
 type PaneConfig struct {
-	ShowHeader    *bool                `yaml:"show_header,omitempty"    json:"show_header,omitempty"`
-	ShowStatusBar *bool                `yaml:"show_status_bar,omitempty" json:"show_status_bar,omitempty"`
-	ID            string               `yaml:"id"           json:"id"`
-	Type          string               `yaml:"type"         json:"type"` // local | ssh | tmux | ssh_tmux
-	Shell         string               `yaml:"shell,omitempty"        json:"shell,omitempty"`
-	Cwd           string               `yaml:"cwd,omitempty"          json:"cwd,omitempty"`
-	Title         string               `yaml:"title,omitempty"        json:"title,omitempty"`
-	Connection    string               `yaml:"connection,omitempty"   json:"connection,omitempty"` // ssh_connections key
-	TmuxSession   string               `yaml:"tmux_session,omitempty" json:"tmux_session,omitempty"`
-	AgentBoard    PaneAgentBoardConfig `yaml:"agent_board,omitempty" json:"agent_board,omitempty"`
+	ShowHeader    *bool  `yaml:"show_header,omitempty"    json:"show_header,omitempty"`
+	ShowStatusBar *bool  `yaml:"show_status_bar,omitempty" json:"show_status_bar,omitempty"`
+	ID            string `yaml:"id"           json:"id"`
+	Type          string `yaml:"type"         json:"type"` // local | ssh | tmux | ssh_tmux
+	Shell         string `yaml:"shell,omitempty"        json:"shell,omitempty"`
+	Cwd           string `yaml:"cwd,omitempty"          json:"cwd,omitempty"`
+	Title         string `yaml:"title,omitempty"        json:"title,omitempty"`
+	Connection    string `yaml:"connection,omitempty"   json:"connection,omitempty"` // ssh_connections key
+	TmuxSession   string `yaml:"tmux_session,omitempty" json:"tmux_session,omitempty"`
 }
 
 // LayoutNode is one node of the split tree. Its `direction` and `children` are
@@ -204,6 +203,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
+	if err := rejectRemovedBoardSettings(data); err != nil {
+		return nil, err
+	}
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
@@ -608,8 +610,6 @@ func (c *Data) expandPaths() {
 	if active, ok := c.ActiveWorkspace(); ok {
 		c.Layout = active.Layout
 	}
-	// AgentBoard.AgmsgPath names a directory on each target host. The adapter
-	// resolves it on that host; configuration never expands it locally.
 }
 
 func expandPanesCwd(children []LayoutChild) {

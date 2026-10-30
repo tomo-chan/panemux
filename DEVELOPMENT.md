@@ -126,6 +126,11 @@ as for `make test-e2e` when the installed Chromium is not the one Playwright exp
   panemux and its children. It starts tmux with `-f /dev/null` and stops its private server on exit,
   including sessions started or resumed through the dashboard. Playwright sends `SIGTERM` to this
   fixture so its cleanup trap runs. It never uses the caller's server.
+- Agent Board and command-center E2E servers also opt into Playwright's SIGTERM shutdown,
+  with a five-second grace period. Their owning shells stop and reap the child before deleting
+  per-run fake HOME directories. SIGKILL cannot run cleanup; the fixture tests retain a negative
+  control for that case and verify the configured SIGTERM path. Process-group checks use optional
+  `python3` and report a skip when it is unavailable.
 - The task-dashboard E2E fixture never reads the developer's own agent sessions. The collection it
   runs is the real one, so its `ps` and `lsof` are stand-ins (`frontend/e2e/fixtures/process-isolation/`).
   They answer only for processes that descend from the fixture's start-up script or its private tmux

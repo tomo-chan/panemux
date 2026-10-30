@@ -86,8 +86,6 @@ func TestGetBoardSessionToken_CommandCenterUnavailable_ReportsFalse(t *testing.T
 	assert.False(t, resp.CommandCenterEnabled)
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 // TestGetBoardSessionToken_AgentBoardEnabled covers agentBoardEnabledAnyPane
 // (internal/api/board.go): the response field must be true only when at
 // least one pane has agent_board.enabled: true, independent of
@@ -100,12 +98,12 @@ func TestGetBoardSessionToken_AgentBoardEnabled(t *testing.T) {
 	}{
 		{
 			name:         "one pane enabled reports true",
-			mutateLayout: func(cfg *config.Config) { cfg.Layout.Children[0].Pane.AgentBoard.Enabled = boolPtr(true) },
+			mutateLayout: func(cfg *config.Config) { cfg.AgentBoard.Enabled = true },
 			want:         true,
 		},
 		{
 			name:         "pane explicitly disabled reports false",
-			mutateLayout: func(cfg *config.Config) { cfg.Layout.Children[0].Pane.AgentBoard.Enabled = boolPtr(false) },
+			mutateLayout: func(cfg *config.Config) { cfg.AgentBoard.Enabled = false },
 			want:         false,
 		},
 		{

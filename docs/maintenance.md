@@ -178,3 +178,10 @@ CI runs Playwright with one retry, and `playwright.config.ts` records a trace on
 - Developer workflow and PR rules: [../DEVELOPMENT.md](../DEVELOPMENT.md)
 - Architecture and security design: [architecture.md](architecture.md)
 - Runtime behavior and operational assumptions: [behavior.md](behavior.md)
+
+## Agent Board rollout (#435)
+
+The first part moves enablement and mode to global configuration and fixes the per-host install
+location. `agmsg_auto_update` is reserved and persisted but inactive in this part. The follow-up
+adds the tested commit SHA alongside the version pin, exact-version startup comparison, tool
+installation and automatic updates. Until then the existing version-warning policy remains.

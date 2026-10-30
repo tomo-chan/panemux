@@ -1152,6 +1152,63 @@ Rejected for now:
 
 ## Agent Board
 
+### Live pane eligibility after configuration edits (2026-10-29, #435 / PR #447 review)
+
+Routing now reads immutable maps derived under the API configuration lock for each relay operation;
+bootstrap refreshes pane membership each tick. Enabled boards continue running even when the
+initial layout is empty. New panes and configured hosts become available without a restart, removed
+IDs lose sender/destination authority, and moving a pane revokes its old host. Participation is
+synchronized on ticks, clearing instruction state on host changes while retaining historical reports.
+Detection continues every five seconds for all eligible panes; the steady-state process/tmux/SSH
+probe cost is documented rather than changing detection semantics in this review fix.
+
+### Global board participation and installer split (2026-10-29, #435 / #438)
+
+The user approved the implementation decisions recorded in #435 on 2026-10-29.
+`agent_board.enabled` defaults to false, `mode` to monitor, and `agmsg_auto_update` to false.
+Enablement, mode, team, and automatic-update preference are instance-wide. Enablement and mode
+are configured in YAML; pane settings no longer expose either. Removed pane `agent_board` blocks
+and `agent_board.agmsg_path` are migration errors, rather than silently discarded settings.
+The installation location is fixed at each host's `~/.agents/skills/agmsg`, using the local home seam.
+
+All configured panes with a resolvable board host become relay addresses, including shells.
+This broadens the set of impersonatable same-host names without changing the same-user trust
+boundary. Only detected agents or reporting panes appear in the UI. The authenticated status API
+adds a synchronized participation map with pane ID, host, registry agent type, whether the current
+session received its instruction, and optional last-report time. Sending an instruction does not
+prove the agent executed it. Global opt-in consents to onboarding all eligible agents; `turn` and
+`both` also consent to agmsg's persistent project-local delivery hooks.
+
+Implementation is split into two main-targeting PRs. Part A contains configuration, enablement,
+fixed paths, participation API/UI, isolated fixtures, and current-state docs. Part B follows after
+A merges: tool prerequisites and pause notification, Install/Update, global automatic updating,
+version+SHA pin and exact-version startup warnings, host-menu UI and their docs. Until B,
+`agmsg_auto_update` is persisted but inactive and existing version-warning behavior remains.
+
+For B the approved initial pin is version 1.2.0 with commit
+`3c537a51bb76a23e312e7c27770df4a58ba794ff` (`TestedAgmsgCommit` alongside `TestedAgmsgVersion`).
+SHA-specified shallow fetch from the repository-documented `https://github.com/fujibee/agmsg.git`
+was verified. Cache verified sources under cachedir's `panemux/agmsg/<SHA>` and reuse them offline.
+Archive only the verified commit; extend the execution port to carry tar on stdin to a fixed
+command that extracts into mktemp storage, runs install.sh with stdin closed, and cleans it up.
+Install has no arguments; Update uses only `--update`. Refuse Update when another named install
+exists: v1.2.0 otherwise chooses the first install it finds. Show installer output/exit/timeout
+without automatically attempting recovery. Check prerequisites; install none of them.
+
+The tool manager will support global and per-host auto-update settings, preserving Codex hook's
+store. Check all hosts at startup and when enabled, updating only older installed copies; show
+failure with manual retry. Drain ongoing panemux calls before an update, refuse new sends promptly,
+pause probing/bootstrap/relay and preserve affected relay cursors until it ends, including failure.
+Agent-owned script calls cannot be paused. Successful Install invalidates absence caching so the
+board can join without restarting panemux; recommend restarting agents separately.
+
+Installer consent covers execution of the fixed commit, also unattended when auto-update is on.
+Its own initialization may create a DB/default config; panemux does not directly manage them or
+teams. The pinned installer can write Claude commands, other agents' skill directories, Codex
+writable roots and an existing shim outside the shared skill directory. Tests use isolated HOME
+and fixtures, never the developer's installation. These are approved B decisions, not capabilities
+introduced by A.
+
 ### Isolate the board message transport (2026-10-26, #438 / #441)
 
 The user confirmed five implementation choices in #441. `internal/board` owns `MessageClient`

@@ -47,12 +47,12 @@ across Agent Board.
 
 ### Discovery and paths
 
-Panemux detects agmsg by checking `<agmsg_path>/scripts/api.sh`. It must not use or invoke the
+Panemux detects agmsg by checking `~/.agents/skills/agmsg/scripts/api.sh`. It must not use or invoke the
 `agmsg` npm bootstrap command, and it never installs or updates agmsg. A missing installation
 disables board integration for that host without affecting terminal service.
 
-`agent_board.agmsg_path` defaults to `~/.agents/skills/agmsg` and may be overridden. Panemux expands
-a leading `~/` before remote shell quoting:
+The installation location is fixed at `~/.agents/skills/agmsg`. Panemux expands the home directory
+before remote shell quoting:
 
 - locally, against the local user's home directory;
 - remotely, against the remote user's home determined through the shared host execution port.
@@ -114,8 +114,6 @@ Board process patterns retain the detection behavior checked against agmsg v1.1.
 registry owns transport-independent process matching. Explicit-only types (antigravity, copilot,
 hermes) and the desktop agmsg-app are not detected as board agents.
 
-Configuration retains `agent_board.agmsg_path` and its existing default and validation results.
-The adapter owns the default path and validation, which `internal/config` delegates to it. No tool
-installation or enablement policy is added here. Relay discovery remembers confirmed absence;
-bootstrap separately caches successful path resolution and rechecks presence on every eligible
-tick, so a later manually installed tool can still participate.
+The public path override has been removed. The adapter owns the fixed default location.
+Relay discovery remembers confirmed absence; bootstrap rechecks presence on eligible ticks.
+Installation and invalidating an absent relay discovery after Install belong to #435's follow-up.

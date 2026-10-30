@@ -8,9 +8,11 @@ server:
     host: 127.0.0.1
     port: 4180
 agent_board:
+    enabled: true
+    mode: monitor
+    agmsg_auto_update: false
     team: panemux-screenshots
-    # Must match run-panemux-screenshots.sh's SHOT_AGMSG_DIR.
-    agmsg_path: /tmp/panemux-screenshots-agmsg
+    # The runner places the stub under the fixed path in its fake HOME.
 workspaces:
     active: dev
     tab_position: left
@@ -26,8 +28,6 @@ workspaces:
                     shell: /bin/bash
                     cwd: /tmp/sample-project
                     title: Project
-                    agent_board:
-                        enabled: true
                   size: 50
                 - direction: vertical
                   children:
@@ -43,8 +43,6 @@ workspaces:
                         shell: /bin/bash
                         cwd: /tmp/sample-project
                         title: Tests
-                        agent_board:
-                            enabled: true
                       size: 50
                   size: 50
         - id: review

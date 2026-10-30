@@ -9,10 +9,10 @@ import (
 )
 
 // remoteHomeProbeCmd is a fixed, non-tainted command run once per remote
-// host to resolve $HOME for expanding a leading ~/ in agent_board.agmsg_path
+// host to resolve $HOME for expanding the fixed ~/ installation location
 // before it ever reaches a Runner.Run argument list — a literal ~
 // inside quoteArgs's single-quoting never expands on the remote shell (see
-// docs/agent-board.md's "~ in agmsg_path is expanded by panemux" note).
+// docs/agent-board/agmsg-integration.md's discovery section).
 // printf, not "echo -n", because -n is not part of POSIX echo — some /bin/sh
 // implementations print it literally instead of suppressing the trailing
 // newline, which would otherwise corrupt the probed path in a way that's
