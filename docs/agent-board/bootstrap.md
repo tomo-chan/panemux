@@ -4,11 +4,14 @@
 
 ## Bootstrap flow
 
-Each pane opts in with `agent_board.enabled: true`. The team and agmsg path are shared instance
-settings; pane-level team overrides do not exist.
+The operator opts in for the whole instance with top-level `agent_board.enabled: true`.
+Every configured pane with a board host is eligible, using the global `agent_board.mode` and team.
+Only detected agents on hosts with agmsg receive participation instructions.
 
-Panemux polls opted-in panes for an interactive agent type that agmsg itself marks as reliably
-process-detectable: `claude-code`, `codex`, `cursor`, `gemini`, `grok-build`, or `opencode`. The
+The bootstrap watcher polls eligible panes for a registered interactive agent ID, using process
+rules that were verified against the messaging integration. It asks the board participation port
+for availability, address validation, and the instruction; only the adapter knows agmsg.
+The supported registry IDs are `claude`, `codex`, `cursor`, `gemini`, `grok-build`, or `opencode`. The
 process rules are the Board rules in the [agent registry](../agent-registry.md#detection-rules).
 Explicit-only and desktop agent types are not guessed.
 
@@ -19,8 +22,9 @@ A pane is bootstrapped only when:
 - agmsg is present at the resolved path on that pane's host.
 
 The two-poll debounce reduces, but does not eliminate, the chance of interleaving onboarding text
-with user input. Enabling Agent Board on the pane is the operator's consent to this one-time PTY
-write.
+with user input. Enabling Agent Board globally is consent to one-time PTY instructions for all detected agent
+panes on participating hosts. With global `turn` or `both`, this also consents to agmsg writing
+project hook files for those agents.
 
 ### Onboarding instruction
 
@@ -63,3 +67,14 @@ Fresh local and SSH sessions are eligible again because panemux recreated their 
 
 This deliberately does not detect an agent process restart inside an otherwise unchanged pane. See
 [Known limitations](limitations.md#known-limitations).
+
+Path discovery and presence probes have independent warning streaks. Once path discovery succeeds,
+its warning clears even if the next presence probe fails. The participation port distinguishes a
+path failure and supplies operator-facing tool/setting labels; the adapter keeps the existing
+agmsg warning wording while the watcher remains transport-independent.
+
+Eligibility follows the live configuration under its lock. New panes are detected on subsequent
+ticks without restarting panemux; removal revokes the sender and destination address immediately
+for subsequent relay operations. Participation entries refresh each tick. Historical reports may
+remain visible after removal, but confer no routing authority. Detection continues for instructed
+panes; see [detection cost](limitations.md#detection-cost).

@@ -2,7 +2,7 @@ import React from 'react'
 import { useBoardStatus } from '../hooks/useBoardStatus'
 import { useModalKeyboard } from '../hooks/useModalKeyboard'
 import { useRestoreFocusOnClose } from '../hooks/useRestoreFocusOnClose'
-import type { BoardMessage, BoardStatusEntry } from '../schemas'
+import type { BoardParticipation, BoardMessage, BoardStatusEntry } from '../schemas'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import { colorForBoardState, formatRelativeTime, isStaleUpdatedAt } from '../utils/boardStatusColors'
 
@@ -18,10 +18,7 @@ export interface BoardPaneRef {
 interface BoardDashboardPanelProps {
   isOpen: boolean
   token: string
-  // Every pane configured with agent_board.enabled, reported or not. Listing
-  // only panes that already reported made "configured but never joined"
-  // indistinguishable from "not configured at all" — the first question this
-  // panel exists to answer.
+  // All configured panes supply titles; participation determines which are shown.
   boardPanes: readonly BoardPaneRef[]
   onClose: () => void
 }
@@ -34,7 +31,7 @@ interface BoardDashboardPanelProps {
 // implementation plan's "Scope外" section) — this panel only ever reads
 // /api/board/status and /api/board/messages.
 export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen, token, boardPanes, onClose }) => {
-  const { statuses, messages, error } = useBoardStatus({ enabled: isOpen, token })
+  const { statuses, participation, messages, error } = useBoardStatus({ enabled: isOpen, token })
   useRestoreFocusOnClose(isOpen)
   const dialogRef = React.useRef<HTMLDivElement>(null)
 
@@ -48,12 +45,9 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
 
   if (!isOpen) return null
 
-  // Union, so a pane that dropped out of the config but is still reporting
-  // does not silently vanish from the board. A reporting pane the config no
-  // longer lists has no title to look up, which is why the title is
-  // optional rather than part of the key.
+  // A detected agent or report makes a pane visible; configuration supplies titles.
   const titles = new Map(boardPanes.map((pane) => [pane.id, pane.title]))
-  const paneIds = Array.from(new Set([...boardPanes.map((p) => p.id), ...Object.keys(statuses)])).sort()
+  const paneIds = Array.from(new Set([...Object.keys(participation).filter(id => participation[id].agent_type !== '' || participation[id].last_report !== undefined), ...Object.keys(statuses)])).sort()
   const messagesNewestFirst = [...messages].reverse()
   const hosts = new Set(messages.map((m) => m.host))
   const showHost = hosts.size > 1
@@ -79,9 +73,9 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
           {error && <div style={errorStyle}>{error}</div>}
 
           <div style={sectionTitleStyle}>Panes</div>
-          {paneIds.length === 0 && <div style={emptyStyle}>No pane has agent board enabled yet.</div>}
+          {paneIds.length === 0 && <div style={emptyStyle}>No agent detected or status reported yet.</div>}
           {paneIds.map((paneId) => (
-            <PaneStatusCard key={paneId} paneId={paneId} title={titles.get(paneId)} status={statuses[paneId]} />
+            <PaneStatusCard key={paneId} paneId={paneId} title={titles.get(paneId)} participation={participation[paneId]} status={statuses[paneId]} />
           ))}
 
           <div style={{ ...sectionTitleStyle, marginTop: '16px' }}>Messages</div>
@@ -104,10 +98,11 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
 // stale silently, so the same pane could show two different branches in two
 // places. Dropping them also removed the only <a> in this component tree,
 // and with it the agent-controlled href that needed scheme validation.
-const PaneStatusCard: React.FC<{ paneId: string; title?: string; status?: BoardStatusEntry }> = ({
+const PaneStatusCard: React.FC<{ paneId: string; title?: string; status?: BoardStatusEntry; participation?: BoardParticipation }> = ({
   paneId,
   title,
   status,
+  participation,
 }) => {
   const stale = status !== undefined && isStaleUpdatedAt(status.updated_at)
 
@@ -118,14 +113,14 @@ const PaneStatusCard: React.FC<{ paneId: string; title?: string; status?: BoardS
         <span style={paneIdStyle}>{paneId}</span>
         {title && <span style={paneTitleStyle}>{title}</span>}
         <span style={pillGroupStyle}>
-          {!status && <span style={pillStyle('#3a2a2a', '#f08b8b')}>not joined</span>}
+          {!status && <span style={pillStyle('#3a2a2a', '#f08b8b')}>{participation?.instructed ? 'instruction sent' : 'agent detected'}</span>}
           {status?.state && <span style={pillStyle('#2d253f', '#cbb3ff')}>{status.state}</span>}
           {stale && <span style={pillStyle('#5a4311', '#f4bf4f')}>stale</span>}
         </span>
       </div>
       {!status && (
         <div style={notJoinedDetailStyle}>
-          On the board in config, but no status has arrived. It reports once its agent joins.
+          {participation?.agent_type} on {participation?.host}. No status report yet.
         </div>
       )}
       {status?.summary && <div style={summaryStyle}>{status.summary}</div>}

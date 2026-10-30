@@ -30,10 +30,10 @@ layout rendering, terminal emulation, interaction state, and presentation.
 |---|---|
 | `main.go` and root helpers | Parse options, load config, construct dependencies, start sessions and optional subsystems, serve, and shut down. |
 | `internal/config` | Load, normalize, validate, and persist YAML. `Data` is the serializable domain model; `Config` adds file and lookup context. |
-| `internal/agent` | Register every coding agent panemux knows: its stable ID, display name, aliases, agmsg type name, the process rules that detect it, and the capabilities it declares. Imports nothing else from panemux. It declares; the packages that use a capability implement it. See [Agent registry](agent-registry.md). |
+| `internal/agent` | Register every coding agent panemux knows: its stable ID, display name, aliases, the process rules that detect it, and the capabilities it declares. Imports nothing else from panemux. It declares; the packages that use a capability implement it. See [Agent registry](agent-registry.md). |
 | `internal/session` | Provide one lifecycle interface for local PTY, SSH, local tmux, and tmux-over-SSH sessions. Optional capability interfaces expose CWD, Git context, port forwarding, and agent detection only where supported. Holds the per-session Workdir capability (`workdirAdapters`, one adapter per agent that declares `workdir`) and the one parser of Claude Code's `~/.claude/sessions` files, both of which `internal/tasks` uses too. `CommandConn` is an SSH connection for short non-interactive commands, dialed with the same dialer panes use. |
-| `internal/host`, `internal/hostexec` | Define host identity and fixed-script execution; own local and shared per-host SSH adapters, lazy dialing, cooldown and reconnect. |
-| `internal/hosttools` | Manage tool status, installation and Codex hook automatic-update settings and background checks; define the `Tool` port (`Check` / `Install`) and shared status. Consume successful task-collection notifications and own cancellation and joining of tool checks. |
+| `internal/host`, `internal/hostexec` | Define host identity and fixed-script execution, including a separate arbitrary stdin stream; own local and shared per-host SSH adapters, lazy dialing, cooldown and reconnect. |
+| `internal/hosttools` | Manage tool status, installation and Codex hook automatic-update settings and background checks; define the `Tool` port (`Check` / `Install`), optional adapter prerequisites, and shared status. Coordinate per-tool/host call admission, update notification and draining. Consume successful task-collection notifications and own cancellation and joining of tool checks. |
 | `internal/codexhook` | Implement the tool port using the shared host execution port; own the embedded permission hook, fixed check/install scripts and hooks.json parsing. |
 | `internal/tasks` | Collect the task dashboard's agent sessions from the panemux host and every `ssh_connections` host with one fixed script, composed at startup from a collect adapter per agent, through the shared host execution port; probe each host's agent CLIs with a second fixed script and keep what can be used per host and agent, including what the collection could not read (`Availability`); list the registered agents with their adapters' notes (`Agents`) and decide which actions each task offers and why one cannot be taken (`TaskActions`, `StateNote`); keep the done and label records in `~/.config/panemux/tasks.json` (`RecordStore`); start and resume claude and codex tasks in detached tmux sessions with one fixed launch script over the same connection (`Launch`, `Resume`), holding a new codex task's labels until its session is collected (`PendingLabels`); read a task's conversation log with a third fixed script and summarize it with its own agent CLI on the panemux host, through a summary adapter per agent (`summaryAdapters`), keeping the summaries in `~/.config/panemux/task-summaries.json` (`SummaryStore`) and reusing one while the excerpt it was made from is unchanged (`Summaries`, `RequestSummary`). |
 | `internal/taskevents` | Observe the running tasks on every host through `internal/tasks`'s lightweight collection while the task event stream has a subscriber, each host on its own cycle; keep what was last observed, publish each difference as an ordered event, assign unsigned waits their `wait_id`, and fan the events out to subscribers without waiting on any one of them. It decides nothing about notifications or panes. |
@@ -43,7 +43,8 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
 | `internal/preview` | Resolve a clicked HTML or Markdown path against a session's working directories, refusing any file outside them, register the file under a random token for the server's lifetime, and serve it and the files under its root sandboxed in an opaque origin, rendering Markdown. For an SSH session the same is done on the host over SFTP (`Remote`, `ResolveRemote`, `Registry.OpenRemote`), and a clicked localhost URL of the host is relayed to a port of its own on `127.0.0.1` (`Relays`). |
 | `internal/portforward` | Maintain short-lived loopback listeners that forward callback traffic through a session's SSH connection. |
-| `internal/board` | Invoke agmsg through its documented scripts, relay rows across configured hosts, and maintain the in-memory status/history view. |
+| `internal/board` | Define messaging and participation ports, validate senders, relay rows across configured hosts, and maintain the in-memory status/history view. |
+| `internal/agmsg` | Implement board messaging and participation through agmsg scripts, including path discovery, versions, parsing, and agent type mapping. |
 | `internal/commandcenter` | Run one headless Claude query at a time, persist its session/history state, and stream structured events. |
 | `internal/boardmcp` | Expose the three board operations to the command-center subprocess through a narrow stdio MCP server backed by panemux REST APIs. |
 | `internal/homedir`, `internal/cachedir` | Centralize OS directory lookups and provide scoped test substitutions. |
@@ -114,8 +115,8 @@ REST handlers and are persisted atomically when a save path is available.
 Board-enabled agents report through agmsg. `internal/board` polls configured hosts, validates and
 relays rows, and updates `BoardCache`. The browser obtains the token from the loopback-only
 bootstrap endpoint and sends it to the board REST and command-center WebSocket routes; the
-command-center MCP client also uses bearer-authenticated board REST APIs. Only `internal/board`
-invokes agmsg scripts. Full detail is in
+command-center MCP client also uses bearer-authenticated board REST APIs. Only `internal/agmsg`
+invokes agmsg scripts, through `host.Runner`; board logic uses its message ports. Full detail is in
 [Agent Board architecture](agent-board/architecture.md).
 
 ### Task dashboard flow
@@ -243,3 +244,8 @@ frames a localhost page. Behavior is in [the split preview](behavior/preview.md)
 - [UI design](ui-design.md) — workspace, pane, modal, attention, and Agent Board interactions.
 - [Quality gateway](quality-gateway.md) — how architectural contracts are verified.
 - [Decision log](DECISIONLOG.md) — tradeoffs and superseded approaches removed from this guide.
+
+Agent Board enablement and delivery mode are instance-wide. Its relay accepts all configured
+pane identities on their owning hosts; bootstrap supplies a synchronized participation snapshot
+for the authenticated status API. Dashboard membership is based on detected agents or reports.
+The agmsg installation location is fixed per host; the installer is a follow-up to #435's settings change.

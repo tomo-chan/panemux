@@ -8,8 +8,10 @@ server:
 command_center:
     enabled: true
 agent_board:
+    enabled: false
+    mode: monitor
+    agmsg_auto_update: false
     team: panemux-e2e-cc
-    agmsg_path: /tmp/panemux-e2e-agmsg-absent
 workspaces:
     active: default
     tab_position: top

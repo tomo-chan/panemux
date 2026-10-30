@@ -3,7 +3,7 @@
 export type {
   DisplayConfig,
   PaneConfig,
-  PaneAgentBoardConfig,
+  AgentBoardConfig,
   BoardMode,
   LayoutChild,
   LayoutNode,

@@ -66,9 +66,9 @@ func panemuxConfigDir(t *testing.T, home string) string {
 	return dir
 }
 
-func boardEnabledConfig(agmsgPath string, panes ...*config.PaneConfig) *config.Config {
+func boardEnabledConfig(panes ...*config.PaneConfig) *config.Config {
 	cfg := configWithPanes(panes...)
-	cfg.AgentBoard = config.AgentBoardConfig{Team: "panemux", AgmsgPath: agmsgPath}
+	cfg.AgentBoard = config.AgentBoardConfig{Enabled: true, Mode: "monitor", Team: "panemux"}
 	return cfg
 }
 
@@ -80,10 +80,8 @@ func boardEnabledConfig(agmsgPath string, panes ...*config.PaneConfig) *config.C
 // client is built for it.
 func TestSetupBoard_BoardEnabledPane_BuildsAClientForItsHost(t *testing.T) {
 	isolatedHome(t)
-	cfg := boardEnabledConfig(
-		installAgmsg(t, t.TempDir(), ""),
-		paneConfig("pane-a", config.PaneAgentBoardConfig{Enabled: boolPtr(true), Mode: "both"}),
-	)
+	installAgmsg(t, "")
+	cfg := boardEnabledConfig(paneConfig("pane-a"))
 
 	cache, relay, bootstrap := setupTestBoard(t, cfg, session.NewManager())
 
@@ -97,7 +95,7 @@ func TestSetupBoard_BoardEnabledPane_BuildsAClientForItsHost(t *testing.T) {
 	// Read through the live config rather than the value setupBoard saw: a
 	// mode changed in the pane settings dialog has to land on the next tick,
 	// and asserting the startup value would pass either way.
-	cfg.Workspaces.Items[0].Layout.Children[0].Pane.AgentBoard.Mode = "turn"
+	cfg.AgentBoard.Mode = "turn"
 	assert.Equal(t, "turn", bootstrap.modeFor("pane-a"),
 		"the watcher reads modes from the live config, not a startup snapshot")
 }
@@ -107,8 +105,7 @@ func TestSetupBoard_BoardEnabledPane_BuildsAClientForItsHost(t *testing.T) {
 func TestSetupBoard_NoAgmsgInstall_SkipsTheHost(t *testing.T) {
 	isolatedHome(t)
 	cfg := boardEnabledConfig(
-		t.TempDir(), // a directory with no scripts/api.sh
-		paneConfig("pane-a", config.PaneAgentBoardConfig{Enabled: boolPtr(true), Mode: "monitor"}),
+		paneConfig("pane-a"),
 	)
 
 	_, relay, bootstrap := setupTestBoard(t, cfg, session.NewManager())
@@ -131,10 +128,8 @@ func TestSetupBoard_UnparsableCursorFile_LogsAndContinues(t *testing.T) {
 	require.NoError(t, os.WriteFile(cursorPath, []byte("{not json"), 0o600))
 
 	buf := captureBoardLog(t)
-	cfg := boardEnabledConfig(
-		installAgmsg(t, t.TempDir(), ""),
-		paneConfig("pane-a", config.PaneAgentBoardConfig{Enabled: boolPtr(true), Mode: "monitor"}),
-	)
+	installAgmsg(t, "")
+	cfg := boardEnabledConfig(paneConfig("pane-a"))
 
 	_, relay, _ := setupTestBoard(t, cfg, session.NewManager())
 
@@ -150,10 +145,8 @@ func TestSetupBoard_UnparsableBootstrapStateFile_LogsAndContinues(t *testing.T) 
 	require.NoError(t, os.WriteFile(statePath, []byte("{not json"), 0o600))
 
 	buf := captureBoardLog(t)
-	cfg := boardEnabledConfig(
-		installAgmsg(t, t.TempDir(), ""),
-		paneConfig("pane-a", config.PaneAgentBoardConfig{Enabled: boolPtr(true), Mode: "monitor"}),
-	)
+	installAgmsg(t, "")
+	cfg := boardEnabledConfig(paneConfig("pane-a"))
 
 	_, _, bootstrap := setupTestBoard(t, cfg, session.NewManager())
 
@@ -180,10 +173,8 @@ func TestSetupBoard_ValidPersistedState_IsLoadedIntoTheRelayAndWatcher(t *testin
 	require.NoError(t, board.SaveBootstrapState(statePath, []string{"pane-a"}))
 
 	buf := captureBoardLog(t)
-	cfg := boardEnabledConfig(
-		installAgmsg(t, t.TempDir(), ""),
-		paneConfig("pane-a", config.PaneAgentBoardConfig{Enabled: boolPtr(true), Mode: "monitor"}),
-	)
+	installAgmsg(t, "")
+	cfg := boardEnabledConfig(paneConfig("pane-a"))
 
 	_, relay, bootstrap := setupTestBoard(t, cfg, session.NewManager())
 

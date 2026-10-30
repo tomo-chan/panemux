@@ -56,16 +56,15 @@ type DisplayConfig struct {
 }
 
 type PaneConfig struct {
-	ShowHeader    *bool                `yaml:"show_header,omitempty"    json:"show_header,omitempty"`
-	ShowStatusBar *bool                `yaml:"show_status_bar,omitempty" json:"show_status_bar,omitempty"`
-	ID            string               `yaml:"id"           json:"id"`
-	Type          string               `yaml:"type"         json:"type"` // local | ssh | tmux | ssh_tmux
-	Shell         string               `yaml:"shell,omitempty"        json:"shell,omitempty"`
-	Cwd           string               `yaml:"cwd,omitempty"          json:"cwd,omitempty"`
-	Title         string               `yaml:"title,omitempty"        json:"title,omitempty"`
-	Connection    string               `yaml:"connection,omitempty"   json:"connection,omitempty"` // ssh_connections key
-	TmuxSession   string               `yaml:"tmux_session,omitempty" json:"tmux_session,omitempty"`
-	AgentBoard    PaneAgentBoardConfig `yaml:"agent_board,omitempty" json:"agent_board,omitempty"`
+	ShowHeader    *bool  `yaml:"show_header,omitempty"    json:"show_header,omitempty"`
+	ShowStatusBar *bool  `yaml:"show_status_bar,omitempty" json:"show_status_bar,omitempty"`
+	ID            string `yaml:"id"           json:"id"`
+	Type          string `yaml:"type"         json:"type"` // local | ssh | tmux | ssh_tmux
+	Shell         string `yaml:"shell,omitempty"        json:"shell,omitempty"`
+	Cwd           string `yaml:"cwd,omitempty"          json:"cwd,omitempty"`
+	Title         string `yaml:"title,omitempty"        json:"title,omitempty"`
+	Connection    string `yaml:"connection,omitempty"   json:"connection,omitempty"` // ssh_connections key
+	TmuxSession   string `yaml:"tmux_session,omitempty" json:"tmux_session,omitempty"`
 }
 
 // LayoutNode is one node of the split tree. Its `direction` and `children` are
@@ -204,6 +203,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
+	if err := rejectRemovedBoardSettings(data); err != nil {
+		return nil, err
+	}
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
@@ -608,17 +610,6 @@ func (c *Data) expandPaths() {
 	if active, ok := c.ActiveWorkspace(); ok {
 		c.Layout = active.Layout
 	}
-	// AgentBoard.AgmsgPath is deliberately NOT expanded here: it names a
-	// path on whichever host it ends up used against (local or, via SSH,
-	// any number of remote hosts), so there is no single "the" home
-	// directory to expand a leading ~/ against at config-load time — that
-	// used to expand it against panemux's own local home unconditionally,
-	// silently breaking every remote host whose home directory differs (see
-	// docs/agent-board.md's "~ in agmsg_path is expanded by panemux, never
-	// left for the remote shell to expand" section). Expansion happens per
-	// host instead, at AgmsgClient construction time in board.go: locally
-	// via homedir.Dir(), remotely via board.ResolveRemoteAgmsgPath's
-	// SSH $HOME probe.
 }
 
 func expandPanesCwd(children []LayoutChild) {
@@ -647,7 +638,7 @@ func ExpandPanePaths(pane *PaneConfig) {
 // against whatever directory panemux was started in and so silently names the
 // wrong file rather than failing where an operator can see it. Leaving the ~/
 // in place is the diagnosable answer, and the one board.go's
-// expandLocalAgmsgPath already describes itself as matching.
+// Message adapter path resolution uses the same home-directory convention.
 func expandTilde(path string) string {
 	if !strings.HasPrefix(path, "~/") {
 		return path

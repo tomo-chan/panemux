@@ -1,4 +1,4 @@
-package board
+package agmsg
 
 import (
 	"context"
@@ -9,10 +9,10 @@ import (
 )
 
 // remoteHomeProbeCmd is a fixed, non-tainted command run once per remote
-// host to resolve $HOME for expanding a leading ~/ in agent_board.agmsg_path
+// host to resolve $HOME for expanding the fixed ~/ installation location
 // before it ever reaches a Runner.Run argument list — a literal ~
 // inside quoteArgs's single-quoting never expands on the remote shell (see
-// docs/agent-board.md's "~ in agmsg_path is expanded by panemux" note).
+// docs/agent-board/agmsg-integration.md's discovery section).
 // printf, not "echo -n", because -n is not part of POSIX echo — some /bin/sh
 // implementations print it literally instead of suppressing the trailing
 // newline, which would otherwise corrupt the probed path in a way that's
@@ -24,8 +24,8 @@ const remoteHomeProbeCmd = `printf '%s' "$HOME"`
 // with ~/ (e.g. already absolute) is returned unchanged, with no
 // Runner.Run call at all. Callers are expected to cache the result for
 // the life of a connection — this function itself makes no attempt to
-// cache, matching internal/board's existing per-call, stateless convention
-// (see AgmsgClient's own doc comments).
+// cache, matching the adapter's existing per-call, stateless convention
+// (see board.MessageClient).
 func ResolveRemoteAgmsgPath(ctx context.Context, executor host.Runner, path string) (string, error) {
 	if !strings.HasPrefix(path, "~/") {
 		return path, nil

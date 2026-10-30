@@ -86,11 +86,11 @@ That is what makes **`agmsg-contract / contract`** safe to mark as a required ch
 
 ### Bumping the pinned agmsg version
 
-The pin is `board.TestedAgmsgVersion` in `internal/board/agmsg_version.go`, and the workflow reads it from that file rather than duplicating it. To bump it:
+The pin is `agmsg.TestedAgmsgVersion` in `internal/agmsg/agmsg_version.go`, and the workflow reads it from that file rather than duplicating it. To bump it:
 
 1. Update `TestedAgmsgVersion`.
-2. Recapture the Tier 1 fixtures at the new version and rename their directory to match — see `internal/board/testdata/agmsg-v1.2.0/README.md` and its `capture.sh`.
-3. Update `fixtureDir` (and the quoted fixture ids) in `internal/board/agmsg_fixture_test.go`.
+2. Recapture the Tier 1 fixtures at the new version and rename their directory to match — see `internal/agmsg/testdata/agmsg-v1.2.0/README.md` and its `capture.sh`.
+3. Update `fixtureDir` (and the quoted fixture ids) in `internal/agmsg/agmsg_fixture_test.go`.
 4. Push. The contract job runs against the new pin automatically, because step 1 touches a scoped path.
 
 A canary failure is a signal to investigate agmsg's changelog, not to bump the pin reflexively: the pinned version is the one panemux's prose and fixtures were verified against, and it keeps working until it is deliberately moved.
@@ -183,3 +183,14 @@ CI runs Playwright with one retry, and `playwright.config.ts` records a trace on
 - Developer workflow and PR rules: [../DEVELOPMENT.md](../DEVELOPMENT.md)
 - Architecture and security design: [architecture.md](architecture.md)
 - Runtime behavior and operational assumptions: [behavior.md](behavior.md)
+
+## Agent Board rollout (#435)
+
+The first part moves enablement and mode to global configuration and fixes the per-host install
+location. `agmsg_auto_update` is reserved and persisted but inactive in this part. The follow-up
+adds the tested commit SHA alongside the version pin, exact-version startup comparison, tool
+installation and automatic updates. Until then the existing version-warning policy remains.
+
+The shared host execution port can carry an archive on a separate stdin stream, and host tool
+management coordinates draining and optional prerequisites for updates. There is no agmsg
+installer or automatic-update execution yet; these capabilities are not exposed for agmsg.

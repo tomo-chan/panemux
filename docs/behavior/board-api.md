@@ -26,20 +26,30 @@ headers are rejected regardless of the addresses they contain. Valid direct requ
 The rationale and accepted reverse-proxy limitation are specified in
 [Auth token and transport encryption](../security/auth.md#auth-token-and-transport-encryption).
 
-The capability flags are independent. `agent_board_enabled` reflects the current configured panes;
+The capability flags are independent. `agent_board_enabled` reflects top-level `agent_board.enabled`;
 `command_center_enabled` reflects command-center configuration. The frontend uses them to expose
 the two surfaces separately.
 
-For every board-enabled pane, background bootstrap detects a supported agent on two consecutive
+For every eligible configured pane, background bootstrap detects a supported agent on two consecutive
 polls, confirms agmsg on that host, and writes one onboarding instruction. There is no REST endpoint
 for this process; see [Bootstrap flow](../agent-board/bootstrap.md#bootstrap-flow).
 
 ### `GET /api/board/status`
 
-Returns the current in-memory status snapshot without contacting agmsg:
+Returns the current in-memory status and participation snapshots without contacting agmsg.
+`participation` is keyed by pane ID and includes host, detected registry agent type (empty when none),
+`instructed` (the instruction was sent, not proof it was executed), and optional `last_report`.
+Detection and instruction state follow the current pane session. Reports can outlive a session.
+The dashboard lists a pane when its agent type is non-empty or a status report exists.
 
 ```json
 {
+  "participation": {
+    "pane-a": {
+      "pane_id": "pane-a", "host": "local", "agent_type": "codex", "instructed": true,
+      "last_report": "2026-08-10T12:00:00Z"
+    }
+  },
   "statuses": {
     "pane-a": {
       "updated_at": "2026-08-10T12:00:00Z",
@@ -56,7 +66,7 @@ Returns the current in-memory status snapshot without contacting agmsg:
 ```
 
 Fields other than `updated_at` are omitted when unreported. An empty cache returns `200` with
-`{"statuses":{}}`, never `null`.
+`{"participation":{},"statuses":{}}`, never `null`.
 
 ### `GET /api/board/messages?since=<seq>`
 

@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"log"
+	"panemux/internal/agmsg"
 	"panemux/internal/board"
 	"panemux/internal/config"
 	"panemux/internal/host"
@@ -19,42 +17,28 @@ const (
 	defaultBoardPollLimit     = 200
 	defaultBoardBackfillLimit = 1000
 	boardHostIDLocal          = "local"
-	boardStartupProbeTimeout  = 10 * time.Second
 )
 
 // setupBoard separates host execution from pane eligibility. A client is retained
 // even when its host cannot be reached at startup; polling retries through the pool.
 func setupBoard(
 	cfg *config.Config, manager *session.Manager, execution *hostexec.Pool,
+	readers ...func(func(*config.Config)),
 ) (*board.BoardCache, *board.Relay, *bootstrapWatcher) {
 	cache := board.NewBoardCache()
-	paneHosts := map[string]string{}
-	for _, pane := range cfg.AllPanes() {
-		if pane.AgentBoard.Enabled == nil || !*pane.AgentBoard.Enabled {
-			continue
-		}
-		target, ok := boardHostForPane(cfg, pane)
-		if !ok {
-			log.Printf("Warning: agent board: pane %q is excluded; "+
-				"add an entry named %q to ssh_connections to enable its board", pane.ID, pane.Connection)
-			continue
-		}
-		paneHosts[pane.ID] = target.BoardID()
+	paneHosts := configuredBoardPanes(cfg, true)
+	cache.SyncParticipation(paneHosts)
+	readConfig := func(visit func(*config.Config)) { visit(cfg) }
+	if len(readers) > 0 {
+		readConfig = readers[0]
 	}
-	clients := map[string]board.AgmsgClient{}
-	runners := map[string]host.Runner{}
-	if len(paneHosts) > 0 {
-		for _, target := range execution.Names() {
-			id := target.BoardID()
-			runner := host.Bind(execution.WithoutDialWait(), target)
-			runners[id] = runner
-			clients[id] = &hostAgmsgClient{
-				id: id, path: cfg.AgentBoard.AgmsgPath, runner: runner, sendRunner: host.Bind(execution, target),
-			}
-		}
+	routing := newBoardRouting(readConfig, execution)
+	var liveRouting func() board.Routing
+	if cfg.AgentBoard.Enabled {
+		liveRouting = routing
 	}
 	relay := board.NewRelay(cache, board.RelayConfig{
-		Team: cfg.AgentBoard.Team, Clients: clients, PaneHosts: paneHosts,
+		Team: cfg.AgentBoard.Team, CurrentRouting: liveRouting, PaneHosts: paneHosts,
 		Limit: defaultBoardPollLimit, BackfillLimit: defaultBoardBackfillLimit, PersistCursors: persistBoardCursors,
 	})
 	if path, err := board.DefaultCursorFilePath(); err == nil {
@@ -66,11 +50,24 @@ func setupBoard(
 	}
 	bootstrap := newBootstrapWatcher(bootstrapWatcherConfig{
 		Manager: manager, PaneHosts: paneHosts,
-		PaneModes:     func() map[string]string { return currentPaneModes(cfg) },
-		RunnerForHost: func(id string) host.Runner { return runners[id] },
-		ResolvePath: func(ctx context.Context, id string) (string, error) {
-			return resolveHostAgmsgPath(ctx, runners[id], cfg.AgentBoard.AgmsgPath)
-		}, Team: cfg.AgentBoard.Team, Persist: persistBootstrapState})
+		CurrentPaneHosts:  func() map[string]string { return routing().PaneHosts },
+		WatchEnabled:      cfg.AgentBoard.Enabled,
+		SyncParticipation: cache.SyncParticipation,
+		PaneModes: func() map[string]string {
+			var modes map[string]string
+			readConfig(func(current *config.Config) { modes = currentPaneModes(current) })
+			return modes
+		},
+		ParticipationForHost: func(id string) board.Participation {
+			client := routing().Clients[id]
+			if client == nil {
+				return nil
+			}
+			return client.(board.Participation)
+		},
+		Team: cfg.AgentBoard.Team, Persist: persistBootstrapState,
+		Observe: cache.RecordParticipation,
+	})
 	if path, err := board.DefaultBootstrapStateFilePath(); err == nil {
 		if ids, err := board.LoadBootstrapState(path); err == nil {
 			bootstrap.LoadPersistedState(ids)
@@ -80,11 +77,57 @@ func setupBoard(
 	}
 	return cache, relay, bootstrap
 }
+func configuredBoardPanes(cfg *config.Config, warn bool) map[string]string {
+	paneHosts := map[string]string{}
+	for _, pane := range cfg.AllPanes() {
+		if !cfg.AgentBoard.Enabled {
+			continue
+		}
+		target, ok := boardHostForPane(cfg, pane)
+		if !ok {
+			if warn {
+				log.Printf("Warning: agent board: pane %q is excluded; "+
+					"add an entry named %q to ssh_connections to enable its board", pane.ID, pane.Connection)
+			}
+			continue
+		}
+		paneHosts[pane.ID] = target.BoardID()
+	}
+	return paneHosts
+}
+
+// Live routing is scheduled only for boards enabled at startup.
+func newBoardRouting(readConfig func(func(*config.Config)), execution *hostexec.Pool) func() board.Routing {
+	var clientsMu sync.Mutex
+	clients := map[host.Host]*agmsg.Client{}
+	return func() board.Routing {
+		result := board.Routing{PaneHosts: map[string]string{}, Clients: map[string]board.MessageClient{}}
+		targets := []host.Host{}
+		readConfig(func(current *config.Config) {
+			targets = append(targets, host.Local)
+			for name := range current.SSHConnections {
+				targets = append(targets, host.Host(name))
+			}
+			result.PaneHosts = configuredBoardPanes(current, false)
+		})
+		clientsMu.Lock()
+		defer clientsMu.Unlock()
+		for _, target := range targets {
+			if clients[target] == nil {
+				clients[target] = agmsg.NewClient(agmsg.ClientConfig{HostID: target.BoardID(),
+					Runner: host.Bind(execution.WithoutDialWait(), target), SendRunner: host.Bind(execution, target)})
+			}
+			result.Clients[target.BoardID()] = clients[target]
+		}
+		return result
+	}
+}
+
 func currentPaneModes(cfg *config.Config) map[string]string {
 	modes := map[string]string{}
 	for _, p := range cfg.AllPanes() {
-		if p.AgentBoard.Enabled != nil && *p.AgentBoard.Enabled {
-			modes[p.ID] = p.AgentBoard.Mode
+		if cfg.AgentBoard.Enabled {
+			modes[p.ID] = cfg.AgentBoard.Mode
 		}
 	}
 	return modes
@@ -96,115 +139,6 @@ func boardHostForPane(cfg *config.Config, pane *config.PaneConfig) (host.Host, b
 	}
 	return host.Local, true
 }
-func resolveHostAgmsgPath(ctx context.Context, runner host.Runner, path string) (string, error) {
-	resolved, err := board.ResolveRemoteAgmsgPath(ctx, runner, path)
-	if err != nil {
-		return "", fmt.Errorf("resolve host agmsg path: %w", err)
-	}
-	return resolved, nil
-}
-
-// hostAgmsgClient resolves a host lazily. Transport failures leave it retryable;
-// a confirmed absent install is remembered, without detecting updates or installing tools.
-// Discovery is published once; probes leave the cache mutex free while doing I/O.
-type hostAgmsgClient struct {
-	runner       host.Runner
-	sendRunner   host.Runner
-	resolvedPath *string
-	id, path     string
-	mu           sync.Mutex
-	absent       bool
-}
-
-func (c *hostAgmsgClient) HostID() string { return c.id }
-func (c *hostAgmsgClient) ready(ctx context.Context, runner host.Runner) (board.AgmsgClient, error) {
-	c.mu.Lock()
-	client, known := c.cachedClient(runner)
-	c.mu.Unlock()
-	if known {
-		return client, nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, boardStartupProbeTimeout)
-	defer cancel()
-	path, err := resolveHostAgmsgPath(ctx, runner, c.path)
-	if err != nil {
-		return nil, err
-	}
-	present, err := board.RemoteAgmsgPresent(ctx, runner, path)
-	if err != nil {
-		return nil, fmt.Errorf("probe agmsg presence: %w", err)
-	}
-	if !present {
-		return c.finishProbe(runner, path, false, "", nil), nil
-	}
-	version, versionErr := board.RemoteAgmsgVersion(ctx, runner, path)
-	return c.finishProbe(runner, path, true, version, versionErr), nil
-}
-
-// cachedClient requires mu. The cache records discovery, not the execution lane.
-func (c *hostAgmsgClient) cachedClient(runner host.Runner) (board.AgmsgClient, bool) {
-	if c.absent {
-		return nil, true
-	}
-	if c.resolvedPath == nil {
-		return nil, false
-	}
-	return board.NewRemoteAgmsgClient(c.id, *c.resolvedPath, runner), true
-}
-
-// Probes run outside mu so a send waiting for SSH cannot block polling.
-// Concurrent successful discoveries publish one cache entry and one warning.
-func (c *hostAgmsgClient) finishProbe(
-	runner host.Runner, path string, present bool, version string, versionErr error,
-) board.AgmsgClient {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if client, known := c.cachedClient(runner); known {
-		return client
-	}
-	if !present {
-		c.absent = true
-		log.Printf("Warning: agent board: no agmsg installation at %q on host %q, skipping that host", path, c.id)
-		return nil
-	}
-	if versionErr != nil {
-		log.Printf("Warning: agent board: reading agmsg version on host %q: %v", c.id, versionErr)
-	} else if warning := board.VersionMismatchWarning(c.id, version); warning != "" {
-		log.Printf("Warning: %s", warning)
-	}
-	c.resolvedPath = &path
-	return board.NewRemoteAgmsgClient(c.id, path, runner)
-}
-
-func (c *hostAgmsgClient) Since(ctx context.Context, team, after string, limit int) ([]board.Row, error) {
-	client, err := c.ready(ctx, c.runner)
-	if err != nil || client == nil {
-		return nil, err
-	}
-	rows, err := client.Since(ctx, team, after, limit)
-	if err != nil {
-		return nil, fmt.Errorf("read host messages: %w", err)
-	}
-	return rows, nil
-}
-func (c *hostAgmsgClient) Send(ctx context.Context, team, from, to, body string) error {
-	runner := c.sendRunner
-	if runner == nil {
-		runner = c.runner
-	}
-	client, err := c.ready(ctx, runner)
-	if err != nil {
-		return err
-	}
-	if client == nil {
-		return errors.New("agmsg is not installed on host")
-	}
-	if err := client.Send(ctx, team, from, to, body); err != nil {
-		return fmt.Errorf("send host message: %w", err)
-	}
-	return nil
-}
-
 func persistBoardCursors(entries []board.CursorEntry) {
 	path, err := board.DefaultCursorFilePath()
 	if err != nil {

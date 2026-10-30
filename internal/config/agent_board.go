@@ -15,7 +15,6 @@ import (
 
 const (
 	defaultAgentBoardTeam = "panemux"
-	defaultAgmsgPath      = "~/.agents/skills/agmsg"
 
 	agentBoardModeMonitor = "monitor"
 	agentBoardModeTurn    = "turn"
@@ -23,7 +22,7 @@ const (
 	agentBoardModeOff     = "off"
 
 	// reservedSystemID is the sentinel identity panemux's own relay and
-	// command center use as their agmsg from/to. It is deliberately not
+	// command center use as their message from/to. It is deliberately not
 	// derived from the product name, since the application could be
 	// renamed without this reserved identity needing to change.
 	reservedSystemID = "_system"
@@ -36,8 +35,10 @@ const authTokenFileMode os.FileMode = 0600
 // AgentBoardConfig holds the top-level agent_board settings shared by every
 // board-enabled pane.
 type AgentBoardConfig struct {
-	Team      string `yaml:"team,omitempty"       json:"team,omitempty"`
-	AgmsgPath string `yaml:"agmsg_path,omitempty" json:"agmsg_path,omitempty"`
+	Mode            string `yaml:"mode,omitempty" json:"mode"`
+	Team            string `yaml:"team,omitempty" json:"team"`
+	Enabled         bool   `yaml:"enabled" json:"enabled"`
+	AgmsgAutoUpdate bool   `yaml:"agmsg_auto_update" json:"agmsg_auto_update"`
 }
 
 // CommandCenterConfig holds the top-level command_center settings.
@@ -45,18 +46,12 @@ type CommandCenterConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`
 }
 
-// PaneAgentBoardConfig holds per-pane agent_board overrides.
-type PaneAgentBoardConfig struct {
-	Enabled *bool  `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	Mode    string `yaml:"mode,omitempty"    json:"mode,omitempty"`
-}
-
 func (c *Data) normalizeAgentBoard() {
 	if c.AgentBoard.Team == "" {
 		c.AgentBoard.Team = defaultAgentBoardTeam
 	}
-	if c.AgentBoard.AgmsgPath == "" {
-		c.AgentBoard.AgmsgPath = defaultAgmsgPath
+	if c.AgentBoard.Mode == "" {
+		c.AgentBoard.Mode = agentBoardModeMonitor
 	}
 }
 

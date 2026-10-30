@@ -254,8 +254,6 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 		errs = append(errs, fmt.Sprintf("pane %q: shell must be an absolute path, got %q", p.ID, p.Shell))
 	}
 
-	errs = append(errs, validatePaneAgentBoardMode(p)...)
-
 	if p.Type == PaneTypeTmux || p.Type == PaneTypeSSHTmux {
 		if p.TmuxSession == "" {
 			errs = append(errs, fmt.Sprintf("pane %q: tmux_session must not be empty", p.ID))
@@ -275,35 +273,15 @@ func validatePane(p *PaneConfig, sshConns map[string]SSHConnection) []string {
 	return errs
 }
 
-func validatePaneAgentBoardMode(p *PaneConfig) []string {
-	mode := p.AgentBoard.Mode
-	if mode == "" {
-		return nil
-	}
-	switch mode {
-	case agentBoardModeMonitor, agentBoardModeTurn, agentBoardModeBoth, agentBoardModeOff:
-		return nil
-	default:
-		return []string{fmt.Sprintf(
-			"pane %q: agent_board.mode %q must be monitor, turn, both, or off",
-			p.ID,
-			mode,
-		)}
-	}
-}
-
-// validateAgentBoard checks the top-level agent_board settings. Both fields
-// tolerate being empty here (Validate can run before normalizeAgentBoard has
-// filled in defaults — see finishLoad), matching the same "only validate a
-// path-like field when it's actually set" pattern validatePane already uses
-// for a pane's Shell.
 func validateAgentBoard(ab AgentBoardConfig) []string {
 	var errs []string
 	if ab.Team == reservedSystemID {
-		errs = append(errs, fmt.Sprintf("agent_board.team must not be the reserved id %q", reservedSystemID))
+		errs = append(errs, "agent_board.team must not be the reserved id _system")
 	}
-	if path := ab.AgmsgPath; path != "" && !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "~/") {
-		errs = append(errs, fmt.Sprintf("agent_board.agmsg_path %q must be an absolute path or start with ~/", path))
+	switch ab.Mode {
+	case "", agentBoardModeMonitor, agentBoardModeTurn, agentBoardModeBoth, agentBoardModeOff:
+	default:
+		errs = append(errs, "agent_board.mode must be monitor, turn, both, or off")
 	}
 	return errs
 }

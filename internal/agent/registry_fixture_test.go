@@ -22,7 +22,6 @@ func TestFixtureAgent_IsRegisteredAfterTheShippedAgents(t *testing.T) {
 	for _, c := range []Capability{Resume, Workdir, Board, Usage} {
 		assert.False(t, d.Has(c), "the fixture agent does not declare %s", c)
 	}
-	assert.Empty(t, d.AgmsgType)
 	assert.Nil(t, d.Detection.Board)
 
 	id, ok := Resolve("panemux-fixture-agent")

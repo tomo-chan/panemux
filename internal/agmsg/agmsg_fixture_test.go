@@ -1,7 +1,8 @@
-package board
+package agmsg
 
 import (
 	"os"
+	"panemux/internal/board"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -60,7 +61,7 @@ func TestAgmsgFixture_TeamMessages_StatusRowRecognized(t *testing.T) {
 	rows := parseAgmsgMessageRows(data, "local")
 	require.Len(t, rows, 4)
 
-	status, ok := IsStatusRow(rows[1])
+	status, ok := board.IsStatusRow(rows[1])
 	require.True(t, ok, "row 2 (addressed to _system with kind=board_status) must be recognized as a status report")
 	assert.Equal(t, "working", status.State)
 	assert.Equal(t, "/tmp/sample-project", status.CWD)
@@ -74,10 +75,10 @@ func TestAgmsgFixture_TeamMessages_CoincidentalJSONNotMistakenForStatus(t *testi
 	rows := parseAgmsgMessageRows(data, "local")
 	require.Len(t, rows, 4)
 
-	// Row 3 is addressed to _system and happens to be valid JSON with a
+	// board.Row 3 is addressed to _system and happens to be valid JSON with a
 	// "state" field, but has no "kind": "board_status" discriminator — it
 	// must be left alone as an ordinary message, not swallowed into status.
-	_, ok := IsStatusRow(rows[2])
+	_, ok := board.IsStatusRow(rows[2])
 	assert.False(t, ok)
 }
 
@@ -87,7 +88,7 @@ func TestAgmsgFixture_TeamMessages_OrdinaryRowsNotMistakenForStatus(t *testing.T
 	require.Len(t, rows, 4)
 
 	for _, i := range []int{0, 3} {
-		_, ok := IsStatusRow(rows[i])
+		_, ok := board.IsStatusRow(rows[i])
 		assert.False(t, ok, "row %d is not addressed to _system and must never be treated as status", i)
 	}
 }
@@ -142,9 +143,9 @@ func TestAgmsgFixture_TeamMessages_BoardCacheIntegration(t *testing.T) {
 	data := readFixture(t, "get_team_messages.jsonl")
 	rows := parseAgmsgMessageRows(data, "local")
 
-	cache := NewBoardCache()
+	cache := board.NewBoardCache()
 	for _, r := range rows {
-		if status, ok := IsStatusRow(r); ok {
+		if status, ok := board.IsStatusRow(r); ok {
 			cache.RecordStatus(r.From, status)
 			continue
 		}

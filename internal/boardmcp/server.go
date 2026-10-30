@@ -118,7 +118,7 @@ func (e *jsonrpcError) Error() string { return e.Message }
 
 // Server is the command center's narrow MCP server: three tools
 // (board_status, board_messages, board_broadcast), each a thin wrapper
-// around a BoardAPIClient call. It never calls agmsg or anything else
+// around a BoardAPIClient call. It never calls the message transport or anything else
 // directly — see docs/agent-board.md's Command center section.
 type Server struct {
 	client BoardAPIClient

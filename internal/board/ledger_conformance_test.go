@@ -365,9 +365,9 @@ func TestRelayOwnSendLedgerUseConformsToModel(t *testing.T) {
 	model := loadLedgerModel(t)
 	c := newLedgerConformance(t, model)
 
-	hostA := &fakeAgmsgClient{hostID: "host-a"}
-	hostB := &fakeAgmsgClient{hostID: "host-b"}
-	r := newTestRelay(NewBoardCache(), map[string]AgmsgClient{
+	hostA := &fakeMessageClient{hostID: "host-a"}
+	hostB := &fakeMessageClient{hostID: "host-b"}
+	r := newTestRelay(NewBoardCache(), map[string]MessageClient{
 		"host-a": hostA, "host-b": hostB,
 	}, map[string]string{"pane-a": "host-a", "pane-b": "host-b"})
 	c.watch(r.ledger)
@@ -383,7 +383,7 @@ func TestRelayOwnSendLedgerUseConformsToModel(t *testing.T) {
 	require.NoError(t, err)
 
 	// A failing Send: Record then Forget, closing the forgery window.
-	hostB.sendErr = errors.New("agmsg send failed")
+	hostB.sendErr = errors.New("message transport send failed")
 	_, err = r.Broadcast(ctx, SystemID, []string{"pane-b"}, "hello")
 	require.Error(t, err)
 	hostB.sendErr = nil

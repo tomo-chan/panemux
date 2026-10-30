@@ -2,7 +2,7 @@
 # Regenerates this directory's fixtures from a REAL agmsg install, so their
 # provenance is reproducible rather than asserted. See README.md.
 #
-#   internal/board/testdata/agmsg-v1.2.0/capture.sh <agmsg-source-checkout>
+#   internal/agmsg/testdata/agmsg-v1.2.0/capture.sh <agmsg-source-checkout>
 #
 # The argument is a checkout of github.com/fujibee/agmsg at the tag matching
 # this directory's name. The install goes into a throwaway HOME, never the

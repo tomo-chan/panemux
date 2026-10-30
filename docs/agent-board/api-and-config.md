@@ -33,19 +33,19 @@ command_center:
   enabled: true     # default: false; independent of agmsg availability
 
 agent_board:
+  enabled: false # opt in for the whole instance
+  mode: monitor  # monitor | turn | both | off
   team: "panemux"
-  agmsg_path: "~/.agents/skills/agmsg"
-
-panes:
-  - id: pane-a
-    type: local
-    agent_board:
-      enabled: true
-      mode: monitor # monitor (default) | turn | both | off
+  agmsg_auto_update: false # reserved for the follow-up installer change
 ```
 
-Board enablement is per pane. All enabled panes use the instance-wide team. agmsg must already be
-installed on each participating host; panemux never installs it.
+Enablement, delivery mode, and team are instance-wide. There are no pane or host overrides.
+Configure these settings in YAML; Pane Settings does not expose them. Each host uses
+`~/.agents/skills/agmsg` relative to its own home. Local discovery uses the injectable home-directory
+seam. The removed pane `agent_board` block and `agent_board.agmsg_path` produce migration errors.
+
+This first part of #435 does not install or update agmsg. `agmsg_auto_update` is persisted but
+has no effect until the follow-up installer change. Install agmsg yourself on participating hosts.
 
 Both boards use the panemux host and `ssh_connections` keys. An SSH pane participates only when
 its `connection` exactly matches a key; resolved hostname, user and port are not compared. A
@@ -53,7 +53,7 @@ its `connection` exactly matches a key; resolved hostname, user and port are not
 Add a name-only `ssh_connections` entry to use its OpenSSH configuration for both boards.
 
 `command_center` is a sibling of `agent_board` because it talks only to panemux's API and can run
-without any board-enabled pane or local agmsg installation. The browser receives independent
+without enabling Agent Board or local agmsg installation. The browser receives independent
 `command_center_enabled` and `agent_board_enabled` flags.
 
 `_system` is reserved. Configuration rejects it as a pane ID or team, but external processes can

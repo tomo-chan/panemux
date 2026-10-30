@@ -1194,6 +1194,105 @@ Rejected for now:
 
 ## Agent Board
 
+### Live pane eligibility after configuration edits (2026-10-29, #435 / PR #447 review)
+
+Routing now reads immutable maps derived under the API configuration lock for each relay operation;
+bootstrap refreshes pane membership each tick. Enabled boards continue running even when the
+initial layout is empty. New panes and configured hosts become available without a restart, removed
+IDs lose sender/destination authority, and moving a pane revokes its old host. Participation is
+synchronized on ticks, clearing instruction state on host changes while retaining historical reports.
+Detection continues every five seconds for all eligible panes; the steady-state process/tmux/SSH
+probe cost is documented rather than changing detection semantics in this review fix.
+
+### Split installer work into three PRs (2026-10-30, #435 / #438)
+
+After part A merged, the user approved splitting B into three main-targeting PRs, each following
+the previous merge, to keep implementation, verification and review within manageable context.
+B1 supplies the common stdin execution lane, call drain/pause and adapter-defined prerequisites.
+The existing Codex hook paths use the coordination; arbitrary stdin and optional prerequisite
+checks are available for adapters, with no agmsg installation or board-pause integration yet.
+B2 adds the manual agmsg Install/Update vertical slice, board integration and host-menu UI.
+B3 adds instance-wide automatic updating and completes the remaining #435 acceptance criteria.
+B1 and B2 reference #435; B3 closes it. The approved product decisions below remain unchanged.
+
+### Global board participation and installer split (2026-10-29, #435 / #438)
+
+The user approved the implementation decisions recorded in #435 on 2026-10-29.
+`agent_board.enabled` defaults to false, `mode` to monitor, and `agmsg_auto_update` to false.
+Enablement, mode, team, and automatic-update preference are instance-wide. Enablement and mode
+are configured in YAML; pane settings no longer expose either. Removed pane `agent_board` blocks
+and `agent_board.agmsg_path` are migration errors, rather than silently discarded settings.
+The installation location is fixed at each host's `~/.agents/skills/agmsg`, using the local home seam.
+
+All configured panes with a resolvable board host become relay addresses, including shells.
+This broadens the set of impersonatable same-host names without changing the same-user trust
+boundary. Only detected agents or reporting panes appear in the UI. The authenticated status API
+adds a synchronized participation map with pane ID, host, registry agent type, whether the current
+session received its instruction, and optional last-report time. Sending an instruction does not
+prove the agent executed it. Global opt-in consents to onboarding all eligible agents; `turn` and
+`both` also consent to agmsg's persistent project-local delivery hooks.
+
+Implementation is split into two main-targeting PRs. Part A contains configuration, enablement,
+fixed paths, participation API/UI, isolated fixtures, and current-state docs. Part B follows after
+A merges: tool prerequisites and pause notification, Install/Update, global automatic updating,
+version+SHA pin and exact-version startup warnings, host-menu UI and their docs. Until B,
+`agmsg_auto_update` is persisted but inactive and existing version-warning behavior remains.
+
+For B the approved initial pin is version 1.2.0 with commit
+`3c537a51bb76a23e312e7c27770df4a58ba794ff` (`TestedAgmsgCommit` alongside `TestedAgmsgVersion`).
+SHA-specified shallow fetch from the repository-documented `https://github.com/fujibee/agmsg.git`
+was verified. Cache verified sources under cachedir's `panemux/agmsg/<SHA>` and reuse them offline.
+Archive only the verified commit; extend the execution port to carry tar on stdin to a fixed
+command that extracts into mktemp storage, runs install.sh with stdin closed, and cleans it up.
+Install has no arguments; Update uses only `--update`. Refuse Update when another named install
+exists: v1.2.0 otherwise chooses the first install it finds. Show installer output/exit/timeout
+without automatically attempting recovery. Check prerequisites; install none of them.
+
+The tool manager will support global and per-host auto-update settings, preserving Codex hook's
+store. Check all hosts at startup and when enabled, updating only older installed copies; show
+failure with manual retry. Drain ongoing panemux calls before an update, refuse new sends promptly,
+pause probing/bootstrap/relay and preserve affected relay cursors until it ends, including failure.
+Agent-owned script calls cannot be paused. Successful Install invalidates absence caching so the
+board can join without restarting panemux; recommend restarting agents separately.
+
+Installer consent covers execution of the fixed commit, also unattended when auto-update is on.
+Its own initialization may create a DB/default config; panemux does not directly manage them or
+teams. The pinned installer can write Claude commands, other agents' skill directories, Codex
+writable roots and an existing shim outside the shared skill directory. Tests use isolated HOME
+and fixtures, never the developer's installation. These are approved B decisions, not capabilities
+introduced by A.
+
+### Isolate the board message transport (2026-10-26, #438 / #441)
+
+The user confirmed five implementation choices in #441. `internal/board` owns `MessageClient`
+(`HostID`, `Since`, `Send`) and `Participation` (availability, address validation, join instruction).
+Requests use registry `agent.ID`, team, pane ID, and mode; rows remain `board.Row`.
+`internal/agmsg` is the only adapter, executing through `host.Runner`. It owns script names,
+paths, JSONL parsing and cursor filtering, versions, participation prose, and agent-specific steps.
+This leaves relay, cache, sender validation, and bootstrap orchestration independent of agmsg.
+
+The adapter's agent-ID-to-type/participation table is checked at startup, as the previous root
+board adapter list was, and by table-driven tests for declarations, duplicates, and valid types.
+`Definition.AgmsgType` and reverse lookup are removed; session detection returns registry IDs.
+Detection rules stay in the registry, with their external provenance documented in the integration.
+
+Captured fixtures move unchanged to `internal/agmsg/testdata/agmsg-v1.2.0`; parser, cursor and
+real-install contract tests move with them. Participation goldens also move unchanged. Relay
+cursor/ledger tests and the TLA+ transition table stay board-owned. Makefile contract execution,
+fixture-agent checks, coverage scope, and CI pin lookup/path selection follow the adapter package.
+
+The participation port also exposes adapter-owned diagnostic labels and a generic path-discovery
+error classification. Bootstrap keeps path and presence warning streaks independent, including
+path-failure → presence-failure transitions, while retaining the original operator-facing messages.
+Adapter retry, send-lane and concurrent discovery tests live with the adapter so package-scoped
+mutation testing exercises the owning package's behavior.
+
+The public `agmsg_path` key, default and validation results remain unchanged. The adapter owns the
+default path and validation and config delegates to it. Relay discovery still remembers absence;
+bootstrap independently caches paths and rechecks presence. The type-name documentation moves to
+`docs/agent-board/agmsg-integration.md`, linked from the transport-independent registry docs.
+Enablement, installation, version/SHA pinning and automatic update PRs remain #435/#437 work.
+
 ### Host tool management and the Codex hook adapter (2026-10-26, #438 / #440)
 
 `internal/hosttools` owns host tool management and defines the `Tool` port: `Check` returns the

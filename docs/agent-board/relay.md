@@ -28,7 +28,7 @@ logged.
 
 ### Sender validation
 
-A normal row is accepted only if `from` names a board-enabled pane on the source host. A row with
+A normal row is accepted only if `from` names a configured pane on the source host. A row with
 `from == "_system"` is accepted only when it consumes a matching entry from panemux's short-lived
 own-send ledger. This prevents any process able to call `send.sh --force` from impersonating the
 command center merely by choosing the reserved name.

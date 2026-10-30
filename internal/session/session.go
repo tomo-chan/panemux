@@ -2,6 +2,7 @@ package session
 
 import (
 	"io"
+	"panemux/internal/agent"
 
 	"panemux/internal/config"
 )
@@ -72,18 +73,11 @@ type ActiveWorkdirGetter interface {
 	GetActiveWorkdirs() ([]string, error)
 }
 
-// AgentTypeDetector is implemented by every session type. It reports the
-// agmsg-recognized type name (e.g. "claude-code", "codex", "gemini") of any
-// live, interactive coding-agent process currently running as a descendant
-// of this pane's shell, among the set agmsg's own type.conf `detect_proc`
-// key considers reliably process-detectable — see the Board rules in internal/agent.
-// This is narrower than ActiveWorkdirGetter (which only distinguishes
-// Codex/Claude, and additionally resolves transcript-derived workdirs at
-// real I/O cost) and returns WHICH type rather than a bare bool, since
-// Agent Board's bootstrap flow writes a different onboarding instruction
-// per agent type.
+// AgentTypeDetector reports the registered ID of a live interactive agent
+// descended from the pane shell. It uses the registry Board rules without
+// resolving transcript workdirs; the messaging adapter handles participation.
 type AgentTypeDetector interface {
-	DetectInteractiveAgentType() (agmsgType string, ok bool, err error)
+	DetectInteractiveAgent() (agentID agent.ID, ok bool, err error)
 }
 
 // GitContext describes the repository state for a session's working directory.
@@ -127,7 +121,7 @@ func previewSSHConfig(cfg SSHConfig) SSHConfig {
 const boardHostIDLocal = "local"
 
 // BoardHostID is implemented by every session type. It returns the
-// identifier of the host whose agmsg installation this session's pane
+// identifier of the messaging host this session's pane
 // participates in: "local" for local/tmux sessions, the SSH connection
 // name for ssh/ssh_tmux sessions.
 type BoardHostID interface {

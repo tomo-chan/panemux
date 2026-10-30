@@ -21,7 +21,9 @@ The contract verifies observable behavior, not log wording or private storage:
 ### Tier 1: hermetic
 
 Every `make check` run verifies panemux's command construction and parses captured JSONL fixtures
-from the tested agmsg release. Fixtures are regenerated from a real tagged installation, never
+from the tested agmsg release in `internal/agmsg/testdata/agmsg-v1.2.0/`.
+Parser, cursor, command-wrapper, participation golden, and real-install contract tests live in
+`internal/agmsg`; the relay and own-send transition tests remain in `internal/board`. Fixtures are regenerated from a real tagged installation, never
 hand-authored. This tier catches regressions in panemux without requiring agmsg, a network, or
 external state.
 
@@ -32,7 +34,7 @@ panemux's real local client.
 
 CI runs it:
 
-- on relevant pull requests against `board.TestedAgmsgVersion`;
+- on relevant pull requests against `agmsg.TestedAgmsgVersion`;
 - on a schedule against the latest agmsg release.
 
 The scheduled canary is an early warning; it does not automatically move the tested-version pin.
@@ -41,3 +43,7 @@ runs skip when no explicit agmsg path is supplied.
 
 Assertions must describe facts Agent Board depends on. Exact diagnostic sentences, timing based on
 fixed sleeps, and incidental process ancestry are not contract behavior.
+
+The workflow reads the tested version from `internal/agmsg/agmsg_version.go` and selects pull
+requests touching `internal/agmsg/`, `Makefile`, or the workflow itself. The package is included in
+the Go coverage gate and in the fixture-agent registry consistency check.

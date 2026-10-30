@@ -187,8 +187,7 @@ export const App: React.FC = () => {
   const overviewPaneIds = useMemo(() => Array.from(paneMetadataByID.keys()), [paneMetadataByID])
   const gitInfoById = useGitInfoSnapshotMap(overviewPaneIds)
 
-  // Panes configured for the board, whether or not they have reported. The
-  // dashboard needs these to tell "never joined" from "not configured".
+  // Configured panes provide titles; the participation API determines visibility.
   const boardPanes = useMemo(() => collectBoardPanes(workspaces?.items ?? []), [workspaces])
   const workspaceSummaries = useMemo(() => {
     const summaries: Record<string, WorkspaceSummary> = {}
@@ -988,7 +987,7 @@ function collectBoardPanes(items: Workspace[]): BoardPaneRef[] {
   const panes: BoardPaneRef[] = []
 
   const walk = (child: LayoutChild) => {
-    if (child.pane?.agent_board?.enabled) panes.push({ id: child.pane.id, title: child.pane.title })
+    if (child.pane) panes.push({ id: child.pane.id, title: child.pane.title })
     for (const nested of child.children ?? []) walk(nested)
   }
   for (const workspace of items) {

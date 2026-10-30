@@ -388,10 +388,7 @@ describe('usePaneSettings restart policy', () => {
   // Restarting kills the shell running in the pane, so it must happen only
   // when something about the session itself changed. Board settings, the
   // title and the chrome toggles do not.
-  it('does not restart when only agent_board changed', async () => {
-    await save({ agent_board: { enabled: true, mode: 'both' } })
-    expect(restartCalls()).toHaveLength(0)
-  })
+
 
   it('does not restart when only the title changed', async () => {
     await save({ title: 'Renamed' })

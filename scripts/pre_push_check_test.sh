@@ -263,12 +263,11 @@ package a')" "go-vet-fixture-agent ./a" "fixture-agent-tests" "go-vet ./a" "gola
 expect "a package without them is not" \
 	"$(planfor a/a.go 'package a')" "go-vet ./a" "!go-vet-fixture-agent ./a" "!fixture-agent-tests" "!build-frontend"
 
-# make test-go-fixture-agent tests the root package too, whose //go:embed
-# needs frontend/dist, so the tagged run builds the frontend first.
-expect "the tagged run builds the embedded frontend first" \
+# The tagged suite tests only internal packages, with no frontend embed.
+expect "the tagged internal-package run needs no frontend build" \
 	"$(planfor a/fixture.go '//go:build panemux_fixture_agent
 
-package a')" "fixture-agent-tests" "build-frontend"
+package a')" "fixture-agent-tests" "!build-frontend"
 
 expect "a file built only without the tag still selects the tagged run" \
 	"$(planfor a/off.go '//go:build !panemux_fixture_agent

@@ -855,6 +855,13 @@ else
 	kill "$child" "$detached" 2>/dev/null
 fi
 
+check
+if output=$(sh "$here/../e2e/fixture-home_test.sh" 2>&1); then
+    pass 'E2E wrappers clean owned homes and preserve the shared build cache'
+else
+    fail 'E2E wrappers clean owned homes and preserve the shared build cache' "$output"
+fi
+
 if [ "$failures" -ne 0 ]; then
 	echo "screenshots-env tests: $failures of $checks failed"
 	exit 1
