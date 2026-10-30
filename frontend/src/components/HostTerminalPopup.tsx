@@ -1,6 +1,8 @@
 import React, { useRef } from 'react'
 import type { HostTerminalSession } from '../hooks/useHostTerminal'
 import { useTerminalPopupKeyboard } from '../hooks/useTerminalPopupKeyboard'
+import { usePaneUrlOpen } from '../hooks/usePaneUrlOpen'
+import { PaneUrlOpenNotice } from './PaneUrlOpenNotice'
 import { TaskTerminal } from './TaskTerminal'
 import type { TaskTerminalStatus } from './TaskTerminal'
 import { TASK_INPUT_CHIP_LABELS, taskInputChip } from './TaskInputPopup'
@@ -131,7 +133,7 @@ export const HostTerminalPopup: React.FC<HostTerminalPopupProps> = ({
         )}
         <div ref={bodyRef} className="td-input-body" data-input={chip === 'connected' ? 'on' : 'off'}>
           {attach.phase === 'ready' ? (
-            <TaskTerminal key={`${attach.sessionId}:${attempt}`} sessionId={attach.sessionId} onStatus={onTerminalStatus} />
+            <HostTerminalBody key={`${attach.sessionId}:${attempt}`} sessionId={attach.sessionId} onStatus={onTerminalStatus} />
           ) : (
             <div className="td-input-blank">
               {attach.phase === 'connecting' ? (
@@ -152,5 +154,32 @@ export const HostTerminalPopup: React.FC<HostTerminalPopupProps> = ({
         </footer>
       </div>
     </div>
+  )
+}
+
+// Keyed by the terminal attempt, so Retry/Reconnect drops pending approvals
+// and errors. Forwarding uses the server's real session ID, never that key.
+const HostTerminalBody: React.FC<{
+  sessionId: string
+  onStatus: (status: TaskTerminalStatus) => void
+}> = ({ sessionId, onStatus }) => {
+  const urlOpen = usePaneUrlOpen(sessionId)
+  return (
+    <>
+      <TaskTerminal
+        sessionId={sessionId}
+        onStatus={onStatus}
+        onLinkActivate={urlOpen.openUrl}
+        onBrowserOpenRequest={urlOpen.requestOpen}
+      />
+      <PaneUrlOpenNotice
+        pendingUrl={urlOpen.pendingUrl}
+        source={urlOpen.pendingSource}
+        error={urlOpen.error}
+        onConfirm={urlOpen.confirmPendingOpen}
+        onDismiss={urlOpen.dismissPendingOpen}
+        onDismissError={urlOpen.dismissError}
+      />
+    </>
   )
 }

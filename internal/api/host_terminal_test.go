@@ -3,17 +3,22 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/config"
+	"panemux/internal/portforward"
 	"panemux/internal/session"
 )
 
@@ -470,5 +475,50 @@ func TestPostHostTerminal_CapCountsTerminalsBeingOpened(t *testing.T) {
 	for call := 1; call <= maxHostTerminalsPerConnection; call++ {
 		finish(call, nil)
 		assert.Equal(t, http.StatusCreated, <-codes)
+	}
+}
+
+// A host terminal is outside the layout, but uses its own real session ID
+// for callback forwarding. Both explicit close and the grace timer release it.
+func TestHostTerminal_URLForwardLifecycle(t *testing.T) {
+	for _, typ := range []string{"ssh", "ssh_tmux"} {
+		for _, closeBy := range []string{"delete", "grace"} {
+			t.Run(typ+"/"+closeBy, func(t *testing.T) {
+				e := newHostTerminalEnv(t)
+				echo := startEchoServer(t)
+				e.h.createSession = func(pane *config.PaneConfig, _ map[string]config.SSHConnection) (session.Session, error) {
+					s := newRemoteMockSession(pane.ID, echo)
+					s.typ = session.Type(pane.Type)
+					return s, nil
+				}
+				registry := portforward.New(portforward.Options{SweepInterval: -1})
+				t.Cleanup(registry.Close)
+				e.h.SetPortForwards(registry)
+				created := decodeHostTerminal(t, e.post(t, `{"connection":"gpu-box","type":"`+typ+`"}`))
+				port := freeLoopbackPort(t)
+				body := `{"url":"http://localhost:` + strconv.Itoa(port) + `/callback"}`
+				rec := postOpenURL(t, e.h, created.SessionID, body)
+				require.Equal(t, http.StatusOK, rec.Code)
+				require.True(t, decodeOpenURL(t, rec).Forwarded)
+				require.Equal(t, []int{port}, registry.Ports(created.SessionID))
+				conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), time.Second)
+				require.NoError(t, err)
+				require.NoError(t, conn.SetDeadline(time.Now().Add(time.Second)))
+				_, err = io.WriteString(conn, "callback")
+				require.NoError(t, err)
+				got := make([]byte, len("callback"))
+				_, err = io.ReadFull(conn, got)
+				require.NoError(t, err)
+				assert.Equal(t, "callback", string(got))
+				conn.Close()
+				if closeBy == "delete" {
+					require.Equal(t, http.StatusNoContent, e.delete(t, "/api/hosts/terminal/"+created.SessionID, nil).Code)
+				} else {
+					e.timers.fire()
+				}
+				assert.Empty(t, registry.Ports(created.SessionID))
+				assert.Equal(t, http.StatusNotFound, postOpenURL(t, e.h, created.SessionID, body).Code)
+			})
+		}
 	}
 }
