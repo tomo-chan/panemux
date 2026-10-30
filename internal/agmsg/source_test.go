@@ -3,6 +3,7 @@ package agmsg
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -18,6 +19,12 @@ type sourceExecution struct {
 	cached   bool
 	mismatch bool
 	fail     bool
+}
+
+func (e *sourceExecution) RunInput(
+	ctx context.Context, h host.Host, script string, _ io.Reader, args ...string,
+) ([]byte, error) {
+	return e.Run(ctx, h, script, args...)
 }
 
 func (e *sourceExecution) Run(_ context.Context, h host.Host, script string, args ...string) ([]byte, error) {

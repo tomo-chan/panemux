@@ -231,9 +231,11 @@ snapshot alone cannot prevent a race. Agent-owned scripts are outside this coord
 
 ### agmsg source and installer
 
-`internal/agmsg.Source` executes the literal `git` through the local host execution port with
+`internal/agmsg.Source` executes the literal `git` through the local input execution port with
 separate argv: SHA-scoped cache path, fixed repository URL, fixed full commit and fixed git
-subcommands. No browser input selects any operand. It verifies `rev-parse <SHA>^{commit}` against
+subcommands. No browser input selects any operand. Combined stdout/stderr and exit errors are retained for
+source diagnostics, including init, fetch, verification and archive failures. Target prerequisite
+checks use the same input lane so local and SSH failures preserve missing-tool names. It verifies `rev-parse <SHA>^{commit}` against
 the complete pin before archiving. Git object hashes protect the fetched content; cache ownership
 is trusted. A verified cache needs Git but no network. No checkout hooks run during acquisition.
 
@@ -244,7 +246,7 @@ archive there, and runs the literal `bash ./install.sh` with stdin closed. The t
 that invocation's temporary directory. No shell program is read from transferred stdin. The tar
 and installer are trusted upstream code pinned in the application; this is not an untrusted
 archive extractor. Output and exit/timeout errors are retained. Process-group cancellation and
-SSH channel cancellation use B1's execution lane. Agent-owned processes are outside its pause.
+SSH channel cancellation use the shared input execution lane. Agent-owned processes are outside its pause.
 
 ### Task dashboard collection
 

@@ -71,4 +71,4 @@ Install / Update authorizes execution as the target user of the pinned upstream 
 contract tests and human release review. The installer writes outside `~/.agents/skills` (Claude
 commands, other agents' skill directories, Codex sandbox settings and agent shims). Panemux does
 not sandbox those effects, operate on teams/DBs directly, run recovery, install dependencies or
-stop agent-owned scripts. Manual operation is implemented; unattended execution remains B3.
+stop agent-owned scripts. Manual operation is implemented; unattended execution is not currently implemented.

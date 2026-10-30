@@ -440,10 +440,12 @@ genuinely alters no use case.
 - Behavior and API specification: [behavior.md](behavior.md)
 - Security requirements: [security.md](security.md)
 
-## Manual agmsg management (#435 B2)
+## Manual agmsg management (#435)
 
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
-| G435B2a | Manually install or update pinned agmsg | Missing offers Install, older offers Update, newer remains unchanged, alternate install is refused, verified cache works offline | `auto`: `internal/agmsg` — `TestAgmsgToolStatesAndInstallSafety`, `TestPinnedSourceFetchVerifyAndOfflineCache`, `TestPinnedWarningIncludesNewerPatch`, `TestToolReleaseOrderingAtEveryComponent` |
-| G435B2b | Update while board calls are active | Paused calls fail promptly; affected relay cursors remain retryable and absence cache resets | `auto`: `internal/board` — `TestRelayPausedDestinationPreservesSourceCursor`, `TestBroadcastWhilePausedDoesNotSend`; `internal/agmsg` — `TestClientPauseRefusesEveryOperationAndInvalidatesAbsence`; root — `TestBootstrapWaitsForToolPauseWithoutWritingOrJoining`; `internal/hosttools` — `TestToolRevisionIncreasesAfterSuccessfulOrPartialInstall` |
-| G435B2c | Host menu feedback | Version, newer warning, installer consent, failure output, retry and restart guidance; no automatic-update checkbox | `auto`: `frontend/src/components/HostTools.agmsg.test.tsx` |
+| G435a | Manually install or update pinned agmsg | Missing offers Install, older offers Update, newer remains unchanged, alternate install is refused, verified cache works offline | `auto`: `internal/agmsg` — `TestAgmsgToolStatesAndInstallSafety`, `TestPinnedSourceFetchVerifyAndOfflineCache`, `TestPinnedWarningIncludesNewerPatch`, `TestToolReleaseOrderingAtEveryComponent` |
+| G435b | Update while board calls are active | Paused calls fail promptly; affected relay cursors remain retryable and absence cache resets | `auto`: `internal/board` — `TestRelayPausedDestinationPreservesSourceCursor`, `TestBroadcastWhilePausedDoesNotSend`; `internal/agmsg` — `TestClientPauseRefusesEveryOperationAndInvalidatesAbsence`; root — `TestBootstrapWaitsForToolPauseWithoutWritingOrJoining`; `internal/hosttools` — `TestToolRevisionIncreasesAfterSuccessfulOrPartialInstall` |
+| G435c | Host menu feedback | Version, newer warning, installer consent, failure output, retry and restart guidance; no automatic-update checkbox | `auto`: `frontend/src/components/HostTools.agmsg.test.tsx` |
+| G435d | Local prerequisites or pinned-source git fails | Missing dependencies and git stderr remain in setup/acquisition errors | `auto`: `internal/agmsg` — `TestLocalPrerequisitesPreserveMissingToolNames`, `TestLocalGitFailuresRetainSourceDiagnostics` |
+| G435e | A describe or dirty agmsg tree is installed | Unknown version, startup warning, and no Install / Update that could overwrite an unordered build | `auto`: `internal/agmsg` — `TestNonReleaseProvenanceIsNotInstalledOrSilentlyDowngraded` |

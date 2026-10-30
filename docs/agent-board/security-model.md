@@ -76,5 +76,5 @@ impersonated by a process inside that boundary. Visibility in the dashboard gran
 Manual Install / Update requires trust in panemux's pinned agmsg code on the target host.
 The installer can write outside the skill directory, including agent settings and commands;
 the UI explains this consent. See [installer details](agmsg-integration.md#manual-install--update).
-Unattended updates remain B3. Panemux pauses its own calls but cannot stop agent-owned scripts;
+Unattended updates are not currently executed. Panemux pauses its own calls but cannot stop agent-owned scripts;
 restart agents after installation/update.

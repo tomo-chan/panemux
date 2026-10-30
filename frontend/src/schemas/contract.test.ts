@@ -285,7 +285,6 @@ describe('the fixture agent in the tasks response', () => {
     ])
   })
 
-  //efficacy:exempt unchanged fixture-agent summary contract; B2 only adds an agmsg schema capture
   it('offers a summary and no resume for its task, and its summary is ready', () => {
     const own = tasks.tasks.filter((t) => t.agent === fixtureAgent)
     expect(own.length).toBeGreaterThan(0)
@@ -420,6 +419,11 @@ function unexercisedOptionalPaths(): string[] {
   }
   return [...out.seen].filter((path) => !out.populated.has(path)).sort()
 }
+
+it('round-trips the agmsg host-tool response without losing fields', () => {
+  const captured = readFixture('host-agmsg')
+  expect(schemas.AgmsgToolSchema.parse(captured)).toEqual(captured)
+})
 
 // Every optional field no capture populates, with the reason it is not
 // captured. A new entry has to be justified here, in the diff — and an entry

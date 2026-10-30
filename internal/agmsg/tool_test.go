@@ -25,6 +25,9 @@ func (e *toolExecution) Run(context.Context, host.Host, string, ...string) ([]by
 func (e *toolExecution) RunInput(
 	_ context.Context, _ host.Host, script string, in io.Reader, args ...string,
 ) ([]byte, error) {
+	if script == targetPrerequisites {
+		return []byte(e.probe), e.err
+	}
 	e.inputs++
 	e.script, e.args = script, args
 	_, err := io.ReadAll(in)

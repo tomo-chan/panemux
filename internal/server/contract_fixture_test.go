@@ -402,8 +402,7 @@ var contractFixtures = map[string]contractFixture{
 		return captureBoardSession(t, e, "/api/tasks/attach", `{"id":"local:claude:7c21e0a4"}`), nil
 	}},
 
-	// The panemux host's codex permission hook (issue #396), with a
-	// hooks.json it will not rewrite, so the reason is in the capture.
+	// A reachable agmsg install newer than the pin preserves status and version.
 	"host-agmsg": {capture: func(t *testing.T) ([]byte, map[string]string) {
 		e := newAPIEnv(t)
 		e.cfg.AgentBoard.Enabled = true
@@ -416,6 +415,8 @@ var contractFixtures = map[string]contractFixture{
 		return rr.Body.Bytes(), nil
 	}},
 
+	// The panemux host's codex permission hook (issue #396), with a
+	// hooks.json it will not rewrite, so the reason is in the capture.
 	"task-codex-hook": {capture: func(t *testing.T) ([]byte, map[string]string) {
 		e := newAPIEnv(t)
 		require.NoError(t, os.Mkdir(filepath.Join(e.home, ".codex"), 0o700))

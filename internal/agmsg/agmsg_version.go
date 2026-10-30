@@ -70,24 +70,14 @@ type agmsgRelease struct {
 // instead: `git describe` output when installing from a checkout ("v1.2.0",
 // "v1.2.0-6-g1a2b3c4" past the tag, "-dirty" on a modified tree), falling
 // back to the bare VERSION only for a tarball install (npx/setup.sh, which
-// has no .git to describe). So the leading "v" and any describe suffix are
-// stripped before comparing.
+// has no .git to describe). Only a leading "v" is normalized.
 //
-// A prerelease suffix ("1.2.0-rc.1") is deliberately NOT accepted as its
-// release: it is a different build from the tag it precedes, and treating
-// it as equal would be exactly the kind of quiet assumption this file
-// exists to avoid. ok == false says "cannot reason about this", and every
-// caller treats that conservatively.
+// Non-release provenance (describe counts, dirty trees and prereleases) cannot
+// be ordered against the pinned release. Return unknown instead of treating a
+// different source tree as equal or offering a possible downgrade.
 func parseAgmsgRelease(raw string) (agmsgRelease, bool) {
 	v := strings.TrimSpace(raw)
 	v = strings.TrimPrefix(v, "v")
-
-	// `git describe` appends "-<commits>-g<sha>" and possibly "-dirty".
-	// Anything else after a "-" is a prerelease and is left in place, so it
-	// fails the numeric parse below rather than being silently accepted.
-	if i := describeSuffixIndex(v); i >= 0 {
-		v = v[:i]
-	}
 
 	parts := strings.Split(v, ".")
 	if len(parts) != 3 {
@@ -102,24 +92,6 @@ func parseAgmsgRelease(raw string) (agmsgRelease, bool) {
 		nums[i] = n
 	}
 	return agmsgRelease{major: nums[0], minor: nums[1], patch: nums[2]}, true
-}
-
-// describeSuffixIndex returns the index at which a `git describe` suffix
-// ("-<commits>-g<sha>", optionally followed by "-dirty") begins, or -1 when
-// the string carries none.
-func describeSuffixIndex(v string) int {
-	for i, part := range strings.Split(v, "-") {
-		if i == 0 {
-			continue
-		}
-		// The describe suffix always starts with the commit count, and a
-		// prerelease label ("rc", "beta") never does.
-		if _, err := strconv.Atoi(part); err == nil {
-			return strings.Index(v, "-"+part)
-		}
-		return -1
-	}
-	return -1
 }
 
 // VersionMismatchWarning returns the operator-facing warning for an agmsg

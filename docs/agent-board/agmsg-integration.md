@@ -67,7 +67,9 @@ an interactive profile is insufficient.
 The initial pair is `1.2.0` / `3c537a51bb76a23e312e7c27770df4a58ba794ff`.
 Startup compares normalized installed releases with the pinned release; every different release,
 including a newer patch, warns without blocking messaging. Missing VERSION remains unknown.
-Provenance suffixes are normalized for comparison; VERSION is not proof of installed source integrity.
+Only whitespace and a leading v are normalized. Describe builds, dirty trees and prereleases
+are unknown and warn: they cannot be ordered safely against the pin and are never changed.
+VERSION is not proof of installed source integrity.
 
 ### Manual Install / Update
 
@@ -103,7 +105,7 @@ including Claude commands, other agents' skills and Codex sandbox settings. It r
 user; operator trust covers the fixed upstream code, verified through contract tests and human
 release review, not a restricted installation sandbox. See [the security model](security-model.md).
 
-Instance-wide automatic updating remains B3. `agmsg_auto_update` is persisted but inactive, and
+Instance-wide automatic updating is not currently executed. `agmsg_auto_update` is persisted but inactive, and
 this PR exposes no automatic-update checkbox for agmsg.
 
 ## Two panes in one project directory

@@ -36,7 +36,7 @@ agent_board:
   enabled: false # opt in for the whole instance
   mode: monitor  # monitor | turn | both | off
   team: "panemux"
-  agmsg_auto_update: false # reserved for B3 automatic-update execution
+  agmsg_auto_update: false # accepted and stored; automatic updates are not currently executed
 ```
 
 Enablement, delivery mode, and team are instance-wide. There are no pane or host overrides.
@@ -45,7 +45,7 @@ Configure these settings in YAML; Pane Settings does not expose them. Each host 
 seam. The removed pane `agent_board` block and `agent_board.agmsg_path` produce migration errors.
 
 Use the task-board host menu for manual Install / Update of the pinned agmsg source.
-`agmsg_auto_update` is persisted but remains inactive until B3; no checkbox is shown yet.
+`agmsg_auto_update` is persisted but remains inactive; no checkbox is shown yet.
 See [installer behavior](agmsg-integration.md#manual-install--update).
 
 Both boards use the panemux host and `ssh_connections` keys. An SSH pane participates only when

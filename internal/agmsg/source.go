@@ -20,7 +20,7 @@ const sourceURL = "https://github.com/fujibee/agmsg.git"
 // only an exact commit match may be archived. No checkout hooks or installer run
 // on the panemux host during acquisition.
 type Source struct {
-	Execution host.Executor
+	Execution host.InputExecutor
 	mu        sync.Mutex
 }
 
@@ -38,7 +38,12 @@ func (s *Source) Archive(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("agmsg source cache: %w", err)
 	}
 	git := func(args ...string) ([]byte, error) {
-		return s.Execution.Run(ctx, host.Local, execArguments, append([]string{"git", "--git-dir=" + repo}, args...)...)
+		out, runErr := s.Execution.RunInput(ctx, host.Local, execArguments, nil,
+			append([]string{"git", "--git-dir=" + repo}, args...)...)
+		if runErr != nil {
+			return nil, fmt.Errorf("agmsg git %s: %w\n%s", args[0], runErr, strings.TrimSpace(string(out)))
+		}
+		return out, nil
 	}
 	commit, err := git("rev-parse", "--verify", TestedAgmsgCommit+"^{commit}")
 	if err != nil {

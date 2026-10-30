@@ -214,7 +214,7 @@ agent_board:
     team: panemux                      # shared agmsg team for all participating panes
     enabled: true                     # default false; all configured panes
     mode: monitor                     # monitor | turn | both | off
-    agmsg_auto_update: false           # reserved; automatic updates arrive in B3
+    agmsg_auto_update: false           # accepted and stored; automatic updates are not currently executed
 
 workspaces:
     items:

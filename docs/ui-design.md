@@ -684,6 +684,6 @@ newer release warning (kept unchanged), Cannot install with setup reasons, or No
 Install / Update explains that the tested installer can write outside the skill directory and
 that existing agent scripts keep running. Errors preserve installer exit/output details; success
 asks agents to restart and explains that panemux participates from its next poll. No agmsg
-Update automatically checkbox is shown until B3 implements the instance-wide setting.
+Update automatically checkbox is shown because instance-wide automatic updating is not currently executed.
 
 ![agmsg manual Update in the host menu](images/agmsg-host-tool.png)

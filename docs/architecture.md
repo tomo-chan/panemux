@@ -249,4 +249,4 @@ Agent Board enablement and delivery mode are instance-wide. Its relay accepts al
 pane identities on their owning hosts; bootstrap supplies a synchronized participation snapshot
 for the authenticated status API. Dashboard membership is based on detected agents or reports.
 The agmsg installation location is fixed per host. Host tool management coordinates manual
-Install / Update with board call leases and discovery revisions; automatic updating remains B3.
+Install / Update with board call leases and discovery revisions; automatic updating is not currently executed.

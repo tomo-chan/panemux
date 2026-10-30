@@ -66,7 +66,7 @@ type Tool struct{ opts ToolOptions }
 
 func NewTool(opts ToolOptions) *Tool {
 	if opts.Archive == nil {
-		source := &Source{Execution: opts.Execution}
+		source := &Source{Execution: opts.Input}
 		opts.Archive = source.Archive
 	}
 	return &Tool{opts: opts}
@@ -106,7 +106,7 @@ func (t *Tool) Check(ctx context.Context, h host.Host) hosttools.State {
 func (t *Tool) Prerequisites(h host.Host) []hosttools.Prerequisite {
 	return []hosttools.Prerequisite{
 		{Name: "target host", Check: func(ctx context.Context) error {
-			out, err := t.opts.Execution.Run(ctx, h, targetPrerequisites)
+			out, err := t.opts.Input.RunInput(ctx, h, targetPrerequisites, nil)
 			if err != nil {
 				return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 			}

@@ -21,7 +21,7 @@ server:
 agent_board:
   enabled: false
   mode: monitor
-  agmsg_auto_update: false  # reserved; automatic updates arrive in B3
+  agmsg_auto_update: false  # accepted and stored; automatic updates are not currently executed
   team: "panemux"                      # shared agmsg team for all participating panes
 
 # ── Command center ────────────────────────────────────────────────────────────
