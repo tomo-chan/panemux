@@ -224,7 +224,7 @@ func (fixtureLaunch) note() string                     { return "" }
 func (fixtureLaunch) refusals() map[string]string      { return nil }
 
 func (fixtureLaunch) newCommand() string {
-	return `  run='p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; exec "$2" "--session-id=$3" -- "$p"'`
+	return `  run='cd -- "$4" || exit 1; exec "$2" "--session-id=$3" -- "$1"'`
 }
 
 // fixtureSummarySource prints a session's log on its host.

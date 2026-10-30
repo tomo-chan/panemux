@@ -146,6 +146,48 @@ prompt; a request that never starts a subprocess does not create a turn.
 
 ## Task dashboard
 
+### A started agent runs through the user's login and interactive shell (2026-10-29, issue #445)
+
+On an SSH host where `ANTHROPIC_API_KEY` was exported in `~/.bashrc`, a claude typed into an
+`ssh_tmux` pane was signed in and one started from the dashboard asked to log in, on a fresh tmux
+server after a reboot too. The pane's claude descends from tmux's own shell for the window, a login
+and interactive shell that reads the rc files; the dashboard's descended from `sh -s` on the exec
+channel, tmux and a fixed `sh -c`, none of which reads them. From inside the dashboard's claude,
+`$SHELL -lic 'echo ${ANTHROPIC_API_KEY:+set}'` printed `set`, so the key was reachable through the
+user's shell. The agent's command now runs through `$SHELL -lic '<a fixed command>'`, which runs the
+agent's fixed `sh -c` once the rc has run.
+
+- **Login and interactive, as a pane's shell.** `-l` alone stops at the `case $- in *i*) ;; *)
+  return;; esac` that opens most distributions' default `~/.bashrc`; `-i` alone skips
+  `~/.bash_profile` and `~/.profile`. tmux starts a window's default shell as a login shell, and it
+  is interactive, so `-lic` reads what a pane reads.
+- **The rc before the agent's own command.** The prompt file is read, the directory changed to and
+  codex's `PATH` set after the rc, so an rc that changes directory or `PATH` undoes neither; the
+  prompt file waits, mode `0600`, while the rc runs.
+- **bash, zsh and sh only.** fish (`$argv`) and csh (its own syntax) cannot take the same
+  constant. dash, ksh and mksh handed the arguments on too, but were left out by the operator's
+  choice to keep the set to bash, zsh and sh; mksh also left SIGTSTP ignored in the agent it ran
+  (measured as `SigIgn` under tmux 3.4), which neither the old direct start nor a pane's shell
+  does. Any other shell keeps the old direct start.
+- **The arguments travel in variables, not as the shell's positional parameters.** The first
+  version gave the user's shell `exec "$@"` with the agent's command as its arguments. A review
+  found that the rc runs in that same shell, so a top-level `set --` or `shift` — the
+  `set -- ~/.profile.d/*.sh; for f; do . "$f"; done` idiom of POSIX profiles — replaced what ran,
+  and that an rc that `exec`s another shell or exits left the prompt file behind, since the agent's
+  command read it. Now a fixed `start` script reads and removes the prompt file first and passes
+  the command and its arguments in exported `PANEMUX_LAUNCH_` variables, which the user's shell
+  expands after its rc and the agent's command unsets. Rejected: a launcher file holding the
+  arguments, which would write the prompt to disk again for the rc's duration; and shell arrays,
+  which sh lacks.
+- **Rejected: passing the key.** `tmux new-session -e ANTHROPIC_API_KEY=…` puts it in the tmux
+  server's process arguments for the server's lifetime. Reading named variables on the host and
+  passing them in a mode-`0600` file writes a secret to disk, needs a list of names, and still
+  leaves `PATH`, proxies and everything else the rc sets different from a pane.
+- **Rejected: typing the command into the window's shell (`send-keys`).** The request's values would
+  be parsed by a shell, and the keys would race the shell's start-up.
+- **Not added: a setting to skip the rc.** A pane runs the same rc; one can be added if an rc that
+  holds or breaks an unattended start turns up.
+
 ### Opening a host from its chip on the dashboard (2026-10-09, issue #314)
 
 A host chip opens a terminal on that host, with the task's two destinations: `Type in pane` (the

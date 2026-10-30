@@ -486,6 +486,50 @@ command as separate arguments executes it directly (tmux 2.0 and later; verified
 argument holding `$(id)`, `; echo`, and a quote, all of which arrived unchanged). The `--` keeps an
 argument from being read as a tmux option.
 
+**The agent's command runs through the user's own shell, which parses only a constant.** So that what
+the user's rc files export (an `ANTHROPIC_API_KEY` in `~/.bashrc`, issue #445) reaches the agent as
+it reaches one typed into a pane, tmux runs a fixed `sh -c` script (`start` in
+`launchScriptTemplate`) whose positional parameters are the user's shell (or nothing), `sh`'s path,
+the agent's fixed command, the prompt file and that command's arguments (the binary, the session
+ID, the working directory). `start` reads and removes the prompt file, then either runs the agent's
+command directly or starts the user's shell, as a login and interactive shell the way tmux starts a
+pane's shell, with one constant command string and no arguments:
+
+`exec "$PANEMUX_LAUNCH_SH" -c "$PANEMUX_LAUNCH_CMD" sh "$PANEMUX_LAUNCH_1" "$PANEMUX_LAUNCH_2" "$PANEMUX_LAUNCH_3" "$PANEMUX_LAUNCH_4"`
+
+The agent's command, `sh`'s path and the arguments — the prompt instead of its file for a new task —
+travel in those exported variables, which the user's shell expands, quoted, after its rc has run,
+and which the agent's command unsets before anything else, so the agent never inherits them. No
+request value is in any string a shell parses, as before; checked with values holding `$(id)`, a
+leading `-`, quotes and newlines under bash 5.2, zsh 5.9 and an `sh` that is dash 0.5.12.
+
+- **Which shell.** `$SHELL` is the host user's own login shell, read by the script on the host — the
+  value the binary lookup above already runs — not a Go `os.Getenv` value flowing into
+  `exec.Command`. It is used only when it is an absolute path to an executable regular file whose
+  name is `bash`, `zsh` or `sh`: fish and csh have their own syntax, and `dash`, `ksh` and `mksh` by
+  those names are left out of what panemux runs through. Any other value, unset included, runs the
+  agent's command directly from `start`, with no rc read.
+- **Which `sh`.** The `sh` the user's shell runs the agent's command with is the absolute path
+  `command -v sh` found before the rc ran, so an rc that changes `PATH` cannot choose the
+  interpreter of the agent's command.
+- **What the rc can do.** The rc files are the host user's own code, run with the user's own rights,
+  as they are each time a pane opens a shell there; running them adds no capability the user does
+  not already have. They run before the agent's command, which then changes to the working
+  directory and, for codex, appends codex's directory to the `PATH` the rc set, so neither is
+  undone by the rc. The agent's process is still the pane's process: each stage `exec`s the next.
+  - The arguments are not the user's shell's positional parameters, so an rc that runs `set --` or
+    `shift` at its top level (`set -- ~/.profile.d/*.sh; for f; do . "$f"; done`) changes nothing
+    that runs.
+  - The rc can read the `PANEMUX_LAUNCH_` variables, the prompt among them, as it can read
+    everything else of the user's; one that sets or unsets them deliberately changes what runs,
+    with its own rights.
+  - An rc that never hands over — it `exec`s another shell (`exec zsh` at the end of a `~/.bashrc`)
+    or exits — leaves the agent unstarted after a launch that reported success, but no prompt file:
+    `start` has removed it before the user's shell ran.
+- **No secret passes through panemux.** panemux neither reads the key nor passes it in an argument,
+  a file or tmux's environment: `tmux new-session -e NAME=value` would have put it in the tmux
+  server's process arguments, readable in `ps` for as long as the server runs.
+
 **No request value goes to a tmux option that tmux expands.** `-c` looks like a plain directory
 argument but is a format: tmux 3.4 turned `/…/proj#Sx` and `/…/a##b` into other paths, found them
 missing, and started the command in the home directory — reported as success, with the script's own
@@ -498,7 +542,7 @@ one is installed, and the stand-in tmux the other tests use refuses `-c` outrigh
 `tmux new-session -c` in `internal/session` has the same property and is outside this section.)
 
 **A resume can add a window to an existing session of the task's name**
-(`tmux new-window -t "=<name>:" -- sh -c …`), with the same arguments as a new session. The script is
+(`tmux new-window -t "=<name>:" -- <command…>`), with the same arguments as a new session. The script is
 told whether it may with a fixed `yes`/`no` that `Service.Resume` sets from the collection it has
 just made: only when no running task was found inside that tmux session. Nothing already in the
 session is replaced or killed. Because that decision rests on a collection made before the launch,
@@ -507,10 +551,12 @@ collects only after the first has launched, sees its claude, and is refused rath
 second claude to the same conversation.
 
 **The first instruction reaches claude as a file, then as one argument after `--`.** The script writes
-it to a `mktemp` file created under `umask 077`, and the tmux command is a fixed
-`sh -c 'p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; exec "$2" "--session-id=$3" -- "$p"'`
-whose positional parameters are the file, the resolved claude path, the session ID and the working
-directory. Command substitution's result is
+it to a `mktemp` file created under `umask 077`. `start` reads it with `p=$(cat -- "$f")`, removes
+it, and runs the agent's fixed command
+`sh -c 'cd -- "$4" || exit 1; exec "$2" "--session-id=$3" -- "$1"'`
+with the instruction, the resolved claude path, the session ID and the working directory as its
+positional parameters (through the `PANEMUX_LAUNCH_` variables when the user's shell runs it).
+Command substitution's result is
 not parsed again, and `--` ends claude's options: [command-center.md](command-center.md#command-center-subprocess-execution)
 records that claude's parser scans all of argv for options, so a prompt beginning with `-` needs it.
 Keeping the instruction out of tmux's arguments matters beyond parsing: a tmux server's process
@@ -518,11 +564,12 @@ arguments are those of the client that started it, for as long as the server run
 there would be readable in `ps` indefinitely. Measured with a real tmux 3.4, the server's arguments
 held the file name and nothing of the instruction. The instruction is still claude's own positional
 argument, the form in which the launch gives an interactive claude its first message, so a user who
-can read claude's arguments on the host can read it while claude runs.
+can read claude's arguments on the host can read it while claude runs — and, for the moment before
+that, the arguments of the `sh` that starts claude and the environment of the user's shell.
 
 **Codex gets its first instruction after `--` too, with `--no-daemon` and
 `-c check_for_update_on_startup=false`.** The fixed command for a new codex task is
-`sh -c 'p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; PATH=$PATH:${2%/*}; export PATH; exec "$2" --no-daemon -c check_for_update_on_startup=false -- "$p"'`,
+`sh -c 'cd -- "$4" || exit 1; PATH=$PATH:${2%/*}; export PATH; exec "$2" --no-daemon -c check_for_update_on_startup=false -- "$1"'`,
 with the same positional parameters (the session ID one is empty). The handling of `--` was verified
 with codex-cli 0.142.2 and 0.157.1 on macOS and 0.157.1 on Linux, before `--no-daemon` was added:
 without `--`, `codex '-x hello'` is refused as an unknown option, and after `--` a prompt such as

@@ -721,10 +721,32 @@ it.
   and, when it is not there, through the user's login shell (`$SHELL -lc 'command -v claude'`), since
   an SSH exec channel's `PATH` rarely includes a per-user install such as `~/.local/bin`. Only an
   absolute path to an executable file is run.
+- **claude starts with the environment the user's shell sets up, as one typed into a pane does.**
+  Inside the tmux session the command runs through the host user's `$SHELL`, started as a login and
+  interactive shell (`$SHELL -lic '<a fixed command>'`), the way tmux starts a pane's shell, so what the
+  shell's rc files export — an `ANTHROPIC_API_KEY` in `~/.bashrc`, a `PATH`, a proxy — reaches
+  claude. An SSH exec channel reads none of them, and a `~/.bashrc` that returns at once when the
+  shell is not interactive, as most distributions' default one does, is read only by an interactive
+  shell. The first instruction's file is read before the shell starts; the rc runs next, and the
+  command after it then changes to the working directory and starts claude, so an rc that changes
+  directory does not move it.
+  Whatever the rc prints, or waits for, appears in the task's pane before claude starts; the launch
+  reports success once tmux has started the session, so an rc that waits holds claude, not the
+  request. The shell's positional parameters are not used, so an rc that sets or shifts them
+  (`set --`, `shift`) changes nothing. An rc that never hands over — one that `exec`s another shell
+  (`exec zsh` at the end of a `~/.bashrc`) or exits — leaves claude unstarted after a launch that
+  reported success, and a new task is then never listed, since claude writes the state file the
+  collection reads; the tmux session `task-<8>` holds what the rc left, if anything.
+  This applies when `$SHELL` is an absolute path to an executable named `bash`, `zsh` or `sh`, the
+  shells checked to pass the command's arguments through `-c` as `"$@"` (on Linux: bash 5.2, zsh
+  5.9 and an `sh` that is dash 0.5.12, under tmux 3.4); an `sh` reads `~/.profile`. Any other
+  `$SHELL` — fish, tcsh, `dash`, `ksh` or `mksh` by those names — or one that is unset, relative or
+  not executable, starts claude directly, and the rc files are not read.
 - **The first instruction reaches claude through a file, not a command line.** It is written to a
   mode-`0600` temporary file on the host (`$TMPDIR`, else `/tmp`, named `panemux-task.XXXXXXXX`),
   which the command inside the tmux session reads and deletes before claude starts; if tmux fails to
-  start the session, the launch deletes it. It is never part of the SSH command, of a string any
+  start the session, the launch deletes it. It is read and deleted before the user's shell and its
+  rc run (above), so an rc that never hands over leaves no file behind. It is never part of the SSH command, of a string any
   shell parses, or of tmux's arguments. A tmux server keeps the arguments of the command that started
   it as its own process arguments for as long as it runs, so an instruction passed there would stay
   visible in `ps`. It is claude's own argument, though, so anyone who can list claude's process
@@ -762,10 +784,12 @@ A **codex** task starts the same way, with these differences:
   earlier does and changes nothing else: the commands codex runs resolve as they would without it.
   The other side of that: **a `node` earlier on that `PATH` is the one that runs codex** — an old
   system `/usr/bin/node` on a host where codex was installed with nvm's node, say. Such a codex fails
-  as it starts, and the tmux session ends; install codex with the `node` the exec channel's `PATH`
-  finds first, or put its directory before that `node` in the login shell's `PATH`. The `codex
-  --help` check above runs the same way, so a `node` that cannot run codex at all is reported as a
-  codex too old.
+  as it starts, and the tmux session ends. Where codex runs through the user's shell (as claude does,
+  above), that `PATH` is the one the shell's rc files set, with codex's directory after it; otherwise
+  it is the exec channel's. Install codex with the `node` that `PATH` finds first, or put its
+  directory before that `node` in the rc's `PATH`. The `codex --help` check above runs before the
+  tmux session, on the exec channel's `PATH` with codex's directory at the end, so a `node` that
+  cannot run codex at all there is reported as a codex too old.
 - **Start-up screens are answered in the pane.** Codex can stop before the first instruction to ask
   whether to trust the directory, to announce a new model, or — once a usage limit is near — to
   offer a cheaper model. panemux does not answer them or write codex's configuration to avoid them.
@@ -815,6 +839,9 @@ environment's claude stopped at its first-run screen). Scenario J21 is the manua
   records, in a new detached tmux session named like a new task's: `task-` and the first eight
   characters of the session ID. A session whose log records no working directory, or one the
   remote-path rule refuses, is not resumed.
+- **A resume starts the agent through the user's shell, as a new task does**
+  ([Starting a task](#starting-a-task)): in a new tmux session and in a window added to a reused
+  one alike, so a resumed claude or codex gets what the rc files export.
 - **A tmux session of that name that no agent runs in gets claude as a new window.** A pane opened
   on the task attaches with `tmux new-session -A`, so when that pane is recreated after claude has
   exited — a `Reconnect`, or the automatic reconnect after an SSH drop — it creates a session of the
