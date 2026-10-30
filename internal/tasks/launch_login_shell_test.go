@@ -55,12 +55,17 @@ func (h stubHost) launchEnv(t *testing.T) string {
 	return strings.TrimSpace(string(data))
 }
 
-// lookUpShell finds a shell on the machine running the suite, skipping the
-// test where it is not installed.
+// lookUpShell finds a shell on the machine running the suite. Where it is not
+// installed the test skips, except in CI (the CI variable is set), which
+// installs every shell these tests run through and must not report them as
+// skipped: see docs/maintenance.md, "Runner Images".
 func lookUpShell(t *testing.T, name string) string {
 	t.Helper()
 	path, err := exec.LookPath(name)
 	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("%s is not installed in CI, where this test must run: %v", name, err)
+		}
 		t.Skipf("%s is not installed", name)
 	}
 	return path

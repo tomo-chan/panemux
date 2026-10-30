@@ -56,6 +56,11 @@ the rest. It refuses to run under another name, and its `mkdir` leaves the path 
 The Go tests that depended on either pass on 26.04 since issue #423; `coverage-blocks.yml`,
 `efficacy.yml` and `mutation.yml` run them there.
 
+Neither image has zsh, which the task launch tests run the agent through (issue #445). Every
+workflow that runs `internal/tasks`'s tests — `ci.yml`, `coverage-blocks.yml`, `efficacy.yml` and
+`mutation.yml` — installs it with `apt-get` first: with `CI` set, those tests fail rather than skip
+when a shell they need is missing, so a new such workflow needs the same step.
+
 ## Dependency Updates
 
 - Renovate is the repository's scheduled dependency update mechanism.
