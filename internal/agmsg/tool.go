@@ -66,7 +66,7 @@ type Tool struct{ opts ToolOptions }
 
 func NewTool(opts ToolOptions) *Tool {
 	if opts.Archive == nil {
-		source := &Source{Execution: opts.Input}
+		source := &Source{}
 		opts.Archive = source.Archive
 	}
 	return &Tool{opts: opts}

@@ -1,7 +1,10 @@
 package agmsg
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +16,47 @@ import (
 	"panemux/internal/host"
 	"panemux/internal/hostexec"
 )
+
+func TestSuccessfulGitWarningsDoNotContaminateSourceData(t *testing.T) {
+	for _, stage := range []string{"rev-parse", "archive", "both"} {
+		t.Run(stage, func(t *testing.T) {
+			dir := isolatedCommandPath(t)
+			cachedir.SetForTest(t, t.TempDir())
+			payload := "fixture contents\x00\xff\n"
+			archive := installerFixture(t, payload)
+			path := filepath.Join(t.TempDir(), "source.tar")
+			require.NoError(t, os.WriteFile(path, archive, 0600))
+			t.Setenv("PANEMUX_TEST_ARCHIVE", path)
+			script := `#!/bin/sh
+if [ "$2" = '` + stage + `' ] || [ '` + stage + `' = both ]; then
+  printf 'warning: sample git notice\n' >&2
+fi
+case "$2" in
+  rev-parse) printf '%s\n' '` + TestedAgmsgCommit + `' ;;
+  archive) /bin/cat "$PANEMUX_TEST_ARCHIVE" ;;
+  *) exit 2 ;;
+esac
+`
+			//nolint:gosec // executable git fixture is confined to the temporary PATH
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0700))
+			execution := hostexec.New(hostexec.Options{})
+			defer execution.Close()
+			tool := NewTool(ToolOptions{Execution: execution, Input: execution})
+			got, err := tool.opts.Archive(context.Background())
+			require.NoError(t, err, "successful git warnings must not fail commit verification")
+			require.Equal(t, archive, got, "only stdout belongs in the archive stream")
+			reader := tar.NewReader(bytes.NewReader(got))
+			header, err := reader.Next()
+			require.NoError(t, err)
+			require.Equal(t, "install.sh", header.Name)
+			contents, err := io.ReadAll(reader)
+			require.NoError(t, err)
+			require.Equal(t, payload, string(contents))
+			_, err = reader.Next()
+			require.ErrorIs(t, err, io.EOF)
+		})
+	}
+}
 
 func isolatedCommandPath(t *testing.T) string {
 	t.Helper()
@@ -56,9 +100,7 @@ case "$2" in
 			script += "\nesac\n"
 			//nolint:gosec // executable git fixture is confined to the temporary PATH
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0700))
-			execution := hostexec.New(hostexec.Options{})
-			defer execution.Close()
-			_, err := (&Source{Execution: execution}).Archive(context.Background())
+			_, err := (&Source{}).Archive(context.Background())
 			require.ErrorContains(t, err, "fatal: source diagnostic")
 			require.ErrorContains(t, err, "agmsg")
 			require.NotContains(t, err.Error(), "task collection")

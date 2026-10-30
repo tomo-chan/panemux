@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"panemux/internal/cachedir"
-	"panemux/internal/host"
+	"panemux/internal/hostexec"
 )
 
 const sourceURL = "https://github.com/fujibee/agmsg.git"
@@ -20,8 +20,8 @@ const sourceURL = "https://github.com/fujibee/agmsg.git"
 // only an exact commit match may be archived. No checkout hooks or installer run
 // on the panemux host during acquisition.
 type Source struct {
-	Execution host.InputExecutor
-	mu        sync.Mutex
+	RunGit func(context.Context, ...string) ([]byte, []byte, error)
+	mu     sync.Mutex
 }
 
 func (s *Source) Archive(ctx context.Context) ([]byte, error) {
@@ -37,14 +37,18 @@ func (s *Source) Archive(ctx context.Context) ([]byte, error) {
 	if err = os.MkdirAll(repo, 0700); err != nil {
 		return nil, fmt.Errorf("agmsg source cache: %w", err)
 	}
+	run := s.RunGit
+	if run == nil {
+		run = runSourceGit
+	}
 	git := func(args ...string) ([]byte, error) {
-		out, runErr := s.Execution.RunInput(ctx, host.Local, execArguments, nil,
-			append([]string{"git", "--git-dir=" + repo}, args...)...)
+		out, stderr, runErr := run(ctx, append([]string{"--git-dir=" + repo}, args...)...)
 		if runErr != nil {
-			return nil, fmt.Errorf("agmsg git %s: %w\n%s", args[0], runErr, strings.TrimSpace(string(out)))
+			return nil, fmt.Errorf("agmsg git %s: %w\n%s", args[0], runErr, strings.TrimSpace(string(stderr)))
 		}
 		return out, nil
 	}
+
 	commit, err := git("rev-parse", "--verify", TestedAgmsgCommit+"^{commit}")
 	if err != nil {
 		if _, err = git("init", "--bare"); err != nil {
@@ -66,4 +70,9 @@ func (s *Source) Archive(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("archive pinned agmsg: %w", err)
 	}
 	return archive, nil
+}
+
+func runSourceGit(ctx context.Context, args ...string) ([]byte, []byte, error) {
+	//nolint:wrapcheck // Archive adds operation context and stderr
+	return hostexec.RunLocalSplit(ctx, execArguments, nil, append([]string{"git"}, args...)...)
 }

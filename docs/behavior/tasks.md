@@ -1458,3 +1458,8 @@ pinned installer after prerequisites and draining existing board calls. Unknown 
 board return 404; writes that fail or overlap return 502 with their reason; checks during a pause
 return 200 / unknown. Requests share the browser authority guard. No request selects source or args.
 See [agmsg installation](../agent-board/agmsg-integration.md#manual-install--update).
+
+Source acquisition keeps git stdout and stderr separate. Only stdout is compared with the pinned
+SHA or transferred as the tar stream, so successful git warnings cannot invalidate the pin or
+corrupt the archive. Failed source operations include stderr in their diagnostic. Installer and
+target-prerequisite calls retain the shared input lane's combined-output behavior.

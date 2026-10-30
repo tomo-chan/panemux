@@ -83,7 +83,9 @@ Before running, the shared tool manager checks the target's `bash`, `sqlite3`, `
 `node`, plus pinned-source availability on the panemux host. Dependencies are never installed.
 Panemux uses `git` to fetch only the fixed SHA from `https://github.com/fujibee/agmsg.git` into
 cachedir's `panemux/agmsg/<SHA>` bare repository. It verifies that the resolved commit exactly
-matches the pin before `git archive --format=tar`. A verified cached commit can be used offline;
+matches the pin before `git archive --format=tar`. SHA comparison and the tar stream consume
+only git stdout. The local runner captures stderr separately: successful warnings are not data,
+and failed operations report their exit error and stderr. A verified cached commit can be used offline;
 GitHub connectivity is needed only on a cache miss. Neither setup.sh, npx nor npm is used.
 
 The archive travels over the shared input execution port to the chosen host. A fixed script extracts

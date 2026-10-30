@@ -3,7 +3,6 @@ package agmsg
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"strings"
 	"testing"
@@ -21,10 +20,9 @@ type sourceExecution struct {
 	fail     bool
 }
 
-func (e *sourceExecution) RunInput(
-	ctx context.Context, h host.Host, script string, _ io.Reader, args ...string,
-) ([]byte, error) {
-	return e.Run(ctx, h, script, args...)
+func (e *sourceExecution) RunGit(ctx context.Context, args ...string) ([]byte, []byte, error) {
+	out, err := e.Run(ctx, host.Local, execArguments, append([]string{"git"}, args...)...)
+	return out, nil, err
 }
 
 func (e *sourceExecution) Run(_ context.Context, h host.Host, script string, args ...string) ([]byte, error) {
@@ -66,7 +64,7 @@ func containsArg(args []string, want string) bool {
 func TestPinnedSourceFetchVerifyAndOfflineCache(t *testing.T) {
 	cachedir.SetForTest(t, t.TempDir())
 	e := &sourceExecution{}
-	s := &Source{Execution: e}
+	s := &Source{RunGit: e.RunGit}
 	archive, err := s.Archive(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, "tar contents", string(archive))
@@ -87,7 +85,7 @@ func TestPinnedSourceFailures(t *testing.T) {
 		t.Run(stage, func(t *testing.T) {
 			cachedir.SetForTest(t, t.TempDir())
 			e := &sourceExecution{failure: stage, cached: stage == "archive"}
-			_, err := (&Source{Execution: e}).Archive(context.Background())
+			_, err := (&Source{RunGit: e.RunGit}).Archive(context.Background())
 			require.Error(t, err)
 		})
 	}

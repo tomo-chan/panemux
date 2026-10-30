@@ -223,6 +223,12 @@ this lane includes stderr as well as stdout and is preserved on nonzero exits; t
 error or timeout is preserved too, including bytes captured before an SSH cancellation.
 The remote wrapper's `exec 2>&1` is trusted fixed text.
 
+For local callers that consume stdout as binary or structured data,
+`hostexec.RunLocalSplit` uses the same command setup, HOME seam, cancellation and wait limit,
+but returns stdout and stderr separately. Success warnings must never become data. This is an
+additional local capture API; `RunInput` keeps its combined-output contract on both local and
+SSH hosts. No HTTP input selects script text or capture mode.
+
 This transport does not fetch, verify, extract or run an installer itself. Adapters own those
 policies, fixed scripts and cleanup. Tool management drains admitted calls before running optional
 adapter prerequisites and installation, rejects new calls while paused and resumes after errors
@@ -233,9 +239,11 @@ snapshot alone cannot prevent a race. Agent-owned scripts are outside this coord
 
 `internal/agmsg.Source` executes the literal `git` through the local input execution port with
 separate argv: SHA-scoped cache path, fixed repository URL, fixed full commit and fixed git
-subcommands. No browser input selects any operand. Combined stdout/stderr and exit errors are retained for
-source diagnostics, including init, fetch, verification and archive failures. Target prerequisite
-checks use the same input lane so local and SSH failures preserve missing-tool names. It verifies `rev-parse <SHA>^{commit}` against
+subcommands. No browser input selects any operand. The local split-output runner returns only stdout for
+SHA comparison and tar transfer; successful stderr warnings are ignored as data. On failure,
+trimmed stderr and the exit error are retained in git operation diagnostics (init, fetch,
+verification and archive). Target prerequisite
+checks use the combined input lane so local and SSH failures preserve missing-tool names. It verifies `rev-parse <SHA>^{commit}` against
 the complete pin before archiving. Git object hashes protect the fetched content; cache ownership
 is trusted. A verified cache needs Git but no network. No checkout hooks run during acquisition.
 
