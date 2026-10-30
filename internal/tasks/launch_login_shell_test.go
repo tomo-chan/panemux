@@ -22,8 +22,6 @@ var loginShellRCFiles = map[string]string{
 		"if [ -n \"${BASH_VERSION-}\" ] && [ -f \"$HOME/.bashrc\" ]; then . \"$HOME/.bashrc\"; fi\n",
 	".bashrc": "case $- in *i*) ;; *) return ;; esac\nexport PANEMUX_TEST_RC=bashrc; cd /\n",
 	".zshrc":  "export PANEMUX_TEST_RC=zshrc; cd /\n",
-	".kshrc":  "export PANEMUX_TEST_RC=kshrc; cd /\n",
-	".mkshrc": "export PANEMUX_TEST_RC=mkshrc; cd /\n",
 }
 
 // writeLoginShellRCFiles puts loginShellRCFiles in the home directory the
@@ -71,11 +69,7 @@ func TestLaunchScript_RunsTheAgentThroughTheUsersLoginShell(t *testing.T) {
 		wantRC string
 	}{
 		{name: "bash", wantRC: "bashrc"},
-		{name: "dash", wantRC: "profile"},
-		{name: "sh", wantRC: "profile"},
 		{name: "zsh", wantRC: "zshrc"},
-		{name: "ksh", wantRC: "kshrc"},
-		{name: "mksh", wantRC: "mkshrc"},
 	}
 	for _, sh := range shells {
 		for _, mode := range []launchMode{launchNew, launchResume} {
@@ -135,9 +129,10 @@ func TestLaunchScript_AReusedSessionsWindowRunsTheAgentThroughTheLoginShell(t *t
 	assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
 }
 
-// A shell whose -c does not take the fixed command's "$@" (fish, csh), one
-// panemux has not checked, or a $SHELL that is not an absolute path to an
-// executable is not used: the agent starts directly, as it did before, and
+// Only bash and zsh are run through. Any other shell — fish and csh, whose
+// -c does not take the fixed command's "$@", the POSIX shells sh, dash, ksh
+// and mksh, or one panemux does not know — or a $SHELL that is not an
+// absolute path to an executable is not used: the agent starts directly, as it did before, and
 // the rc files are not read.
 //
 //efficacy:exempt pins the start every launch had before issue #445, which a revert of the change keeps
@@ -151,6 +146,18 @@ func TestLaunchScript_StartsTheAgentDirectlyWhenTheShellIsNotOneItRunsThrough(t 
 		}},
 		{name: "tcsh", shell: func(t *testing.T, h stubHost) string {
 			return writeRecordingShell(t, h, "tcsh")
+		}},
+		{name: "sh", shell: func(t *testing.T, h stubHost) string {
+			return writeRecordingShell(t, h, "sh")
+		}},
+		{name: "dash", shell: func(t *testing.T, h stubHost) string {
+			return writeRecordingShell(t, h, "dash")
+		}},
+		{name: "ksh", shell: func(t *testing.T, h stubHost) string {
+			return writeRecordingShell(t, h, "ksh")
+		}},
+		{name: "mksh", shell: func(t *testing.T, h stubHost) string {
+			return writeRecordingShell(t, h, "mksh")
 		}},
 		{name: "a shell panemux has not checked", shell: func(t *testing.T, h stubHost) string {
 			return writeRecordingShell(t, h, "login-shell")
@@ -224,14 +231,14 @@ func TestLaunchScript_CodexGetsItsDirectoryOnThePathTheRCSet(t *testing.T) {
 
 			require.NoError(t, parseLaunchOutput(h.run(t, script, shell)))
 
-			// The host's own /etc/profile may add directories of its own
-			// anywhere in between (a CI runner's appends /snap/bin).
+			// What lies in between is the host's own: its /etc/profile may
+			// add directories (a CI runner's appends /snap/bin) or set PATH
+			// outright before the rc runs.
 			lines := h.lines(t, "codex.path")
 			require.Len(t, lines, 1)
 			path := strings.Split(lines[0], ":")
-			require.GreaterOrEqual(t, len(path), 3, lines[0])
+			require.GreaterOrEqual(t, len(path), 2, lines[0])
 			assert.Equal(t, rcBin, path[0], "the rc's PATH is kept: %s", lines[0])
-			assert.Contains(t, path[1:len(path)-1], h.bin, "the PATH the rc started from is kept: %s", lines[0])
 			assert.Equal(t, h.bin, path[len(path)-1], "codex's directory comes last: %s", lines[0])
 			assert.Equal(t, []string{cwd}, h.lines(t, "codex.pwd"))
 		})

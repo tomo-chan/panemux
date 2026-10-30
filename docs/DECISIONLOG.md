@@ -164,9 +164,15 @@ fixed `sh -c` and its arguments after it.
 - **The rc before the agent's own command.** The prompt file is read, the directory changed to and
   codex's `PATH` set after the rc, so an rc that changes directory or `PATH` undoes neither; the
   prompt file waits, mode `0600`, while the rc runs.
-- **An allowlist of shells.** Only bash, zsh, sh, dash, ksh and mksh were checked to hand `-c`'s
-  arguments on as `"$@"`; fish (`$argv`) and csh (its own syntax) cannot take the same constant. An
-  unchecked shell keeps the old direct start rather than a guess.
+- **bash and zsh only.** fish (`$argv`) and csh (its own syntax) cannot take the same constant. sh,
+  dash, ksh and mksh handed the arguments on too, but were left out by the operator's choice to
+  keep the set to bash and zsh; mksh also left SIGTSTP ignored in the agent it ran (measured as
+  `SigIgn` under tmux 3.4), which neither the old direct start nor a pane's shell does. Any other
+  shell keeps the old direct start.
+- **What an rc can still do.** A review found that the rc runs in the same shell as `exec "$@"`:
+  a top-level `set --` or `shift` replaces what runs, and an rc that `exec`s another shell or exits
+  never hands over. Either way the agent does not start after a launch that reported success, and a
+  new task's prompt file is left behind. This is documented rather than prevented for now.
 - **Rejected: passing the key.** `tmux new-session -e ANTHROPIC_API_KEY=…` puts it in the tmux
   server's process arguments for the server's lifetime. Reading named variables on the host and
   passing them in a mode-`0600` file writes a secret to disk, needs a list of names, and still

@@ -163,10 +163,10 @@ type launchParams struct {
 //     agent's command follows as its arguments: the rc runs first, then that
 //     command reads the prompt file, changes to the working directory and
 //     sets codex's PATH. Only a $SHELL that is an absolute path to an
-//     executable named bash, zsh, sh, dash, ksh or mksh is used, the shells
-//     whose `-c` was checked to hand the arguments over as "$@"; sh goes as
-//     the absolute path found here, so an rc that changes PATH cannot change
-//     which sh runs the command. Any other $SHELL starts the agent's command
+//     executable named bash or zsh is used, the shells whose `-c` was
+//     checked to hand the arguments over as "$@"; sh goes as the absolute
+//     path found here, so an rc that changes PATH cannot change which sh
+//     runs the command. Any other $SHELL starts the agent's command
 //     directly, and no rc is read.
 //   - tmux receives the command as separate arguments after "--", which tmux
 //     runs without a shell (tmux 2.0 and later). The working directory is not
@@ -215,7 +215,7 @@ set -- sh
 case ${SHELL:-} in
 /*)
   case ${SHELL##*/} in
-  bash|zsh|sh|dash|ksh|mksh)
+  bash|zsh)
     shpath=$(command -v sh 2>/dev/null)
     case $shpath in
     /*) [ -f "$SHELL" ] && [ -x "$SHELL" ] && set -- "$SHELL" -lic 'exec "$@"' "$SHELL" "$shpath" ;;

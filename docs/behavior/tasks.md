@@ -723,15 +723,19 @@ it.
   to the working directory and starts claude, so an rc that changes directory does not move it.
   Whatever the rc prints, or waits for, appears in the task's pane before claude starts; the launch
   reports success once tmux has started the session, so an rc that waits holds claude, not the
-  request. This applies when `$SHELL` is an absolute path to an executable named `bash`, `zsh`, `sh`,
-  `dash`, `ksh` or `mksh` — the shells checked to pass the command's arguments through `-c` as
-  `"$@"` (on Linux: bash 5.2, dash 0.5.12, zsh 5.9, ksh 93u+m/1.0.8 and mksh R59, under tmux 3.4). Any other
-  `$SHELL` (fish, tcsh), or one that is unset, relative or not executable, starts claude directly,
-  and the rc files are not read.
+  request. An rc that never hands over — one that `exec`s another shell (`exec zsh` at the end of a
+  `~/.bashrc`), exits, or changes its positional parameters with `set --` or `shift` — leaves claude
+  unstarted after a launch that reported success: a new task is then never listed, since claude
+  writes the state file the collection reads, and its first instruction's file is left behind. This applies when `$SHELL` is an absolute path to an executable named `bash` or `zsh`,
+  the shells checked to pass the command's arguments through `-c` as `"$@"` (on Linux: bash 5.2 and
+  zsh 5.9, under tmux 3.4). Any other `$SHELL` — fish, tcsh, a POSIX `sh`, `dash`, `ksh` or `mksh` —
+  or one that is unset, relative or not executable, starts claude directly, and the rc files are
+  not read.
 - **The first instruction reaches claude through a file, not a command line.** It is written to a
   mode-`0600` temporary file on the host (`$TMPDIR`, else `/tmp`, named `panemux-task.XXXXXXXX`),
   which the command inside the tmux session reads and deletes before claude starts; if tmux fails to
-  start the session, the launch deletes it. It is never part of the SSH command, of a string any
+  start the session, the launch deletes it. An rc that never hands over to that command (above)
+  leaves it in place. It is never part of the SSH command, of a string any
   shell parses, or of tmux's arguments. A tmux server keeps the arguments of the command that started
   it as its own process arguments for as long as it runs, so an instruction passed there would stay
   visible in `ps`. It is claude's own argument, though, so anyone who can list claude's process

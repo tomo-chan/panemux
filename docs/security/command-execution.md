@@ -468,16 +468,18 @@ it reaches one typed into a pane, the command tmux runs is
 shell, started as a login and interactive shell the way tmux starts a pane's shell, is given the
 literal `exec "$@"` as its command string and nothing else to parse. The agent's fixed `sh -c`
 command and its positional parameters (the prompt file, the resolved binary, the session ID, the
-working directory) follow as arguments, which `"$@"` hands on unchanged; checked with an argument
-holding `$(id)` and a leading `-` under bash 5.2, dash 0.5.12, zsh 5.9, ksh 93u+m/1.0.8 and mksh R59.
+working directory) follow as arguments, which `"$@"` hands on unchanged unless the rc itself
+changes them (below); checked with an argument holding `$(id)` and a leading `-` under bash 5.2 and
+zsh 5.9.
 No request value is in any string a shell parses, as before.
 
 - **Which shell.** `$SHELL` is the host user's own login shell, read by the script on the host — the
   value the binary lookup above already runs — not a Go `os.Getenv` value flowing into
   `exec.Command`. It is used only when it is an absolute path to an executable regular file whose
-  name is `bash`, `zsh`, `sh`, `dash`, `ksh` or `mksh`: fish's `-c` takes its arguments as `$argv`
-  and csh's has another syntax, so the same constant would not hand them on. Any other value, unset
-  included, leaves the command as it was: `sh -c <the agent's fixed command> …`, with no rc read.
+  name is `bash` or `zsh`: fish's `-c` takes its arguments as `$argv` and csh's has another syntax,
+  so the same constant would not hand them on, and the POSIX shells (`sh`, `dash`, `ksh`, `mksh`)
+  are left out of what panemux runs through. Any other value, unset included, leaves the command as
+  it was: `sh -c <the agent's fixed command> …`, with no rc read.
 - **Which `sh`.** The `sh` after the user's shell is the absolute path `command -v sh` found before
   the rc ran, so an rc that changes `PATH` cannot choose the interpreter of the agent's command.
 - **What the rc can do.** The rc files are the host user's own code, run with the user's own rights,
@@ -485,6 +487,13 @@ No request value is in any string a shell parses, as before.
   not already have. They run before the agent's command, which then changes to the working
   directory and, for codex, appends codex's directory to the `PATH` the rc set, so neither is
   undone by the rc. The agent's process is still the pane's process: each stage `exec`s the next.
+  The rc runs in the same shell as `exec "$@"`, so it sees the positional parameters — the prompt
+  file's name, the binary, the session ID and the working directory, none of them secret — and
+  can change them: an rc that runs `set --` or `shift` at its top level replaces what `exec "$@"`
+  runs with what it chose, its own code run with its own rights. An rc like that, or one that
+  `exec`s another shell or exits, never reaches the agent's command: the launch has already
+  reported success, the agent does not start, and a new task's prompt file is left behind (mode
+  `0600`, under `$TMPDIR`).
 - **No secret passes through panemux.** panemux neither reads the key nor passes it in an argument,
   a file or tmux's environment: `tmux new-session -e NAME=value` would have put it in the tmux
   server's process arguments, readable in `ps` for as long as the server runs.
