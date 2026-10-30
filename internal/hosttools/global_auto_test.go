@@ -303,3 +303,32 @@ func TestGlobalAutoRetainsProbeFailuresAndLogsOnlyFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestGlobalAutoTurningOffDuringPrerequisitesSkipsInstaller(t *testing.T) {
+	state := State{Status: Outdated}
+	started, proceed := make(chan struct{}), make(chan struct{})
+	release := sync.OnceFunc(func() { close(proceed) })
+	var on atomic.Bool
+	on.Store(true)
+	tool := &prerequisiteTool{fakeTool: fakeTool{state: &state}, checks: []Prerequisite{{
+		Name: "source", Check: func(context.Context) error { close(started); <-proceed; return nil },
+	}}}
+	s := New(Options{
+		Tools:      map[ID]Tool{AgmsgTool: tool},
+		GlobalAuto: map[ID]func() bool{AgmsgTool: on.Load},
+	})
+	defer s.Close()
+	defer release()
+	s.StartAutoUpdates(AgmsgTool)
+	<-started
+	on.Store(false)
+	release()
+	s.Wait()
+	require.Empty(t, tool.installed)
+	require.Zero(t, s.Revision(AgmsgTool, host.Local))
+	got, err := s.Check(context.Background(), AgmsgTool, host.Local)
+	require.NoError(t, err)
+	require.False(t, got.AutoUpdate)
+	require.False(t, got.AutoUpdated)
+	require.Empty(t, got.AutoError)
+}

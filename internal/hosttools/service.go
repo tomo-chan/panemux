@@ -182,10 +182,11 @@ func (s *Service) installWhen(
 		return State{}, err
 	}
 	defer resume()
+	var checked State
 	if eligible != nil {
-		got := tool.Check(ctx, h)
-		if !eligible(got) {
-			return got, nil
+		checked = tool.Check(ctx, h)
+		if !eligible(checked) {
+			return checked, nil
 		}
 	}
 	install := tool.Install
@@ -202,6 +203,12 @@ func (s *Service) installWhen(
 	}
 	if err := CheckPrerequisites(ctx, checks); err != nil {
 		return State{}, err
+	}
+	// Acquisition may have waited for another host's source preparation.
+	// Honor opt-out again before admitting the installer, using the same
+	// checked state; UpdateTool performs its own final host probe.
+	if eligible != nil && !eligible(checked) {
+		return checked, nil
 	}
 	defer s.invalidate(id, h)
 	return install(ctx, h) //nolint:wrapcheck // preserve adapter errors
