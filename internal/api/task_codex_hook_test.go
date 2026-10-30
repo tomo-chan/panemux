@@ -15,9 +15,65 @@ import (
 
 	"panemux/internal/config"
 	"panemux/internal/homedir"
+	"panemux/internal/host"
+	"panemux/internal/hosttools"
 	"panemux/internal/session"
 	"panemux/internal/tasks"
+	"time"
 )
+
+type updatingHookTool struct{ started, finish chan struct{} }
+
+func (updatingHookTool) Check(context.Context, host.Host) hosttools.State {
+	return hosttools.State{Status: hosttools.Installed}
+}
+func (f updatingHookTool) Install(ctx context.Context, _ host.Host) (hosttools.State, error) {
+	close(f.started)
+	select {
+	case <-f.finish:
+		return hosttools.State{Status: hosttools.Installed}, nil
+	case <-ctx.Done():
+		return hosttools.State{}, ctx.Err()
+	}
+}
+
+func TestCodexHookRoutesDuringUpdate(t *testing.T) {
+	h, _ := codexHookHandler(t, "")
+	h.hostTools.Close()
+	tool := updatingHookTool{started: make(chan struct{}), finish: make(chan struct{})}
+	h.hostTools = hosttools.New(hosttools.Options{Tools: map[hosttools.ID]hosttools.Tool{hosttools.CodexHookTool: tool}})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/api/tasks/codex-hook", strings.NewReader(`{"host":""}`))
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+		setupRouterWithHandler(h).ServeHTTP(rec, req)
+		done <- rec
+	}()
+	select {
+	case <-tool.started:
+	case <-ctx.Done():
+		t.Fatal("install did not start")
+	}
+	rec := doCodexHook(h, http.MethodGet, "/api/tasks/codex-hook", "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `{"status":"unknown","error":"tool is updating","auto_update":false}`, rec.Body.String())
+	rec = doCodexHook(h, http.MethodPost, "/api/tasks/codex-hook", `{"host":""}`)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Contains(t, rec.Body.String(), "tool is updating")
+	rec = doCodexHook(h, http.MethodGet, "/api/tasks/codex-hook?host=unknown", "")
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	close(tool.finish)
+	select {
+	case rec = <-done:
+		require.Equal(t, http.StatusOK, rec.Code)
+	case <-ctx.Done():
+		t.Fatal("install did not finish")
+	}
+	assert.Equal(t, http.StatusOK, doCodexHook(h, http.MethodGet, "/api/tasks/codex-hook", "").Code)
+}
 
 // codexHookHandler is a panemux host whose HOME has ~/.codex and the
 // hooks.json given ("" for none), and one ssh_connections host.

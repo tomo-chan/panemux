@@ -209,15 +209,19 @@ visible at the call site.
 `host.InputExecutor`, implemented by `hostexec.Pool.RunInput`, accepts trusted application script
 text, positional operands and an arbitrary input stream separately. It is an internal port, with
 no HTTP route supplying script text. Locally the executable is the literal `sh`, with `-c`, the
-trusted script and a fixed `$0` in argv; remotely each of those operands is single-quoted at the
-SSH boundary, escaping interior quotes. Variable values must remain positional arguments, never
-be interpolated into script text. The input stream is data, not a shell program: the shell reads
+trusted script and a fixed `$0` in argv. Remotely the login shell parses only a fixed one-line
+bootstrap and single-quoted octal operands: no raw newline, quote or `!` reaches that parser.
+This avoids csh/tcsh history expansion and fish's different quote/backslash rules. POSIX `sh`
+decodes the script and operands using its builtin `printf`, preserving empty operands and trailing
+newlines, then executes the trusted script with the decoded operands as positional arguments.
+Variable values must never be interpolated into script text. The input stream is data, not a shell program: the shell reads
 its commands from `-c`, leaving stdin available for an archive consumer such as `tar`.
 
 Local execution uses `homedir` for HOME and the existing process-group cancellation and wait
 limit. SSH execution uses the shared connection, cancellation and liveness policy. Output from
 this lane includes stderr as well as stdout and is preserved on nonzero exits; the wrapped exit
-error or timeout is preserved too. The remote wrapper's `exec 2>&1` is trusted fixed text.
+error or timeout is preserved too, including bytes captured before an SSH cancellation.
+The remote wrapper's `exec 2>&1` is trusted fixed text.
 
 This transport does not fetch, verify, extract or run an installer itself. Adapters own those
 policies, fixed scripts and cleanup. Tool management drains admitted calls before running optional

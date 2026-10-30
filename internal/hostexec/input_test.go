@@ -6,8 +6,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -15,6 +19,72 @@ import (
 	"panemux/internal/homedir"
 	"panemux/internal/host"
 )
+
+func TestRunInputRemoteSupportsNonPOSIXLoginShells(t *testing.T) {
+	c := &testConn{}
+	p := New(Options{Hosts: func() []string { return []string{"dev"} },
+		Dial: func(string) (Conn, error) { return c, nil }})
+	defer p.Close()
+	args := []string{"", "\n\n", "a'!\n\\\\$(exit 9);`exit 8`\xff\n"}
+	_, err := p.RunInput(poolTestContext(t), "dev", "printf '%s|' \"$@\"\nprintf reason >&2; cat",
+		strings.NewReader("archive\x00"), args...)
+	require.NoError(t, err)
+	require.NotContains(t, c.commands[0], "\n")
+	require.NotContains(t, c.commands[0], "!")
+	for _, shell := range []string{"sh", "tcsh", "csh", "fish"} {
+		t.Run(shell, func(t *testing.T) {
+			path, lookupErr := exec.LookPath(shell)
+			if lookupErr != nil {
+				t.Skipf("%s unavailable", shell)
+			}
+			//nolint:gosec // Execute the generated command through the actual login-shell parser.
+			cmd := exec.CommandContext(poolTestContext(t), path, "-c", c.commands[0])
+			cmd.Stdin = strings.NewReader("archive\x00")
+			out, runErr := cmd.CombinedOutput()
+			require.NoError(t, runErr, string(out))
+			require.Equal(t, strings.Join(args, "|")+"|reasonarchive\x00", string(out))
+		})
+	}
+}
+
+func TestRunInputCancellationKillsDescendants(t *testing.T) {
+	homedir.SetForTest(t, t.TempDir())
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	p := New(Options{})
+	defer p.Close()
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.RunInput(ctx, host.Local, `sleep 30 >/dev/null 2>&1 & printf '%s' "$!" > "$1"; wait`, nil, pidFile)
+		done <- err
+	}()
+	var pid int
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(pidFile)
+		if err != nil {
+			return false
+		}
+		pid, err = strconv.Atoi(string(data))
+		return err == nil && pid > 0
+	}, time.Second, time.Millisecond)
+	stopped := false
+	t.Cleanup(func() {
+		if !stopped {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("input execution failed to return after cancellation")
+	}
+	require.Eventually(t, func() bool { return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) },
+		time.Second, 5*time.Millisecond, "installer descendant survived cancellation")
+	stopped = true
+}
 
 func TestRunInputTransfersArchiveOnStdin(t *testing.T) {
 	homedir.SetForTest(t, t.TempDir())

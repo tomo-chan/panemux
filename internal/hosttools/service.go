@@ -105,7 +105,7 @@ func (s *Service) Check(ctx context.Context, id ID, h host.Host) (State, error) 
 	}
 	got, err := s.check(ctx, id, h, tool)
 	if err != nil {
-		return State{}, err
+		got = State{Status: Unknown, Error: err.Error()}
 	}
 	if id == CodexHookTool {
 		got = s.autoUpdateCodexHook(ctx, string(h), got)

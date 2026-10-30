@@ -88,7 +88,7 @@ func TestCallGateCanceledDrainResumesCalls(t *testing.T) {
 	require.NoError(t, err)
 	next()
 	release()
-	resume, err := gate.Pause(context.Background(), "tool", host.Local)
+	resume, err := gate.Pause(callTestContext(t), "tool", host.Local)
 	require.NoError(t, err)
 	resume()
 }
@@ -120,14 +120,14 @@ func TestServicePrerequisitesPreventInstallAndReportEveryFailure(t *testing.T) {
 	}}
 	s := New(Options{Tools: map[ID]Tool{"tool": tool}})
 	defer s.Close()
-	_, err := s.Install(context.Background(), "tool", host.Local)
+	_, err := s.Install(callTestContext(t), "tool", host.Local)
 	require.ErrorIs(t, err, missing)
 	require.ErrorContains(t, err, "bash: not found")
 	require.ErrorContains(t, err, "source: offline")
 	require.Equal(t, []string{"bash", "node", "source"}, checked)
 	require.Empty(t, tool.installed)
 	tool.checks = nil
-	_, err = s.Install(context.Background(), "tool", host.Local)
+	_, err = s.Install(callTestContext(t), "tool", host.Local)
 	require.NoError(t, err)
 	require.Equal(t, []host.Host{host.Local}, tool.installed)
 }
@@ -152,8 +152,9 @@ func TestServiceInstallDrainsAndAlwaysResumes(t *testing.T) {
 				t.Fatal("prerequisite/installer started before drain")
 			default:
 			}
-			_, err = s.Check(context.Background(), "tool", host.Local)
-			require.ErrorIs(t, err, ErrUpdating)
+			paused, checkErr := s.Check(context.Background(), "tool", host.Local)
+			require.NoError(t, checkErr)
+			require.Equal(t, State{Status: Unknown, Error: ErrUpdating.Error()}, paused)
 			release()
 			select {
 			case <-started:
@@ -206,15 +207,15 @@ func TestServiceCallAdmissionValidatesIdentityAndPausesAutomaticCalls(t *testing
 	require.ErrorIs(t, err, ErrUnknownHost)
 	_, err = s.BeginCall("unknown", host.Local)
 	require.ErrorIs(t, err, ErrUnknownTool)
-	resume, err := s.calls.Pause(context.Background(), CodexHookTool, host.Local)
+	resume, err := s.calls.Pause(callTestContext(t), CodexHookTool, host.Local)
 	require.NoError(t, err)
 	got := s.checkCodexHook(context.Background(), "")
 	require.Equal(t, Unknown, got.Status)
 	require.Equal(t, ErrUpdating.Error(), got.Error)
-	_, err = s.installCodexHook(context.Background(), "")
+	_, err = s.installCodexHook(callTestContext(t), "")
 	require.ErrorIs(t, err, ErrUpdating)
 	resume()
-	got, err = s.installCodexHook(context.Background(), "")
+	got, err = s.installCodexHook(callTestContext(t), "")
 	require.NoError(t, err)
 	require.Equal(t, Installed, got.Status)
 }
@@ -244,4 +245,11 @@ func updateTestTool(
 		}}}
 	}
 	return tool
+}
+
+func callTestContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	t.Cleanup(cancel)
+	return ctx
 }
