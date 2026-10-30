@@ -11,9 +11,11 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"panemux/internal/agent"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -145,6 +147,77 @@ func TestSubstituteProxyCommand_NoTokens(t *testing.T) {
 	cmd := "nc -q0 bastion 22"
 	got := substituteProxyCommand(cmd, "unused", 0)
 	assert.Equal(t, cmd, got)
+}
+
+// The ssh library closes its transport itself — on a failed handshake, and
+// when its read loop or mux loop ends — while panemux closes the same conn
+// from its handshake timeout and from client.Close. exec.Cmd.Wait is not safe
+// to call more than once, let alone concurrently: two concurrent Waits race on
+// the command's pipe list and panicked in os/exec.closeDescriptors.
+//
+// The proxy command ignores its stdin closing, as a real tunnel may, so only
+// the kill in Close ends it: a Close that skipped the kill would hang.
+func TestProxyCommandConn_CloseIsIdempotent(t *testing.T) {
+	tests := []struct {
+		name       string
+		concurrent bool
+	}{
+		{name: "sequential", concurrent: false},
+		{name: "concurrent", concurrent: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			conn, err := dialViaProxyCommand("exec sleep 60", "host", 22)
+			require.NoError(t, err)
+
+			const closers = 8
+			errs := make([]error, closers)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				if !tc.concurrent {
+					for i := range closers {
+						errs[i] = conn.Close()
+					}
+					return
+				}
+				start := make(chan struct{})
+				var wg sync.WaitGroup
+				for i := range closers {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						<-start
+						errs[i] = conn.Close()
+					}()
+				}
+				close(start)
+				wg.Wait()
+			}()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				// Kill it here, or the stray process holds this test binary's
+				// stderr open and the package run waits out the sleep.
+				conn.(*proxyCommandConn).cmd.Process.Kill() //nolint:errcheck
+				t.Fatal("Close did not return: the proxy command was not killed")
+			}
+
+			// Every caller sees the outcome of the one real close, never
+			// "exec: Wait was already called".
+			for i := 1; i < closers; i++ {
+				assert.Equal(t, errs[0], errs[i], "close #%d", i)
+			}
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, errs[0], &exitErr)
+			// That close killed and reaped the subprocess.
+			state := conn.(*proxyCommandConn).cmd.ProcessState
+			require.NotNil(t, state, "subprocess was not waited for")
+			ws, ok := state.Sys().(syscall.WaitStatus)
+			require.True(t, ok)
+			assert.True(t, ws.Signaled() && ws.Signal() == syscall.SIGKILL, "subprocess exited with %v, not SIGKILL", state)
+		})
+	}
 }
 
 func TestBuildHostKeyCallback_NonexistentFile_Error(t *testing.T) {

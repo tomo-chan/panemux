@@ -393,17 +393,29 @@ type proxyCommandConn struct {
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 	raddr  net.Addr // host:port of the remote end, used for knownhosts verification
+
+	// Close is called more than once, and concurrently: the ssh library
+	// closes its transport itself (failed handshake, read loop and mux loop
+	// exit) while panemux closes it on a handshake timeout and through
+	// client.Close. exec.Cmd.Wait must run only once — concurrent Waits race
+	// on the command's pipe list — so the first Close does the work and every
+	// caller gets its result.
+	closeErr  error
+	closeOnce sync.Once
 }
 
 func (c *proxyCommandConn) Read(p []byte) (int, error)  { return c.stdout.Read(p) }
 func (c *proxyCommandConn) Write(p []byte) (int, error) { return c.stdin.Write(p) }
 func (c *proxyCommandConn) Close() error {
-	c.stdin.Close()
-	c.stdout.Close()
-	if c.cmd.Process != nil {
-		c.cmd.Process.Kill() //nolint:errcheck
-	}
-	return c.cmd.Wait()
+	c.closeOnce.Do(func() {
+		c.stdin.Close()
+		c.stdout.Close()
+		if c.cmd.Process != nil {
+			c.cmd.Process.Kill() //nolint:errcheck
+		}
+		c.closeErr = c.cmd.Wait()
+	})
+	return c.closeErr
 }
 func (c *proxyCommandConn) LocalAddr() net.Addr                { return proxyAddr("127.0.0.1:0") }
 func (c *proxyCommandConn) RemoteAddr() net.Addr               { return c.raddr }
