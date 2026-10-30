@@ -83,3 +83,21 @@ func TestPinnedWarningIncludesNewerPatch(t *testing.T) {
 	require.NotEmpty(t, VersionMismatchWarning("demo", "1.2.1"))
 	require.Equal(t, "3c537a51bb76a23e312e7c27770df4a58ba794ff", TestedAgmsgCommit)
 }
+
+func TestToolReleaseOrderingAtEveryComponent(t *testing.T) {
+	want := agmsgRelease{1, 2, 5}
+	for _, tc := range []struct {
+		status hosttools.Status
+		got    agmsgRelease
+	}{
+		{hosttools.Installed, agmsgRelease{1, 2, 5}},
+		{hosttools.Outdated, agmsgRelease{0, 9, 9}},
+		{hosttools.Outdated, agmsgRelease{1, 1, 9}},
+		{hosttools.Outdated, agmsgRelease{1, 2, 4}},
+		{hosttools.Newer, agmsgRelease{1, 2, 6}},
+		{hosttools.Newer, agmsgRelease{1, 3, 0}},
+		{hosttools.Newer, agmsgRelease{2, 0, 0}},
+	} {
+		require.Equal(t, tc.status, toolReleaseStatus(tc.got, want))
+	}
+}

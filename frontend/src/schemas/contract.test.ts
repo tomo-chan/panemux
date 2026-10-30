@@ -285,6 +285,7 @@ describe('the fixture agent in the tasks response', () => {
     ])
   })
 
+  //efficacy:exempt unchanged fixture-agent summary contract; B2 only adds an agmsg schema capture
   it('offers a summary and no resume for its task, and its summary is ready', () => {
     const own = tasks.tasks.filter((t) => t.agent === fixtureAgent)
     expect(own.length).toBeGreaterThan(0)

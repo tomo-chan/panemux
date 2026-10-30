@@ -97,18 +97,7 @@ func (t *Tool) Check(ctx context.Context, h host.Host) hosttools.State {
 				Error: "Cannot compare the installed agmsg version; check its VERSION file."}
 		}
 		want, _ := parseAgmsgRelease(TestedAgmsgVersion)
-		status := hosttools.Installed
-		if got.major < want.major ||
-			got.major == want.major && (got.minor < want.minor || got.minor == want.minor && got.patch < want.patch) {
-
-			status = hosttools.Outdated
-		}
-		if got.major > want.major ||
-			got.major == want.major && (got.minor > want.minor || got.minor == want.minor && got.patch > want.patch) {
-
-			status = hosttools.Newer
-		}
-		return hosttools.State{Status: status, Version: version}
+		return hosttools.State{Status: toolReleaseStatus(got, want), Version: version}
 	default:
 		return hosttools.State{Status: hosttools.Unknown, Error: "Unrecognized agmsg probe response."}
 	}
@@ -151,4 +140,19 @@ func (t *Tool) Install(ctx context.Context, h host.Host) (hosttools.State, error
 		return state, fmt.Errorf("agmsg installer: %w\n%s", err, strings.TrimSpace(string(out)))
 	}
 	return t.Check(ctx, h), nil
+}
+
+func toolReleaseStatus(got, want agmsgRelease) hosttools.Status {
+	status := hosttools.Installed
+	if got.major < want.major ||
+		got.major == want.major && (got.minor < want.minor || got.minor == want.minor && got.patch < want.patch) {
+
+		status = hosttools.Outdated
+	}
+	if got.major > want.major ||
+		got.major == want.major && (got.minor > want.minor || got.minor == want.minor && got.patch > want.patch) {
+
+		status = hosttools.Newer
+	}
+	return status
 }

@@ -20,6 +20,41 @@ type fakeParticipation struct {
 	present        bool
 }
 
+type pausingParticipation struct {
+	*fakeParticipation
+	leases int
+	paused bool
+}
+
+func (p *pausingParticipation) LeaseParticipation() (board.Participation, func(), error) {
+	if p.paused {
+		return nil, nil, errors.New("tool is updating")
+	}
+	p.leases++
+	return p.fakeParticipation, func() { p.leases-- }, nil
+}
+
+func TestBootstrapWaitsForToolPauseWithoutWritingOrJoining(t *testing.T) {
+	manager := session.NewManager()
+	pane := &fakeAgentSession{id: "pane-a", detectType: string(agent.Claude), detectOK: true}
+	manager.Add(pane)
+	participant := &pausingParticipation{fakeParticipation: &fakeParticipation{present: true}, paused: true}
+	watcher := newBootstrapWatcher(bootstrapWatcherConfig{
+		Manager: manager, PaneHosts: map[string]string{"pane-a": "host-a"}, Team: "team-a",
+		ParticipationForHost: func(string) board.Participation { return participant },
+	})
+	watcher.pollOnce(context.Background())
+	watcher.pollOnce(context.Background())
+	require.Empty(t, pane.writes)
+	require.Empty(t, participant.requests)
+	participant.paused = false
+	watcher.pollOnce(context.Background())
+	watcher.pollOnce(context.Background())
+	require.Len(t, pane.writes, 1)
+	require.Len(t, participant.requests, 1)
+	require.Zero(t, participant.leases)
+}
+
 func (p *fakeParticipation) Description() board.ParticipationDescription {
 	return board.ParticipationDescription{Name: "transport", PathSetting: "transport_path"}
 }
