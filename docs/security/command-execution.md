@@ -204,6 +204,27 @@ first argument existed. The `//nolint:gosec` on the call therefore keeps its rea
 than being a bare suppression: what makes it safe is where `name` comes from, and that is not
 visible at the call site.
 
+### Host execution with separate standard input
+
+`host.InputExecutor`, implemented by `hostexec.Pool.RunInput`, accepts trusted application script
+text, positional operands and an arbitrary input stream separately. It is an internal port, with
+no HTTP route supplying script text. Locally the executable is the literal `sh`, with `-c`, the
+trusted script and a fixed `$0` in argv; remotely each of those operands is single-quoted at the
+SSH boundary, escaping interior quotes. Variable values must remain positional arguments, never
+be interpolated into script text. The input stream is data, not a shell program: the shell reads
+its commands from `-c`, leaving stdin available for an archive consumer such as `tar`.
+
+Local execution uses `homedir` for HOME and the existing process-group cancellation and wait
+limit. SSH execution uses the shared connection, cancellation and liveness policy. Output from
+this lane includes stderr as well as stdout and is preserved on nonzero exits; the wrapped exit
+error or timeout is preserved too. The remote wrapper's `exec 2>&1` is trusted fixed text.
+
+This transport does not fetch, verify, extract or run an installer itself. Adapters own those
+policies, fixed scripts and cleanup. Tool management drains admitted calls before running optional
+adapter prerequisites and installation, rejects new calls while paused and resumes after errors
+or cancellation. A consumer must hold its admission lease for its entire operation; an updating
+snapshot alone cannot prevent a race. Agent-owned scripts are outside this coordination.
+
 ### Task dashboard collection
 
 The task dashboard ([behavior](../behavior/tasks.md)) runs commands on the panemux host and on every

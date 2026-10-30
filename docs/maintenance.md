@@ -185,3 +185,7 @@ The first part moves enablement and mode to global configuration and fixes the p
 location. `agmsg_auto_update` is reserved and persisted but inactive in this part. The follow-up
 adds the tested commit SHA alongside the version pin, exact-version startup comparison, tool
 installation and automatic updates. Until then the existing version-warning policy remains.
+
+The shared host execution port can carry an archive on a separate stdin stream, and host tool
+management coordinates draining and optional prerequisites for updates. There is no agmsg
+installer or automatic-update execution yet; these capabilities are not exposed for agmsg.

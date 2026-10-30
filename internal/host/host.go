@@ -1,7 +1,10 @@
 // Package host defines host identity without owning any I/O.
 package host
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 // Host is an ssh_connections key, or the empty name for the panemux host.
 type Host string
@@ -24,6 +27,13 @@ type Runner interface {
 // Executor is the shared host execution port. Scripts are supplied by trusted application code.
 type Executor interface {
 	Run(context.Context, Host, string, ...string) ([]byte, error)
+}
+
+// InputExecutor runs trusted fixed script text with a separate, arbitrary stdin
+// stream (for example an archive). Arguments remain data. Output includes stderr
+// so an installer failure can be explained without losing its exit error.
+type InputExecutor interface {
+	RunInput(context.Context, Host, string, io.Reader, ...string) ([]byte, error)
 }
 
 // Bind selects a host without allocating or owning a connection.

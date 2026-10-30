@@ -513,6 +513,13 @@ Tool management lives in `internal/hosttools`; `internal/codexhook` implements i
 the shared host execution port. The task collector only notifies management after a successful
 collection. The existing `/api/tasks/codex-hook` routes and JSON remain the host menu contract.
 
+Tool updates announce a pause for that tool on that host before waiting for active management
+checks to finish. New checks and overlapping updates return an updating error immediately; other
+tools and hosts remain usable. Once drained, management runs any adapter-defined prerequisites
+and installs only if they all pass. A failed prerequisite reports its name and reason and asks
+the operator to set it up; management never installs dependencies. Success, failure and cancellation
+all lift the pause. Codex hook's manual and automatic paths use the same coordination.
+
 ### Where a task runs
 
 | `location.kind` | Meaning |

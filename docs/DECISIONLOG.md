@@ -1162,6 +1162,17 @@ synchronized on ticks, clearing instruction state on host changes while retainin
 Detection continues every five seconds for all eligible panes; the steady-state process/tmux/SSH
 probe cost is documented rather than changing detection semantics in this review fix.
 
+### Split installer work into three PRs (2026-10-30, #435 / #438)
+
+After part A merged, the user approved splitting B into three main-targeting PRs, each following
+the previous merge, to keep implementation, verification and review within manageable context.
+B1 supplies the common stdin execution lane, call drain/pause and adapter-defined prerequisites.
+The existing Codex hook paths use the coordination; arbitrary stdin and optional prerequisite
+checks are available for adapters, with no agmsg installation or board-pause integration yet.
+B2 adds the manual agmsg Install/Update vertical slice, board integration and host-menu UI.
+B3 adds instance-wide automatic updating and completes the remaining #435 acceptance criteria.
+B1 and B2 reference #435; B3 closes it. The approved product decisions below remain unchanged.
+
 ### Global board participation and installer split (2026-10-29, #435 / #438)
 
 The user approved the implementation decisions recorded in #435 on 2026-10-29.
