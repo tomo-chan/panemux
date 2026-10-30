@@ -290,6 +290,24 @@ func (b *bootstrapWatcher) modeFor(paneID string) string {
 // docs/agent-board.md's Bootstrap flow section for the algorithm this
 // implements.
 func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
+	participant := b.participant(host)
+	if participant == nil {
+		return
+	}
+	if leaser, supportsLease := participant.(board.ParticipationLeaser); supportsLease {
+		leased, release, err := leaser.LeaseParticipation()
+		if err != nil {
+			return
+		}
+		defer release()
+		participant = leased
+	}
+	b.checkPaneWithParticipant(ctx, paneID, host, participant)
+}
+
+func (b *bootstrapWatcher) checkPaneWithParticipant(
+	ctx context.Context, paneID, host string, participant board.Participation,
+) {
 	sess, ok := b.sessionFor(paneID)
 	detectedKind := ""
 	defer b.observePane(paneID, host, &detectedKind, sess)
@@ -297,10 +315,6 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 		return
 	}
 
-	participant := b.participant(host)
-	if participant == nil {
-		return
-	}
 	if err := participant.ValidateAddress(b.team, paneID); err != nil {
 		b.warnOnce(paneID, warnKindIdentifier, fmt.Sprintf("agent board bootstrap: %v, skipping bootstrap", err))
 		delete(b.pending, paneID)
@@ -346,7 +360,7 @@ func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 		return
 	}
 
-	present, checked := b.messagingPresent(ctx, paneID, host)
+	present, checked := b.messagingPresent(ctx, paneID, host, participant)
 	if !checked {
 		return
 	}
@@ -436,8 +450,13 @@ func (b *bootstrapWatcher) writeInstruction(paneID string, sess session.Session,
 }
 
 // messagingPresent probes the host without depending on pane transport.
-func (b *bootstrapWatcher) messagingPresent(ctx context.Context, paneID, host string) (bool, bool) {
+func (b *bootstrapWatcher) messagingPresent(
+	ctx context.Context, paneID, host string, participants ...board.Participation,
+) (bool, bool) {
 	participant := b.participant(host)
+	if len(participants) > 0 {
+		participant = participants[0]
+	}
 	if participant == nil {
 		return false, false
 	}

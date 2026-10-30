@@ -394,7 +394,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
   screen too narrow for the group on a line of its own wraps it inside, so no action is cut off.
 - **Host connection menu.** The chip of a remote host whose collection succeeded is a button
   (`aria-haspopup="dialog"`, `aria-expanded`) with a small terminal icon; the panemux host's chip
-  opens only its Codex input notifications (below), and a `connecting`, failed or not-yet-collected
+  opens its tool items (Codex input notifications, plus agmsg when Agent Board is enabled),
+  and a `connecting`, failed or not-yet-collected
   chip is plain text
   ([behavior](behavior/tasks.md#opening-a-host)). Pressing it opens a small popover dialog anchored
   under the chip, titled after the host: a `Connection` group of `ssh` / `ssh_tmux` radios (`ssh`
@@ -674,3 +675,15 @@ Agent Board reuses the existing modal, panel, color, status, and focus-restorati
 Global shortcuts use capture phase so terminal focus does not swallow them. Closing any Agent Board
 surface restores the previously focused element. Full data-flow rules are in
 [Command center](agent-board/command-center.md#command-center).
+
+### agmsg in the host menu
+
+When Agent Board is globally enabled, HostTools lists agmsg using HostToolItem beneath the host
+menu actions. It shows Not installed / Install, older release / Update, Installed with version,
+newer release warning (kept unchanged), Cannot install with setup reasons, or Not checked.
+Install / Update explains that the tested installer can write outside the skill directory and
+that existing agent scripts keep running. Errors preserve installer exit/output details; success
+asks agents to restart and explains that panemux participates from its next poll. No agmsg
+Update automatically checkbox is shown because instance-wide automatic updating is not currently executed.
+
+![agmsg manual Update in the host menu](images/agmsg-host-tool.png)

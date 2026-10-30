@@ -620,6 +620,28 @@ var apiCases = map[string]apiCase{
 		assert.Equal(t, http.StatusNoContent, rr.Code, rr.Body.String())
 	}},
 
+	"GET /api/hosts/agmsg": {run: func(t *testing.T, e *apiEnv) {
+		rr := e.do(t, http.MethodGet, "/api/hosts/agmsg?host=", "")
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+		e.cfg.AgentBoard.Enabled = true
+		rr = e.do(t, http.MethodGet, "/api/hosts/agmsg?host=", "")
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.Contains(t, rr.Body.String(), "missing")
+		rr = e.do(t, http.MethodGet, "/api/hosts/agmsg?host=not-configured", "")
+		assert.Equal(t, http.StatusNotFound, rr.Code)
+	}},
+	"POST /api/hosts/agmsg": {
+		notHappyPathReason: "success executes pinned upstream source from GitHub/cache; " +
+			"isolated adapter and API tests cover installation without network",
+		run: func(t *testing.T, e *apiEnv) {
+			rr := e.do(t, http.MethodPost, "/api/hosts/agmsg", `{"host":""}`)
+			assert.Equal(t, http.StatusNotFound, rr.Code)
+			e.cfg.AgentBoard.Enabled = true
+			rr = e.do(t, http.MethodPost, "/api/hosts/agmsg", `{"host":"not-configured"}`)
+			assert.Equal(t, http.StatusNotFound, rr.Code)
+			rr = e.do(t, http.MethodPost, "/api/hosts/agmsg", `{"host":"","command":"unsafe"}`)
+			assert.Equal(t, http.StatusBadRequest, rr.Code)
+		}},
 	"GET /api/tasks/codex-hook": {run: func(t *testing.T, e *apiEnv) {
 		require.NoError(t, os.Mkdir(filepath.Join(e.home, ".codex"), 0o700))
 
@@ -793,6 +815,7 @@ func TestServer_APIIntegration(t *testing.T) {
 // literal in the diff.
 var documentedIntegrationGaps = []string{
 	"POST /api/board/broadcast",
+	"POST /api/hosts/agmsg",
 	"POST /api/sessions/{id}/open-vscode",
 }
 

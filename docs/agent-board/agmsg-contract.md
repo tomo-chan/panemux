@@ -16,7 +16,7 @@ The contract verifies observable behavior, not log wording or private storage:
 - reads do not mark messages as consumed;
 - identity claims and pane-specific watchers isolate same-project Claude sessions;
 - dead claim owners can be replaced;
-- installed version normalization matches agmsg's supported provenance forms.
+- exact release/tag normalization is accepted; non-release provenance warns and is not ordered.
 
 ### Tier 1: hermetic
 

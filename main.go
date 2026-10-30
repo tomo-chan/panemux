@@ -95,7 +95,9 @@ func buildServerServices(
 	cfg *config.Config, manager *session.Manager,
 ) (*server.Server, *board.Relay, *bootstrapWatcher) {
 	handler := api.NewHandler(cfg, manager, nil, nil)
-	boardCache, boardRelay, boardBootstrap := setupBoard(cfg, manager, handler.HostExecution(), handler.ReadBoardConfig)
+	boardCache, boardRelay, boardBootstrap := setupBoard(
+		cfg, manager, handler.HostExecution(), handler.HostTools(), handler.ReadBoardConfig,
+	)
 	handler.SetBoard(boardCache, boardRelay)
 	commandRunner := setupCommandCenter(cfg)
 

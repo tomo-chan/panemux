@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
-import type { CodexHook as HostToolState, CodexHookAuto as HostToolAuto } from '../schemas'
+import type { AgmsgTool, CodexHook, CodexHookAuto as HostToolAuto } from '../schemas'
 import type { TaskActionResult } from '../hooks/useTasks'
+
+type HostToolState = AgmsgTool & Omit<CodexHook, 'status'>
 
 export interface HostToolItemProps {
   tool: ToolDefinition
@@ -10,7 +12,7 @@ export interface HostToolItemProps {
   label?: string
   load: (host: string) => Promise<TaskActionResult<HostToolState>>
   install: (host: string) => Promise<TaskActionResult<HostToolState>>
-  setAuto: (host: string, enabled: boolean) => Promise<TaskActionResult<HostToolAuto>>
+  setAuto?: (host: string, enabled: boolean) => Promise<TaskActionResult<HostToolAuto>>
   /** The item is all the menu has: a host without the tool says so. */
   alone?: boolean
 }
@@ -57,6 +59,7 @@ export const HostToolItem: React.FC<HostToolItemProps> = ({ tool, host, label = 
   }
 
   const toggleAuto = (hook: HostToolState) => {
+    if (!setAuto) return
     setSaving(true)
     setSaveError(null)
     void setAuto(host, !hook.auto_update).then(async (result) => {
@@ -100,7 +103,10 @@ export const HostToolItem: React.FC<HostToolItemProps> = ({ tool, host, label = 
         action = 'Update'
         break
       case 'installed':
-        detail = <span className="td-host-menu-installed">Installed</span>
+        detail = <span className="td-host-menu-installed">Installed{state.hook.version ? ` ${state.hook.version}` : ''}</span>
+        break
+      case 'newer':
+        detail = <span role="status">{state.hook.version} is newer than panemux’s tested version; kept unchanged.</span>
         break
       case 'invalid':
         detail = (
@@ -131,7 +137,8 @@ export const HostToolItem: React.FC<HostToolItemProps> = ({ tool, host, label = 
         )}
       </div>
       <div className="td-host-menu-codex-detail">{detail}</div>
-      {hook && (hook.status === 'missing' || hook.status === 'outdated' || hook.status === 'installed') && (
+      {action && tool.consent && <div className="td-muted">{tool.consent}</div>}
+      {setAuto && hook && (hook.status === 'missing' || hook.status === 'outdated' || hook.status === 'installed') && (
         <label className="td-host-menu-codex-auto">
           <input
             type="checkbox"
@@ -178,6 +185,7 @@ export const HostToolItem: React.FC<HostToolItemProps> = ({ tool, host, label = 
 
 // Tool-specific copy is supplied by the adapter, while menu behavior is shared.
 export interface ToolDefinition {
+  consent?: string
   id: string
   title: string
   absent: (label: string) => string

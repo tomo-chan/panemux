@@ -86,9 +86,13 @@ That is what makes **`agmsg-contract / contract`** safe to mark as a required ch
 
 ### Bumping the pinned agmsg version
 
-The pin is `agmsg.TestedAgmsgVersion` in `internal/agmsg/agmsg_version.go`, and the workflow reads it from that file rather than duplicating it. To bump it:
+The install pin is the pair `agmsg.TestedAgmsgVersion` (`internal/agmsg/agmsg_version.go`) and
+`agmsg.TestedAgmsgCommit` (`internal/agmsg/tool.go`). The current contract workflow reads the
+version; changing the version/SHA pair is currently manual. To bump the pair:
 
-1. Update `TestedAgmsgVersion`.
+1. Update `TestedAgmsgVersion` and `TestedAgmsgCommit` together after verifying the full commit SHA.
+   Verify fetch/archive and the real contract in an isolated HOME. Never test installation against
+   the developer's real skills/settings. The source cache is SHA-scoped; no cache migration is needed.
 2. Recapture the Tier 1 fixtures at the new version and rename their directory to match — see `internal/agmsg/testdata/agmsg-v1.2.0/README.md` and its `capture.sh`.
 3. Update `fixtureDir` (and the quoted fixture ids) in `internal/agmsg/agmsg_fixture_test.go`.
 4. Push. The contract job runs against the new pin automatically, because step 1 touches a scoped path.

@@ -9,8 +9,10 @@
 - An unreachable host is retried on later polls through the shared connection pool: failed dials
   wait 60 seconds, a connection lost during use can reconnect immediately, and the task host menu
   reconnect discards the shared connection and cooldown. No restart or pane is needed.
-- A confirmed missing agmsg installation is skipped by relay for the process lifetime; bootstrap
-  continues checking presence. Panemux does not install or update agmsg.
+- A confirmed missing agmsg installation is cached as absent until a managed installer attempt; bootstrap
+  continues checking presence. Successful manual Install clears absence and joins on the next poll.
+- Updates pause only panemux calls. Existing agent-owned scripts can see files being replaced;
+  restart agents after Install / Update. Failed installers may require manual recovery.
 - An SSH pane whose `connection` exists only in `~/.ssh/config` is outside Agent Board. Add a
   name-only entry to `ssh_connections` to include it; startup warns without rejecting the config.
 - The status/history cache is memory-only. Restart recovery uses bounded backfill and can omit older

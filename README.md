@@ -214,7 +214,7 @@ agent_board:
     team: panemux                      # shared agmsg team for all participating panes
     enabled: true                     # default false; all configured panes
     mode: monitor                     # monitor | turn | both | off
-    agmsg_auto_update: false           # reserved; installer follows in #435
+    agmsg_auto_update: false           # accepted and stored; automatic updates are not currently executed
 
 workspaces:
     items:
@@ -233,6 +233,9 @@ Pane ids become board addresses, so give them names you will recognize (`api`, `
 than `pane-1`. `_system` is reserved and rejected at config validation.
 
 Set enablement and mode in the top-level YAML block. Pane Settings has no board controls.
+With Agent Board enabled, each task-board host menu can Install / Update the tested agmsg source.
+Dependencies must already be installed. The menu explains installer effects and restart guidance;
+newer versions are kept unchanged. See [manual installation](docs/agent-board/agmsg-integration.md#manual-install--update).
 Enabling Agent Board consents to participation instructions for every detected agent on hosts
 with agmsg. With `turn` or `both`, that consent includes project-local hook writes. Removed
 pane-level `agent_board` and `agent_board.agmsg_path` settings cause migration errors.

@@ -79,7 +79,7 @@ func TestBoardHostWithoutPanesSharesTaskConnectionAndRecovers(t *testing.T) {
 	t.Cleanup(p.Close)
 	cfg := boardEnabledConfig(paneConfig("local-agent"))
 	cfg.SSHConnections = map[string]config.SSHConnection{"dev": {}}
-	_, relay, _ := setupBoard(cfg, session.NewManager(), p)
+	_, relay, _ := setupBoard(cfg, session.NewManager(), p, nil)
 	_, err := p.Connect(context.Background(), "dev")
 	require.Error(t, err)
 	relay.Poll(context.Background())
@@ -124,7 +124,7 @@ func TestBoardExcludedPaneWarnsWithConfigurationRemedy(t *testing.T) {
 	cfg := boardEnabledConfig(pane)
 	p := hostexec.New(hostexec.Options{})
 	defer p.Close()
-	_, relay, bootstrap := setupBoard(cfg, session.NewManager(), p)
+	_, relay, bootstrap := setupBoard(cfg, session.NewManager(), p, nil)
 	assert.True(t, relay.HasClients())
 	assert.True(t, bootstrap.HasWork())
 	require.NotContains(t, bootstrap.paneHosts, "excluded")
@@ -138,7 +138,7 @@ func setupTestBoard(
 	t.Helper()
 	p := hostexec.New(hostexec.Options{})
 	t.Cleanup(p.Close)
-	return setupBoard(cfg, manager, p)
+	return setupBoard(cfg, manager, p, nil)
 }
 
 type hostRunnerFunc func(context.Context, string, ...string) ([]byte, error)
@@ -203,7 +203,7 @@ func TestBoardPendingDialDoesNotDelayHealthyHost(t *testing.T) {
 	require.NoError(t, err)
 	cfg := boardEnabledConfig(paneConfig("local-agent"))
 	cfg.SSHConnections = map[string]config.SSHConnection{"a-unused": {}, "b-live": {}}
-	_, relay, _ := setupBoard(cfg, session.NewManager(), pool)
+	_, relay, _ := setupBoard(cfg, session.NewManager(), pool, nil)
 	for range 2 {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		started := time.Now()
@@ -288,7 +288,7 @@ func TestBoardSendWaitsForDialBeforePollAndAfterConnectionLoss(t *testing.T) {
 			pane.Type, pane.Connection = "ssh", "dev"
 			cfg := boardEnabledConfig(pane)
 			cfg.SSHConnections = map[string]config.SSHConnection{"dev": {}}
-			_, relay, _ := setupBoard(cfg, session.NewManager(), pool)
+			_, relay, _ := setupBoard(cfg, session.NewManager(), pool, nil)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			if state != "initial" {
@@ -420,7 +420,7 @@ func TestBootstrapSkipsHostRemovedBetweenParticipationSnapshots(t *testing.T) {
 		}
 		visit(cfg)
 	}
-	cache, _, watcher := setupBoard(cfg, manager, pool, read)
+	cache, _, watcher := setupBoard(cfg, manager, pool, nil, read)
 	watcher.pollOnce(context.Background())
 	require.Equal(t, 2, snapshots)
 	require.Empty(t, sess.writes)

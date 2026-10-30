@@ -1204,6 +1204,34 @@ synchronized on ticks, clearing instruction state on host changes while retainin
 Detection continues every five seconds for all eligible panes; the steady-state process/tmux/SSH
 probe cost is documented rather than changing detection semantics in this review fix.
 
+### Keep source data separate from diagnostics (2026-10-31, #435 review round 2)
+
+The combined input lane retained failure diagnostics but also mixed successful git warnings into
+rev-parse and tar output. Git source acquisition now uses a local split-output entry point sharing
+hostexec's command setup and cancellation. Only stdout is source data; stderr is attached only to
+failure diagnostics. The existing combined RunInput contract is unchanged for installers and
+prerequisite probes. Regression cases cover warnings during verification, archive creation and both.
+
+### Manual installer diagnostics and non-release versions (2026-10-31, #435 review)
+
+Target prerequisites and git acquisition use the shared input lane so failures retain output on
+both local and SSH hosts. Git diagnostics name the source operation rather than task collection.
+Only exact release/tag spellings are comparable: describe builds, dirty trees and prereleases
+are unknown, warn, and are never installed over. Prerequisites remain inside B1's reserved update
+window to preserve prompt overlap refusal and avoid racing another installer. Moving slow source
+preparation out of that window would need separate preparation reservation semantics.
+
+### Manual pinned agmsg installation (2026-10-30, #435 B2)
+
+B2 connects B1's input lane, prerequisites and pause to the pinned agmsg tool adapter and host menu.
+The release stays 1.2.0 and SHA stays 3c537a51bb76a23e312e7c27770df4a58ba794ff. Startup warnings
+now compare with the pinned normalized release, including newer patches. A SHA-specific bare Git
+cache is verified before archive transfer and can be reused offline. Manual operations expose
+installer consent, output/exit failures and restart guidance. Relay leases cover source/destination
+batches before state changes; bootstrap leases extend through PTY onboarding. Installer attempts
+invalidate discovery. The global auto-update setting remains persisted but inactive with no UI
+checkbox until B3. #435 stays open.
+
 ### Split installer work into three PRs (2026-10-30, #435 / #438)
 
 After part A merged, the user approved splitting B into three main-targeting PRs, each following

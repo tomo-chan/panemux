@@ -99,6 +99,21 @@ type prerequisiteTool struct {
 	fakeTool
 }
 
+func TestToolRevisionIncreasesAfterSuccessfulOrPartialInstall(t *testing.T) {
+	tool := &fakeTool{}
+	s := New(Options{Tools: map[ID]Tool{AgmsgTool: tool}})
+	defer s.Close()
+	require.Zero(t, s.Revision(AgmsgTool, host.Local))
+	_, err := s.Install(callTestContext(t), AgmsgTool, host.Local)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), s.Revision(AgmsgTool, host.Local))
+	tool.fail = errors.New("partial install")
+	_, err = s.Install(callTestContext(t), AgmsgTool, host.Local)
+	require.ErrorIs(t, err, tool.fail)
+	require.Equal(t, uint64(2), s.Revision(AgmsgTool, host.Local))
+	require.Zero(t, s.Revision(CodexHookTool, host.Local))
+}
+
 func (p *prerequisiteTool) Prerequisites(host.Host) []Prerequisite { return p.checks }
 func (p *prerequisiteTool) Install(ctx context.Context, h host.Host) (State, error) {
 	if p.install != nil {

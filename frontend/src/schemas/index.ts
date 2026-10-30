@@ -764,6 +764,13 @@ export const CodexHookSchema = z.object({
 
 export type CodexHook = z.infer<typeof CodexHookSchema>
 
+export const AgmsgToolSchema = z.object({
+  error: z.string().optional(),
+  status: z.enum(['absent', 'missing', 'installed', 'outdated', 'invalid', 'unknown', 'newer']),
+  version: z.string().optional(),
+})
+export type AgmsgTool = z.infer<typeof AgmsgToolSchema>
+
 // POST /api/tasks/codex-hook/auto-update (issue #402): the setting stored.
 export const CodexHookAutoSchema = z.object({
   auto_update: z.boolean(),

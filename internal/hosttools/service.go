@@ -15,6 +15,7 @@ import (
 type ID string
 
 const CodexHookTool ID = "codex-hook"
+const AgmsgTool ID = "agmsg"
 
 type Status string
 
@@ -25,10 +26,12 @@ const (
 	Outdated  Status = "outdated"
 	Invalid   Status = "invalid"
 	Unknown   Status = "unknown"
+	Newer     Status = "newer"
 )
 
 // State preserves the host menu's status and automatic-update outcomes.
 type State struct {
+	Version           string `json:"version,omitempty"`
 	Status            Status `json:"status"`
 	Error             string `json:"error,omitempty"`
 	AutoError         string `json:"auto_error,omitempty"`
@@ -162,6 +165,7 @@ func (s *Service) install(ctx context.Context, id ID, h host.Host, tool Tool) (S
 	if err := CheckPrerequisites(ctx, checks); err != nil {
 		return State{}, err
 	}
+	defer s.invalidate(id, h)
 	return tool.Install(ctx, h) //nolint:wrapcheck // preserve adapter errors
 }
 func hostName(name string) string {

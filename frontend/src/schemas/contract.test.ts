@@ -118,6 +118,7 @@ const roundTrips: RoundTrip[] = [
   { fixture: 'task-attach', schemaName: 'TaskAttachSchema', schema: schemas.TaskAttachSchema },
   { fixture: 'host-session-name', schemaName: 'HostSessionNameSchema', schema: schemas.HostSessionNameSchema },
   { fixture: 'host-terminal', schemaName: 'HostTerminalSchema', schema: schemas.HostTerminalSchema },
+  { fixture: 'host-agmsg', schemaName: 'AgmsgToolSchema', schema: schemas.AgmsgToolSchema },
   { fixture: 'task-codex-hook', schemaName: 'CodexHookSchema', schema: schemas.CodexHookSchema },
   {
     fixture: 'task-codex-hook-auto-update',
@@ -419,6 +420,11 @@ function unexercisedOptionalPaths(): string[] {
   return [...out.seen].filter((path) => !out.populated.has(path)).sort()
 }
 
+it('round-trips the agmsg host-tool response without losing fields', () => {
+  const captured = readFixture('host-agmsg')
+  expect(schemas.AgmsgToolSchema.parse(captured)).toEqual(captured)
+})
+
 // Every optional field no capture populates, with the reason it is not
 // captured. A new entry has to be justified here, in the diff — and an entry
 // that starts being exercised has to be deleted, so the list cannot rot into a
@@ -474,6 +480,7 @@ const unexercisedOptionals: Record<string, string> = {
   // the capture records them, which is the path worth pinning.
   // Set only once panemux updated a host's hook by itself (issue #402); the
   // capture's hooks.json cannot be read, so there is nothing to update.
+  'host-agmsg.error': 'the captured installation has a comparable version and is reachable',
   'task-codex-hook.auto_updated': 'needs a hook updated by itself, and the captured hooks.json cannot be updated',
   'task-codex-hook.auto_error': 'needs an update by itself that fails, and the captured hooks.json cannot be updated',
   'task-codex-hook.auto_settings_error': 'needs a codex hook settings file that cannot be read, and the capture has none',

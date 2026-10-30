@@ -1,6 +1,7 @@
 package hostexec
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -53,25 +54,45 @@ func (s *Pool) RunInput(
 const inputBootstrap = `for arg do value=$(printf "%bX" "$arg"); set -- "$@" "${value%X}"; shift; done; ` +
 	`script=$1; shift; exec sh -c "$script" panemux-input "$@"`
 
+// RunLocalSplit uses the local input execution boundary with separate output
+// streams. Binary/structured stdout stays data; stderr is diagnostic only.
+// RunInput retains its existing combined-output contract on every host.
+func RunLocalSplit(
+	ctx context.Context, script string, input io.Reader, args ...string,
+) ([]byte, []byte, error) {
+	var stdout, stderr bytes.Buffer
+	err := runLocalInputCommand(ctx, script, input, &stdout, &stderr, args...)
+	return stdout.Bytes(), stderr.Bytes(), err
+}
+
 func runLocalInput(ctx context.Context, script string, input io.Reader, args ...string) ([]byte, error) {
+	var combined bytes.Buffer
+	err := runLocalInputCommand(ctx, script, input, &combined, &combined, args...)
+	return combined.Bytes(), err
+}
+
+func runLocalInputCommand(
+	ctx context.Context, script string, input io.Reader, stdout, stderr io.Writer, args ...string,
+) error {
 	home, err := homedir.Dir()
 	if err != nil {
-		return nil, fmt.Errorf("resolve home dir for host input execution: %w", err)
+		return fmt.Errorf("resolve home dir for host input execution: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, "sh", "-c")
 	cmd.Args = append(cmd.Args, script, "panemux-input")
 	cmd.Args = append(cmd.Args, args...)
 	cmd.Stdin = input
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.Env = append(os.Environ(), "HOME="+home)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = localWaitDelay
-	out, err := cmd.CombinedOutput()
+	err = cmd.Run()
 	if ctx.Err() != nil {
-		return out, &RunError{Err: ctx.Err(), TimedOut: true}
+		return &RunError{Err: ctx.Err(), TimedOut: true}
 	}
 	if err != nil {
-		return out, &RunError{Err: err}
+		return &RunError{Err: err}
 	}
-	return out, nil
+	return nil
 }
