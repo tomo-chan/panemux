@@ -20,7 +20,10 @@ A forward binds a real listening socket on the panemux host, so its scope is del
   which no OAuth loopback listener uses in practice — never triggers a bind.
 - **Bounded.** At most 8 forwards per pane and 32 in total, each expiring after 30 minutes without
   traffic, and all closed when the pane is deleted or restarted (`Handler.closeSessionForwards`) or
-  when the server shuts down (`Server.Shutdown`).
+  when a host Type in pane terminal is closed, replaced by Retry/Reconnect, or expires after its
+  disconnect grace period (`Handler.removeBoardAttachSession`), and when the server shuts down
+  (`Server.Shutdown`). A session removed or replaced during forward preparation is checked again
+  after `Ensure`; its stale forwards are closed before the request returns.
 - **No command execution.** Forwarding runs entirely over the pane's existing SSH connection using
   `(*ssh.Client).DialContext`. No shell is involved, so none of the shell-argument rules in
   [command-execution.md](command-execution.md#security-command-execution-sinks) apply — there is no

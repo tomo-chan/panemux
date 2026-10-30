@@ -302,3 +302,36 @@ func TestRestartSession_ClosesPortForwards(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Nil(t, registry.Ports("main"), "a restarted pane's stale forwards must be dropped")
 }
+
+// Listen runs after the route has looked up the session but before Ensure
+// publishes its forward. Remove/replace there to deterministically exercise
+// a session ending while an open request is preparing its callback port.
+func TestPostOpenURL_SessionEndsDuringEnsure(t *testing.T) {
+	for _, replacement := range []bool{false, true} {
+		t.Run(fmt.Sprintf("replacement=%t", replacement), func(t *testing.T) {
+			sess := newRemoteMockSession("remote", startEchoServer(t))
+			h, _ := newOpenURLHandler(t, sess)
+			t.Cleanup(h.manager.CloseAll)
+			registry := portforward.New(portforward.Options{
+				SweepInterval: -1,
+				Listen: func(network, address string) (net.Listener, error) {
+					require.NoError(t, h.manager.Remove(sess.ID()))
+					if replacement {
+						h.manager.Add(newRemoteMockSession(sess.ID(), sess.echoAddr))
+					}
+					return net.Listen(network, address)
+				},
+			})
+			t.Cleanup(registry.Close)
+			h.SetPortForwards(registry)
+			port := freeLoopbackPort(t)
+			rec := postOpenURL(t, h, sess.ID(), `{"url":"http://localhost:`+strconv.Itoa(port)+`/callback"}`)
+			assert.Equal(t, http.StatusNotFound, rec.Code)
+			assert.Empty(t, registry.Ports(sess.ID()), "no forward may outlive the session that prepared it")
+			ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+			if assert.NoError(t, err, "the callback port is released immediately") {
+				ln.Close()
+			}
+		})
+	}
+}

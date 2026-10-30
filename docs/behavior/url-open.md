@@ -30,7 +30,9 @@ forwards, and the server at most 32.
 
 The host chip's **Type in pane** terminal uses the same forwarding and browser-open interception
 as an `ssh` or `ssh_tmux` pane, using its host terminal session ID even though it is outside the
-workspace layout. Closing it or expiring its disconnected-session grace period closes its forwards.
+workspace layout. Closing it, Retry/Reconnect (which deletes the old terminal), or expiry of its
+disconnected-session grace period closes its forwards. After Reconnect, open the URL again to
+forward its callback, even if the CLI is still waiting in the remote tmux session.
 The new-session and existing-session tmux interception limitations below also apply to it.
 
 **This assumes the browser showing the dashboard runs on the panemux host** — the documented local

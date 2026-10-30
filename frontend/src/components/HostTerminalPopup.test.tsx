@@ -42,6 +42,26 @@ beforeEach(() => {
 })
 
 describe('HostTerminalPopup URL opening (issue #455)', () => {
+  it.each(['approval', 'error'] as const)('traps Tab on the %s notice while terminal keys remain untouched', async (notice) => {
+    render(<HostTerminalPopup {...props()} />)
+    if (notice === 'approval') {
+      act(() => terminal.props.onBrowserOpenRequest?.(url))
+    } else {
+      fetchMock.mockResolvedValue({ ok: false, text: async () => 'port already in use' })
+      act(() => terminal.props.onLinkActivate?.(url))
+      await screen.findByText(/Port forwarding failed/)
+    }
+    const last = screen.getByRole('button', { name: notice === 'approval' ? 'Ignore' : 'Dismiss' })
+    const first = screen.getByRole('button', { name: 'Maximize' })
+    last.focus()
+    expect(fireEvent.keyDown(last, { key: 'Tab' })).toBe(false)
+    expect(first).toHaveFocus()
+    expect(fireEvent.keyDown(first, { key: 'Tab', shiftKey: true })).toBe(false)
+    expect(last).toHaveFocus()
+    expect(fireEvent.keyDown(screen.getByTestId('terminal'), { key: 'Tab' })).toBe(true)
+    expect(fireEvent.keyDown(screen.getByTestId('terminal'), { key: 'Escape' })).toBe(true)
+  })
+
   it.each(['ssh', 'ssh_tmux'] as const)('%s opens printed links through the host session forward', async (type) => {
     const p = props()
     p.session.type = type

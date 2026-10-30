@@ -131,9 +131,9 @@ export const HostTerminalPopup: React.FC<HostTerminalPopupProps> = ({
             </button>
           </div>
         )}
-        <div ref={bodyRef} className="td-input-body" data-input={chip === 'connected' ? 'on' : 'off'}>
+        <div className="td-input-body" data-input={chip === 'connected' ? 'on' : 'off'}>
           {attach.phase === 'ready' ? (
-            <HostTerminalBody key={`${attach.sessionId}:${attempt}`} sessionId={attach.sessionId} onStatus={onTerminalStatus} />
+            <HostTerminalBody key={`${attach.sessionId}:${attempt}`} sessionId={attach.sessionId} onStatus={onTerminalStatus} terminalRef={bodyRef} />
           ) : (
             <div className="td-input-blank">
               {attach.phase === 'connecting' ? (
@@ -162,16 +162,20 @@ export const HostTerminalPopup: React.FC<HostTerminalPopupProps> = ({
 const HostTerminalBody: React.FC<{
   sessionId: string
   onStatus: (status: TaskTerminalStatus) => void
-}> = ({ sessionId, onStatus }) => {
+  terminalRef: React.RefObject<HTMLDivElement | null>
+}> = ({ sessionId, onStatus, terminalRef }) => {
   const urlOpen = usePaneUrlOpen(sessionId)
   return (
     <>
-      <TaskTerminal
-        sessionId={sessionId}
-        onStatus={onStatus}
-        onLinkActivate={urlOpen.openUrl}
-        onBrowserOpenRequest={urlOpen.requestOpen}
-      />
+      {/* Only terminal input bypasses the popup's Tab trap, not notice controls. */}
+      <div ref={terminalRef} style={{ height: '100%' }}>
+        <TaskTerminal
+          sessionId={sessionId}
+          onStatus={onStatus}
+          onLinkActivate={urlOpen.openUrl}
+          onBrowserOpenRequest={urlOpen.requestOpen}
+        />
+      </div>
       <PaneUrlOpenNotice
         pendingUrl={urlOpen.pendingUrl}
         source={urlOpen.pendingSource}

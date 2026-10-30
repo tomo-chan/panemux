@@ -279,10 +279,10 @@ func (h *Handler) armBoardAttachLocked(attach *boardAttach) {
 }
 
 func (h *Handler) removeBoardAttachSession(sessionID string) {
-	h.closeSessionForwards(sessionID)
 	if err := h.manager.Remove(sessionID); err != nil {
 		log.Printf("board attach %s: %v", sessionID, err)
 	}
+	h.closeSessionForwards(sessionID)
 }
 
 // newBoardAttachID returns a session ID no registered session has.

@@ -86,6 +86,13 @@ func (h *Handler) PostOpenURL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), status)
 		return
 	}
+	// Closing/restarting may have removed this session while Ensure bound the
+	// callback port. Do not leave a forward pointing at the old SSH session.
+	if current, exists := h.manager.Get(id); !exists || current != sess {
+		h.closeSessionForwards(id)
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
 	writeJSON(w, openURLResponse{URL: req.URL, Port: port, Forwarded: true})
 }
 
