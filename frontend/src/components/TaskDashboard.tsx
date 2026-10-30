@@ -14,6 +14,7 @@ import { TaskInputPopup } from './TaskInputPopup'
 import { HostConnectDialog } from './HostConnectDialog'
 import { codexHookTool } from './codexHookTool'
 import { HostTools } from './HostTools'
+import { agmsgTool } from './agmsgTool'
 import { HostTerminalPopup } from './HostTerminalPopup'
 import { useHostTerminal } from '../hooks/useHostTerminal'
 import { loadTaskTerminalMaximized, saveTaskTerminalMaximized } from '../utils/taskTerminalPrefs'
@@ -88,6 +89,7 @@ const ALL_LABELS = '\u0000all'
 const NARROW_QUERY = '(max-width: 720px)'
 
 export interface TaskDashboardProps {
+  agentBoardEnabled?: boolean
   tasksState: TasksState
   /**
    * The hosts the dashboard collects from (ssh_connections), for the Hosts…
@@ -131,6 +133,7 @@ function stateStyle(state: Task['state']): StateVars {
 
 export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   tasksState,
+  agentBoardEnabled = false,
   hostsState,
   workspaces,
   onOpenTask,
@@ -419,6 +422,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
                   hostInput.open(host.name, type, tmuxSession, chip)
                 },
                 sessionName: tasksState.hostSessionName,
+                agmsgEnabled: agentBoardEnabled,
                 codexHook: tasksState.codexHook,
                 installCodexHook: tasksState.installCodexHook,
                 setCodexHookAuto: tasksState.setCodexHookAuto,
@@ -727,6 +731,7 @@ interface HostChipMenu {
   onOpen: (type: HostTerminalType, tmuxSession: string | undefined) => void
   onTypeIn: (type: HostTerminalType, tmuxSession: string | undefined, chip: HTMLElement | null) => void
   sessionName: TasksState['hostSessionName']
+  agmsgEnabled?: boolean
   codexHook: TasksState['codexHook']
   installCodexHook: TasksState['installCodexHook']
   setCodexHookAuto: TasksState['setCodexHookAuto']
@@ -800,7 +805,7 @@ const HostChip: React.FC<HostChipProps> = ({ host, running, onReconnect, menu })
               <HostTools
                 host={host.name}
                 label={label}
-                tools={[codexHookTool({ load: menu.codexHook, install: menu.installCodexHook, setAuto: menu.setCodexHookAuto })]}
+                tools={[codexHookTool({ load: menu.codexHook, install: menu.installCodexHook, setAuto: menu.setCodexHookAuto }), ...(menu.agmsgEnabled ? [agmsgTool()] : [])]}
                 alone={!terminal}
               />
             }

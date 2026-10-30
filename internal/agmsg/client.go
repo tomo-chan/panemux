@@ -19,6 +19,8 @@ const DefaultPath = "~/.agents/skills/agmsg"
 // ClientConfig binds a message transport to one host. Polling does not wait for
 // a pending dial; sends can use the waiting execution lane independently.
 type ClientConfig struct {
+	BeginCall  func() (func(), error)
+	Revision   func() uint64
 	Runner     host.Runner
 	SendRunner host.Runner
 	HostID     string
@@ -30,7 +32,8 @@ func NewClient(cfg ClientConfig) *Client {
 	if path == "" {
 		path = DefaultPath
 	}
-	return &Client{id: cfg.HostID, path: path, runner: cfg.Runner, sendRunner: cfg.SendRunner}
+	return &Client{beginCall: cfg.BeginCall, revision: cfg.Revision, id: cfg.HostID, path: path,
+		runner: cfg.Runner, sendRunner: cfg.SendRunner}
 }
 
 var _ board.MessageClient = (*Client)(nil)
@@ -45,9 +48,11 @@ func resolveHostAgmsgPath(ctx context.Context, runner host.Runner, path string) 
 }
 
 // Client resolves a host lazily. Transport failures leave it retryable;
-// a confirmed absent install is remembered, without detecting updates or installing tools.
+// a confirmed absent install is remembered until the tool manager changes its revision.
 // Discovery is published once; probes leave the cache mutex free while doing I/O.
 type Client struct {
+	beginCall         func() (func(), error)
+	revision          func() uint64
 	runner            host.Runner
 	sendRunner        host.Runner
 	resolvedPath      *string
@@ -55,6 +60,7 @@ type Client struct {
 	id, path          string
 	participationMu   sync.Mutex
 	mu                sync.Mutex
+	seenRevision      uint64
 	absent            bool
 }
 
@@ -118,7 +124,7 @@ func (c *Client) finishProbe(
 	return NewRemoteAgmsgClient(c.id, path, runner)
 }
 
-func (c *Client) Since(ctx context.Context, team, after string, limit int) ([]board.Row, error) {
+func (c *Client) since(ctx context.Context, team, after string, limit int) ([]board.Row, error) {
 	client, err := c.ready(ctx, c.runner)
 	if err != nil || client == nil {
 		return nil, err
@@ -129,7 +135,7 @@ func (c *Client) Since(ctx context.Context, team, after string, limit int) ([]bo
 	}
 	return rows, nil
 }
-func (c *Client) Send(ctx context.Context, team, from, to, body string) error {
+func (c *Client) send(ctx context.Context, team, from, to, body string) error {
 	runner := c.sendRunner
 	if runner == nil {
 		runner = c.runner
@@ -171,14 +177,14 @@ func (c *Client) ValidateAddress(team, paneID string) error {
 	}
 	return nil
 }
-func (c *Client) Available(ctx context.Context) (bool, error) {
+func (c *Client) available(ctx context.Context) (bool, error) {
 	path, err := c.participationRoot(ctx)
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", board.ErrParticipationPath, err)
 	}
 	return RemoteAgmsgPresent(ctx, c.runner, path)
 }
-func (c *Client) JoinInstruction(ctx context.Context, request board.JoinRequest) (string, error) {
+func (c *Client) joinInstruction(ctx context.Context, request board.JoinRequest) (string, error) {
 	if err := c.ValidateAddress(request.Team, request.PaneID); err != nil {
 		return "", err
 	}

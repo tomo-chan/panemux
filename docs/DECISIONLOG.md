@@ -1162,6 +1162,17 @@ synchronized on ticks, clearing instruction state on host changes while retainin
 Detection continues every five seconds for all eligible panes; the steady-state process/tmux/SSH
 probe cost is documented rather than changing detection semantics in this review fix.
 
+### Manual pinned agmsg installation (2026-10-30, #435 B2)
+
+B2 connects B1's input lane, prerequisites and pause to the pinned agmsg tool adapter and host menu.
+The release stays 1.2.0 and SHA stays 3c537a51bb76a23e312e7c27770df4a58ba794ff. Startup warnings
+now compare with the pinned normalized release, including newer patches. A SHA-specific bare Git
+cache is verified before archive transfer and can be reused offline. Manual operations expose
+installer consent, output/exit failures and restart guidance. Relay leases cover source/destination
+batches before state changes; bootstrap leases extend through PTY onboarding. Installer attempts
+invalidate discovery. The global auto-update setting remains persisted but inactive with no UI
+checkbox until B3. #435 stays open.
+
 ### Split installer work into three PRs (2026-10-30, #435 / #438)
 
 After part A merged, the user approved splitting B into three main-targeting PRs, each following

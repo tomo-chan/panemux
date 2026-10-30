@@ -101,25 +101,9 @@ func TestVersionMismatchWarning_InstallProvenanceForms(t *testing.T) {
 	}
 }
 
-// TestVersionMismatchWarning_PatchReleasesInTheTestedLineAreQuiet covers the
-// other half of the noise. agmsg ships a release every ~3 days (median gap
-// 2.9 days over its first 22 releases), so an operator on a current install
-// is almost never on the exact pinned patch, and warning them on every
-// startup says nothing they can act on: bumping the pin is this
-// repository's work, not theirs.
-//
-// A patch release at or past the pinned one is therefore quiet, and that
-// silence is bought by something real rather than assumed — Tier 2's canary
-// runs the contract against each new agmsg release (see
-// docs/agent-board.md's agmsg compatibility contract). Stated plainly:
-// agmsg makes no semver promise for the scripts panemux's write path
-// depends on, so this is a deliberate noise-for-coverage trade, not a claim
-// that patch releases cannot break anything.
-func TestVersionMismatchWarning_PatchReleasesInTheTestedLineAreQuiet(t *testing.T) {
+func TestVersionMismatchWarning_NewerPatchesWarn(t *testing.T) {
 	for _, installed := range []string{"1.2.1", "v1.2.2", "1.2.17"} {
-		assert.Empty(t, VersionMismatchWarning("host-a", installed),
-			"%q is at or past the pinned %s in the same minor line, which the canary covers",
-			installed, TestedAgmsgVersion)
+		assert.NotEmpty(t, VersionMismatchWarning("host-a", installed))
 	}
 }
 
@@ -168,8 +152,8 @@ func TestReleaseCovered(t *testing.T) {
 		covered   bool
 	}{
 		{"the pinned release itself", agmsgRelease{1, 2, 5}, true},
-		{"a newer patch is covered by the canary", agmsgRelease{1, 2, 6}, true},
-		{"a much newer patch, same line", agmsgRelease{1, 2, 40}, true},
+		{"a newer patch is covered by the canary", agmsgRelease{1, 2, 6}, false},
+		{"a much newer patch, same line", agmsgRelease{1, 2, 40}, false},
 		{"an older patch has no canary backing", agmsgRelease{1, 2, 4}, false},
 		{"the first patch of the tested minor", agmsgRelease{1, 2, 0}, false},
 		{"a newer minor is where the interface moves", agmsgRelease{1, 3, 0}, false},

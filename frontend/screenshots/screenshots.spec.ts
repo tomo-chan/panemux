@@ -84,6 +84,18 @@ test('documentation screenshots', async ({ page }) => {
     await page.screenshot({ path: imagePath('task-dashboard.png') })
   })
 
+  await test.step('agmsg host tool', async () => {
+    await page.route('**/api/tasks/codex-hook?*', route => route.fulfill({ json: { status: 'absent' } }))
+    await page.route('**/api/hosts/agmsg?*', route => route.fulfill({
+      json: { status: 'outdated', version: '1.1.13' },
+    }))
+    await page.getByRole('button', { name: 'Open a terminal on build-box' }).click()
+    const item = page.getByRole('group', { name: 'agmsg', exact: true })
+    await expect(item.getByRole('button', { name: 'Update agmsg on build-box' })).toBeVisible()
+    await page.screenshot({ path: imagePath('agmsg-host-tool.png') })
+    await page.keyboard.press('Escape')
+  })
+
   // Last, so the command it types shows in no other image.
   await test.step('split preview', async () => {
     await page.getByRole('button', { name: 'Workspaces' }).click()

@@ -19,6 +19,7 @@ type callKey struct {
 type callSlot struct {
 	idle     chan struct{}
 	active   int
+	revision uint64
 	updating bool
 }
 
@@ -111,6 +112,19 @@ func (s *Service) BeginCall(id ID, h host.Host) (func(), error) {
 }
 
 func (s *Service) Updating(id ID, h host.Host) bool { return s.calls.Updating(id, h) }
+
+// Revision changes after installer attempts, including partial failures.
+func (s *Service) Revision(id ID, h host.Host) uint64 {
+	s.calls.mu.Lock()
+	defer s.calls.mu.Unlock()
+	return s.calls.slot(callKey{id, h}).revision
+}
+
+func (s *Service) invalidate(id ID, h host.Host) {
+	s.calls.mu.Lock()
+	defer s.calls.mu.Unlock()
+	s.calls.slot(callKey{id, h}).revision++
+}
 
 // Prerequisite is an adapter-defined check: it can probe the target, the
 // panemux host, or verified local cache. Checks must not install dependencies.

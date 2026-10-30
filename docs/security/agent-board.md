@@ -8,7 +8,8 @@
 Only `internal/agmsg`, the adapter of the board-owned message and participation ports, may invoke
 operator-installed agmsg scripts through the shared host execution port
 (local `sh -s` or the per-host SSH command connection). It
-must never install panemux, agmsg, or persistent helper scripts on a remote host.
+must never install panemux or panemux helper scripts on a remote host. The agmsg tool adapter may
+install the pinned upstream source through the shared input port, with the trust described below.
 
 Remote commands must satisfy all of these rules:
 
@@ -26,8 +27,8 @@ The encoded-body path deliberately places an allowlist check before the exec sin
 CodeQL scan has yet confirmed that the analyzer recognizes the taint break. Treat this as structural
 mitigation until verified.
 
-The only fixed probes permitted are those needed to resolve the remote home directory and test for
-agmsg's read script and read its version marker. Variable values must be positional arguments, not embedded in probe text.
+Fixed probes resolve the remote home, test the read script/version marker, discover alternate
+`.agmsg` installations and check installation prerequisites. Variable values must be positional arguments, not embedded in probe text.
 
 Bootstrap's onboarding text is a PTY write, not an `exec.Command` sink. Shell-escaping rules do not
 apply to that text, but all interpolated identifiers must still pass Agent Board validation so the
@@ -56,4 +57,18 @@ allowed names does not strengthen same-user authentication. Agent detection and 
 are presentation and onboarding concerns, not sender authorization.
 
 Global `turn`/`both` modes allow onboarding to write project-local agmsg delivery hooks through the
-agent. These persist after disablement. The tool installer is a later part of #435.
+agent. These persist after disablement. The host menu can run the pinned installer with explicit consent.
+
+### Pinned installer trust
+
+Only the agmsg adapter chooses the fixed upstream repository, version and full commit SHA.
+The panemux host fetches and verifies the exact commit, revalidates cached commit identity and uses
+`git archive` to produce the transferred tar. Source/cache ownership is trusted like other local
+application state. No request chooses repository, ref, archive bytes, command or installer arguments.
+See [the command boundary](command-execution.md#agmsg-source-and-installer).
+
+Install / Update authorizes execution as the target user of the pinned upstream code verified by
+contract tests and human release review. The installer writes outside `~/.agents/skills` (Claude
+commands, other agents' skill directories, Codex sandbox settings and agent shims). Panemux does
+not sandbox those effects, operate on teams/DBs directly, run recovery, install dependencies or
+stop agent-owned scripts. Manual operation is implemented; unattended execution remains B3.

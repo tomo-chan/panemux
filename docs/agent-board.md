@@ -6,7 +6,7 @@ optional conversational command center. This guide summarizes the current design
 
 ## What it does
 
-- Globally enabled agent panes report status through an operator-installed agmsg instance.
+- Globally enabled agent panes report status through an agmsg instance.
 - Panemux aggregates reports and bounded message history across connected hosts.
 - Panes exchange messages through agmsg, without PTY injection.
 - The browser provides a read-only dashboard.
@@ -42,10 +42,9 @@ agmsg's scripts; it never reads agmsg's database or team files directly.
   Claude-only protocol.
 - **Share host execution.** Both boards use one command connection per `ssh_connections` key,
   independently of pane sessions. Local execution uses the same script-execution port.
-- **Never install panemux on a remote host.** A remote host needs only an agmsg installation managed
-  by the operator.
-- **Detect dependencies; do not install them.** Panemux skips unavailable agmsg backends and never
-  runs an installer.
+- **Never install panemux on a remote host.** A remote host needs an agmsg installation; the host menu can manage the pinned copy.
+- **Detect dependencies; do not install them.** Panemux skips unavailable backends and installs no dependencies.
+  The host menu can run the pinned agmsg installer with operator consent.
 - **Keep one script-execution boundary.** Only `internal/agmsg` calls agmsg. The command center and
   browser use panemux's authenticated API.
 - **Treat panemux as a trusted relay.** Message plaintext exists in the panemux process between SSH

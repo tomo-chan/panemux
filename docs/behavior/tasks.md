@@ -1448,3 +1448,13 @@ Opens a new host terminal ([Opening a host](#opening-a-host)):
 `DELETE /api/hosts/terminal/{session_id}` ends it at once and answers `204`; `404` for an ID that is
 not a host terminal (a task's board attach and a pane's session included), and `403` for a
 cross-site request.
+
+## Manual agmsg host tool
+
+With `agent_board.enabled`, `GET /api/hosts/agmsg?host=<ssh_connections-key>` returns
+`{status, version?, error?}`. Empty host selects the panemux host. Status is missing, installed,
+outdated, newer, invalid or unknown. `POST /api/hosts/agmsg` accepts only `{host}` and runs the
+pinned installer after prerequisites and draining existing board calls. Unknown hosts and disabled
+board return 404; writes that fail or overlap return 502 with their reason; checks during a pause
+return 200 / unknown. Requests share the browser authority guard. No request selects source or args.
+See [agmsg installation](../agent-board/agmsg-integration.md#manual-install--update).

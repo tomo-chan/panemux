@@ -229,6 +229,23 @@ adapter prerequisites and installation, rejects new calls while paused and resum
 or cancellation. A consumer must hold its admission lease for its entire operation; an updating
 snapshot alone cannot prevent a race. Agent-owned scripts are outside this coordination.
 
+### agmsg source and installer
+
+`internal/agmsg.Source` executes the literal `git` through the local host execution port with
+separate argv: SHA-scoped cache path, fixed repository URL, fixed full commit and fixed git
+subcommands. No browser input selects any operand. It verifies `rev-parse <SHA>^{commit}` against
+the complete pin before archiving. Git object hashes protect the fetched content; cache ownership
+is trusted. A verified cache needs Git but no network. No checkout hooks run during acquisition.
+
+`internal/agmsg.Tool` passes git archive's tar bytes as stdin to a fixed target script through
+`host.InputExecutor`. The only operand is either empty or the literal `--update`; the script
+allowlists both, checks alternate `.agmsg` markers again, creates a mktemp directory, extracts the
+archive there, and runs the literal `bash ./install.sh` with stdin closed. The trap removes only
+that invocation's temporary directory. No shell program is read from transferred stdin. The tar
+and installer are trusted upstream code pinned in the application; this is not an untrusted
+archive extractor. Output and exit/timeout errors are retained. Process-group cancellation and
+SSH channel cancellation use B1's execution lane. Agent-owned processes are outside its pause.
+
 ### Task dashboard collection
 
 The task dashboard ([behavior](../behavior/tasks.md)) runs commands on the panemux host and on every

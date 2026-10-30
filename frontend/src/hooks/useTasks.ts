@@ -121,7 +121,7 @@ export type HostTerminalType = 'ssh' | 'ssh_tmux'
 
 // postTaskAction POSTs body to path and parses the answer with schema. A
 // refusal comes back as the server's own reason.
-function postTaskAction<T>(path: string, body: unknown, schema: ResponseSchema<T>): Promise<TaskActionResult<T>> {
+export function postTaskAction<T>(path: string, body: unknown, schema: ResponseSchema<T>): Promise<TaskActionResult<T>> {
   return requestTaskAction(
     path,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
@@ -131,7 +131,7 @@ function postTaskAction<T>(path: string, body: unknown, schema: ResponseSchema<T
 
 type ResponseSchema<T> = { safeParse: (value: unknown) => { success: true; data: T } | { success: false } }
 
-async function requestTaskAction<T>(
+export async function requestTaskAction<T>(
   path: string,
   init: RequestInit | undefined,
   schema: ResponseSchema<T>,

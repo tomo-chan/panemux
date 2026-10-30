@@ -114,7 +114,7 @@ Verification column values:
 ## F. Documentation
 
 Documentation is part of the product here: an operator cannot use Agent Board without following
-[README](../README.md#agent-board), with global YAML settings and a per-host agmsg installation (the installer follows in #435).
+[README](../README.md#agent-board), with global YAML settings and a per-host agmsg installation (manual Install / Update is available in each task-board host menu).
 
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
@@ -146,7 +146,7 @@ See [agent-board/agmsg-contract.md](agent-board/agmsg-contract.md#agmsg-compatib
 | G9 | An agmsg release changes behavior | The canary fails against agmsg's latest tag, before anyone here bumps the pin | `auto`: `.github/workflows/agmsg-contract.yml`, `schedule` trigger (daily 06:00 UTC, doing real work once per new agmsg release) |
 | G10 | A PR bumps `agmsg.TestedAgmsgVersion` | The contract runs against the new pin and blocks the merge if real behavior differs | `auto`: same workflow, `pull_request` trigger — see [maintenance.md](maintenance.md#the-agmsg-compatibility-contract-job) for the branch-protection step this depends on |
 | G11 | An operator installs exactly the pinned agmsg | No version warning at startup, whichever install path they used — `install.sh` writes `v1.2.0`, not `1.2.0` | `auto`: `TestVersionMismatchWarning_InstallProvenanceForms`; `auto (opt-in)`: `TestAgmsgContract_InstalledVersionDoesNotFalselyWarn` against the real installer |
-| G12 | An operator runs a newer patch of agmsg | No warning — the canary verified that release when it shipped | `auto`: `TestVersionMismatchWarning_PatchReleasesInTheTestedLineAreQuiet` |
+| G12 | An operator runs a newer patch of agmsg | Warn against the pinned release without blocking startup | `auto`: `TestVersionMismatchWarning_NewerPatchesWarn` |
 | G12a | An operator runs a patch *older* than the pin | Warned — it never went through the canary. Unreachable while the pin's patch is 0, so the rule is tested apart from the pin | `auto`: `TestReleaseCovered` |
 | G13 | An operator runs a different minor/major, or an unreadable version | Warned, naming the version found and the pin | `auto`: `TestVersionMismatchWarning_StillWarnsWhereItMatters` |
 
@@ -439,3 +439,11 @@ genuinely alters no use case.
 - Agent Board design, including its own testing plan and agmsg compatibility contract: [agent-board.md](agent-board.md)
 - Behavior and API specification: [behavior.md](behavior.md)
 - Security requirements: [security.md](security.md)
+
+## Manual agmsg management (#435 B2)
+
+| # | Scenario | Expected | Verification |
+|---|---|---|---|
+| G435B2a | Manually install or update pinned agmsg | Missing offers Install, older offers Update, newer remains unchanged, alternate install is refused, verified cache works offline | `auto`: `internal/agmsg` — `TestAgmsgToolStatesAndInstallSafety`, `TestPinnedSourceFetchVerifyAndOfflineCache`, `TestPinnedWarningIncludesNewerPatch` |
+| G435B2b | Update while board calls are active | Paused calls fail promptly; affected relay cursors remain retryable and absence cache resets | `auto`: `internal/board` — `TestRelayPausedDestinationPreservesSourceCursor`, `TestBroadcastWhilePausedDoesNotSend`; `internal/agmsg` — `TestClientPauseRefusesEveryOperationAndInvalidatesAbsence` |
+| G435B2c | Host menu feedback | Version, newer warning, installer consent, failure output, retry and restart guidance; no automatic-update checkbox | `auto`: `frontend/src/components/HostTools.agmsg.test.tsx` |

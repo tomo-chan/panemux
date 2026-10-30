@@ -175,6 +175,11 @@ func (r *Relay) pollHost(ctx context.Context, host string, limit int) (bool, err
 	if client == nil {
 		return false, nil
 	}
+	client, release, err := leaseMessages(client)
+	if err != nil {
+		return false, err
+	}
+	defer release()
 
 	r.mu.Lock()
 	cursor := r.cursors[host]
@@ -187,8 +192,25 @@ func (r *Relay) pollHost(ctx context.Context, host string, limit int) (bool, err
 		return false, fmt.Errorf("since: %w", err)
 	}
 
+	// Admit all involved destinations before touching cache, ledger or cursor.
+	// A paused destination leaves the source batch retryable on the next poll.
+	routing := r.routing()
+	leased := map[string]MessageClient{host: client}
 	for _, row := range rows {
-		r.processRow(ctx, host, row)
+		dest := routing.PaneHosts[row.To]
+		if row.To == SystemID || dest == host || leased[dest] != nil || routing.Clients[dest] == nil {
+			continue
+		}
+		c, done, err := leaseMessages(routing.Clients[dest])
+		if err != nil {
+			return false, err
+		}
+		defer done()
+		leased[dest] = c
+	}
+	routing.Clients = leased
+	for _, row := range rows {
+		r.processRowUsing(ctx, host, row, routing)
 	}
 
 	newCursor := lastRowID(rows, cursor)
@@ -232,6 +254,10 @@ func lastRowID(rows []Row, prev string) string {
 // intentional, not a bug: see the relay design notes in the project's
 // implementation plan.
 func (r *Relay) processRow(ctx context.Context, sourceHost string, row Row) {
+	r.processRowUsing(ctx, sourceHost, row, r.routing())
+}
+
+func (r *Relay) processRowUsing(ctx context.Context, sourceHost string, row Row, routing Routing) {
 	if !r.validFrom(sourceHost, row) {
 		log.Printf("agent board relay: dropping row from host %q: invalid from %q", sourceHost, row.From)
 		return
@@ -245,7 +271,7 @@ func (r *Relay) processRow(ctx context.Context, sourceHost string, row Row) {
 		return
 	}
 
-	destHost, ok := r.routing().PaneHosts[row.To]
+	destHost, ok := routing.PaneHosts[row.To]
 	if !ok {
 		log.Printf("agent board relay: dropping row from host %q: unknown to %q", sourceHost, row.To)
 		return
@@ -257,7 +283,7 @@ func (r *Relay) processRow(ctx context.Context, sourceHost string, row Row) {
 		return
 	}
 
-	client, ok := r.routing().Clients[destHost]
+	client, ok := routing.Clients[destHost]
 	if !ok {
 		log.Printf("agent board relay: no client for host %q while relaying to pane %q", destHost, row.To)
 		return
@@ -361,10 +387,16 @@ func (r *Relay) Broadcast(ctx context.Context, from string, to []string, body st
 		if !ok {
 			return delivered, fmt.Errorf("agent board: no client for host %q (pane %q)", host, pane)
 		}
+		client, release, err := leaseMessages(client)
+		if err != nil {
+			return delivered, err
+		}
 		if from == SystemID {
 			r.ledger.Record(host, r.team, pane, body)
 		}
-		if err := client.Send(ctx, r.team, from, pane, body); err != nil {
+		err = client.Send(ctx, r.team, from, pane, body)
+		release()
+		if err != nil {
 			if from == SystemID {
 				r.ledger.Forget(host, r.team, pane, body)
 			}

@@ -7,6 +7,7 @@ import (
 	"panemux/internal/config"
 	"panemux/internal/host"
 	"panemux/internal/hostexec"
+	"panemux/internal/hosttools"
 	"panemux/internal/session"
 	"sync"
 	"time"
@@ -22,7 +23,7 @@ const (
 // setupBoard separates host execution from pane eligibility. A client is retained
 // even when its host cannot be reached at startup; polling retries through the pool.
 func setupBoard(
-	cfg *config.Config, manager *session.Manager, execution *hostexec.Pool,
+	cfg *config.Config, manager *session.Manager, execution *hostexec.Pool, tools *hosttools.Service,
 	readers ...func(func(*config.Config)),
 ) (*board.BoardCache, *board.Relay, *bootstrapWatcher) {
 	cache := board.NewBoardCache()
@@ -32,7 +33,7 @@ func setupBoard(
 	if len(readers) > 0 {
 		readConfig = readers[0]
 	}
-	routing := newBoardRouting(readConfig, execution)
+	routing := newBoardRouting(readConfig, execution, tools)
 	var liveRouting func() board.Routing
 	if cfg.AgentBoard.Enabled {
 		liveRouting = routing
@@ -97,7 +98,9 @@ func configuredBoardPanes(cfg *config.Config, warn bool) map[string]string {
 }
 
 // Live routing is scheduled only for boards enabled at startup.
-func newBoardRouting(readConfig func(func(*config.Config)), execution *hostexec.Pool) func() board.Routing {
+func newBoardRouting(
+	readConfig func(func(*config.Config)), execution *hostexec.Pool, tools *hosttools.Service,
+) func() board.Routing {
 	var clientsMu sync.Mutex
 	clients := map[host.Host]*agmsg.Client{}
 	return func() board.Routing {
@@ -114,7 +117,13 @@ func newBoardRouting(readConfig func(func(*config.Config)), execution *hostexec.
 		defer clientsMu.Unlock()
 		for _, target := range targets {
 			if clients[target] == nil {
-				clients[target] = agmsg.NewClient(agmsg.ClientConfig{HostID: target.BoardID(),
+				var begin func() (func(), error)
+				var revision func() uint64
+				if tools != nil {
+					begin = func() (func(), error) { return tools.BeginCall(hosttools.AgmsgTool, target) }
+					revision = func() uint64 { return tools.Revision(hosttools.AgmsgTool, target) }
+				}
+				clients[target] = agmsg.NewClient(agmsg.ClientConfig{HostID: target.BoardID(), BeginCall: begin, Revision: revision,
 					Runner: host.Bind(execution.WithoutDialWait(), target), SendRunner: host.Bind(execution, target)})
 			}
 			result.Clients[target.BoardID()] = clients[target]

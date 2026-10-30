@@ -33,7 +33,7 @@ has not been verified by a real CodeQL run. Treat it as structural mitigation, n
 taint path is recognized as closed.
 
 Panemux never installs its binary or helper scripts on a remote host. Remote hosts contain only
-operator-managed agmsg and agent processes.
+agmsg and agent processes; the host menu can run the pinned agmsg installer.
 
 ### Message trust
 
@@ -73,5 +73,8 @@ on its owning host, including shells that have never been detected as agents or 
 The same-host, same-user trust boundary is unchanged, but more configured identities can be
 impersonated by a process inside that boundary. Visibility in the dashboard grants no authority.
 
-The installer follow-up will require trust in panemux's pinned agmsg commit on every target host,
-including unattended updates. That capability is not implemented in this part.
+Manual Install / Update requires trust in panemux's pinned agmsg code on the target host.
+The installer can write outside the skill directory, including agent settings and commands;
+the UI explains this consent. See [installer details](agmsg-integration.md#manual-install--update).
+Unattended updates remain B3. Panemux pauses its own calls but cannot stop agent-owned scripts;
+restart agents after installation/update.

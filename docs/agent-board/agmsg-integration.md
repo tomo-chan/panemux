@@ -48,7 +48,7 @@ across Agent Board.
 ### Discovery and paths
 
 Panemux detects agmsg by checking `~/.agents/skills/agmsg/scripts/api.sh`. It must not use or invoke the
-`agmsg` npm bootstrap command, and it never installs or updates agmsg. A missing installation
+`agmsg` npm bootstrap command. The host menu can install or update the pinned source as described below. A missing installation
 disables board integration for that host without affecting terminal service.
 
 The installation location is fixed at `~/.agents/skills/agmsg`. Panemux expands the home directory
@@ -63,15 +63,48 @@ an interactive profile is insufficient.
 
 ### Version coverage
 
-`agmsg.TestedAgmsgVersion` is the version whose script behavior this repository verifies. The first
-successful host probe normalizes agmsg's common `VERSION` forms and warns when an installed release is outside the
-covered range. A warning never blocks startup.
+`agmsg.TestedAgmsgVersion` and `agmsg.TestedAgmsgCommit` pin the tested release and source commit.
+The initial pair is `1.2.0` / `3c537a51bb76a23e312e7c27770df4a58ba794ff`.
+Startup compares normalized installed releases with the pinned release; every different release,
+including a newer patch, warns without blocking messaging. Missing VERSION remains unknown.
+Provenance suffixes are normalized for comparison; VERSION is not proof of installed source integrity.
 
-Coverage means the same major/minor line at or above the tested patch. Older patches, other
-major/minor lines, prereleases, and unparseable versions warn. A missing `VERSION` file is unknown
-and does not produce a false mismatch claim. This policy reduces warning noise; it is not a semver
-guarantee from agmsg. The [compatibility contract](agmsg-contract.md#agmsg-compatibility-contract)
-must verify real releases.
+### Manual Install / Update
+
+With Agent Board enabled, each task-board host menu shows agmsg. Missing copies offer Install,
+older releases offer Update, and equal releases show Installed with their version. Newer releases
+are kept unchanged with a warning: no downgrade is offered. Unreadable or unparseable versions show
+Not checked. Another named installation (a `.agmsg` marker under another skill directory) refuses
+installation/update and asks the operator to consolidate it; v1.2.0 otherwise selects the first install.
+
+Before running, the shared tool manager checks the target's `bash`, `sqlite3`, `tar`, `mktemp` and
+`node`, plus pinned-source availability on the panemux host. Dependencies are never installed.
+Panemux uses `git` to fetch only the fixed SHA from `https://github.com/fujibee/agmsg.git` into
+cachedir's `panemux/agmsg/<SHA>` bare repository. It verifies that the resolved commit exactly
+matches the pin before `git archive --format=tar`. A verified cached commit can be used offline;
+GitHub connectivity is needed only on a cache miss. Neither setup.sh, npx nor npm is used.
+
+The archive travels over the shared input execution port to the chosen host. A fixed script extracts
+it in a new mktemp directory, runs `bash ./install.sh` (Install) or `bash ./install.sh --update`
+(Update) with stdin closed, and cleans only that temporary directory. The target does not need Git
+or GitHub connectivity. Failures show the exit error and captured output, including timeouts;
+`--recover` is never attempted automatically.
+
+Tool management announces a pause before draining existing panemux calls. New sends fail promptly
+with an updating error; paused status checks return 200 / unknown and overlapping writes 502.
+Relay holds leases for the source batch and its destinations before changing history or cursors;
+a paused destination keeps that batch retryable. Bootstrap holds a lease through its PTY write.
+Installer attempts invalidate discovery caches, so successful Install can participate from the next
+poll without restarting panemux. Pause ends on success, failure or cancellation.
+
+The UI explains installer consent and asks for agents to restart afterwards. Panemux cannot stop
+agent-owned scripts during replacement. The pinned installer can write outside `~/.agents/skills`,
+including Claude commands, other agents' skills and Codex sandbox settings. It runs as the target
+user; operator trust covers the fixed upstream code, verified through contract tests and human
+release review, not a restricted installation sandbox. See [the security model](security-model.md).
+
+Instance-wide automatic updating remains B3. `agmsg_auto_update` is persisted but inactive, and
+this PR exposes no automatic-update checkbox for agmsg.
 
 ## Two panes in one project directory
 

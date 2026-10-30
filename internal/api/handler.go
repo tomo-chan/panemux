@@ -24,6 +24,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"panemux/internal/agmsg"
 	"panemux/internal/board"
 	"panemux/internal/codexhook"
 	"panemux/internal/commandcenter"
@@ -213,6 +214,7 @@ func NewHandler(
 	h.hostTools = hosttools.New(hosttools.Options{
 		Hosts: h.taskHostNames,
 		Tools: map[hosttools.ID]hosttools.Tool{
+			hosttools.AgmsgTool:     agmsg.NewTool(agmsg.ToolOptions{Execution: h.execution, Input: h.execution}),
 			hosttools.CodexHookTool: codexhook.New(codexhook.Options{Execution: h.execution}),
 		},
 		CodexHookAuto: hosttools.NewCodexHookAutoStore(""),

@@ -134,34 +134,8 @@ func describeSuffixIndex(v string) int {
 // line naming the version that changed — the failure mode
 // docs/agent-board.md's compatibility contract exists to avoid.
 //
-// It is deliberately narrower than "installed != TestedAgmsgVersion",
-// because that comparison warned in two cases where it said nothing useful:
-//
-//  1. **An exactly-pinned install.** The provenance forms above meant a
-//     clone-and-install of the tested version reported "v1.2.0" against a
-//     pin of "1.2.0" and was warned about on every startup. Every one of
-//     those warnings was false, and a warning that is usually false trains
-//     its reader to skip the one that is not.
-//  2. **A patch release at or past the pinned one, in the same minor line.**
-//     agmsg ships roughly
-//     every three days, so an operator on a current install is almost never
-//     on the exact pinned patch, and moving the pin is this repository's
-//     work rather than something the warning's reader can act on. What
-//     makes the silence honest is that those releases are covered: Tier 2's
-//     canary runs the real contract against each new agmsg release (see
-//     docs/agent-board.md's agmsg compatibility contract), so a patch
-//     release that breaks the interface surfaces in CI here rather than
-//     going unnoticed. Stated plainly: agmsg makes no semver promise for
-//     the scripts panemux's write path depends on, so this is a deliberate
-//     trade of noise for canary coverage, not a claim that a patch release
-//     cannot break anything.
-//
-// Everything else still warns — an older minor may predate an interface
-// panemux depends on, a newer minor or major is exactly where that
-// interface can move, and a version this cannot parse is reported rather
-// than assumed to be fine. A patch OLDER than the pin warns too, for the
-// reason releaseCovered gives: only releases from the pin forward have been
-// through the canary.
+// Release comparison normalizes install provenance but now warns for every
+// release different from the pinned release, including newer patches.
 func VersionMismatchWarning(host, installed string) string {
 	// Unknown version: panemux does not claim a mismatch it could not
 	// observe. agmsg installs predating the VERSION file exist.
@@ -194,19 +168,7 @@ func coveredByTestedVersion(installed string) bool {
 	return releaseCovered(got, want)
 }
 
-// releaseCovered is the coverage rule itself, split from the pin so it can
-// be tested at boundaries the current pin cannot reach — with a pinned
-// patch of 0, no same-minor release is older than it, so the last clause
-// below is unreachable today and would first take effect on a pin bump,
-// which is exactly when nobody would be looking for it.
-//
-// Covered means: the same minor line, at or past the pinned patch.
-//
-// The asymmetry is deliberate. A NEWER patch is quiet because Tier 2's
-// canary verifies each agmsg release as it ships, so those versions have
-// been exercised even though the pin has not moved. An OLDER patch has no
-// such backing — it may predate a fix or behavior the pin was moved for —
-// so it is treated like any other version outside the tested line.
+// releaseCovered compares the normalized release with the tested pin.
 func releaseCovered(got, want agmsgRelease) bool {
-	return got.major == want.major && got.minor == want.minor && got.patch >= want.patch
+	return got == want
 }

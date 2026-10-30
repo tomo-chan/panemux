@@ -674,3 +674,15 @@ Agent Board reuses the existing modal, panel, color, status, and focus-restorati
 Global shortcuts use capture phase so terminal focus does not swallow them. Closing any Agent Board
 surface restores the previously focused element. Full data-flow rules are in
 [Command center](agent-board/command-center.md#command-center).
+
+### agmsg in the host menu
+
+When Agent Board is globally enabled, HostTools lists agmsg using HostToolItem beneath the host
+menu actions. It shows Not installed / Install, older release / Update, Installed with version,
+newer release warning (kept unchanged), Cannot install with setup reasons, or Not checked.
+Install / Update explains that the tested installer can write outside the skill directory and
+that existing agent scripts keep running. Errors preserve installer exit/output details; success
+asks agents to restart and explains that panemux participates from its next poll. No agmsg
+Update automatically checkbox is shown until B3 implements the instance-wide setting.
+
+![agmsg manual Update in the host menu](images/agmsg-host-tool.png)

@@ -44,7 +44,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `internal/preview` | Resolve a clicked HTML or Markdown path against a session's working directories, refusing any file outside them, register the file under a random token for the server's lifetime, and serve it and the files under its root sandboxed in an opaque origin, rendering Markdown. For an SSH session the same is done on the host over SFTP (`Remote`, `ResolveRemote`, `Registry.OpenRemote`), and a clicked localhost URL of the host is relayed to a port of its own on `127.0.0.1` (`Relays`). |
 | `internal/portforward` | Maintain short-lived loopback listeners that forward callback traffic through a session's SSH connection. |
 | `internal/board` | Define messaging and participation ports, validate senders, relay rows across configured hosts, and maintain the in-memory status/history view. |
-| `internal/agmsg` | Implement board messaging and participation through agmsg scripts, including path discovery, versions, parsing, and agent type mapping. |
+| `internal/agmsg` | Implement board messaging and participation through agmsg scripts, including path discovery, versions, parsing, agent type mapping, and the pinned-source tool adapter (cache, archive transfer, installer and prerequisites). |
 | `internal/commandcenter` | Run one headless Claude query at a time, persist its session/history state, and stream structured events. |
 | `internal/boardmcp` | Expose the three board operations to the command-center subprocess through a narrow stdio MCP server backed by panemux REST APIs. |
 | `internal/homedir`, `internal/cachedir` | Centralize OS directory lookups and provide scoped test substitutions. |
@@ -248,4 +248,5 @@ frames a localhost page. Behavior is in [the split preview](behavior/preview.md)
 Agent Board enablement and delivery mode are instance-wide. Its relay accepts all configured
 pane identities on their owning hosts; bootstrap supplies a synchronized participation snapshot
 for the authenticated status API. Dashboard membership is based on detected agents or reports.
-The agmsg installation location is fixed per host; the installer is a follow-up to #435's settings change.
+The agmsg installation location is fixed per host. Host tool management coordinates manual
+Install / Update with board call leases and discovery revisions; automatic updating remains B3.

@@ -16,12 +16,12 @@ server:
 # One dashboard for what every pane's coding agent is doing, plus a command
 # palette to message them. Optional: omit this whole block and panemux behaves
 # exactly as it did without it. See the README's "Agent Board" section for the
-# setup steps, and note that agmsg must already be installed on every host
-# whose panes join — panemux never installs it.
+# setup steps. With the board enabled, each task-board host menu can Install / Update
+# panemux's tested agmsg source; dependencies must be installed separately.
 agent_board:
   enabled: false
   mode: monitor
-  agmsg_auto_update: false  # reserved; no updates until the installer follow-up
+  agmsg_auto_update: false  # reserved; automatic updates arrive in B3
   team: "panemux"                      # shared agmsg team for all participating panes
 
 # ── Command center ────────────────────────────────────────────────────────────

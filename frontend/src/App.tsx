@@ -914,6 +914,7 @@ export const App: React.FC = () => {
         </div>
         {layer === 'tasks' && (
           <TaskDashboard
+            agentBoardEnabled={agentBoardEnabled}
             tasksState={dashboardTasksState}
             workspaces={workspaces?.items ?? []}
             onOpenTask={handleOpenTask}
