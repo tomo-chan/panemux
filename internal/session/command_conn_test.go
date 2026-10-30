@@ -69,6 +69,16 @@ func TestCommandConnRunReturnsTheContextErrorWhenCancelledMidCommand(t *testing.
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
+func TestCommandConnRunPreservesOutputOnTimeout(t *testing.T) {
+	client, _ := startSessionTestSSHServer(t, nil)
+	conn := newCommandConn(client, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	out, err := conn.Run(ctx, "tmux new-session -A -s hang", strings.NewReader("installer diagnostic\n"))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Equal(t, "installer diagnostic\n", string(out))
+}
+
 func TestCommandConnRunFailsOnAClosedConnection(t *testing.T) {
 	client, _ := startSessionTestSSHServer(t, nil)
 	conn := newCommandConn(client, nil)

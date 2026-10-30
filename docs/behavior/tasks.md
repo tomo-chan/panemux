@@ -513,6 +513,14 @@ Tool management lives in `internal/hosttools`; `internal/codexhook` implements i
 the shared host execution port. The task collector only notifies management after a successful
 collection. The existing `/api/tasks/codex-hook` routes and JSON remain the host menu contract.
 
+Tool updates announce a pause for that tool on that host before waiting for active management
+checks to finish. New consumer calls and overlapping updates return an updating error immediately;
+status checks report `unknown` with that reason instead of invoking the tool. Other tools and
+hosts remain usable. Once drained, management runs any adapter-defined prerequisites
+and installs only if they all pass. A failed prerequisite reports its name and reason and asks
+the operator to set it up; management never installs dependencies. Success, failure and cancellation
+all lift the pause. Codex hook's manual and automatic paths use the same coordination.
+
 ### Where a task runs
 
 | `location.kind` | Meaning |
@@ -1397,7 +1405,9 @@ POST /api/tasks/codex-hook   { "host": "gpu-box" }
   ([`Update automatically`](#codex-permission-requests)), and answers the status read back after it.
 - `404` for a host that is not in `ssh_connections`. `POST` answers `502` with the reason when the
   host has no codex, its `hooks.json` is `invalid`, or the check or the write failed, and `400` for a
-  body it cannot decode strictly. Both answer `403` to a cross-site request.
+  body it cannot decode strictly. During an update `GET` answers `200` with `unknown` and
+  `"error": "tool is updating"`; an overlapping `POST` writes nothing and answers `502` with that
+  reason, as for other write failures. Both answer `403` to a cross-site request.
 - `POST /api/tasks/codex-hook/auto-update` with `{ "host": "gpu-box", "enabled": true }` turns
   `Update automatically` on or off for that host and answers `200` with `{ "auto_update": true }`.
   It touches nothing on the host. `404` for a host not in `ssh_connections`, `400` for a body it

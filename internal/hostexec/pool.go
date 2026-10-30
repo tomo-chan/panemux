@@ -115,11 +115,15 @@ func (s *Pool) run(ctx context.Context, target host.Host, script string, wait bo
 		return nil, err
 	}
 	out, err := conn.Run(ctx, command(args), strings.NewReader(script))
+	return s.finishRun(ctx, name, conn, out, err)
+}
+
+func (s *Pool) finishRun(ctx context.Context, name string, conn Conn, out []byte, err error) ([]byte, error) {
 	switch {
 	case err == nil:
 		return out, nil
 	case isExitError(err):
-		return nil, &RunError{Err: err}
+		return out, &RunError{Err: err}
 	case ctx.Err() != nil:
 		// Out of time is not the same as a broken connection: a host that
 		// is slow to answer, or has a large ~/.claude, would otherwise be
@@ -130,10 +134,10 @@ func (s *Pool) run(ctx context.Context, target host.Host, script string, wait bo
 		if pingErr := conn.Ping(pingCtx); pingErr != nil {
 			s.drop(name, conn)
 		}
-		return nil, &RunError{Err: ctx.Err(), TimedOut: true}
+		return out, &RunError{Err: ctx.Err(), TimedOut: true}
 	default:
 		s.drop(name, conn)
-		return nil, &RunError{Err: err}
+		return out, &RunError{Err: err}
 	}
 }
 

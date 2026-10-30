@@ -59,6 +59,7 @@ type Service struct {
 	codexHookAuto map[string]codexHookAuto
 	ctx           context.Context
 	cancel        context.CancelFunc
+	calls         CallGate
 	mu            sync.Mutex
 	runs          sync.WaitGroup
 	closed        bool
@@ -102,7 +103,10 @@ func (s *Service) Check(ctx context.Context, id ID, h host.Host) (State, error) 
 	if err != nil {
 		return State{}, err
 	}
-	got := tool.Check(ctx, h)
+	got, err := s.check(ctx, id, h, tool)
+	if err != nil {
+		got = State{Status: Unknown, Error: err.Error()}
+	}
 	if id == CodexHookTool {
 		got = s.autoUpdateCodexHook(ctx, string(h), got)
 	}
@@ -114,7 +118,7 @@ func (s *Service) Install(ctx context.Context, id ID, h host.Host) (State, error
 	if err != nil {
 		return State{}, err
 	}
-	got, err := tool.Install(ctx, h)
+	got, err := s.install(ctx, id, h, tool)
 	if err != nil {
 		return State{}, err //nolint:wrapcheck // preserve adapter errors
 	}
@@ -126,10 +130,39 @@ func (s *Service) Install(ctx context.Context, id ID, h host.Host) (State, error
 }
 
 func (s *Service) checkCodexHook(ctx context.Context, name string) State {
-	return s.opts.Tools[CodexHookTool].Check(ctx, host.Host(name))
+	got, err := s.check(ctx, CodexHookTool, host.Host(name), s.opts.Tools[CodexHookTool])
+	if err != nil {
+		return State{Status: Unknown, Error: err.Error()}
+	}
+	return got
 }
 func (s *Service) installCodexHook(ctx context.Context, name string) (State, error) {
-	return s.opts.Tools[CodexHookTool].Install(ctx, host.Host(name)) //nolint:wrapcheck // preserve adapter errors
+	return s.install(ctx, CodexHookTool, host.Host(name), s.opts.Tools[CodexHookTool])
+}
+
+func (s *Service) check(ctx context.Context, id ID, h host.Host, tool Tool) (State, error) {
+	release, err := s.calls.Begin(id, h)
+	if err != nil {
+		return State{}, err
+	}
+	defer release()
+	return tool.Check(ctx, h), nil
+}
+
+func (s *Service) install(ctx context.Context, id ID, h host.Host, tool Tool) (State, error) {
+	resume, err := s.calls.Pause(ctx, id, h)
+	if err != nil {
+		return State{}, err
+	}
+	defer resume()
+	var checks []Prerequisite
+	if p, ok := tool.(PrerequisiteTool); ok {
+		checks = p.Prerequisites(h)
+	}
+	if err := CheckPrerequisites(ctx, checks); err != nil {
+		return State{}, err
+	}
+	return tool.Install(ctx, h) //nolint:wrapcheck // preserve adapter errors
 }
 func hostName(name string) string {
 	if name == "" {

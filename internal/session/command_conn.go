@@ -34,7 +34,7 @@ func newCommandConn(client, jumpClient *ssh.Client) *CommandConn {
 // Run runs cmd in a new exec channel with stdin as its input and returns its
 // standard output. A command that exits non-zero returns *ssh.ExitError,
 // whose ExitStatus method tells it apart from a failed connection. Canceling
-// ctx closes the channel.
+// ctx closes the channel, preserving any stdout captured before cancellation.
 func (c *CommandConn) Run(ctx context.Context, cmd string, stdin io.Reader) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -59,7 +59,7 @@ func (c *CommandConn) Run(ctx context.Context, cmd string, stdin io.Reader) ([]b
 	out, err := sess.Output(cmd)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
+			return out, ctxErr
 		}
 		return out, err
 	}
