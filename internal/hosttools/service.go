@@ -142,6 +142,7 @@ func (s *Service) Install(ctx context.Context, id ID, h host.Host) (State, error
 	s.mu.Lock()
 	if auto, ok := s.globalAuto[callKey{id, h}]; ok {
 		auto.err, auto.updated = "", false
+		//mutation:exempt[INCREMENT_DECREMENT] equivalent: generation equality ignores the direction of change
 		auto.revision++
 		s.globalAuto[callKey{id, h}] = auto
 	}
