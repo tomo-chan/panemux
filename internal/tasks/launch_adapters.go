@@ -52,8 +52,9 @@ type launchAdapter interface {
 	// returned.
 	validNewSessionID(id string) bool
 	// newCommand is a fixed shell fragment, run once the agent's binary is
-	// found, that sets run: the `sh -c` script tmux runs with the prompt
-	// file, the binary, the session ID and the working directory as $1–$4.
+	// found, that sets run: the `sh -c` script that starts the agent with
+	// the prompt, the binary, the session ID and the working directory as
+	// $1–$4.
 	newCommand() string
 	// note is a fixed text on what to know before starting a new session,
 	// "" when there is nothing to say (issue #376).
@@ -71,8 +72,8 @@ type resumeAdapter interface {
 	// tmuxSessionFor names the tmux session a resume of id runs in.
 	tmuxSessionFor(id string) string
 	// resumeCommand is a fixed shell fragment that sets resume: the
-	// `sh -c` script tmux runs with the working directory, the binary and
-	// the session ID as $1–$3.
+	// `sh -c` script that starts the agent with the working directory, the
+	// binary and the session ID as $1–$3.
 	resumeCommand() string
 	refusals() map[string]string
 }
@@ -289,7 +290,7 @@ func (claudeLaunch) note() string                     { return "" }
 // takes an optional value, and an ID given as a separate argument that
 // began with "-" would be parsed as an option.
 func (claudeLaunch) newCommand() string {
-	return `  run='p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; exec "$2" "--session-id=$3" -- "$p"'`
+	return `  run='cd -- "$4" || exit 1; exec "$2" "--session-id=$3" -- "$1"'`
 }
 
 func (claudeLaunch) resumeCommand() string {
@@ -335,7 +336,7 @@ const codexPrelude = `  PATH=$PATH:${bin%/*} "$bin" --help </dev/null 2>/dev/nul
 // parses an unguarded leading "-" as an option, and `codex resume <id> '-h …'`
 // prints its help and exits 0.
 func (codexLaunch) newCommand() string {
-	return codexPrelude + `  run='p=$(cat -- "$1"); rm -f -- "$1"; cd -- "$4" || exit 1; '"$codex"' -- "$p"'`
+	return codexPrelude + `  run='cd -- "$4" || exit 1; '"$codex"' -- "$1"'`
 }
 
 func (codexLaunch) resumeCommand() string {

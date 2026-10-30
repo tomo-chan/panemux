@@ -154,8 +154,8 @@ server after a reboot too. The pane's claude descends from tmux's own shell for 
 and interactive shell that reads the rc files; the dashboard's descended from `sh -s` on the exec
 channel, tmux and a fixed `sh -c`, none of which reads them. From inside the dashboard's claude,
 `$SHELL -lic 'echo ${ANTHROPIC_API_KEY:+set}'` printed `set`, so the key was reachable through the
-user's shell. The agent's command now runs through `$SHELL -lic 'exec "$@"'`, with the agent's
-fixed `sh -c` and its arguments after it.
+user's shell. The agent's command now runs through `$SHELL -lic '<a fixed command>'`, which runs the
+agent's fixed `sh -c` once the rc has run.
 
 - **Login and interactive, as a pane's shell.** `-l` alone stops at the `case $- in *i*) ;; *)
   return;; esac` that opens most distributions' default `~/.bashrc`; `-i` alone skips
@@ -169,10 +169,16 @@ fixed `sh -c` and its arguments after it.
   choice to keep the set to bash, zsh and sh; mksh also left SIGTSTP ignored in the agent it ran
   (measured as `SigIgn` under tmux 3.4), which neither the old direct start nor a pane's shell
   does. Any other shell keeps the old direct start.
-- **What an rc can still do.** A review found that the rc runs in the same shell as `exec "$@"`:
-  a top-level `set --` or `shift` replaces what runs, and an rc that `exec`s another shell or exits
-  never hands over. Either way the agent does not start after a launch that reported success, and a
-  new task's prompt file is left behind. This is documented rather than prevented for now.
+- **The arguments travel in variables, not as the shell's positional parameters.** The first
+  version gave the user's shell `exec "$@"` with the agent's command as its arguments. A review
+  found that the rc runs in that same shell, so a top-level `set --` or `shift` — the
+  `set -- ~/.profile.d/*.sh; for f; do . "$f"; done` idiom of POSIX profiles — replaced what ran,
+  and that an rc that `exec`s another shell or exits left the prompt file behind, since the agent's
+  command read it. Now a fixed `start` script reads and removes the prompt file first and passes
+  the command and its arguments in exported `PANEMUX_LAUNCH_` variables, which the user's shell
+  expands after its rc and the agent's command unsets. Rejected: a launcher file holding the
+  arguments, which would write the prompt to disk again for the rc's duration; and shell arrays,
+  which sh lacks.
 - **Rejected: passing the key.** `tmux new-session -e ANTHROPIC_API_KEY=…` puts it in the tmux
   server's process arguments for the server's lifetime. Reading named variables on the host and
   passing them in a mode-`0600` file writes a secret to disk, needs a list of names, and still

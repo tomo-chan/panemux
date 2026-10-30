@@ -715,18 +715,20 @@ it.
   absolute path to an executable file is run.
 - **claude starts with the environment the user's shell sets up, as one typed into a pane does.**
   Inside the tmux session the command runs through the host user's `$SHELL`, started as a login and
-  interactive shell (`$SHELL -lic 'exec "$@"'`), the way tmux starts a pane's shell, so what the
+  interactive shell (`$SHELL -lic '<a fixed command>'`), the way tmux starts a pane's shell, so what the
   shell's rc files export — an `ANTHROPIC_API_KEY` in `~/.bashrc`, a `PATH`, a proxy — reaches
   claude. An SSH exec channel reads none of them, and a `~/.bashrc` that returns at once when the
   shell is not interactive, as most distributions' default one does, is read only by an interactive
-  shell. The rc runs first, and the command after it then reads the first instruction's file, changes
-  to the working directory and starts claude, so an rc that changes directory does not move it.
+  shell. The first instruction's file is read before the shell starts; the rc runs next, and the
+  command after it then changes to the working directory and starts claude, so an rc that changes
+  directory does not move it.
   Whatever the rc prints, or waits for, appears in the task's pane before claude starts; the launch
   reports success once tmux has started the session, so an rc that waits holds claude, not the
-  request. An rc that never hands over — one that `exec`s another shell (`exec zsh` at the end of a
-  `~/.bashrc`), exits, or changes its positional parameters with `set --` or `shift` — leaves claude
-  unstarted after a launch that reported success: a new task is then never listed, since claude
-  writes the state file the collection reads, and its first instruction's file is left behind.
+  request. The shell's positional parameters are not used, so an rc that sets or shifts them
+  (`set --`, `shift`) changes nothing. An rc that never hands over — one that `exec`s another shell
+  (`exec zsh` at the end of a `~/.bashrc`) or exits — leaves claude unstarted after a launch that
+  reported success, and a new task is then never listed, since claude writes the state file the
+  collection reads; the tmux session `task-<8>` holds what the rc left, if anything.
   This applies when `$SHELL` is an absolute path to an executable named `bash`, `zsh` or `sh`, the
   shells checked to pass the command's arguments through `-c` as `"$@"` (on Linux: bash 5.2, zsh
   5.9 and an `sh` that is dash 0.5.12, under tmux 3.4); an `sh` reads `~/.profile`. Any other
@@ -735,8 +737,8 @@ it.
 - **The first instruction reaches claude through a file, not a command line.** It is written to a
   mode-`0600` temporary file on the host (`$TMPDIR`, else `/tmp`, named `panemux-task.XXXXXXXX`),
   which the command inside the tmux session reads and deletes before claude starts; if tmux fails to
-  start the session, the launch deletes it. An rc that never hands over to that command (above)
-  leaves it in place. It is never part of the SSH command, of a string any
+  start the session, the launch deletes it. It is read and deleted before the user's shell and its
+  rc run (above), so an rc that never hands over leaves no file behind. It is never part of the SSH command, of a string any
   shell parses, or of tmux's arguments. A tmux server keeps the arguments of the command that started
   it as its own process arguments for as long as it runs, so an instruction passed there would stay
   visible in `ps`. It is claude's own argument, though, so anyone who can list claude's process

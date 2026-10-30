@@ -46,6 +46,15 @@ func (h stubHost) promptFilesLeft(t *testing.T) []string {
 	return left
 }
 
+// launchEnv is what the stand-in claude found of the PANEMUX_LAUNCH_
+// variables in its environment.
+func (h stubHost) launchEnv(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(h.log, "claude.launchenv"))
+	require.NoError(t, err)
+	return strings.TrimSpace(string(data))
+}
+
 // lookUpShell finds a shell on the machine running the suite, skipping the
 // test where it is not installed.
 func lookUpShell(t *testing.T, name string) string {
@@ -94,11 +103,9 @@ func TestLaunchScript_RunsTheAgentThroughTheUsersLoginShell(t *testing.T) {
 				assert.Equal(t, []string{sh.wantRC}, h.lines(t, "claude.rc"))
 				assert.Equal(t, wantArgs, h.args(t, "claude.args"))
 				assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
+				assert.Empty(t, h.launchEnv(t), "the variables that carried the arguments are not passed on")
 				tmuxArgs := h.args(t, "tmux.args")
-				require.GreaterOrEqual(t, len(tmuxArgs), 11)
-				assert.Equal(t, []string{
-					"--", shell, "-lic", `exec "$@"`, shell, filepath.Join(h.bin, "sh"), "-c",
-				}, tmuxArgs[4:11], "the shell is given only the fixed command; the agent's follows as arguments")
+				assert.Contains(t, tmuxArgs, shell)
 				assert.NotContains(t, strings.Join(tmuxArgs, "\n"), "touch pwned", "the prompt must not reach tmux's arguments")
 				assert.Empty(t, h.promptFilesLeft(t), "the prompt file is removed once claude has read it")
 				assert.NoFileExists(t, filepath.Join(cwd, "pwned"))
@@ -124,9 +131,9 @@ func TestLaunchScript_AReusedSessionsWindowRunsTheAgentThroughTheLoginShell(t *t
 
 	require.NoError(t, parseLaunchOutput(h.run(t, script, shell)))
 
-	tmuxArgs := h.args(t, "tmux.args")
-	assert.Equal(t, []string{"new-window", "-t", "=task-0f0e0d0c:", "--", shell, "-lic"}, tmuxArgs[:6])
+	assert.Equal(t, []string{"new-window", "-t", "=task-0f0e0d0c:", "--"}, h.args(t, "tmux.args")[:4])
 	assert.Equal(t, []string{"bashrc"}, h.lines(t, "claude.rc"))
+	assert.Equal(t, []string{"--resume=" + testSessionID}, h.args(t, "claude.args"))
 	assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
 }
 
@@ -189,6 +196,8 @@ func TestLaunchScript_StartsTheAgentDirectlyWhenTheShellIsNotOneItRunsThrough(t 
 			assert.Equal(t, []string{"--session-id=" + testSessionID, "--", "hello"}, h.args(t, "claude.args"))
 			assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
 			assert.Equal(t, []string{""}, h.lines(t, "claude.rc"))
+			assert.Empty(t, h.launchEnv(t))
+			assert.Empty(t, h.promptFilesLeft(t))
 			assert.Equal(t, []string{"new-session", "-d", "-s", "task-0f0e0d0c", "--", "sh", "-c"}, h.args(t, "tmux.args")[:7])
 			assert.NoFileExists(t, filepath.Join(h.log, "shell.args"), "the shell is not run to start the agent")
 		})
@@ -265,6 +274,111 @@ func TestLaunchScript_RealTmuxRunsTheAgentInTheLoginShellsEnvironment(t *testing
 			h.waitForClaude(t)
 			assert.Equal(t, []string{"bashrc"}, h.lines(t, "claude.rc"))
 			assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
+		})
+	}
+}
+
+// writeRecordingWrapper puts a stand-in named name in front of the real
+// shell: it records the arguments it was given and runs the real shell with
+// them.
+func writeRecordingWrapper(t *testing.T, h stubHost, name, shell string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	writeExecutable(t, path, "#!/bin/sh\n"+
+		"[ \"$1\" = -lc ] || printf '%s\\0' \"$@\" > '"+filepath.Join(h.log, "shell.args")+"'\n"+
+		"exec '"+shell+"' \"$@\"\n")
+	return path
+}
+
+// The user's shell is given one fixed command and no argument: nothing the
+// request carries — the prompt, the directory, the session ID — is in a
+// string it parses or among its positional parameters, which its rc could
+// read or change.
+func TestLaunchScript_TheUsersShellIsGivenOnlyAFixedCommand(t *testing.T) {
+	for _, mode := range []launchMode{launchNew, launchResume} {
+		t.Run(string(mode), func(t *testing.T) {
+			h := newStubHost(t, true, true)
+			h.writeLoginShellRCFiles(t)
+			shell := writeRecordingWrapper(t, h, "bash", lookUpShell(t, "bash"))
+			cwd := t.TempDir()
+			p := newParams(t, cwd, hostilePrompt)
+			if mode == launchResume {
+				p = newParams(t, cwd, "")
+				p.mode = launchResume
+			}
+			script, err := buildLaunchScript(p)
+			require.NoError(t, err)
+
+			require.NoError(t, parseLaunchOutput(h.run(t, script, shell)))
+
+			args := h.args(t, "shell.args")
+			require.Len(t, args, 2, "%q", args)
+			assert.Equal(t, "-lic", args[0])
+			for _, value := range []string{"touch pwned", cwd, testSessionID} {
+				assert.NotContains(t, args[1], value)
+			}
+			assert.Equal(t, []string{"bashrc"}, h.lines(t, "claude.rc"))
+		})
+	}
+}
+
+// An rc that sets or shifts its own positional parameters at its top level
+// — `set -- ~/.profile.d/*.sh; for f; do . "$f"; done` is a common profile
+// idiom — does not change what runs: the arguments do not travel as the
+// shell's positional parameters.
+func TestLaunchScript_AnRCThatChangesItsPositionalParametersDoesNotChangeWhatRuns(t *testing.T) {
+	rcs := map[string]string{
+		"bash": ".bash_profile",
+		"zsh":  ".zshrc",
+		"sh":   ".profile",
+	}
+	for name, rc := range rcs {
+		for _, mode := range []launchMode{launchNew, launchResume} {
+			t.Run(name+"/"+string(mode), func(t *testing.T) {
+				shell := lookUpShell(t, name)
+				h := newStubHost(t, true, true)
+				hijack := filepath.Join(h.tmp, "hijack")
+				writeExecutable(t, hijack, "#!/bin/sh\ntouch '"+filepath.Join(h.log, "hijacked")+"'\n")
+				require.NoError(t, os.WriteFile(filepath.Join(h.tmp, rc),
+					[]byte("set -- '"+hijack+"' a b c d e f g h; shift 0\n"), 0o600))
+				cwd := t.TempDir()
+				p := newParams(t, cwd, hostilePrompt)
+				wantArgs := []string{"--session-id=" + testSessionID, "--", hostilePrompt}
+				if mode == launchResume {
+					p = newParams(t, cwd, "")
+					p.mode = launchResume
+					wantArgs = []string{"--resume=" + testSessionID}
+				}
+				script, err := buildLaunchScript(p)
+				require.NoError(t, err)
+
+				require.NoError(t, parseLaunchOutput(h.run(t, script, shell)))
+
+				assert.NoFileExists(t, filepath.Join(h.log, "hijacked"))
+				assert.Equal(t, wantArgs, h.args(t, "claude.args"))
+				assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
+			})
+		}
+	}
+}
+
+// An rc that never hands over — one that execs another shell, as a
+// ~/.bashrc ending in `exec zsh` does where the login shell cannot be
+// changed, or exits — leaves the agent unstarted, but not the prompt's file:
+// it is read and removed before the user's shell runs.
+func TestLaunchScript_AnRCThatNeverHandsOverLeavesNoPromptFile(t *testing.T) {
+	for _, rc := range []string{"exec /bin/sh -c :", "exit 0"} {
+		t.Run(rc, func(t *testing.T) {
+			shell := lookUpShell(t, "bash")
+			h := newStubHost(t, true, true)
+			require.NoError(t, os.WriteFile(filepath.Join(h.tmp, ".bash_profile"), []byte(rc+"\n"), 0o600))
+			script, err := buildLaunchScript(newParams(t, t.TempDir(), "hello"))
+			require.NoError(t, err)
+
+			require.NoError(t, parseLaunchOutput(h.run(t, script, shell)))
+
+			assert.NoFileExists(t, filepath.Join(h.log, "claude.args"))
+			assert.Empty(t, h.promptFilesLeft(t))
 		})
 	}
 }
