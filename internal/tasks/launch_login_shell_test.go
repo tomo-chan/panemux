@@ -70,6 +70,7 @@ func TestLaunchScript_RunsTheAgentThroughTheUsersLoginShell(t *testing.T) {
 	}{
 		{name: "bash", wantRC: "bashrc"},
 		{name: "zsh", wantRC: "zshrc"},
+		{name: "sh", wantRC: "profile"},
 	}
 	for _, sh := range shells {
 		for _, mode := range []launchMode{launchNew, launchResume} {
@@ -129,10 +130,10 @@ func TestLaunchScript_AReusedSessionsWindowRunsTheAgentThroughTheLoginShell(t *t
 	assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
 }
 
-// Only bash and zsh are run through. Any other shell — fish and csh, whose
-// -c does not take the fixed command's "$@", the POSIX shells sh, dash, ksh
-// and mksh, or one panemux does not know — or a $SHELL that is not an
-// absolute path to an executable is not used: the agent starts directly, as it did before, and
+// Only bash, zsh and sh are run through. Any other shell — fish and csh,
+// whose -c does not take the fixed command's "$@", dash, ksh and mksh, or
+// one panemux does not know — or a $SHELL that is not an absolute path to
+// an executable is not used: the agent starts directly, as it did before, and
 // the rc files are not read.
 //
 //efficacy:exempt pins the start every launch had before issue #445, which a revert of the change keeps
@@ -146,9 +147,6 @@ func TestLaunchScript_StartsTheAgentDirectlyWhenTheShellIsNotOneItRunsThrough(t 
 		}},
 		{name: "tcsh", shell: func(t *testing.T, h stubHost) string {
 			return writeRecordingShell(t, h, "tcsh")
-		}},
-		{name: "sh", shell: func(t *testing.T, h stubHost) string {
-			return writeRecordingShell(t, h, "sh")
 		}},
 		{name: "dash", shell: func(t *testing.T, h stubHost) string {
 			return writeRecordingShell(t, h, "dash")

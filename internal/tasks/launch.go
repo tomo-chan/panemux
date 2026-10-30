@@ -163,7 +163,7 @@ type launchParams struct {
 //     agent's command follows as its arguments: the rc runs first, then that
 //     command reads the prompt file, changes to the working directory and
 //     sets codex's PATH. Only a $SHELL that is an absolute path to an
-//     executable named bash or zsh is used, the shells whose `-c` was
+//     executable named bash, zsh or sh is used, the shells whose `-c` was
 //     checked to hand the arguments over as "$@"; sh goes as the absolute
 //     path found here, so an rc that changes PATH cannot change which sh
 //     runs the command. Any other $SHELL starts the agent's command
@@ -215,7 +215,7 @@ set -- sh
 case ${SHELL:-} in
 /*)
   case ${SHELL##*/} in
-  bash|zsh)
+  bash|zsh|sh)
     shpath=$(command -v sh 2>/dev/null)
     case $shpath in
     /*) [ -f "$SHELL" ] && [ -x "$SHELL" ] && set -- "$SHELL" -lic 'exec "$@"' "$SHELL" "$shpath" ;;

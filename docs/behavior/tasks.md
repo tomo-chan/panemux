@@ -726,11 +726,12 @@ it.
   request. An rc that never hands over — one that `exec`s another shell (`exec zsh` at the end of a
   `~/.bashrc`), exits, or changes its positional parameters with `set --` or `shift` — leaves claude
   unstarted after a launch that reported success: a new task is then never listed, since claude
-  writes the state file the collection reads, and its first instruction's file is left behind. This applies when `$SHELL` is an absolute path to an executable named `bash` or `zsh`,
-  the shells checked to pass the command's arguments through `-c` as `"$@"` (on Linux: bash 5.2 and
-  zsh 5.9, under tmux 3.4). Any other `$SHELL` — fish, tcsh, a POSIX `sh`, `dash`, `ksh` or `mksh` —
-  or one that is unset, relative or not executable, starts claude directly, and the rc files are
-  not read.
+  writes the state file the collection reads, and its first instruction's file is left behind.
+  This applies when `$SHELL` is an absolute path to an executable named `bash`, `zsh` or `sh`, the
+  shells checked to pass the command's arguments through `-c` as `"$@"` (on Linux: bash 5.2, zsh
+  5.9 and an `sh` that is dash 0.5.12, under tmux 3.4); an `sh` reads `~/.profile`. Any other
+  `$SHELL` — fish, tcsh, `dash`, `ksh` or `mksh` by those names — or one that is unset, relative or
+  not executable, starts claude directly, and the rc files are not read.
 - **The first instruction reaches claude through a file, not a command line.** It is written to a
   mode-`0600` temporary file on the host (`$TMPDIR`, else `/tmp`, named `panemux-task.XXXXXXXX`),
   which the command inside the tmux session reads and deletes before claude starts; if tmux fails to

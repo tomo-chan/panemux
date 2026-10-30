@@ -469,15 +469,15 @@ shell, started as a login and interactive shell the way tmux starts a pane's she
 literal `exec "$@"` as its command string and nothing else to parse. The agent's fixed `sh -c`
 command and its positional parameters (the prompt file, the resolved binary, the session ID, the
 working directory) follow as arguments, which `"$@"` hands on unchanged unless the rc itself
-changes them (below); checked with an argument holding `$(id)` and a leading `-` under bash 5.2 and
-zsh 5.9.
+changes them (below); checked with an argument holding `$(id)` and a leading `-` under bash 5.2,
+zsh 5.9 and an `sh` that is dash 0.5.12.
 No request value is in any string a shell parses, as before.
 
 - **Which shell.** `$SHELL` is the host user's own login shell, read by the script on the host — the
   value the binary lookup above already runs — not a Go `os.Getenv` value flowing into
   `exec.Command`. It is used only when it is an absolute path to an executable regular file whose
-  name is `bash` or `zsh`: fish's `-c` takes its arguments as `$argv` and csh's has another syntax,
-  so the same constant would not hand them on, and the POSIX shells (`sh`, `dash`, `ksh`, `mksh`)
+  name is `bash`, `zsh` or `sh`: fish's `-c` takes its arguments as `$argv` and csh's has another
+  syntax, so the same constant would not hand them on, and `dash`, `ksh` and `mksh` by those names
   are left out of what panemux runs through. Any other value, unset included, leaves the command as
   it was: `sh -c <the agent's fixed command> …`, with no rc read.
 - **Which `sh`.** The `sh` after the user's shell is the absolute path `command -v sh` found before

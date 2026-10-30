@@ -164,11 +164,11 @@ fixed `sh -c` and its arguments after it.
 - **The rc before the agent's own command.** The prompt file is read, the directory changed to and
   codex's `PATH` set after the rc, so an rc that changes directory or `PATH` undoes neither; the
   prompt file waits, mode `0600`, while the rc runs.
-- **bash and zsh only.** fish (`$argv`) and csh (its own syntax) cannot take the same constant. sh,
-  dash, ksh and mksh handed the arguments on too, but were left out by the operator's choice to
-  keep the set to bash and zsh; mksh also left SIGTSTP ignored in the agent it ran (measured as
-  `SigIgn` under tmux 3.4), which neither the old direct start nor a pane's shell does. Any other
-  shell keeps the old direct start.
+- **bash, zsh and sh only.** fish (`$argv`) and csh (its own syntax) cannot take the same
+  constant. dash, ksh and mksh handed the arguments on too, but were left out by the operator's
+  choice to keep the set to bash, zsh and sh; mksh also left SIGTSTP ignored in the agent it ran
+  (measured as `SigIgn` under tmux 3.4), which neither the old direct start nor a pane's shell
+  does. Any other shell keeps the old direct start.
 - **What an rc can still do.** A review found that the rc runs in the same shell as `exec "$@"`:
   a top-level `set --` or `shift` replaces what runs, and an rc that `exec`s another shell or exits
   never hands over. Either way the agent does not start after a launch that reported success, and a
