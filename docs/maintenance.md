@@ -195,7 +195,7 @@ The agmsg adapter pins both `TestedAgmsgVersion` and `TestedAgmsgCommit`; acquis
 exact commit and archives it through the shared input execution lane. Keep the pair consistent
 when updating the tested upstream source. The automatic pin-bump workflow belongs to #437.
 
-Host management owns prerequisite checks, drain/pause and background automatic updates at startup
-and opt-in. Automatic results are process-local; failures remain visible for manual Update,
+Host management owns prerequisite checks, drain/pause and background automatic updates at startup,
+on opt-in and after a new host is persisted. Automatic results are process-local; failures remain visible for manual Update,
 with no periodic retry. The global checkbox uses config persistence; Codex hook preferences continue
 to use their per-host store. See [agmsg integration](agent-board/agmsg-integration.md#automatic-updating).

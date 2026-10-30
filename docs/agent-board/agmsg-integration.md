@@ -112,7 +112,11 @@ release review, not a restricted installation sandbox. See [the security model](
 `agent_board.agmsg_auto_update` defaults to false. With Agent Board enabled and this preference
 on, panemux checks the local host and every configured SSH host in the background at startup.
 Turning on **Update automatically (all hosts)** in any host menu saves the same global config
-preference and starts those checks too. Reopening a menu or collecting tasks does not retry a failed update. No periodic
+preference and starts those checks too. A re-enable received during an active run queues one
+follow-up check for that host; overlapping requests coalesce and never run installers concurrently.
+Adding an SSH host through the host settings checks that new host after config persistence succeeds,
+if automatic updates are on. It does not recheck existing hosts or retry their retained failures.
+Reopening a menu or collecting tasks does not retry a failed update. No periodic
 monitor is added. Turning it off prevents pending updates from starting; an installer already
 running is allowed to finish.
 
@@ -128,7 +132,7 @@ successful automatic updates with agent-restart guidance. Use the host's manual 
 a successful manual operation clears the retained automatic result. Restarting panemux or explicitly turning automatic updates off and on starts a new check. There is no automatic recovery invocation.
 
 The global checkbox is available even on a host that cannot itself be updated: it controls all
-hosts. Its consent explains that future startup/opt-in updates execute the trusted pinned installer
+hosts. Its consent explains that future automatic updates execute the trusted pinned installer
 without another prompt, including writes outside the skill directory.
 
 ## Two panes in one project directory
@@ -174,4 +178,5 @@ hermes) and the desktop agmsg-app are not detected as board agents.
 
 The public path override has been removed. The adapter owns the fixed default location.
 Relay discovery remembers confirmed absence; bootstrap rechecks presence on eligible ticks.
-Installation and invalidating an absent relay discovery after Install belong to #435's follow-up.
+The host tool manager installs the pinned source and invalidates absent relay discovery after
+an installer attempt. Successful Install can therefore join from the next poll without restart.

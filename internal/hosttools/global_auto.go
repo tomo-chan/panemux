@@ -8,9 +8,9 @@ import (
 )
 
 type globalAutoResult struct {
-	err              string
-	revision         uint64
-	running, updated bool
+	err                       string
+	revision                  uint64
+	running, updated, pending bool
 }
 
 func (s *Service) globalAutoEnabled(id ID) bool {
@@ -31,30 +31,72 @@ func (s *Service) StartAutoUpdates(id ID) {
 			hosts = append(hosts, host.Host(name))
 		}
 	}
+
 	for _, h := range hosts {
-		key := callKey{id, h}
-		s.mu.Lock()
-		if s.globalAuto[key].running || s.closed {
-			s.mu.Unlock()
-			continue
-		}
-		previous := s.globalAuto[key]
-		previous.running = true
-		s.globalAuto[key] = previous
-		s.runs.Add(1)
-		s.mu.Unlock()
-		go func() {
-			defer s.runs.Done()
-			s.runGlobalAuto(id, h)
-		}()
+		s.startGlobalAuto(id, h)
 	}
+}
+
+// AfterHostAdded checks only the newly persisted host for enabled global tools.
+// Existing hosts' failures are not retried by a host-list edit.
+func (s *Service) AfterHostAdded(h host.Host) {
+	for id := range s.opts.GlobalAuto {
+		if s.globalAutoEnabled(id) && s.opts.Tools[id] != nil {
+			s.startGlobalAuto(id, h)
+		}
+	}
+}
+
+func (s *Service) startGlobalAuto(id ID, h host.Host) {
+	key := callKey{id, h}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	previous := s.globalAuto[key]
+	if previous.running {
+		previous.pending = true
+		s.globalAuto[key] = previous
+		s.mu.Unlock()
+		return
+	}
+	previous.running = true
+	s.globalAuto[key] = previous
+	s.runs.Add(1)
+	s.mu.Unlock()
+	go func() {
+		defer s.runs.Done()
+		for {
+			s.runGlobalAuto(id, h)
+			if !s.continueGlobalAuto(id, h) {
+				return
+			}
+		}
+	}()
+}
+
+func (s *Service) continueGlobalAuto(id ID, h host.Host) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := callKey{id, h}
+	current := s.globalAuto[key]
+	// Only an explicit event queues another check; never an automatic failure.
+	if s.closed {
+		current.pending = false
+	}
+	current.running = current.pending
+	current.pending = false
+	s.globalAuto[key] = current
+	return current.running
 }
 
 func (s *Service) runGlobalAuto(id ID, h host.Host) {
 	ctx, cancel := context.WithTimeout(s.ctx, 3*time.Minute)
 	defer cancel()
 	s.mu.Lock()
-	revision := s.globalAuto[callKey{id, h}].revision
+	previous := s.globalAuto[callKey{id, h}]
+	revision := previous.revision
 	s.mu.Unlock()
 	tool, err := s.tool(id, h)
 	var got State
@@ -70,7 +112,7 @@ func (s *Service) runGlobalAuto(id ID, h host.Host) {
 			})
 		}
 	}
-	result := globalAutoResult{updated: attempted && err == nil && got.Status == Installed}
+	result := globalAutoResult{updated: (attempted || previous.updated) && err == nil && got.Status == Installed}
 	if err != nil {
 		result.err = err.Error()
 	} else if got.Status == Unknown || got.Status == Invalid {
@@ -88,11 +130,10 @@ func (s *Service) finishGlobalAuto(id ID, h host.Host, revision uint64, result g
 	current := s.globalAuto[callKey{id, h}]
 	if current.revision != revision {
 		// A successful manual retry supersedes this background result.
-		current.running = false
-		s.globalAuto[callKey{id, h}] = current
 		return false
 	}
 	result.revision = revision
+	result.running, result.pending = current.running, current.pending
 	s.globalAuto[callKey{id, h}] = result
 	return true
 }

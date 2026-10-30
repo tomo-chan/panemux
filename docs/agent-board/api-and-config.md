@@ -36,7 +36,7 @@ agent_board:
   enabled: false # opt in for the whole instance
   mode: monitor  # monitor | turn | both | off
   team: "panemux"
-  agmsg_auto_update: false # update older installed copies on all hosts at startup / opt-in
+  agmsg_auto_update: false # update older installed copies on all hosts
 ```
 
 Enablement, delivery mode, and team are instance-wide. There are no pane or host overrides.

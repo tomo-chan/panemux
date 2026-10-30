@@ -215,7 +215,7 @@ agent_board:
     team: panemux                      # shared agmsg team for all participating panes
     enabled: true                     # default false; all configured panes
     mode: monitor                     # monitor | turn | both | off
-    agmsg_auto_update: false           # update older installed copies on all hosts at startup / opt-in
+    agmsg_auto_update: false           # update older installed copies on all hosts
 
 workspaces:
     items:

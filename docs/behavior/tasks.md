@@ -1499,6 +1499,8 @@ rejects unknown fields or a missing/non-boolean enabled value (400), and reports
 failures as 500 without changing the in-memory preference. It uses the existing YAML save path.
 GET/POST agmsg tool responses also contain `auto_update`, plus `auto_updated` or `auto_error`
 when this process has a result. The checkbox controls every host; local and SSH use the same API.
-Startup and each off-to-on opt-in check all hosts, update older installed releases only and
+Startup and each off-to-on opt-in check all hosts; an opt-in arriving during a run queues one
+coalesced follow-up. A successfully persisted host addition checks only the new host when the
+preference is on. These checks update older installed releases only and
 retain failures for manual retry. There is no automatic Install, downgrade, recovery or periodic
 retry. See [automatic updating](../agent-board/agmsg-integration.md#automatic-updating).

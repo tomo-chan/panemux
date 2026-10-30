@@ -17,12 +17,14 @@ type globalAutoTool struct {
 	fail     error
 	states   map[host.Host]State
 	installs []host.Host
+	checked  []host.Host
 	mu       sync.Mutex
 }
 
 func (f *globalAutoTool) Check(_ context.Context, h host.Host) State {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.checked = append(f.checked, h)
 	return f.states[h]
 }
 func (f *globalAutoTool) Install(_ context.Context, h host.Host) (State, error) {
@@ -161,6 +163,7 @@ func TestGlobalAutoPrerequisitesAndCancellation(t *testing.T) {
 		GlobalAuto: map[ID]func() bool{AgmsgTool: func() bool { return true }}})
 	c.StartAutoUpdates(AgmsgTool)
 	<-blocked.started
+	c.StartAutoUpdates(AgmsgTool) // queue a follow-up before shutdown
 	c.Close()
 	c.StartAutoUpdates(AgmsgTool) // closed services start no more work
 	require.Contains(t, c.globalAuto[callKey{AgmsgTool, host.Local}].err, "canceled")
@@ -331,4 +334,70 @@ func TestGlobalAutoTurningOffDuringPrerequisitesSkipsInstaller(t *testing.T) {
 	require.False(t, got.AutoUpdate)
 	require.False(t, got.AutoUpdated)
 	require.Empty(t, got.AutoError)
+}
+
+func TestGlobalAutoReenableWhileOptingOutQueuesOneCheck(t *testing.T) {
+	tool := &globalAutoTool{states: map[host.Host]State{host.Local: {Status: Outdated}}}
+	var reads atomic.Int32
+	var s *Service
+	s = New(Options{
+		Tools: map[ID]Tool{AgmsgTool: tool},
+		GlobalAuto: map[ID]func() bool{AgmsgTool: func() bool {
+			if reads.Add(1) == 3 {
+				// This run has observed opt-out. Deliver the next opt-in before its
+				// completion, exactly as the settings handler can do concurrently.
+				s.StartAutoUpdates(AgmsgTool)
+				s.StartAutoUpdates(AgmsgTool)
+				return false
+			}
+			return true
+		}},
+	})
+	defer s.Close()
+	s.StartAutoUpdates(AgmsgTool)
+	s.Wait()
+	require.Equal(t, []host.Host{host.Local}, tool.installs)
+	require.Len(t, tool.checked, 4, "two overlapping opt-ins coalesce into one follow-up check")
+	got, err := s.Check(context.Background(), AgmsgTool, host.Local)
+	require.NoError(t, err)
+	require.Equal(t, Installed, got.Status)
+	require.True(t, got.AutoUpdate)
+	require.True(t, got.AutoUpdated)
+	require.Empty(t, got.AutoError)
+}
+
+type heldAutoCheck struct {
+	*globalAutoTool
+	started, proceed chan struct{}
+	once             sync.Once
+}
+
+func (f *heldAutoCheck) Check(ctx context.Context, h host.Host) State {
+	f.once.Do(func() { close(f.started); <-f.proceed })
+	return f.globalAutoTool.Check(ctx, h)
+}
+
+func TestGlobalAutoQueuedCheckKeepsSuccessfulUpdateNotice(t *testing.T) {
+	tool := &heldAutoCheck{
+		globalAutoTool: &globalAutoTool{states: map[host.Host]State{host.Local: {Status: Outdated}}},
+		started:        make(chan struct{}), proceed: make(chan struct{}),
+	}
+	release := sync.OnceFunc(func() { close(tool.proceed) })
+	s := New(Options{
+		Tools:      map[ID]Tool{AgmsgTool: tool},
+		GlobalAuto: map[ID]func() bool{AgmsgTool: func() bool { return true }},
+	})
+	defer s.Close()
+	defer release()
+	s.StartAutoUpdates(AgmsgTool)
+	<-tool.started
+	s.StartAutoUpdates(AgmsgTool)
+	s.StartAutoUpdates(AgmsgTool)
+	release()
+	s.Wait()
+	require.Len(t, tool.checked, 3, "one follow-up confirms the successful update without installing twice")
+	require.Equal(t, []host.Host{host.Local}, tool.installs)
+	got, err := s.Check(context.Background(), AgmsgTool, host.Local)
+	require.NoError(t, err)
+	require.True(t, got.AutoUpdated, "agent restart guidance must survive the queued confirmation")
 }
