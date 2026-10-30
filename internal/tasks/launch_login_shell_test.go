@@ -339,8 +339,8 @@ func TestLaunchScript_AnRCThatChangesItsPositionalParametersDoesNotChangeWhatRun
 				h := newStubHost(t, true, true)
 				hijack := filepath.Join(h.tmp, "hijack")
 				writeExecutable(t, hijack, "#!/bin/sh\ntouch '"+filepath.Join(h.log, "hijacked")+"'\n")
-				require.NoError(t, os.WriteFile(filepath.Join(h.tmp, rc),
-					[]byte("set -- '"+hijack+"' a b c d e f g h; shift 0\n"), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(h.tmp, rc), []byte(
+					"export PANEMUX_TEST_RC=set\nset -- '"+hijack+"' a b c d e f g h; shift 0\n"), 0o600))
 				cwd := t.TempDir()
 				p := newParams(t, cwd, hostilePrompt)
 				wantArgs := []string{"--session-id=" + testSessionID, "--", hostilePrompt}
@@ -354,6 +354,7 @@ func TestLaunchScript_AnRCThatChangesItsPositionalParametersDoesNotChangeWhatRun
 
 				require.NoError(t, parseLaunchOutput(h.run(t, script, shell)))
 
+				assert.Equal(t, []string{"set"}, h.lines(t, "claude.rc"), "the rc ran")
 				assert.NoFileExists(t, filepath.Join(h.log, "hijacked"))
 				assert.Equal(t, wantArgs, h.args(t, "claude.args"))
 				assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
