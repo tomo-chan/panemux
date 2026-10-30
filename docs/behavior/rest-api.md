@@ -274,6 +274,11 @@ answered is in [`POST /api/tasks/input-given`](tasks.md#post-apitasksinput-given
 and updating it by itself are in [`GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`](tasks.md#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update); the board's temporary tmux attach is in
 [`POST /api/tasks/attach`](tasks.md#post-apitasksattach).
 
+### `GET` and `POST /api/hosts/agmsg`
+
+Manual pinned agmsg state and installation/update for the panemux host or a configured SSH host,
+available only with Agent Board enabled. See [Manual agmsg host tool](tasks.md#manual-agmsg-host-tool).
+
 ### `POST /api/hosts/session-name` and `POST`/`DELETE /api/hosts/terminal`
 
 Opening a host from its chip on the task dashboard: a generated tmux session name for an

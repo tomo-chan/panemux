@@ -394,7 +394,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
   screen too narrow for the group on a line of its own wraps it inside, so no action is cut off.
 - **Host connection menu.** The chip of a remote host whose collection succeeded is a button
   (`aria-haspopup="dialog"`, `aria-expanded`) with a small terminal icon; the panemux host's chip
-  opens only its Codex input notifications (below), and a `connecting`, failed or not-yet-collected
+  opens its tool items (Codex input notifications, plus agmsg when Agent Board is enabled),
+  and a `connecting`, failed or not-yet-collected
   chip is plain text
   ([behavior](behavior/tasks.md#opening-a-host)). Pressing it opens a small popover dialog anchored
   under the chip, titled after the host: a `Connection` group of `ssh` / `ssh_tmux` radios (`ssh`
