@@ -182,12 +182,13 @@ startup warning; add a name-only entry to `ssh_connections` to include it. Board
 pane on the host. Initially unreachable hosts retry on later polls with the shared 60-second dial
 cooldown; **Reconnect** clears that wait for both boards.
 
-**[agmsg](https://github.com/fujibee/agmsg) must already be installed** on every host whose panes join
+**[agmsg](https://github.com/fujibee/agmsg) must be installed** on every host whose panes join
 the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux is tested against **agmsg
 1.2.0**; it reads each host's `VERSION` on its first successful probe and logs a warning for anything else, without
 blocking. agmsg promises compatibility only for reading through `scripts/api.sh`, while panemux also
-depends on `send.sh`, `join.sh` and `delivery.sh`, so a different version may work or may misbehave. panemux never installs, updates, or
-manages agmsg; it only detects an existing installation by looking for `scripts/api.sh` under the
+depends on `send.sh`, `join.sh` and `delivery.sh`, so a different version may work or may misbehave.
+The host menu can Install / Update the tested fixed-SHA source, with one optional automatic-update
+preference for older installed copies on all hosts. Discovery looks for `scripts/api.sh` under the
 fixed `~/.agents/skills/agmsg` location. If it isn't there, panemux logs one warning naming the host and the path it looked in,
 and skips that host — panes there simply stay off the board, and nothing else about them changes.
 
@@ -214,7 +215,7 @@ agent_board:
     team: panemux                      # shared agmsg team for all participating panes
     enabled: true                     # default false; all configured panes
     mode: monitor                     # monitor | turn | both | off
-    agmsg_auto_update: false           # accepted and stored; automatic updates are not currently executed
+    agmsg_auto_update: false           # update older installed copies on all hosts at startup / opt-in
 
 workspaces:
     items:

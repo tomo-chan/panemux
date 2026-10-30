@@ -188,13 +188,14 @@ CI runs Playwright with one retry, and `playwright.config.ts` records a trace on
 - Architecture and security design: [architecture.md](architecture.md)
 - Runtime behavior and operational assumptions: [behavior.md](behavior.md)
 
-## Agent Board rollout (#435)
+## Agent Board tools (#435)
 
-The first part moves enablement and mode to global configuration and fixes the per-host install
-location. `agmsg_auto_update` is reserved and persisted but inactive in this part. The follow-up
-adds the tested commit SHA alongside the version pin, exact-version startup comparison, tool
-installation and automatic updates. Until then the existing version-warning policy remains.
+Enablement, mode and the agmsg automatic-update preference are instance-wide in config.yaml.
+The agmsg adapter pins both `TestedAgmsgVersion` and `TestedAgmsgCommit`; acquisition verifies the
+exact commit and archives it through the shared input execution lane. Keep the pair consistent
+when updating the tested upstream source. The automatic pin-bump workflow belongs to #437.
 
-The shared host execution port can carry an archive on a separate stdin stream, and host tool
-management coordinates draining and optional prerequisites for updates. There is no agmsg
-installer or automatic-update execution yet; these capabilities are not exposed for agmsg.
+Host management owns prerequisite checks, drain/pause and background automatic updates at startup
+and opt-in. Automatic results are process-local; failures remain visible for manual Update,
+with no periodic retry. The global checkbox uses config persistence; Codex hook preferences continue
+to use their per-host store. See [agmsg integration](agent-board/agmsg-integration.md#automatic-updating).

@@ -74,8 +74,7 @@ func (h *Handler) Mount(r chi.Router, boardAuth func(http.Handler) http.Handler)
 		r.Post("/tasks/summary", h.PostTaskSummary)
 		r.Post("/tasks/input-given", h.PostTaskInputGiven)
 		r.Get("/tasks/codex-hook", h.GetTaskCodexHook)
-		r.Get("/hosts/agmsg", h.GetAgmsgTool)
-		r.Post("/hosts/agmsg", h.PostAgmsgTool)
+		h.mountAgmsgRoutes(r)
 		r.Post("/tasks/codex-hook", h.PostTaskCodexHook)
 		r.Post("/tasks/codex-hook/auto-update", h.PostTaskCodexHookAutoUpdate)
 		r.Put("/tasks/records", h.PutTaskRecord)
@@ -102,4 +101,10 @@ func (h *Handler) Mount(r chi.Router, boardAuth func(http.Handler) http.Handler)
 		r.Post("/broadcast", h.PostBoardBroadcast)
 		r.Get("/command/history", h.GetBoardCommandHistory)
 	})
+}
+
+func (h *Handler) mountAgmsgRoutes(r chi.Router) {
+	r.Get("/hosts/agmsg", h.GetAgmsgTool)
+	r.Post("/hosts/agmsg", h.PostAgmsgTool)
+	r.Post("/hosts/agmsg/auto-update", h.PostAgmsgAutoUpdate)
 }

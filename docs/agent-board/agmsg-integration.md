@@ -107,8 +107,28 @@ including Claude commands, other agents' skills and Codex sandbox settings. It r
 user; operator trust covers the fixed upstream code, verified through contract tests and human
 release review, not a restricted installation sandbox. See [the security model](security-model.md).
 
-Instance-wide automatic updating is not currently executed. `agmsg_auto_update` is persisted but inactive, and
-this PR exposes no automatic-update checkbox for agmsg.
+## Automatic updating
+
+`agent_board.agmsg_auto_update` defaults to false. With Agent Board enabled and this preference
+on, panemux checks the local host and every configured SSH host in the background at startup.
+Turning on **Update automatically (all hosts)** in any host menu saves the same global config
+preference and starts those checks too. Reopening a menu or collecting tasks does not retry a failed update. No periodic
+monitor is added. Turning it off prevents pending updates from starting; an installer already
+running is allowed to finish.
+
+Only an installed release older than the version pin is updated, using the same prerequisite,
+verified-source, archive and drain/pause path as manual Update. Eligibility is rechecked within
+the update reservation. Missing, newer, unknown and alternate installations are left alone.
+Opting in never installs agmsg on an absent host and never downgrades it.
+
+Menus show a check/update in progress and ask to reopen for the result, retain automatic failure
+reasons (including prerequisites, acquisition, installer exit/output and timeouts), and report
+successful automatic updates with agent-restart guidance. Use the host's manual Update to retry;
+a successful manual operation clears the retained automatic result. Restarting panemux or explicitly turning automatic updates off and on starts a new check. There is no automatic recovery invocation.
+
+The global checkbox is available even on a host that cannot itself be updated: it controls all
+hosts. Its consent explains that future startup/opt-in updates execute the trusted pinned installer
+without another prompt, including writes outside the skill directory.
 
 ## Two panes in one project directory
 

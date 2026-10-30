@@ -415,6 +415,14 @@ var contractFixtures = map[string]contractFixture{
 		return rr.Body.Bytes(), nil
 	}},
 
+	"host-agmsg-auto-update": {capture: func(t *testing.T) ([]byte, map[string]string) {
+		e := newAPIEnv(t)
+		e.cfg.AgentBoard.Enabled = true
+		rr := e.do(t, http.MethodPost, "/api/hosts/agmsg/auto-update", `{"enabled":false}`)
+		require.Equal(t, 200, rr.Code, rr.Body.String())
+		return rr.Body.Bytes(), nil
+	}},
+
 	// The panemux host's codex permission hook (issue #396), with a
 	// hooks.json it will not rewrite, so the reason is in the capture.
 	"task-codex-hook": {capture: func(t *testing.T) ([]byte, map[string]string) {

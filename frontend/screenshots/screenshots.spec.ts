@@ -87,7 +87,7 @@ test('documentation screenshots', async ({ page }) => {
   await test.step('agmsg host tool', async () => {
     await page.route('**/api/tasks/codex-hook?*', route => route.fulfill({ json: { status: 'absent' } }))
     await page.route('**/api/hosts/agmsg?*', route => route.fulfill({
-      json: { status: 'outdated', version: '1.1.13' },
+      json: { status: 'outdated', version: '1.1.13', auto_update: true, auto_error: 'Missing node; install it on this host, then retry Update.' },
     }))
     await page.getByRole('button', { name: 'Open a terminal on build-box' }).click()
     const item = page.getByRole('group', { name: 'agmsg', exact: true })

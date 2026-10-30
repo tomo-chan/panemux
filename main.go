@@ -18,6 +18,7 @@ import (
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
+	"panemux/internal/hosttools"
 	"panemux/internal/server"
 	"panemux/internal/session"
 )
@@ -99,6 +100,7 @@ func buildServerServices(
 		cfg, manager, handler.HostExecution(), handler.HostTools(), handler.ReadBoardConfig,
 	)
 	handler.SetBoard(boardCache, boardRelay)
+	handler.HostTools().StartAutoUpdates(hosttools.AgmsgTool)
 	commandRunner := setupCommandCenter(cfg)
 
 	srv := server.New(cfg, manager, boardCache, boardRelay, commandRunner, frontendFS, handler)

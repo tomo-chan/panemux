@@ -9,7 +9,7 @@
 5. Traverse every configured workspace layout and create each pane session, including panes in
    inactive workspaces.
 6. Start enabled Agent Board relay/bootstrap and command-center services.
-7. Start the HTTP server and serve the embedded frontend.
+7. Schedule enabled global agmsg automatic-update checks on all hosts, then start the HTTP server and serve the embedded frontend.
 8. On `SIGINT` or `SIGTERM`, shut down background services, the server, and all sessions.
 
 If a configured session fails to start, the server logs a warning and continues booting other sessions.
@@ -95,7 +95,7 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 | Frontend Runtime Behavior; Pane Git and PR metadata | [frontend.md](behavior/frontend.md) |
 | Opening URLs from a Pane | [url-open.md](behavior/url-open.md) |
 | Split Preview; Panes on an SSH host; Localhost URLs of an SSH host; `POST /api/sessions/{id}/preview` | [preview.md](behavior/preview.md) |
-| Task Dashboard; Wait signature; `GET /api/tasks`; `POST /api/tasks/hosts/{name}/reconnect`; `PUT /api/tasks/records`; `POST /api/tasks`; `POST /api/tasks/resume`; `POST /api/tasks/summary`; `POST /api/tasks/input-given`; `GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`; manual agmsg host tool (`GET` and `POST /api/hosts/agmsg`) | [tasks.md](behavior/tasks.md) |
+| Task Dashboard; Wait signature; `GET /api/tasks`; `POST /api/tasks/hosts/{name}/reconnect`; `PUT /api/tasks/records`; `POST /api/tasks`; `POST /api/tasks/resume`; `POST /api/tasks/summary`; `POST /api/tasks/input-given`; `GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`; agmsg host tool (`GET` and `POST /api/hosts/agmsg`, `POST /api/hosts/agmsg/auto-update`) | [tasks.md](behavior/tasks.md) |
 | Task summaries: what they cost (measurements) | [task-summary-cost.md](behavior/task-summary-cost.md) |
 | Task Events; `GET /ws/tasks/events` | [task-events.md](behavior/task-events.md) (Japanese: [task-events.ja.md](behavior/task-events.ja.md)) |
 

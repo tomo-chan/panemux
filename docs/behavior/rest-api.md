@@ -389,3 +389,7 @@ is when `config.yaml` is loaded.
 
 Returns display preferences such as header/status-bar visibility, and `task_dashboard_shortcut`: the
 effective task dashboard shortcut letter, upper-cased, `S` when the config does not set one.
+
+The global agmsg preference uses `POST /api/hosts/agmsg/auto-update` with only an enabled boolean,
+not a host selector. Tool responses include its global value and retained automatic results; see
+[global agmsg automatic updates](tasks.md#global-agmsg-automatic-updates).

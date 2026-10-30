@@ -72,3 +72,8 @@ contract tests and human release review. The installer writes outside `~/.agents
 commands, other agents' skill directories, Codex sandbox settings and agent shims). Panemux does
 not sandbox those effects, operate on teams/DBs directly, run recovery, install dependencies or
 stop agent-owned scripts. Manual operation is implemented; unattended execution is not currently implemented.
+
+Automatic agmsg updates use the same fixed-SHA source and installer path as manual Update. The
+instance-wide preference authorizes unattended execution on older installed copies at startup
+and opt-in; it never authorizes automatic Install or downgrade. Eligibility is rechecked inside
+the update reservation. No new command execution sink is introduced.

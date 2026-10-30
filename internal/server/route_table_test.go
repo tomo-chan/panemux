@@ -82,6 +82,7 @@ var expectedRoutes = []string{
 	"POST /api/board/broadcast",
 	"POST /api/config/ssh-connections",
 	"POST /api/hosts/agmsg",
+	"POST /api/hosts/agmsg/auto-update",
 	"POST /api/hosts/session-name",
 	"POST /api/hosts/terminal",
 	"POST /api/sessions",

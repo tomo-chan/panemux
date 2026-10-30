@@ -21,7 +21,7 @@ server:
 agent_board:
   enabled: false
   mode: monitor
-  agmsg_auto_update: false  # accepted and stored; automatic updates are not currently executed
+  agmsg_auto_update: false  # update older installed copies on all hosts at startup / opt-in
   team: "panemux"                      # shared agmsg team for all participating panes
 
 # ── Command center ────────────────────────────────────────────────────────────

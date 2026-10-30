@@ -630,6 +630,17 @@ var apiCases = map[string]apiCase{
 		rr = e.do(t, http.MethodGet, "/api/hosts/agmsg?host=not-configured", "")
 		assert.Equal(t, http.StatusNotFound, rr.Code)
 	}},
+	"POST /api/hosts/agmsg/auto-update": {run: func(t *testing.T, e *apiEnv) {
+		rr := e.do(t, http.MethodPost, "/api/hosts/agmsg/auto-update", `{"enabled":false}`)
+		require.Equal(t, 404, rr.Code)
+		e.cfg.AgentBoard.Enabled = true
+		rr = e.do(t, http.MethodPost, "/api/hosts/agmsg/auto-update", `{"enabled":false}`)
+		require.Equal(t, 200, rr.Code, rr.Body.String())
+		assert.JSONEq(t, `{"auto_update":false}`, rr.Body.String())
+		rr = e.do(t, http.MethodPost, "/api/hosts/agmsg/auto-update", `{"host":"build-box","enabled":true}`)
+		require.Equal(t, 400, rr.Code)
+	}},
+
 	"POST /api/hosts/agmsg": {
 		notHappyPathReason: "success executes pinned upstream source from GitHub/cache; " +
 			"isolated adapter and API tests cover installation without network",
