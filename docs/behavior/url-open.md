@@ -28,6 +28,13 @@ forwards, and the server at most 32.
 
 `local` and `tmux` panes need no forward: their callback listener is already on the panemux host.
 
+The host chip's **Type in pane** terminal uses the same forwarding and browser-open interception
+as an `ssh` or `ssh_tmux` pane, using its host terminal session ID even though it is outside the
+workspace layout. Closing it, Retry/Reconnect (which deletes the old terminal), or expiry of its
+disconnected-session grace period closes its forwards. After Reconnect, open the URL again to
+forward its callback, even if the CLI is still waiting in the remote tmux session.
+The new-session and existing-session tmux interception limitations below also apply to it.
+
 **This assumes the browser showing the dashboard runs on the panemux host** — the documented local
 workflow. panemux can only bind ports on its own host, so when the dashboard is opened from a
 different machine, forwarding does not make that machine's `localhost:<port>` resolve to the pane.
@@ -105,28 +112,37 @@ process launched inside tmux cannot wrap those panes' notifications for an unrel
 
 ### Clicked links
 
-Printed links, OSC 8 hyperlinks and the browser shim all go through the same opener in the pane (and
-in the task dashboard's Type in pane popup).
+Printed links, OSC 8 hyperlinks and the browser shim all go through the same opener in the pane,
+the task's Type in pane popup, and the host chip's Type in pane popup.
 
-A printed link, whose text is the URL, opens when clicked. A localhost link opens in
-[the split preview](preview.md#opening-a-localhost-url) instead of a tab: in a terminal on the
+The host chip's popup offers **Open** and **Ignore** for browser-open requests and clicked OSC 8
+links, naming the target before approval. A printed URL opens directly when clicked. Both approved
+requests and printed links prepare the host session's callback forward; a localhost tab waits for
+that forward before navigating, and forwarding failures are shown in the popup. The host popup
+does not offer **Preview**, including for localhost URLs. Retry or Reconnect drops pending requests
+and errors belonging to the replaced terminal.
+
+A printed link, whose text is the URL, opens when clicked. In workspace panes and task popups,
+a localhost link opens in [the split preview](preview.md#opening-a-localhost-url) instead of a tab:
+in a terminal on the
 panemux host as it is, and in an `ssh` or `ssh_tmux` pane, or the popup of a task on an SSH host,
 that host's URL through a relay of its own rather than a forward
 ([Localhost URLs of an SSH host](preview.md#localhost-urls-of-an-ssh-host)). While the terminal is
 connected, clicking a printed localhost link previews it and prepares no forward; while it is not,
-the preview cannot open, and the link opens in a tab — in a pane with its callback forward, in the
-Type in pane popup without one. In a pane the strip's `Open` keeps the tab and the callback
+the preview cannot open, and the link opens in a tab — in a pane with its callback forward, in
+the task's Type in pane popup without one. In a pane the strip's `Open` keeps the tab and the callback
 forward, on an SSH host as everywhere, so an OAuth flow whose callback must arrive at its own port
-number is opened from the strip with `Open`. The Type in pane popup is not a pane and has no
+number is opened from the strip with `Open`. The task's Type in pane popup is not a pane and has no
 forwards; its `Open` opens the tab only.
 An OSC 8 hyperlink's target is chosen by the program's output and need not match its text, so a
 click on one shows the approval strip above, saying `This link goes to` and naming the target, with
-the same `Preview`, `Open` and `Ignore`. OSC 8 links are `http` and `https` only. Clicking a URL that
+`Open` and `Ignore`, plus `Preview` in workspace panes and task popups. OSC 8 links are `http` and
+`https` only. Clicking a URL that
 a strip is still asking about removes the request, so it is not opened twice.
 
 Links in the terminal are otherwise opened by the frontend in a new tab. A link that is itself a loopback URL
 is opened into a blank tab that is navigated once the forward is ready, because the browser would
 otherwise reach the port before it exists; every other URL opens immediately and the forward is
 prepared alongside it, since its callback only fires after the operator has logged in. A forward
-that fails is reported in the pane rather than silently swallowed. The Type in pane popup's attach is
+that fails is reported in the pane rather than silently swallowed. The task's Type in pane popup's attach is
 not a pane and has no forwards: its links and approved requests open their tab directly.

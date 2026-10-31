@@ -282,6 +282,7 @@ func (h *Handler) removeBoardAttachSession(sessionID string) {
 	if err := h.manager.Remove(sessionID); err != nil {
 		log.Printf("board attach %s: %v", sessionID, err)
 	}
+	h.closeSessionForwards(sessionID)
 }
 
 // newBoardAttachID returns a session ID no registered session has.
