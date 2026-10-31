@@ -172,4 +172,4 @@ if command -v tmux >/dev/null 2>&1; then
 fi
 
 # Keep this wrapper alive so its EXIT trap stops the private tmux server.
-sh "$E2E_DIR/run-panemux-e2e.sh" task-dashboard.yml 4179 panemux_fixture_agent
+sh "$E2E_DIR/run-panemux-e2e.sh" task-dashboard.yml "${1:-4179}" panemux_fixture_agent

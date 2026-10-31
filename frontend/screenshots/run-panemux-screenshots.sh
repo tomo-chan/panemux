@@ -208,4 +208,4 @@ SHOT_TEAM=panemux-screenshots
     'All 24 search tests pass. One flaky timeout in items_test.go, looking now.' --force
 
 cd "$SHOT_PROJECT"
-exec "$SHOT_ROOT/panemux" --config "$SHOT_ROOT/showcase.yml" --port 4180
+exec "$SHOT_ROOT/panemux" --config "$SHOT_ROOT/showcase.yml" --port "${PANEMUX_SCREENSHOTS_PORT:-4180}"

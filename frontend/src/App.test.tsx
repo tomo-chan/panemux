@@ -1256,6 +1256,32 @@ describe('App task dashboard layer', () => {
     location: { kind: 'tmux', tmux_session: 'task-a', attachable: true },
   }
 
+  it('opens an incoming session URL after layout and task collection, focusing its existing pane', async () => {
+    vi.spyOn(window, 'focus').mockImplementation(() => {})
+    window.history.replaceState({}, '', '/?session_host=&session_agent=claude&session_id=aaaa')
+    const linked = { ...waitingTask, location: { kind: 'outside', pane_id: 'ops-main', attachable: false } }
+    mockUseTasks.mockReturnValue({ ...tasksStateWith([]), data: null })
+    const { rerender } = render(<App />)
+    expect(screen.getByRole('status')).toHaveTextContent('Opening session')
+    mockUseTasks.mockReturnValue(tasksStateWith([linked]))
+    rerender(<App />)
+    await waitFor(() => expect(mockSetActiveWorkspace).toHaveBeenCalledWith('ops'))
+    expect(mockCreatePane).not.toHaveBeenCalled()
+    expect(window.location.search).toContain('session_id=aaaa')
+    await waitFor(() => expect(screen.queryByText('Opening session…')).toBeNull())
+    window.history.replaceState({}, '', '/')
+  })
+
+  it('shares the Dashboard copy action between card and selected details without changing selection', () => {
+    mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    const card = screen.getByTestId('task-card-local:claude:a')
+    expect(within(card).getByRole('button', { name: 'Copy session link' })).toBeEnabled()
+    fireEvent.click(within(card).getByRole('button', { name: 'panemux' }))
+    expect(screen.getAllByRole('button', { name: 'Copy session link' })).toHaveLength(2)
+  })
+
   it('starts on the workspaces and collects tasks only while the dashboard is shown', () => {
     render(<App />)
 

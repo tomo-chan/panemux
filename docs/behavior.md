@@ -136,3 +136,6 @@ MST_REPO=OWNER/REPO MST_VERSION=v1.2.3 ./install.sh
 - UI intent: [ui-design.md](ui-design.md)
 - Agent Board design: [agent-board.md](agent-board.md)
 - Developer workflow rules: [../DEVELOPMENT.md](../DEVELOPMENT.md)
+
+Session-key browser URLs, their copy actions and external construction contract are defined under
+[Session links](behavior/tasks.md#session-links).

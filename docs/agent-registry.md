@@ -41,6 +41,9 @@ only within its agent on its host, so the same session ID under another agent or
 another session. A key is valid only when its session ID is known: a session whose ID is still
 being decided has no key and is not matched to any keyed session.
 
+The [session-link query](behavior/tasks.md#session-links) uses these three elements, including an
+explicit empty host. It resolves the session's current location rather than storing a pane ID.
+
 Where a session is found is not part of what it is:
 
 - a **pane** may show a session's process, or none — a session started outside panemux has no pane;

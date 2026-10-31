@@ -16,7 +16,8 @@ import { useBrowserNotificationPermission } from './hooks/useBrowserNotification
 import { useSessionsOverview } from './hooks/useSessionsOverview'
 import { useGitInfoSnapshotMap } from './hooks/useGitInfo'
 import { useBoardSessionToken } from './hooks/useBoardSessionToken'
-import { useTasks, type HostTerminalType } from './hooks/useTasks'
+import { type HostTerminalType } from './hooks/useTasks'
+import { useSessionLink } from './hooks/useSessionLink'
 import { DisplayConfig } from './types'
 import { TERMINAL_FONT_FAMILY } from './utils/fonts'
 import { collectLeafPanes, findPaneById, generatePaneId, layoutContainsPane } from './utils/layoutTree'
@@ -160,7 +161,10 @@ export const App: React.FC = () => {
   const [isBoardDashboardOpen, setIsBoardDashboardOpen] = useState(false)
   const boardDashboardAvailable = agentBoardEnabled && boardToken !== ''
   const [layer, setLayer] = useState<Layer>('workspaces')
-  const tasksState = useTasks(layer === 'tasks')
+  const sessionLink = useSessionLink(layer === 'tasks', workspaces?.items ?? null, error,
+    (task, action, current) => handleOpenTask(task, action, current),
+    (task) => revealTask(task.id))
+  const tasksState = sessionLink.tasks
   const [flashPaneId, setFlashPaneId] = useState<string | null>(null)
   // display.task_dashboard_shortcut, which GET /api/display reports already
   // defaulted; the fallback covers only the moment before it arrives.
@@ -501,12 +505,13 @@ export const App: React.FC = () => {
   }, [movePane])
 
   const handleSelectWorkspacePaneSummary = useCallback((workspaceId: string, paneId: string) => {
+    sessionLink.selectPane(paneId)
     clearPaneAttention(paneId)
     clearWorkspaceAttention(workspaceId)
     setActivePaneId(paneId)
     setPendingFocusedPaneId(paneId)
     void setActiveWorkspace(workspaceId)
-  }, [clearPaneAttention, clearWorkspaceAttention, setActiveWorkspace])
+  }, [clearPaneAttention, clearWorkspaceAttention, setActiveWorkspace, sessionLink])
 
   // Opening a task from the dashboard: go to the pane it runs in (the pane
   // attached to its tmux session, or the local / ssh pane an agent outside
@@ -518,35 +523,32 @@ export const App: React.FC = () => {
   // none, so a second Open would create a second pane attached to it.
   const openingTaskSessionsRef = React.useRef(new Set<string>())
 
-  const handleOpenTask = useCallback((task: Task, action: TaskOpenAction) => {
-    if (action.kind === 'unavailable') return
+  const handleOpenTask = useCallback(async (task: Task, action: TaskOpenAction, current: () => boolean = () => true) => {
+    if (action.kind === 'unavailable') return null
     if (action.kind === 'goto') {
-      setLayer('workspaces')
-      setFlashPaneId(action.pane.paneId)
-      handleSelectWorkspacePaneSummary(action.pane.workspaceId, action.pane.paneId)
-      return
+      if (current()) revealPane(action.pane.workspaceId, action.pane.paneId)
+      return action.pane
     }
 
     const pane = paneConfigForTask(task, generatePaneId())
-    if (!pane) return
+    if (!pane) return null
     const sessionKey = `${task.host}\u0000${pane.tmux_session}`
     setLayer('workspaces')
-    if (openingTaskSessionsRef.current.has(sessionKey)) return
+    if (openingTaskSessionsRef.current.has(sessionKey)) return null
     openingTaskSessionsRef.current.add(sessionKey)
     setCreatePaneError(null)
-    void createPane(pane, { type: 'workspace-edge', edge: 'right' })
-      .then(() => {
-        setActivePaneId(pane.id)
-        setFlashPaneId(pane.id)
-        setPendingFocusedPaneId(pane.id)
-      })
-      .catch((err) => {
-        setCreatePaneError(err instanceof Error ? err.message : 'Something went wrong')
-      })
-      .finally(() => {
-        openingTaskSessionsRef.current.delete(sessionKey)
-      })
-  }, [createPane, handleSelectWorkspacePaneSummary])
+    try {
+      await createPane(pane, { type: 'workspace-edge', edge: 'right' })
+      const workspaceId = workspaces!.active
+      if (current()) revealPane(workspaceId, pane.id)
+      return { paneId: pane.id, paneTitle: pane.title ?? pane.id, workspaceId, workspaceTitle: workspaceId }
+    } catch (err) {
+      if (current()) setCreatePaneError(err instanceof Error ? err.message : 'Something went wrong')
+      throw err
+    } finally {
+      openingTaskSessionsRef.current.delete(sessionKey)
+    }
+  }, [createPane, revealPane, workspaces])
 
   // Opening a host from the dashboard (issue #314): always a new ssh or
   // ssh_tmux pane, even when one on that host already exists.
@@ -613,6 +615,18 @@ export const App: React.FC = () => {
     }
   }, [pendingFocusedPaneId, workspaces?.active])
 
+  const linkNotice = (sessionLink.notice && (
+          <aside role="status" style={{ position: 'absolute', top: 48, right: 12, zIndex: 100, maxWidth: 420, padding: 12, background: '#252526', color: '#dbe8f5', border: '1px solid #555' }}>
+            {sessionLink.notice}{' '}
+            {sessionLink.pending ? <button type="button" onClick={sessionLink.clear}>Cancel</button> : <>
+              <button type="button" onClick={sessionLink.retry}>Retry</button>{' '}
+              <button type="button" onClick={sessionLink.clear}>Clear link</button>{' '}
+              <button type="button" onClick={sessionLink.dismiss}>Dismiss</button>
+            </>}
+          </aside>
+        )
+  )
+
   if (error) {
     return (
       <div style={{
@@ -624,6 +638,7 @@ export const App: React.FC = () => {
         fontFamily: TERMINAL_FONT_FAMILY,
         fontSize: '14px',
       }}>
+        {linkNotice}
         Failed to load layout: {error}
       </div>
     )
@@ -640,6 +655,7 @@ export const App: React.FC = () => {
         fontFamily: TERMINAL_FONT_FAMILY,
         fontSize: '14px',
       }}>
+        {linkNotice}
         Loading…
       </div>
     )
@@ -649,7 +665,7 @@ export const App: React.FC = () => {
     <LayoutActionsContext.Provider value={{
       onSplit: splitPane,
       onCreatePaneBeside: handleCreateDefaultPane,
-      onClose: closePane,
+      onClose: (paneId) => { sessionLink.closePane(paneId); closePane(paneId) },
       onMaximize: setMaximizedPaneId,
       onSettings: (paneId: string) => {
         const pane = findPaneById(layout, paneId)
@@ -674,7 +690,7 @@ export const App: React.FC = () => {
         review: revealTask,
       },
       activePaneId,
-      setActivePaneId,
+      setActivePaneId: (paneId) => { sessionLink.selectPane(paneId); setActivePaneId(paneId) },
     }}>
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>
         <div
@@ -706,7 +722,7 @@ export const App: React.FC = () => {
                 handleMovePane(sourcePaneId, { type: 'workspace-tab', workspaceId })
                 setDragSourcePaneId(null)
               }}
-              onSelect={setActiveWorkspace}
+              onSelect={(workspaceId) => { sessionLink.selectWorkspace(workspaceId); void setActiveWorkspace(workspaceId) }}
               leading={(
                 <button
                   type="button"
@@ -917,7 +933,8 @@ export const App: React.FC = () => {
             agentBoardEnabled={agentBoardEnabled}
             tasksState={dashboardTasksState}
             workspaces={workspaces?.items ?? []}
-            onOpenTask={handleOpenTask}
+            onOpenTask={(task, action) => { sessionLink.selectTask(task); void handleOpenTask(task, action).catch(() => {}) }}
+            onSelectTask={sessionLink.selectTask}
             onOpenHost={handleOpenHost}
             onShowWorkspaces={() => setLayer('workspaces')}
             shortcut={taskShortcut}
@@ -926,6 +943,7 @@ export const App: React.FC = () => {
             onListedTasksChange={handleListedTasksChange}
           />
         )}
+        {linkNotice}
       </div>
     </LayoutActionsContext.Provider>
   )

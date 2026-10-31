@@ -381,7 +381,7 @@ terminal that had focus cannot receive what is typed into the dashboard.
   `Workspaces` button back, which shows the shortcut beside its label. `Cmd/Ctrl+Shift+S` switches
   either way; the letter is `display.task_dashboard_shortcut`. Like the palette's and the board's
   shortcuts it is registered on the keydown capture phase, so it fires while a terminal pane has
-  focus. panemux opens on the workspaces. While the dashboard is shown, `Cmd/Ctrl+Shift+K` and
+  focus. panemux opens on the workspaces, unless a session link leads to a stopped task's details. While the dashboard is shown, `Cmd/Ctrl+Shift+K` and
   `Cmd/Ctrl+Shift+B` do nothing, and the palette, history panel and Agent Board close when it
   appears: they belong to the workspace layer, which is inert then.
 - **Top bar.** The title, one chip per host (`Local` for the panemux host) with its running count, a
@@ -482,6 +482,12 @@ terminal that had focus cannot receive what is typed into the dashboard.
   chosen rows, with the catch-all row ("Not in a Git repository", "No label") last. Split by label, a
   task with two labels appears in both rows. A catch-all row is keyed apart from every name, so a
   label or repository that happens to be called "No label" gets a row of its own.
+- **Session links.** Cards and the detail action row offer `Copy session link`. A missing session
+  ID disables it with a reason; stopped sessions and sessions without panes can still be linked.
+  Success announces `Copied`; clipboard refusal or unavailability shows a selectable URL for manual
+  copying. Incoming links show a non-modal `Opening session…` with Cancel over either layer, and
+  errors offer Retry, Clear link and Dismiss. A different explicit selection clears the URL target;
+  changing layers alone keeps it. Opening a pane restores a different maximized pane in its workspace.
 - **Cards.** A left border in the state's color; host, agent and how long the task has been in its
   state; the working directory's last segment as the title with the full directory under it; for a
   waiting task its reason and "open the pane to respond", and for any other task its summary, two

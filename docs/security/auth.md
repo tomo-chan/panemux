@@ -196,3 +196,13 @@ client authentication nor DNS rebinding protection.
 Development proxies must preserve the browser Host and Origin. Vite configures both `/api`
 and `/ws` with `changeOrigin: false`; it never rewrites Origin. Fetch Metadata alone is
 insufficient: Chrome WebSocket upgrades may omit it, so Origin is always checked when present.
+
+### Session links
+
+[Session links](../behavior/tasks.md#session-links) carry only host, agent and session ID; never
+include bearer tokens, passwords or connection secrets. Keys are identifying information visible
+in browser history, server logs and potentially Referer. A link grants no authentication. Its SPA
+uses the same guarded API and WebSocket requests as Dashboard Open; no browser guard, CORS or token
+bootstrap exception is added. CLI task discovery without browser headers remains supported by the
+existing guard, and does not require an Agent Board token. Deployment proxies retain their own
+authentication. The request guard is not proof of a user's intent in opening a session link.

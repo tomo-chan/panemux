@@ -49,6 +49,7 @@ import type { LaneMode, LaunchedTaskRef, TaskInputAction, TaskOpenAction, TaskPa
 import { matchLabelSuggestions } from '../utils/labelSuggestions'
 import { unreadableRows } from '../utils/unreadableState'
 import UnreadableStateDialog from './UnreadableStateDialog'
+import { CopySessionLink } from './CopySessionLink'
 
 // Layer 1 of issue #252: every agent session on every host, as a kanban by
 // state, with a detail panel on the right. Besides reading, it records what a
@@ -98,6 +99,7 @@ export interface TaskDashboardProps {
   hostsState?: SSHConnectionsState
   workspaces: Workspace[]
   onOpenTask: (task: Task, action: TaskOpenAction) => void
+  onSelectTask?: (task: Task) => void
   /**
    * Adds a new pane on a host (issue #314): App's job, like onOpenTask. Every
    * call is a new pane, whatever panes the host already has.
@@ -137,6 +139,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   hostsState,
   workspaces,
   onOpenTask,
+  onSelectTask,
   onOpenHost,
   onShowWorkspaces,
   shortcut,
@@ -277,6 +280,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     setPendingLaunch(null)
     setSelectedId(target.id)
     setDetailOpen(true)
+    if (columnForTask(target) === 'done') setShowDone(true)
     setFlashTaskId(target.id)
     onFocusRequestHandled?.()
   }, [activeLabel, focusRequest, hostFilter, onFocusRequestHandled, query, tasks])
@@ -292,6 +296,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
 
   // A person selecting a task: a stopped one is summarized only when asked.
   const pick = (task: Task) => {
+    onSelectTask?.(task)
     select(task)
     if (summaryRequestOnSelect(task, summariesEnabled)) void requestSummary(task)
   }
@@ -911,6 +916,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
         <TypeInButton task={task} action={inputAction} mark={inputMark} origin="card" onTypeIn={onTypeIn} small />
         <OpenButton task={task} action={action} onOpen={onOpen} small />
         <ResumeButton task={task} resuming={resuming} onResume={onResume} small />
+        <CopySessionLink task={task} />
       </div>
     </article>
   )
@@ -1247,6 +1253,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
           <TypeInButton task={task} action={inputAction} mark={inputMark} origin="detail" onTypeIn={onTypeIn} />
           <OpenButton task={task} action={action} onOpen={onOpen} />
           <ResumeButton task={task} resuming={resuming} onResume={onResume} />
+          <CopySessionLink key={`${task.host}\u0000${task.agent}\u0000${task.session_id}`} task={task} />
           {isPermissionWait(task) && (
             <button type="button" className="td-btn" disabled={saving} onClick={() => void giveInput()}>
               Input given

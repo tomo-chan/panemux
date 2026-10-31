@@ -17,6 +17,7 @@ structure, [Behavior specification](behavior.md) for runtime contracts, or the
   host by state, independently of panes, opening one in a pane attached to its tmux session or
   going to the `local` / `ssh` pane an agent outside tmux was started from, and starting a new
   claude task or resuming a stopped one in a tmux session on its host.
+- Copyable session links that return to the session's current pane, or its dashboard details when stopped.
 - Browser notifications and attention indicators when a coding agent starts waiting for the
   operator, from a stream of the agents' state changes that the server publishes.
 - Loopback OAuth callback forwarding for CLI login flows running in SSH-backed panes.

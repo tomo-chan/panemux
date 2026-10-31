@@ -44,7 +44,7 @@ const AGENT_BOARD_AGMSG_SPEC = /agent-board-agmsg\.spec\.ts$/
 const COMMAND_CENTER_SPEC = /command-center\.spec\.ts$/
 const CORE_MULTIPLEXER_SPEC = /core-multiplexer\.spec\.ts$/
 const A11Y_SPEC = /a11y\.spec\.ts$/
-const TASK_DASHBOARD_SPEC = /task-dashboard\.spec\.ts$/
+const TASK_DASHBOARD_SPEC = /(?:task-dashboard|session-links)\.spec\.ts$/
 const PREVIEW_SPEC = /preview-split\.spec\.ts$/
 
 export default defineConfig({

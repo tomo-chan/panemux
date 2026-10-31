@@ -75,7 +75,9 @@ of its conversation (see [Summaries](#summaries)).
 
 ### Collection
 
-Collection runs only when the dashboard asks for it — every 10 seconds while the dashboard is on
+Collection also runs while a session link is being resolved (see [Session links](#session-links)).
+Once that request is handled it stops asking, even though the URL keeps the session key.
+Otherwise collection runs only when the dashboard asks for it — every 10 seconds while the dashboard is on
 screen and the page is visible, and on the Refresh button — or while the
 [task event stream](task-events.md) has a subscriber, which observes the running tasks on every host
 every 5 seconds. Nothing collects when neither asks.
@@ -1029,7 +1031,7 @@ See [Codex summary runner and rollout reader](../security/command-execution.md#c
 | Outside tmux, in a `local` / `ssh` pane the workspaces hold | That pane's workspace becomes active and the pane takes focus |
 | Outside tmux, naming a pane no workspace holds, or no pane | Not opened; the reason is shown |
 | Stopped | Not opened; a stopped task whose agent resumes offers `Resume` ([Resuming a task](#resuming-a-task)) |
-| Unknown | Not opened |
+| Unknown | Uses its known location as above; unknown state alone does not prevent opening |
 
 Either way the dashboard closes and the pane is briefly outlined. Opening the same tmux session again
 while its pane is still being created does not create a second pane.
@@ -1099,6 +1101,77 @@ never holds it.
 
 The dashboard and the workspaces are switched with the `← Tasks` and `Workspaces` buttons or with
 `Cmd/Ctrl+Shift+<display.task_dashboard_shortcut>` (`S` unless configured), from either layer.
+
+### Session links
+
+A session link identifies an agent session by its host, canonical agent ID and session ID:
+
+```text
+https://panemux.example/?session_host=&session_agent=claude&session_id=7c21e0a4
+https://panemux.example/?session_host=gpu-box&session_agent=codex&session_id=019b0000-0000-7000-8000-000000000001
+```
+
+All three query parameters occur exactly once. `session_host` is the `ssh_connections` key,
+empty for the panemux host; it is not a hostname or the literal `local`. `session_agent` matches
+`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`; aliases are not substituted. `session_id` is nonempty and opaque,
+not restricted to UUIDs. Values use UTF-8 form URL encoding: a space is `+`, a literal plus `%2B`.
+Values are decoded once, without trimming or case conversion. Missing/duplicate parameters,
+malformed percent encoding or UTF-8, and an invalid agent ID produce `Invalid session link`.
+Unrelated parameters alone are ordinary startup; they do not target a session.
+
+Cards and the selected detail panel offer **Copy session link**, including stopped tasks and tasks
+without panes. A task still waiting for its session ID has a disabled button with the reason.
+Copying keeps only the browser origin and app pathname, then sets the three parameters: it copies
+no existing query, fragment or credentials, and changes neither the address bar nor selection.
+Unavailable or refused Clipboard API displays a read-only URL for manual copying.
+
+An incoming link waits for the layout and a full task collection, including stopped tasks. The
+visible page collects even with the dashboard closed, at the normal interval while its host is
+connecting. `Opening session…` is non-modal and offers Cancel. Success follows [Opening a
+task](#opening-a-task): reuse the current matching pane across all workspaces, or add an attachable
+tmux pane at the active workspace's right edge. A different maximized pane in the destination
+workspace is restored, and the target is selected, briefly outlined and focused after rendering.
+Dashboard Open uses the same reveal behavior. A stopped task opens its dashboard details, including
+the Done column if needed, with a reminder to Resume manually; following a URL never resumes it.
+A task of an unknown agent can still use the existing pane actions.
+
+Host connection/collection errors are distinguished from `Session not found`; an ambiguous key or
+an unavailable location reports its reason and creates nothing. Retry asks for a new collection.
+Clear link removes the target parameters; Dismiss hides only the notice. Cancel also invalidates
+pending navigation. After a pane creation POST has been sent, cancellation cannot retract it, but
+its late completion does not take focus. The host-plus-tmux-session lock is shared with Dashboard
+Open inside this browser app. Repeated effects and sequential reloads reuse existing panes;
+simultaneous creation in different tabs is not coordinated by the server. A tmux session ending
+between collection and attachment has the ordinary Open race (`tmux new-session -A` can create a
+shell); no agent is launched or resumed by the link.
+
+The URL keeps its key after handling and does not force focus again on every task update. A reload
+resolves it again. Explicit selection of a different pane, workspace or dashboard task removes
+only the three target parameters with `replaceState`, keeping unrelated query parameters and the
+fragment. Re-selecting the target, switching layers, copying, or moving its pane keeps the link;
+closing the target pane clears it. Pending navigation is invalidated by a different selection.
+No `pushState` entries are added. Back/Forward (`popstate`) resolves a restored session query again
+or cancels pending navigation when the query no longer targets a session.
+
+**External tools.** Configure the browser's reachable panemux base URL in the external tool and
+construct the same query with a URL library. The server bind address cannot tell a tool the user's
+SSH tunnel or reverse-proxy address. A localhost link names the device opening it. No new link API
+or CLI is needed: existing `GET /api/tasks` returns `host`, `agent`, `session_id` for selecting
+sessions. CLI clients without browser headers pass the existing request guard; core tasks routes
+require no Agent Board token, while any deployment proxy keeps its own authentication. Failures or
+connecting hosts are not proof that a session is absent. The existing collection history limits
+still apply, and a host-key rename or removed session record can make a link unresolved.
+Never put a token or connection secret in a link. See [auth security](../security/auth.md).
+
+The distributable [panemux-session-link skill](../../skills/panemux-session-link/SKILL.md) creates a
+link for the current agent by default or explicitly selected sessions, including several sessions
+managed from one agent. Install that folder into the agent's skill location (`.agents/skills/`
+for Codex, `.claude/skills/` for Claude Code, or their personal equivalents); panemux does not
+install it or change agent settings. Supply a browser base URL explicitly or through the optional
+`PANEMUX_BASE_URL` environment variable, which panemux does not automatically export. Supply the
+panemux host mapping explicitly or from the task API. Codex uses `CODEX_THREAD_ID`; Claude Code
+uses its documented skill substitution `${CLAUDE_SESSION_ID}`, not a shell variable. If unavailable,
+confirm the key rather than reading other sessions' histories or guessing from the newest file.
 
 ### Opening a host
 

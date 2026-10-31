@@ -170,6 +170,7 @@ export function useTasks(enabled: boolean): TasksState {
     if (inFlight.current) return
     inFlight.current = true
     setLoading(true)
+    setError(null)
     const savesAtStart = recordSaves.current
     try {
       const res = await fetch('/api/tasks')

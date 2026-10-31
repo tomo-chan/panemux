@@ -79,7 +79,11 @@ throwaway git repository at `/tmp/sample-project`, a private tmux socket, a stub
 fixed task list served to the task dashboard in place of the real collection, which would list the
 developer's own agent sessions. It needs `tmux` for the tmux pane; set `PLAYWRIGHT_CHROMIUM_EXECUTABLE`
 as for `make test-e2e` when the installed Chromium is not the one Playwright expects. It is not part of
-`make check`.
+`make check`. Set `PANEMUX_SCREENSHOTS_PORT` to choose another port (default 4180) when another
+session is using the default; the staging directories and lock are still shared.
+For an isolated session-link browser run on port 4289, use
+`scripts/npm.sh --prefix frontend run test:e2e -- --config e2e/session-links.config.ts`.
+The task-dashboard fixture runner also accepts its port as the first argument.
 
 - The run stages everything under its root, `$TMPDIR/panemux-screenshots`, which it empties when it
   carries the `.panemux-screenshots` marker the run leaves in it, or when every entry in it is a

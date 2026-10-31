@@ -7,7 +7,7 @@ import { defineConfig, devices } from '@playwright/test'
 //
 // PLAYWRIGHT_CHROMIUM_EXECUTABLE works as it does for the e2e suite.
 const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
-const BASE_URL = 'http://127.0.0.1:4180'
+const BASE_URL = `http://127.0.0.1:${process.env.PANEMUX_SCREENSHOTS_PORT || '4180'}`
 
 export default defineConfig({
   testDir: '.',
