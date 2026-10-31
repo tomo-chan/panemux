@@ -139,14 +139,7 @@ func (s *Service) Install(ctx context.Context, id ID, h host.Host) (State, error
 		s.forgetCodexHookAuto(string(h))
 		got = s.withCodexHookAuto(string(h), got)
 	}
-	s.mu.Lock()
-	if auto, ok := s.globalAuto[callKey{id, h}]; ok {
-		auto.err, auto.updated = "", false
-		//mutation:exempt[INCREMENT_DECREMENT] equivalent: generation equality ignores the direction of change
-		auto.revision++
-		s.globalAuto[callKey{id, h}] = auto
-	}
-	s.mu.Unlock()
+	s.resetGlobalAuto(id, h)
 	return s.withGlobalAuto(id, h, got), nil
 }
 

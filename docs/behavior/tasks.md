@@ -1498,7 +1498,9 @@ target-prerequisite calls retain the shared input lane's combined-output behavio
 rejects unknown fields or a missing/non-boolean enabled value (400), and reports config-save
 failures as 500 without changing the in-memory preference. It uses the existing YAML save path.
 GET/POST agmsg tool responses also contain `auto_update`, plus `auto_updated` or `auto_error`
-when this process has a result. The checkbox controls every host; local and SSH use the same API.
+when this process has a result. Success belongs to the current host run, including its queued
+confirmation; a later opt-in run or a newly added host identity does not inherit earlier success.
+The checkbox controls every host; local and SSH use the same API.
 Startup and each off-to-on opt-in check all hosts; an opt-in arriving during a run queues one
 coalesced follow-up. A successfully persisted host addition checks only the new host when the
 preference is on. These checks update older installed releases only and

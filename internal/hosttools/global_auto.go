@@ -41,9 +41,23 @@ func (s *Service) StartAutoUpdates(id ID) {
 // Existing hosts' failures are not retried by a host-list edit.
 func (s *Service) AfterHostAdded(h host.Host) {
 	for id := range s.opts.GlobalAuto {
+		s.resetGlobalAuto(id, h)
 		if s.globalAutoEnabled(id) && s.opts.Tools[id] != nil {
 			s.startGlobalAuto(id, h)
 		}
+	}
+}
+
+// resetGlobalAuto invalidates a previous host identity or a superseded result.
+func (s *Service) resetGlobalAuto(id ID, h host.Host) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := callKey{id, h}
+	if auto, ok := s.globalAuto[key]; ok {
+		auto.err, auto.updated = "", false
+		//mutation:exempt[INCREMENT_DECREMENT] equivalent: generation equality ignores the direction of change
+		auto.revision++
+		s.globalAuto[key] = auto
 	}
 }
 
@@ -61,6 +75,7 @@ func (s *Service) startGlobalAuto(id ID, h host.Host) {
 		s.mu.Unlock()
 		return
 	}
+	previous.updated = false
 	previous.running = true
 	s.globalAuto[key] = previous
 	s.runs.Add(1)
@@ -112,6 +127,7 @@ func (s *Service) runGlobalAuto(id ID, h host.Host) {
 			})
 		}
 	}
+	// A fresh worker clears success; only its own queued confirmations can carry it.
 	result := globalAutoResult{updated: (attempted || previous.updated) && err == nil && got.Status == Installed}
 	if err != nil {
 		result.err = err.Error()

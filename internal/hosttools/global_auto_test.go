@@ -401,3 +401,75 @@ func TestGlobalAutoQueuedCheckKeepsSuccessfulUpdateNotice(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, got.AutoUpdated, "agent restart guidance must survive the queued confirmation")
 }
+
+func TestGlobalAutoNewRunDoesNotInheritUpdateNotice(t *testing.T) {
+	for _, event := range []string{"opt-in", "host re-added", "host re-added while off"} {
+		t.Run(event, func(t *testing.T) {
+			on := true
+			tool := &globalAutoTool{states: map[host.Host]State{host.Local: {Status: Installed}, "box": {Status: Outdated}}}
+			s := New(Options{
+				Hosts:      func() []string { return []string{"box"} },
+				Tools:      map[ID]Tool{AgmsgTool: tool},
+				GlobalAuto: map[ID]func() bool{AgmsgTool: func() bool { return on }},
+			})
+			defer s.Close()
+			s.AfterHostAdded("box")
+			s.Wait()
+			got, err := s.Check(context.Background(), AgmsgTool, "box")
+			require.NoError(t, err)
+			require.True(t, got.AutoUpdated)
+			tool.installs = nil
+			if event == "host re-added while off" {
+				on = false
+			}
+			if event == "opt-in" {
+				s.StartAutoUpdates(AgmsgTool)
+			} else {
+				s.AfterHostAdded("box")
+			}
+			s.Wait()
+			require.Empty(t, tool.installs)
+			got, err = s.Check(context.Background(), AgmsgTool, "box")
+			require.NoError(t, err)
+			require.False(t, got.AutoUpdated, "no update ran for the new host/run")
+		})
+	}
+}
+
+type heldAutoUpdate struct {
+	*globalAutoTool
+	started, proceed chan struct{}
+}
+
+func (f *heldAutoUpdate) Update(ctx context.Context, h host.Host) (State, error) {
+	got, err := f.globalAutoTool.Update(ctx, h)
+	close(f.started)
+	<-f.proceed
+	return got, err
+}
+
+func TestGlobalAutoReaddedHostDiscardsOlderInFlightNotice(t *testing.T) {
+	tool := &heldAutoUpdate{
+		globalAutoTool: &globalAutoTool{states: map[host.Host]State{"box": {Status: Outdated}}},
+		started:        make(chan struct{}), proceed: make(chan struct{}),
+	}
+	release := sync.OnceFunc(func() { close(tool.proceed) })
+	s := New(Options{
+		Hosts:      func() []string { return []string{"box"} },
+		Tools:      map[ID]Tool{AgmsgTool: tool},
+		GlobalAuto: map[ID]func() bool{AgmsgTool: func() bool { return true }},
+	})
+	defer s.Close()
+	defer release()
+	s.AfterHostAdded("box")
+	<-tool.started
+	// The old target's installer has finished, but its result has not arrived.
+	// Re-add the name for an already-current target before delivering that result.
+	s.AfterHostAdded("box")
+	release()
+	s.Wait()
+	require.Equal(t, []host.Host{"box"}, tool.installs)
+	got, err := s.Check(context.Background(), AgmsgTool, "box")
+	require.NoError(t, err)
+	require.False(t, got.AutoUpdated)
+}

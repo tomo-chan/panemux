@@ -1212,6 +1212,14 @@ hostexec's command setup and cancellation. Only stdout is source data; stderr is
 failure diagnostics. The existing combined RunInput contract is unchanged for installers and
 prerequisite probes. Regression cases cover warnings during verification, archive creation and both.
 
+### Scope automatic-update success to its host run (2026-10-31, #435 B3 review)
+
+Success and restart guidance survive a queued confirmation within the same worker run, but a new
+opt-in run starts without a success claim. Adding a host clears the previous identity's outcomes,
+even while automatic updates are off; changing its result generation also rejects late outcomes
+from the old identity. The shared result invalidation is used after successful manual updates too.
+These are result/notification changes; installation admission and execution are unchanged.
+
 ### Automatic-update event delivery (2026-10-31, #435 B3 review)
 
 An off-to-on event received during a host's active check is retained as one pending confirmation.

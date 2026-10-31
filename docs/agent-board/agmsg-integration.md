@@ -128,7 +128,10 @@ Opting in never installs agmsg on an absent host and never downgrades it.
 
 Menus show a check/update in progress and ask to reopen for the result, retain automatic failure
 reasons (including prerequisites, acquisition, installer exit/output and timeouts), and report
-successful automatic updates with agent-restart guidance. Use the host's manual Update to retry;
+successful automatic updates with agent-restart guidance. A queued confirmation keeps the notice
+for its own host run. A later opt-in run does not inherit that success, and adding a host identity
+clears results from any previous host with the same name, including late in-flight results.
+Use the host's manual Update to retry;
 a successful manual operation clears the retained automatic result. Restarting panemux or explicitly turning automatic updates off and on starts a new check. There is no automatic recovery invocation.
 
 The global checkbox is available even on a host that cannot itself be updated: it controls all
