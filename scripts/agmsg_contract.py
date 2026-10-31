@@ -91,7 +91,7 @@ def validate_files(files, tag, sha):
     if not isinstance(files, dict) or set(files) != set(DATA_FILES):
         raise ValueError("artifact must contain only the five captured data files")
     for name, value in files.items():
-        if not isinstance(value, str) or len(value.encode()) > 1024 * 1024 or "\\x00" in value:
+        if not isinstance(value, str) or len(value.encode()) > 1024 * 1024 or "\x00" in value:
             raise ValueError("invalid or oversized capture data")
         if name.endswith(".jsonl"):
             rows = [json.loads(line) for line in value.splitlines()]

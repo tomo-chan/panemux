@@ -259,6 +259,18 @@ esac
             with self.assertRaises(ValueError):
                 automation.read_bundle(directory, "v2.0.0", SHA)
 
+    def test_capture_data_rejects_nul_but_accepts_literal_escape_text(self):
+        files = {name: (ROOT / "internal/agmsg/testdata/agmsg-v1.2.0" / name).read_text()
+                 for name in automation.DATA_FILES}
+        tag, sha = automation.pins(ROOT)
+        files["VERSION.txt"] = "v" + tag + "\n"
+        files["COMMIT.txt"] = sha + "\n"
+        for name in automation.DATA_FILES:
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "invalid or oversized capture data"):
+                automation.validate_files({**files, name: files[name] + "\x00"}, "v" + tag, sha)
+        files["get_teams.jsonl"] = json.dumps({"name": "literal \\x00 text"}) + "\n"
+        self.assertEqual(automation.validate_files(files, "v" + tag, sha), files)
+
     def test_preflight_skips_existing_pr_and_resumes_branch_without_capture(self):
         for existing, remote, mode in (("[]", "", "new"), ('[{"number":1}]', "", "skip"), ("[]", SHA, "resume")):
             def fake(args, **kwargs):
