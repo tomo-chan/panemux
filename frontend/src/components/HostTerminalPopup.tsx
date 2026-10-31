@@ -162,7 +162,7 @@ export const HostTerminalPopup: React.FC<HostTerminalPopupProps> = ({
 const HostTerminalBody: React.FC<{
   sessionId: string
   onStatus: (status: TaskTerminalStatus) => void
-  terminalRef: React.RefObject<HTMLDivElement | null>
+  terminalRef: React.RefObject<HTMLDivElement>
 }> = ({ sessionId, onStatus, terminalRef }) => {
   const urlOpen = usePaneUrlOpen(sessionId)
   return (
