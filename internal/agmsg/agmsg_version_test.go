@@ -3,6 +3,7 @@ package agmsg
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,10 +60,10 @@ func TestVersionMismatchWarning(t *testing.T) {
 	// The tested version: no warning.
 	assert.Empty(t, VersionMismatchWarning("host-a", TestedAgmsgVersion))
 
-	warning := VersionMismatchWarning("host-a", "1.3.0")
+	warning := VersionMismatchWarning("host-a", newerAgmsgPatch(t, 1))
 	require.NotEmpty(t, warning)
 	assert.Contains(t, warning, "host-a")
-	assert.Contains(t, warning, "1.3.0")
+	assert.Contains(t, warning, newerAgmsgPatch(t, 1))
 	assert.Contains(t, warning, TestedAgmsgVersion)
 }
 
@@ -78,9 +79,9 @@ func TestTestedAgmsgVersionIsPinned(t *testing.T) {
 // are covered by TestNonReleaseProvenanceIsNotInstalledOrSilentlyDowngraded.
 func TestVersionMismatchWarning_InstallProvenanceForms(t *testing.T) {
 	for _, installed := range []string{
-		"1.2.0",     // tarball install (npx / setup.sh)
-		"v1.2.0",    // git checkout sitting exactly on the tag
-		" v1.2.0\n", // whatever whitespace the file carries
+		TestedAgmsgVersion,               // tarball install (npx / setup.sh)
+		"v" + TestedAgmsgVersion,         // git checkout sitting exactly on the tag
+		" v" + TestedAgmsgVersion + "\n", // whatever whitespace the file carries
 	} {
 		assert.Empty(t, VersionMismatchWarning("host-a", installed),
 			"%q is the pinned version under one of install.sh's own provenance forms", installed)
@@ -88,7 +89,7 @@ func TestVersionMismatchWarning_InstallProvenanceForms(t *testing.T) {
 }
 
 func TestVersionMismatchWarning_NewerPatchesWarn(t *testing.T) {
-	for _, installed := range []string{"1.2.1", "v1.2.2", "1.2.17"} {
+	for _, installed := range []string{newerAgmsgPatch(t, 1), "v" + newerAgmsgPatch(t, 2), newerAgmsgPatch(t, 17)} {
 		assert.NotEmpty(t, VersionMismatchWarning("host-a", installed))
 	}
 }
@@ -105,9 +106,9 @@ func TestVersionMismatchWarning_StillWarnsWhereItMatters(t *testing.T) {
 	}{
 		{"1.1.13", "an older minor may predate an interface panemux depends on"},
 		{"v1.1.9", "same, in git-describe form"},
-		{"1.2.0-rc.1", "a prerelease of the tested version is not the tested version"},
-		{"1.3.0", "a newer minor line is exactly where the interface can move"},
-		{"2.0.0", "a new major even more so"},
+		{TestedAgmsgVersion + "-rc.1", "a prerelease of the tested version is not the tested version"},
+		{newerAgmsgMinor(t), "a newer minor line is exactly where the interface can move"},
+		{newerAgmsgMajor(t), "a new major even more so"},
 		{"nightly", "an unparseable version cannot be reasoned about; say so rather than assume"},
 		{"1.2", "a two-component version is not a release this can compare"},
 	}
@@ -124,11 +125,8 @@ func TestVersionMismatchWarning_StillWarnsWhereItMatters(t *testing.T) {
 	}
 }
 
-// TestReleaseCovered pins the coverage rule at boundaries the current pin
-// cannot reach. TestedAgmsgVersion's patch is 0, so no same-minor release is
-// older than it and VersionMismatchWarning alone cannot exercise the
-// older-patch branch — it would first take effect on a pin bump, which is
-// exactly when an unnoticed change of behavior would be most costly.
+// TestReleaseCovered uses a synthetic positive patch so older-patch and
+// independent major/minor boundaries remain covered whatever the current pin is.
 func TestReleaseCovered(t *testing.T) {
 	pin := agmsgRelease{major: 1, minor: 2, patch: 5}
 
@@ -137,15 +135,17 @@ func TestReleaseCovered(t *testing.T) {
 		installed agmsgRelease
 		covered   bool
 	}{
-		{"the pinned release itself", agmsgRelease{1, 2, 5}, true},
-		{"a newer patch is outside the pin", agmsgRelease{1, 2, 6}, false},
-		{"a much newer patch is outside the pin", agmsgRelease{1, 2, 40}, false},
-		{"an older patch has no canary backing", agmsgRelease{1, 2, 4}, false},
-		{"the first patch of the tested minor", agmsgRelease{1, 2, 0}, false},
-		{"a newer minor is where the interface moves", agmsgRelease{1, 3, 0}, false},
-		{"an older minor may predate what panemux needs", agmsgRelease{1, 1, 99}, false},
-		{"a newer major, all the more so", agmsgRelease{2, 0, 0}, false},
-		{"an older major", agmsgRelease{0, 9, 9}, false},
+		{"the pinned release itself", pin, true},
+		{"a newer patch is outside the pin", agmsgRelease{pin.major, pin.minor, pin.patch + 1}, false},
+		{"a much newer patch is outside the pin", agmsgRelease{pin.major, pin.minor, pin.patch + 35}, false},
+		{"an older patch has no canary backing", agmsgRelease{pin.major, pin.minor, pin.patch - 1}, false},
+		{"the first patch of the tested minor", agmsgRelease{pin.major, pin.minor, 0}, false},
+		{"a newer minor is where the interface moves", agmsgRelease{pin.major, pin.minor + 1, 0}, false},
+		{"an older minor may predate what panemux needs", agmsgRelease{pin.major, pin.minor - 1, 99}, false},
+		{"a newer major, all the more so", agmsgRelease{pin.major + 1, 0, 0}, false},
+		{"only the minor differs", agmsgRelease{pin.major, pin.minor + 1, pin.patch}, false},
+		{"only the major differs", agmsgRelease{pin.major + 1, pin.minor, pin.patch}, false},
+		{"an older major", agmsgRelease{pin.major - 1, 9, 9}, false},
 	}
 
 	for _, tt := range tests {
@@ -153,4 +153,25 @@ func TestReleaseCovered(t *testing.T) {
 			assert.Equal(t, tt.covered, releaseCovered(tt.installed, pin))
 		})
 	}
+}
+
+func newerAgmsgPatch(t *testing.T, offset int) string {
+	t.Helper()
+	release, ok := parseAgmsgRelease(TestedAgmsgVersion)
+	require.True(t, ok)
+	return fmt.Sprintf("%d.%d.%d", release.major, release.minor, release.patch+offset)
+}
+
+func newerAgmsgMinor(t *testing.T) string {
+	t.Helper()
+	release, ok := parseAgmsgRelease(TestedAgmsgVersion)
+	require.True(t, ok)
+	return fmt.Sprintf("%d.%d.0", release.major, release.minor+1)
+}
+
+func newerAgmsgMajor(t *testing.T) string {
+	t.Helper()
+	release, ok := parseAgmsgRelease(TestedAgmsgVersion)
+	require.True(t, ok)
+	return fmt.Sprintf("%d.0.0", release.major+1)
 }

@@ -42,7 +42,7 @@ else
 fi
 mkdir -p "$HOME/.agents/skills/agmsg/scripts"
 printf '#!/bin/sh\n' > "$HOME/.agents/skills/agmsg/scripts/api.sh"
-printf '1.2.0\n' > "$HOME/.agents/skills/agmsg/VERSION"
+printf '%s\n' '`+TestedAgmsgVersion+`' > "$HOME/.agents/skills/agmsg/VERSION"
 printf 'owned\n' > "$HOME/.agents/skills/agmsg/.agmsg"
 `)
 	tool := NewTool(ToolOptions{Execution: execution, Input: execution,
@@ -50,7 +50,7 @@ printf 'owned\n' > "$HOME/.agents/skills/agmsg/.agmsg"
 	state, err := tool.Install(context.Background(), host.Local)
 	require.NoError(t, err)
 	require.Equal(t, hosttools.Installed, state.Status)
-	require.Equal(t, "1.2.0", state.Version)
+	require.Equal(t, TestedAgmsgVersion, state.Version)
 	versionPath := filepath.Join(home, ".agents", "skills", "agmsg", "VERSION")
 	require.NoError(t, os.WriteFile(versionPath, []byte("1.1.0"), 0600))
 	state, err = tool.Install(context.Background(), host.Local)

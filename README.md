@@ -183,8 +183,8 @@ pane on the host. Initially unreachable hosts retry on later polls with the shar
 cooldown; **Reconnect** clears that wait for both boards.
 
 **[agmsg](https://github.com/fujibee/agmsg) must be installed** on every host whose panes join
-the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux is tested against **agmsg
-1.2.0**; it reads each host's `VERSION` on its first successful probe and logs a warning for anything else, without
+the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux is tested against the
+[pinned agmsg version and commit](docs/maintenance.md#bumping-the-pinned-agmsg-version); it reads each host's `VERSION` on its first successful probe and logs a warning for anything else, without
 blocking. agmsg promises compatibility only for reading through `scripts/api.sh`, while panemux also
 depends on `send.sh`, `join.sh` and `delivery.sh`, so a different version may work or may misbehave.
 The host menu can Install / Update the tested fixed-SHA source, with one optional automatic-update

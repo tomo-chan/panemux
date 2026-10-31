@@ -21,9 +21,10 @@ The contract verifies observable behavior, not log wording or private storage:
 ### Tier 1: hermetic
 
 Every `make check` run verifies panemux's command construction and parses captured JSONL fixtures
-from the tested agmsg release in `internal/agmsg/testdata/agmsg-v1.2.0/`.
+from the tested agmsg release selected by `fixtureDir` in `internal/agmsg/agmsg_fixture_test.go`.
+The original `internal/agmsg/testdata/agmsg-v1.2.0/` capture also protects the historical ID-order regression.
 Parser, cursor, command-wrapper, participation golden, and real-install contract tests live in
-`internal/agmsg`; the relay and own-send transition tests remain in `internal/board`. Fixtures are regenerated from a real tagged installation, never
+`internal/agmsg`; the relay and own-send transition tests remain in `internal/board`. Fixtures are regenerated from a verified release commit SHA, never
 hand-authored. This tier catches regressions in panemux without requiring agmsg, a network, or
 external state.
 
@@ -34,16 +35,19 @@ panemux's real local client.
 
 CI runs it:
 
-- on relevant pull requests against `agmsg.TestedAgmsgVersion`;
+- on relevant pull requests against the PR's `agmsg.TestedAgmsgCommit`;
 - on a schedule against the latest agmsg release.
 
-The scheduled canary is an early warning; it does not automatically move the tested-version pin.
+The scheduled canary proposes a version/SHA pin and fixture bump only after success.
+The App-authenticated `fix:` PR must pass ordinary CI and be reviewed before merging; draft
+release publication remains manual. See [maintenance](../maintenance.md#bumping-the-pinned-agmsg-version).
 The job remains outside `make check` because it installs and executes an external project. Local
 runs skip when no explicit agmsg path is supplied.
 
 Assertions must describe facts Agent Board depends on. Exact diagnostic sentences, timing based on
 fixed sleeps, and incidental process ancestry are not contract behavior.
 
-The workflow reads the tested version from `internal/agmsg/agmsg_version.go` and selects pull
-requests touching `internal/agmsg/`, `Makefile`, or the workflow itself. The package is included in
+The workflow reads the version from `internal/agmsg/agmsg_version.go` and commit from
+`internal/agmsg/tool.go`, and selects pull requests touching `internal/agmsg/`,
+`scripts/agmsg_contract*`, `Makefile`, or the workflow itself. The package is included in
 the Go coverage gate and in the fixture-agent registry consistency check.

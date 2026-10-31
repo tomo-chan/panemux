@@ -42,8 +42,16 @@ install-hooks:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-verify test-node-toolchain test-go-toolchain test-go test-frontend test-hooks test-pre-push test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
+test: test-agmsg-automation test-verify test-node-toolchain test-go-toolchain test-go test-frontend test-hooks test-pre-push test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
       test-coverage-blocks test-mutation test-model-check
+
+.PHONY: test-agmsg-automation
+test-agmsg-automation:
+	@if command -v python3 >/dev/null 2>&1; then \
+		python3 -B scripts/agmsg_contract_test.py; \
+	elif [ -n "$$CI" ]; then \
+		echo "python3 is required for agmsg automation tests in CI" >&2; exit 1; \
+	else echo "SKIP agmsg automation tests: python3 unavailable"; fi
 
 test-node-toolchain:
 	sh scripts/node_toolchain_test.sh
