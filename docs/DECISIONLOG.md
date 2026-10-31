@@ -18,7 +18,11 @@ A GitHub App token, chosen in #437, creates fix PRs with version/SHA, captured T
 matching assertions. Capture works on CI with an isolated HOME; the original v1.2.0 ID-order
 regression remains frozen because fresh captures need not reproduce that ordering. Contents and
 pull-requests write suffice; the owner creates/installs the App and registers secrets. Missing
-secrets skip proposals without failing verification. Token minting follows upstream execution.
+secrets skip proposals without failing verification. Token minting runs on a separate fresh runner,
+after validating a data-only artifact and testing trusted code against it. The upstream runner
+receives no App secrets. Only JSONL and provenance cross the job boundary; scripts, Go source and
+hooks never do. Preflight avoids repeating capture for existing proposals. Pin-dependent tests
+derive expectations from constants/captures, so bumps need no test edits or efficacy exemptions.
 GITHUB_TOKEN was not chosen because its events do not trigger ordinary PR CI.
 
 Release-specific branches deduplicate all PR states, including deliberate closure. A newer tag

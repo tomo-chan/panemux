@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -61,22 +62,20 @@ class AutomationTests(unittest.TestCase):
             original_run = automation.run
             def capture(*args, **kwargs):
                 if args[0][0] == "bash":
-                    out = root / "internal/agmsg/testdata/agmsg-v2.0.0"
+                    out = Path(args[0][-1])
                     for name in ("get_teams.jsonl", "get_team_members.jsonl", "get_team_messages.jsonl"):
                         shutil.copy(ROOT / "internal/agmsg/testdata/agmsg-v1.2.0" / name, out / name)
                     messages = out / "get_team_messages.jsonl"
                     messages.write_text(messages.read_text().replace("01a02760-c340", "01a11111-aaaa").replace("2026-08-22T02:50:48Z", "2026-10-31T01:02:03Z"))
                     (out / "VERSION.txt").write_text("v2.0.0\n")
+                    (out / "COMMIT.txt").write_text(sha + "\n")
                     return ""
                 return original_run(*args, **kwargs)
+            original_tests = (root / "internal/agmsg/agmsg_fixture_test.go").read_bytes()
             with patch.object(automation, "run", side_effect=capture):
                 automation.prepare(root, "v2.0.0", sha, source)
             self.assertEqual(automation.pins(root), ("2.0.0", sha))
-            tests = (root / "internal/agmsg/agmsg_fixture_test.go").read_text()
-            self.assertIn('fixtureDir = "testdata/agmsg-v2.0.0"', tests)
-            self.assertIn('fixtureID1 = "01a11111-aaaa', tests)
-            self.assertIn("time.Date(2026, 10, 31, 1, 2, 3, 0, time.UTC)", tests)
-            self.assertIn('os.ReadFile("testdata/agmsg-v1.2.0/get_team_messages.jsonl")', tests)
+            self.assertEqual(original_tests, (root / "internal/agmsg/agmsg_fixture_test.go").read_bytes())
             with self.assertRaises(ValueError):
                 automation.prepare(root, "v2.0.1", SHA, source)
 
@@ -179,13 +178,17 @@ class AutomationTests(unittest.TestCase):
             automation.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"], cwd=source)
             sha = automation.run(["git", "rev-parse", "HEAD"], cwd=source)
             mktemp = binary / "mktemp"
-            mktemp.write_text("#!/bin/sh\nexit 1\n")
+            mktemp.write_text("#!/bin/sh\ntouch \"$MKTEMP_SENTINEL\"\nexit 1\n")
             mktemp.chmod(0o755)
+            sqlite = binary / "sqlite3"
+            sqlite.write_text("#!/bin/sh\nexit 99\n")
+            sqlite.chmod(0o755)
             capture = ROOT / "internal/agmsg/testdata/agmsg-v1.2.0/capture.sh"
-            env = {**os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"], "INSTALL_SENTINEL": str(root / "installed")}
+            env = {**os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"], "INSTALL_SENTINEL": str(root / "installed"), "MKTEMP_SENTINEL": str(root / "mktemp-called")}
             result = subprocess.run(["bash", str(capture), str(source), sha], env=env, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((root / "installed").exists())
+            self.assertTrue((root / "mktemp-called").exists())
             self.assertEqual(automation.run(["git", "status", "--porcelain"], cwd=source), "")
 
     def test_capture_isolates_home_and_sanitizes_normalized_paths(self):
@@ -220,10 +223,75 @@ esac
             automation.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"], cwd=source)
             sha = automation.run(["git", "rev-parse", "HEAD"], cwd=source)
             env = {**os.environ, "HOME": str(caller_home), "TMPDIR": str(root) + "/", "AGMSG_STORAGE_PATH": str(caller_home / "forbidden")}
+            binary = root / "bin"
+            binary.mkdir()
+            sqlite = binary / "sqlite3"
+            sqlite.write_text("#!/bin/sh\nexit 99\n")
+            sqlite.chmod(0o755)
+            env["PATH"] = str(binary) + os.pathsep + env["PATH"]
             subprocess.run(["bash", str(out / "capture.sh"), str(source), sha], env=env, check=True, capture_output=True)
             self.assertEqual(json.loads((out / "get_team_members.jsonl").read_text())["project"], "/tmp/sample-project")
             self.assertEqual(list(caller_home.iterdir()), [caller_home / "untouched"])
             self.assertEqual((out / "COMMIT.txt").read_text().strip(), sha)
+
+    def test_bundle_rejects_code_paths_metadata_mismatch_and_symlinks(self):
+        files = {name: (ROOT / "internal/agmsg/testdata/agmsg-v1.2.0" / name).read_text()
+                 for name in automation.DATA_FILES if name != "COMMIT.txt"}
+        files["COMMIT.txt"] = SHA + "\n"
+        files["VERSION.txt"] = "v2.0.0\n"
+        bundle = {"tag": "v2.0.0", "sha": SHA, "files": files}
+        with tempfile.TemporaryDirectory(prefix="panemux-agmsg-artifact-") as tmp:
+            directory = Path(tmp)
+            path = directory / "bundle.json"
+            path.write_text(json.dumps(bundle))
+            self.assertEqual(automation.read_bundle(directory, "v2.0.0", SHA), files)
+            for key, value in (("../tool.go", "malicious"), ("capture.sh", "malicious"), ("README.md", "malicious")):
+                changed = {**bundle, "files": {**files, key: value}}
+                path.write_text(json.dumps(changed))
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    automation.read_bundle(directory, "v2.0.0", SHA)
+            path.write_text(json.dumps({**bundle, "sha": "b" * 40}))
+            with self.assertRaises(ValueError):
+                automation.read_bundle(directory, "v2.0.0", SHA)
+            target = directory / "other"
+            path.rename(target)
+            path.symlink_to(target)
+            with self.assertRaises(ValueError):
+                automation.read_bundle(directory, "v2.0.0", SHA)
+
+    def test_preflight_skips_existing_pr_and_resumes_branch_without_capture(self):
+        for existing, remote, mode in (("[]", "", "new"), ('[{"number":1}]', "", "skip"), ("[]", SHA, "resume")):
+            def fake(args, **kwargs):
+                return existing if args[0] == "gh" else remote
+            with self.subTest(mode=mode), patch.object(automation, "run", side_effect=fake):
+                self.assertEqual(automation.proposal_mode(ROOT, "v99.0.0", SHA, "owner/repo"), mode)
+
+    def test_workflow_keeps_upstream_execution_away_from_app_credentials(self):
+        workflow = (ROOT / ".github/workflows/agmsg-contract.yml").read_text()
+        capture, publish = workflow.split("\n  capture:\n")[1].split("\n  propose-bump:\n")
+        self.assertNotIn("secrets.", capture)
+        self.assertNotIn("create-github-app-token", capture)
+        self.assertNotIn("git clone", publish)
+        self.assertNotIn("./install.sh", publish)
+        self.assertIn("scripts/agmsg_contract.py apply", publish)
+        self.assertLess(publish.index("scripts/agmsg_contract.py apply"), publish.index("create-github-app-token"))
+
+    def test_cli_routes_data_operations_without_entering_publication(self):
+        with tempfile.TemporaryDirectory(prefix="panemux-agmsg-cli-") as tmp:
+            directory = Path(tmp)
+            env = {"AGMSG_TAG": "v2.0.0", "AGMSG_SHA": SHA, "BUNDLE_DIR": str(directory / "artifact"),
+                   "AGMSG_SOURCE": str(directory), "GITHUB_OUTPUT": str(directory / "output"), "GITHUB_REPOSITORY": "owner/repo"}
+            with patch.dict(os.environ, env), patch.object(automation, "open_pr", side_effect=AssertionError("unexpected privileged operation")):
+                with patch.object(sys, "argv", ["automation", "capture"]), patch.object(automation, "capture_files", return_value={"data": "value"}):
+                    automation.main()
+                    self.assertEqual(json.loads((directory / "artifact/bundle.json").read_text())["sha"], SHA)
+                with patch.object(sys, "argv", ["automation", "apply"]), patch.object(automation, "read_bundle", return_value={}) as read, patch.object(automation, "apply_files") as apply:
+                    automation.main()
+                    read.assert_called_once()
+                    apply.assert_called_once()
+                with patch.object(sys, "argv", ["automation", "preflight"]), patch.object(automation, "proposal_mode", return_value="skip"):
+                    automation.main()
+                    self.assertEqual((directory / "output").read_text(), "mode=skip\n")
 
 
 if __name__ == "__main__":

@@ -59,6 +59,7 @@ the response's own order — see `filterRowsAfter` in `../../agmsg_parse.go`.
 | `get_team_members.jsonl` | `api.sh get teams panemux members` |
 | `get_team_messages.jsonl` | `api.sh get teams panemux messages --limit 100` |
 | `VERSION.txt` | `scripts/version.sh` — the provenance of this capture |
+| `COMMIT.txt` | verified source commit SHA |
 
 Tier 1 cannot detect that agmsg changed; it only pins panemux against a
 fixed shape. That is [Tier

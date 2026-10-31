@@ -70,6 +70,16 @@ and provide npm/npx. A bad published cache is an error, not a reason to silently
 runtime. This is development tooling, with no product/user-input route into its commands.
 See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
 
+## agmsg release proposal CI
+
+Upstream installers and agmsg scripts run in jobs without App secrets. Publication uses a fresh
+runner and a trusted checkout, never that job's workspace, processes or hooks. Its only upstream
+input is a bounded data-only JSON artifact: fixed capture filenames, JSON objects and version/SHA
+provenance validated against independently resolved scope outputs. Reject code, paths, symlinks,
+extra files and oversized content. Trusted code applies constants and fixture data, then runs
+the package tests before minting the repository-scoped App token. See
+[maintenance](maintenance.md#github-app-setup-repository-owner) for permissions and setup.
+
 ## `gosec` Policy
 
 - Fix `gosec` findings structurally in the implementation rather than suppressing them in shipped code.

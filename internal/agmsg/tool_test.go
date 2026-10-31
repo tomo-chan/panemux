@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -45,8 +48,8 @@ func TestAgmsgToolStatesAndInstallSafety(t *testing.T) {
 	}{
 		{"missing\n", hosttools.Missing, ""},
 		{"installed\n1.1.9\n", hosttools.Outdated, "--update"},
-		{"installed\nv1.2.0\n", hosttools.Installed, "refuse"},
-		{"installed\n1.2.1\n", hosttools.Newer, "refuse"},
+		{"installed\nv" + TestedAgmsgVersion + "\n", hosttools.Installed, "refuse"},
+		{"installed\n" + newerAgmsgPatch(t, 1) + "\n", hosttools.Newer, "refuse"},
 		{"installed\nunknown\n", hosttools.Unknown, "refuse"},
 		{"alternate\n", hosttools.Invalid, "refuse"},
 	} {
@@ -83,8 +86,10 @@ func TestAgmsgToolPreservesFailureOutputAndSourceFailure(t *testing.T) {
 }
 
 func TestPinnedWarningIncludesNewerPatch(t *testing.T) {
-	require.NotEmpty(t, VersionMismatchWarning("demo", "1.2.1"))
-	require.Equal(t, "3c537a51bb76a23e312e7c27770df4a58ba794ff", TestedAgmsgCommit)
+	require.NotEmpty(t, VersionMismatchWarning("demo", newerAgmsgPatch(t, 1)))
+	data, err := os.ReadFile(filepath.Join(fixtureDir, "COMMIT.txt"))
+	require.NoError(t, err)
+	require.Equal(t, strings.TrimSpace(string(data)), TestedAgmsgCommit)
 }
 
 func TestToolReleaseOrderingAtEveryComponent(t *testing.T) {

@@ -64,7 +64,7 @@ an interactive profile is insufficient.
 ### Version coverage
 
 `agmsg.TestedAgmsgVersion` and `agmsg.TestedAgmsgCommit` pin the tested release and source commit.
-The initial pair is `1.2.0` / `3c537a51bb76a23e312e7c27770df4a58ba794ff`.
+Read those constants for the current tested pair; [maintenance](../maintenance.md#bumping-the-pinned-agmsg-version) describes verified bump proposals.
 Startup compares normalized installed releases with the pinned release; every different release,
 including a newer patch, warns without blocking messaging. Missing VERSION remains unknown.
 Only whitespace and a leading v are normalized. Describe builds, dirty trees and prereleases

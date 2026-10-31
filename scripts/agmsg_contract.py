@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """agmsg contract CI operations. External values are operands, never shell code."""
 import argparse
-from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -84,52 +83,94 @@ def replace(path, pattern, value):
     path.write_text(text)
 
 
-def prepare(root, tag, sha, source):
+DATA_FILES = ("get_teams.jsonl", "get_team_members.jsonl", "get_team_messages.jsonl", "VERSION.txt", "COMMIT.txt")
+
+
+def validate_files(files, tag, sha):
+    validate(tag, sha)
+    if not isinstance(files, dict) or set(files) != set(DATA_FILES):
+        raise ValueError("artifact must contain only the five captured data files")
+    for name, value in files.items():
+        if not isinstance(value, str) or len(value.encode()) > 1024 * 1024 or "\\x00" in value:
+            raise ValueError("invalid or oversized capture data")
+        if name.endswith(".jsonl"):
+            rows = [json.loads(line) for line in value.splitlines()]
+            if not rows or not all(isinstance(row, dict) for row in rows):
+                raise ValueError("capture must contain JSON objects")
+    messages = [json.loads(line) for line in files["get_team_messages.jsonl"].splitlines()]
+    if len(messages) != 4 or any(not isinstance(row.get("id"), str) for row in messages):
+        raise ValueError("capture must contain four opaque message IDs")
+    if len({row["id"] for row in messages}) != 4:
+        raise ValueError("capture must contain four distinct message IDs")
+    if files["COMMIT.txt"].strip() != sha or files["VERSION.txt"].strip().removeprefix("v") != tag[1:]:
+        raise ValueError("capture provenance differs from trusted scope outputs")
+    return files
+
+
+def read_bundle(directory, tag, sha):
+    path = directory / "bundle.json"
+    if set(directory.iterdir()) != {path} or path.is_symlink() or not path.is_file() or path.stat().st_size > 6 * 1024 * 1024:
+        raise ValueError("expected one bounded regular bundle.json file")
+    bundle = json.loads(path.read_text())
+    if set(bundle) != {"tag", "sha", "files"} or bundle["tag"] != tag or bundle["sha"] != sha:
+        raise ValueError("artifact metadata differs from trusted scope outputs")
+    return validate_files(bundle["files"], tag, sha)
+
+
+def capture_files(root, tag, sha, source):
     validate(tag, sha)
     if run(["git", "rev-parse", "HEAD"], cwd=source) != sha:
         raise ValueError("fixture source is not the contract-tested commit")
     version, _ = pins(root)
+    with tempfile.TemporaryDirectory(prefix="panemux-agmsg-data-") as tmp:
+        out = Path(tmp)
+        script = root / f"internal/agmsg/testdata/agmsg-v{version}/capture.sh"
+        # The trusted script accepts an explicit output directory. No generated
+        # script or source code crosses into the privileged publication job.
+        run(["bash", str(script), str(source), sha, str(out)], cwd=root)
+        return validate_files({name: (out / name).read_text() for name in DATA_FILES}, tag, sha)
+
+
+def apply_files(root, tag, sha, files):
+    validate_files(files, tag, sha)
+    version, _ = pins(root)
     if tuple(map(int, tag[1:].split("."))) <= tuple(map(int, version.split("."))):
         print("latest release is already pinned or older; no bump")
         return
-    old = root / f"internal/agmsg/testdata/agmsg-v{version}"
     out = root / f"internal/agmsg/testdata/agmsg-{tag}"
-    # Keep the old capture: it proves that lexicographic ID order can differ
-    # from API order. A fresh capture need not happen within one millisecond.
     out.mkdir()
-    shutil.copyfile(old / "capture.sh", out / "capture.sh")
+    # Copy only trusted checkout code. Artifacts never supply executable files,
+    # Go source, diffs, paths, hooks, modes, or documentation.
+    shutil.copyfile(root / f"internal/agmsg/testdata/agmsg-v{version}/capture.sh", out / "capture.sh")
     (out / "README.md").write_text(
-        f"# agmsg {tag} fixtures\n\n"
-        f"Captured from release `{tag}` at commit `{sha}`, after the real-install contract passed.\n"
-        "`capture.sh <source-checkout> <commit-sha>` installs into a throwaway HOME, joins a team, "
-        "sends four messages and records raw api.sh JSONL. It requires sqlite3 and Python 3; "
-        "check out the supplied SHA first. Project paths are sanitized to `/tmp/sample-project`.\n\n"
-        "VERSION.txt records installer provenance; COMMIT.txt records the verified source SHA. "
-        "get_teams.jsonl, get_team_members.jsonl and get_team_messages.jsonl are captured through "
-        "the public API. Exact IDs and timestamps in the fixture test come from this capture. "
-        "The original v1.2.0 directory remains the historical ID-order regression fixture.\n")
-    run(["bash", str(out / "capture.sh"), str(source), sha], cwd=root)
-    rows = [json.loads(line) for line in (out / "get_team_messages.jsonl").read_text().splitlines()]
-    if len(rows) != 4 or len({row["id"] for row in rows}) != 4:
-        raise ValueError("capture must contain four distinct message IDs")
-    if (out / "VERSION.txt").read_text().strip().removeprefix("v") != tag[1:]:
-        raise ValueError("captured installation has unexpected provenance")
-    tests = root / "internal/agmsg/agmsg_fixture_test.go"
-    replace(tests, r'^const fixtureDir = ".*"$', f'const fixtureDir = "testdata/agmsg-{tag}"')
-    for i, row in enumerate(rows, 1):
-        replace(tests, rf'^\s*fixtureID{i} = ".*"$', f'\tfixtureID{i} = {json.dumps(row["id"])}')
-    at = datetime.fromisoformat(rows[0]["at"].replace("Z", "+00:00"))
-    replace(tests, r'\tassert.Equal\(t, time.Date\(.*\), rows\[0\].At\)',
-            f'\tassert.Equal(t, time.Date({at.year}, {at.month}, {at.day}, {at.hour}, {at.minute}, {at.second}, {at.microsecond * 1000}, time.UTC), rows[0].At)')
-    text = tests.read_text()
-    start = text.index("func TestAgmsgFixture_TeamMessages_LexicographicOrderDiffersFromReturnedOrder")
-    before, historic = text[:start], text[start:]
-    historic = historic.replace('data := readFixture(t, "get_team_messages.jsonl")',
-                                'data, err := os.ReadFile("testdata/agmsg-v1.2.0/get_team_messages.jsonl")\n\trequire.NoError(t, err)', 1)
-    tests.write_text(before + historic)
+        f"# agmsg {tag} fixtures\n\nCaptured at verified commit {sha}.\n\n"
+        "capture.sh <source-checkout> <commit-sha> installs into a throwaway HOME, "
+        "joins a team, sends four messages and captures api.sh JSONL. It requires "
+        "sqlite3 and Python 3. VERSION.txt and COMMIT.txt record provenance. "
+        "Project paths are sanitized to /tmp/sample-project. The tests derive IDs "
+        "and timestamps from this capture; the original v1.2.0 directory retains "
+        "the historical ID-order regression.\n")
+    for name, value in files.items():
+        (out / name).write_text(value)
     replace(root / "internal/agmsg/agmsg_version.go", r'^const TestedAgmsgVersion = ".*"$', f'const TestedAgmsgVersion = "{tag[1:]}"')
     replace(root / "internal/agmsg/tool.go", r'^const TestedAgmsgCommit = ".*"$', f'const TestedAgmsgCommit = "{sha}"')
-    run(["gofmt", "-w", str(tests)], cwd=root)
+
+
+def prepare(root, tag, sha, source):
+    apply_files(root, tag, sha, capture_files(root, tag, sha, source))
+
+
+def proposal_mode(root, tag, sha, repo):
+    validate(tag, sha)
+    version, _ = pins(root)
+    if tuple(map(int, tag[1:].split("."))) <= tuple(map(int, version.split("."))):
+        return "skip"
+    branch = f"automation/agmsg-{tag}"
+    if json.loads(run(["gh", "pr", "list", "--repo", repo, "--head", branch, "--base", "main", "--state", "all", "--json", "number"], cwd=root)):
+        return "skip"
+    if run(["git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}"], cwd=root):
+        return "resume"
+    return "new"
 
 
 def open_pr(root, tag, sha, repo):
@@ -164,7 +205,7 @@ def open_pr(root, tag, sha, repo):
         body = Path(tmp) / "body.md"
         body.write_text(f"Bump the tested agmsg release to `{tag}` at commit `{sha}`.\n\n"
                         "The scheduled real-install contract passed at this exact SHA. Tier 1 fixtures "
-                        "were recaptured in an isolated HOME; fixture assertions were updated and tested. "
+                        "were recaptured in an isolated HOME; pin-independent fixture assertions were tested. "
                         "PR CI rechecks the recorded SHA.\n\n"
                         "Review the upstream release, fixtures and CI before merging. Older release PRs "
                         "remain open for human review; close superseded proposals manually. "
@@ -174,7 +215,7 @@ def open_pr(root, tag, sha, repo):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["scope", "prepare", "pr"])
+    parser.add_argument("operation", choices=["scope", "prepare", "capture", "apply", "preflight", "pr"])
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     if args.operation == "scope":
@@ -185,6 +226,17 @@ def main():
         tag, sha = os.environ["AGMSG_TAG"], os.environ["AGMSG_SHA"]
         if args.operation == "prepare":
             prepare(root, tag, sha, Path(os.environ["AGMSG_SOURCE"]))
+        elif args.operation == "capture":
+            files = capture_files(root, tag, sha, Path(os.environ["AGMSG_SOURCE"]))
+            directory = Path(os.environ["BUNDLE_DIR"])
+            directory.mkdir()
+            (directory / "bundle.json").write_text(json.dumps({"tag": tag, "sha": sha, "files": files}))
+        elif args.operation == "apply":
+            apply_files(root, tag, sha, read_bundle(Path(os.environ["BUNDLE_DIR"]), tag, sha))
+        elif args.operation == "preflight":
+            mode = proposal_mode(root, tag, sha, os.environ["GITHUB_REPOSITORY"])
+            with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+                output.write(f"mode={mode}\n")
         else:
             open_pr(root, tag, sha, os.environ["GITHUB_REPOSITORY"])
 

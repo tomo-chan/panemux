@@ -17,7 +17,7 @@ src="${1:?usage: capture.sh <agmsg-source-checkout> <commit-sha>}"
 sha="${2:?expected contract-tested commit SHA}"
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
 [ "$(git -C "$src" rev-parse HEAD)" = "$sha" ] || exit 1
-out="$(cd "$(dirname "$0")" && pwd)"
+out="${3:-$(cd "$(dirname "$0")" && pwd)}"
 tag="$(basename "$out" | sed 's/^agmsg-v/v/')"
 
 command -v sqlite3 >/dev/null || { echo "sqlite3 is required" >&2; exit 1; }

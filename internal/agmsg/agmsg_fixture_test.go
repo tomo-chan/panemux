@@ -1,6 +1,8 @@
 package agmsg
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"panemux/internal/board"
 	"path/filepath"
@@ -19,17 +21,26 @@ import (
 // captured from a real agmsg install at TestedAgmsgVersion. See
 // fixtureDir/README.md for how it is regenerated, and for what the capture
 // caught that the hand-written fixtures it replaced could not.
-const fixtureDir = "testdata/agmsg-v1.2.0"
+const fixtureDir = "testdata/agmsg-v" + TestedAgmsgVersion
 
-// Real UUIDv7 ids from that capture. They are quoted here rather than
-// recomputed because their exact shape is the point: agmsg's ids are opaque
-// text, not the integers panemux's cursor once assumed.
-const (
-	fixtureID1 = "01a02760-c340-7ec7-8f18-071cce739579"
-	fixtureID2 = "01a02760-c340-7ae0-81eb-31430e02886a"
-	fixtureID3 = "01a02760-c340-711a-8382-1825710d6878"
-	fixtureID4 = "01a02760-c340-72ff-839b-0498652568bb"
-)
+// Read expected capture metadata independently of the production parser. Bumps
+// change data, never these tests; opaque IDs remain anchored to response order.
+type capturedMessageMetadata struct {
+	At time.Time
+	ID string
+}
+
+func fixtureMessages(t *testing.T) []capturedMessageMetadata {
+	t.Helper()
+	var rows []capturedMessageMetadata
+	for _, line := range bytes.Split(bytes.TrimSpace(readFixture(t, "get_team_messages.jsonl")), []byte("\n")) {
+		var row capturedMessageMetadata
+		require.NoError(t, json.Unmarshal(line, &row))
+		rows = append(rows, row)
+	}
+	require.Len(t, rows, 4)
+	return rows
+}
 
 func readFixture(t *testing.T, name string) []byte {
 	t.Helper()
@@ -44,15 +55,15 @@ func TestAgmsgFixture_TeamMessages_ParsesAllRowsInOrder(t *testing.T) {
 	rows := parseAgmsgMessageRows(data, "local")
 	require.Len(t, rows, 4)
 
-	assert.Equal(t, fixtureID1, rows[0].ID)
+	assert.Equal(t, fixtureMessages(t)[0].ID, rows[0].ID)
 	assert.Equal(t, "pane-a", rows[0].From)
 	assert.Equal(t, "pane-b", rows[0].To)
 	assert.Equal(t, "please review my latest commit", rows[0].Body)
 	assert.Equal(t, "local", rows[0].Host)
 	assert.Equal(t, "panemux", rows[0].Team)
-	assert.Equal(t, time.Date(2026, 8, 22, 2, 50, 48, 0, time.UTC), rows[0].At)
+	assert.Equal(t, fixtureMessages(t)[0].At, rows[0].At)
 
-	assert.Equal(t, fixtureID4, rows[3].ID)
+	assert.Equal(t, fixtureMessages(t)[3].ID, rows[3].ID)
 	assert.Equal(t, "lgtm, merging now", rows[3].Body)
 }
 
@@ -97,10 +108,10 @@ func TestAgmsgFixture_TeamMessages_FilterRowsAfterCursor(t *testing.T) {
 	data := readFixture(t, "get_team_messages.jsonl")
 	rows := parseAgmsgMessageRows(data, "local")
 
-	newRows := filterRowsAfter(rows, fixtureID2)
+	newRows := filterRowsAfter(rows, fixtureMessages(t)[1].ID)
 	require.Len(t, newRows, 2)
-	assert.Equal(t, fixtureID3, newRows[0].ID)
-	assert.Equal(t, fixtureID4, newRows[1].ID)
+	assert.Equal(t, fixtureMessages(t)[2].ID, newRows[0].ID)
+	assert.Equal(t, fixtureMessages(t)[3].ID, newRows[1].ID)
 }
 
 // TestAgmsgFixture_TeamMessages_IDsAreNotNumeric is the hermetic guard
@@ -123,7 +134,8 @@ func TestAgmsgFixture_TeamMessages_IDsAreNotNumeric(t *testing.T) {
 // these four rows were written in the same millisecond, so their UUIDv7
 // prefixes are identical and only the random bits separate them.
 func TestAgmsgFixture_TeamMessages_LexicographicOrderDiffersFromReturnedOrder(t *testing.T) {
-	data := readFixture(t, "get_team_messages.jsonl")
+	data, err := os.ReadFile("testdata/agmsg-v1.2.0/get_team_messages.jsonl")
+	require.NoError(t, err)
 	rows := parseAgmsgMessageRows(data, "local")
 	require.Len(t, rows, 4)
 

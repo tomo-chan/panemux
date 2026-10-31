@@ -18,17 +18,21 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   scope:
+    permissions:
+      contents: read
+      pull-requests: read
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.verified.outputs.run }}
       agmsg_ref: ${{ steps.decide.outputs.agmsg_ref }}
       agmsg_tag: ${{ steps.decide.outputs.agmsg_tag }}
       cache_key: ${{ steps.decide.outputs.cache_key }}
+      app_enabled: ${{ steps.app.outputs.enabled }}
+      proposal_mode: ${{ steps.preflight.outputs.mode }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -41,6 +45,26 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           DISPATCH_REF: ${{ inputs.agmsg_ref }}
         run: python3 -B scripts/agmsg_contract.py scope
+      - name: Check optional App configuration
+        if: github.event_name == 'schedule'
+        id: app
+        env:
+          APP_ID: ${{ secrets.AGMSG_BUMP_APP_ID }}
+          APP_KEY: ${{ secrets.AGMSG_BUMP_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APP_ID" ] && [ -n "$APP_KEY" ]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'GitHub App secrets are absent; no bump PR will be created.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Check existing proposals before executing upstream
+        if: github.event_name == 'schedule' && steps.app.outputs.enabled == 'true'
+        id: preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AGMSG_TAG: ${{ steps.decide.outputs.agmsg_tag }}
+          AGMSG_SHA: ${{ steps.decide.outputs.agmsg_ref }}
+        run: python3 -B scripts/agmsg_contract.py preflight
       - name: Look up the verified tag and commit
         id: cache
         if: steps.decide.outputs.cache_key != ''
@@ -65,6 +89,8 @@ jobs:
   # Always reports a conclusion, even when no contract-relevant files changed.
   # Keep this job suitable for branch protection: agmsg-contract / contract.
   contract:
+    permissions:
+      contents: read
     needs: scope
     runs-on: ubuntu-latest
     steps:
@@ -114,34 +140,19 @@ jobs:
           path: .agmsg-contract-passed
           key: ${{ needs.scope.outputs.cache_key }}
 
-  propose-bump:
+  capture:
     needs: [scope, contract]
-    # PRs and manual dispatches never receive the App token. A cached success
-    # may retry proposal after missing credentials or a transient GitHub error.
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' && needs.scope.outputs.app_enabled == 'true' && needs.scope.outputs.proposal_mode == 'new'
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
-      - name: Check optional App configuration
-        id: app
-        env:
-          APP_ID: ${{ secrets.AGMSG_BUMP_APP_ID }}
-          APP_KEY: ${{ secrets.AGMSG_BUMP_APP_PRIVATE_KEY }}
-        run: |
-          if [ -n "$APP_ID" ] && [ -n "$APP_KEY" ]; then
-            echo 'enabled=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'GitHub App secrets are absent; contract passed, no bump PR created.' >> "$GITHUB_STEP_SUMMARY"
-          fi
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        if: steps.app.outputs.enabled == 'true'
         with:
           persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
-        if: steps.app.outputs.enabled == 'true'
-        with:
-          go-version-file: go.mod
-      - name: Recapture fixtures and update the pin
-        if: steps.app.outputs.enabled == 'true'
+      # Upstream code executes here without App secrets or token. Publication
+      # never shares this runner's filesystem, processes, hooks or workspace.
+      - name: Capture data at the verified SHA
         env:
           AGMSG_TAG: ${{ needs.scope.outputs.agmsg_tag }}
           AGMSG_SHA: ${{ needs.scope.outputs.agmsg_ref }}
@@ -152,12 +163,51 @@ jobs:
           git clone --quiet https://github.com/fujibee/agmsg.git "$RUNNER_TEMP/agmsg-src"
           git -C "$RUNNER_TEMP/agmsg-src" checkout --quiet --detach "$AGMSG_SHA"
           export AGMSG_SOURCE="$RUNNER_TEMP/agmsg-src"
-          python3 -B scripts/agmsg_contract.py prepare
-          go test ./internal/agmsg -run '^TestAgmsgFixture_' -count=1
-      # Mint only after upstream installer/capture finished. No token is given
-      # to upstream code. Git/gh below use this repository-scoped short-lived token.
+          export BUNDLE_DIR="$RUNNER_TEMP/agmsg-bundle"
+          python3 -B scripts/agmsg_contract.py capture
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: agmsg-capture
+          path: ${{ runner.temp }}/agmsg-bundle/bundle.json
+          if-no-files-found: error
+          retention-days: 1
+
+  propose-bump:
+    needs: [scope, contract, capture]
+    if: >-
+      always() && github.event_name == 'schedule' &&
+      needs.scope.result == 'success' && needs.contract.result == 'success' &&
+      needs.scope.outputs.app_enabled == 'true' &&
+      (needs.capture.result == 'success' || needs.scope.outputs.proposal_mode == 'resume')
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        if: needs.scope.outputs.proposal_mode == 'new'
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        if: needs.scope.outputs.proposal_mode == 'new'
+        with:
+          name: agmsg-capture
+          path: ${{ runner.temp }}/agmsg-data
+      - name: Validate untrusted data and apply using trusted checkout code
+        if: needs.scope.outputs.proposal_mode == 'new'
+        env:
+          AGMSG_TAG: ${{ needs.scope.outputs.agmsg_tag }}
+          AGMSG_SHA: ${{ needs.scope.outputs.agmsg_ref }}
+        run: |
+          set -euo pipefail
+          export BUNDLE_DIR="$RUNNER_TEMP/agmsg-data"
+          python3 -B scripts/agmsg_contract.py apply
+          go test ./internal/agmsg ./internal/board -count=1
+      # Only this fresh runner receives the token. No upstream installer,
+      # uploaded script, uploaded Go source or uploaded hook executes here.
       - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
-        if: steps.app.outputs.enabled == 'true'
         id: token
         with:
           app-id: ${{ secrets.AGMSG_BUMP_APP_ID }}
@@ -165,7 +215,6 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
       - name: Create the release-specific PR once
-        if: steps.app.outputs.enabled == 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           AGMSG_TAG: ${{ needs.scope.outputs.agmsg_tag }}

@@ -3,6 +3,7 @@ package agmsg
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,10 +60,10 @@ func TestVersionMismatchWarning(t *testing.T) {
 	// The tested version: no warning.
 	assert.Empty(t, VersionMismatchWarning("host-a", TestedAgmsgVersion))
 
-	warning := VersionMismatchWarning("host-a", "1.3.0")
+	warning := VersionMismatchWarning("host-a", newerAgmsgPatch(t, 1))
 	require.NotEmpty(t, warning)
 	assert.Contains(t, warning, "host-a")
-	assert.Contains(t, warning, "1.3.0")
+	assert.Contains(t, warning, newerAgmsgPatch(t, 1))
 	assert.Contains(t, warning, TestedAgmsgVersion)
 }
 
@@ -78,9 +79,9 @@ func TestTestedAgmsgVersionIsPinned(t *testing.T) {
 // are covered by TestNonReleaseProvenanceIsNotInstalledOrSilentlyDowngraded.
 func TestVersionMismatchWarning_InstallProvenanceForms(t *testing.T) {
 	for _, installed := range []string{
-		"1.2.0",     // tarball install (npx / setup.sh)
-		"v1.2.0",    // git checkout sitting exactly on the tag
-		" v1.2.0\n", // whatever whitespace the file carries
+		TestedAgmsgVersion,               // tarball install (npx / setup.sh)
+		"v" + TestedAgmsgVersion,         // git checkout sitting exactly on the tag
+		" v" + TestedAgmsgVersion + "\n", // whatever whitespace the file carries
 	} {
 		assert.Empty(t, VersionMismatchWarning("host-a", installed),
 			"%q is the pinned version under one of install.sh's own provenance forms", installed)
@@ -88,7 +89,7 @@ func TestVersionMismatchWarning_InstallProvenanceForms(t *testing.T) {
 }
 
 func TestVersionMismatchWarning_NewerPatchesWarn(t *testing.T) {
-	for _, installed := range []string{"1.2.1", "v1.2.2", "1.2.17"} {
+	for _, installed := range []string{newerAgmsgPatch(t, 1), "v" + newerAgmsgPatch(t, 2), newerAgmsgPatch(t, 17)} {
 		assert.NotEmpty(t, VersionMismatchWarning("host-a", installed))
 	}
 }
@@ -105,9 +106,9 @@ func TestVersionMismatchWarning_StillWarnsWhereItMatters(t *testing.T) {
 	}{
 		{"1.1.13", "an older minor may predate an interface panemux depends on"},
 		{"v1.1.9", "same, in git-describe form"},
-		{"1.2.0-rc.1", "a prerelease of the tested version is not the tested version"},
-		{"1.3.0", "a newer minor line is exactly where the interface can move"},
-		{"2.0.0", "a new major even more so"},
+		{TestedAgmsgVersion + "-rc.1", "a prerelease of the tested version is not the tested version"},
+		{newerAgmsgPatch(t, 1), "a newer minor line is exactly where the interface can move"},
+		{newerAgmsgPatch(t, 100), "a new major even more so"},
 		{"nightly", "an unparseable version cannot be reasoned about; say so rather than assume"},
 		{"1.2", "a two-component version is not a release this can compare"},
 	}
@@ -153,4 +154,11 @@ func TestReleaseCovered(t *testing.T) {
 			assert.Equal(t, tt.covered, releaseCovered(tt.installed, pin))
 		})
 	}
+}
+
+func newerAgmsgPatch(t *testing.T, offset int) string {
+	t.Helper()
+	release, ok := parseAgmsgRelease(TestedAgmsgVersion)
+	require.True(t, ok)
+	return fmt.Sprintf("%d.%d.%d", release.major, release.minor, release.patch+offset)
 }

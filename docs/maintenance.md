@@ -103,14 +103,17 @@ The pin is the pair `agmsg.TestedAgmsgVersion` (`internal/agmsg/agmsg_version.go
 2. Run `capture.sh` against the already checked-out SHA in an isolated HOME. This works on CI
    with sqlite3 and Python 3; no manual capture is needed. The new versioned directory contains
    raw JSONL, VERSION and COMMIT provenance. Project paths are sanitized to `/tmp/sample-project`.
-3. Update fixtureDir, captured IDs and timestamp assertions; run the Tier 1 fixture tests.
+3. Fixture tests derive their directory from TestedAgmsgVersion and expected IDs/timestamps from
+   the captured data, so a bump changes no test code. Run the full agmsg and board packages.
    Preserve the original v1.2.0 capture for the ID-order regression, because fresh captures need
    not reproduce out-of-order UUIDs within one millisecond.
 4. Create branch `automation/agmsg-vN.N.N` and its PR using a GitHub App token. PR CI rechecks
    the recorded SHA, independent of later tag movement.
 
 One tag has at most one proposal: open, closed and merged PRs on that branch suppress duplicates.
-A push that succeeded before PR creation failed is reused without force-pushing. New tags receive
+A push that succeeded before PR creation failed is reused without force-pushing after its pin is
+checked. Preflight skips existing proposals before capture and resumes a pushed branch without
+rerunning upstream code. New tags receive
 separate PRs; older proposals stay open and unchanged for human comparison and closure. Deliberately
 closed proposals are not reopened. Scheduled runs are serialized by workflow concurrency. Moved
 tags are reverified but do not rewrite existing proposals; investigate upstream retagging manually.
@@ -129,9 +132,15 @@ ID as repository Actions secret `AGMSG_BUMP_APP_ID` and its generated private ke
 `AGMSG_BUMP_APP_PRIVATE_KEY`. App creation, installation and secret registration are manual.
 
 `actions/create-github-app-token` mints a short-lived token scoped to this repository with those
-two write permissions. Unlike GITHUB_TOKEN, its events trigger ordinary PR CI. Minting happens
-after upstream installation, capture and Tier 1 verification; upstream commands receive no App
-token. If either secret is absent, the workflow reports no proposal and succeeds after verification.
+two write permissions. Unlike GITHUB_TOKEN, its events trigger ordinary PR CI. Upstream installation
+and capture run in a job with read-only repository permission and no App secrets. A separate fresh
+publication runner checks out trusted code and accepts only one bounded JSON artifact containing
+the three JSONL captures, VERSION and COMMIT. It checks names, regular-file status, sizes, JSON
+shape and provenance against the independently resolved tag/SHA; no uploaded source, scripts,
+paths, hooks or executable modes are applied. Trusted code writes the constants and data, then
+tests the full agmsg and board packages before minting the token. Scope needs contents/PR read;
+other jobs need only contents read until the App token. If either secret is absent, the workflow
+reports no proposal and succeeds after contract verification.
 The automation changes no App settings or secrets.
 
 ### Running it locally
