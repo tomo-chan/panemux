@@ -19,7 +19,7 @@ import (
 // bootstrap paths depend on — send.sh's argument order, join.sh, delivery.sh
 // set, and the per-type hooks_file layout — carries no such promise, so an
 // agmsg upgrade can change them without that being a bug on agmsg's side.
-const TestedAgmsgVersion = "1.2.0"
+const TestedAgmsgVersion = "1.7.0"
 
 // agmsgVersionFile is agmsg's own version marker at its install root.
 const agmsgVersionFile = "VERSION"
