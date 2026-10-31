@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"panemux/internal/config"
+	"panemux/internal/host"
 	"panemux/internal/session"
 	"panemux/internal/sshconfig"
 )
@@ -119,15 +120,17 @@ func (h *Handler) PostConfigSSHConnection(w http.ResponseWriter, r *http.Request
 	conn.Password = req.Password
 
 	h.cfgMu.Lock()
-	defer h.cfgMu.Unlock()
 	if _, exists := h.cfg.SSHConnections[req.Name]; exists {
+		h.cfgMu.Unlock()
 		writeJSONError(w, http.StatusConflict, fmt.Sprintf("ssh connection %q already exists", req.Name))
 		return
 	}
 	saved, ok := h.storeSSHConnection(w, req.Name, conn)
+	h.cfgMu.Unlock()
 	if !ok {
 		return
 	}
+	h.hostTools.AfterHostAdded(host.Host(req.Name))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(saved)

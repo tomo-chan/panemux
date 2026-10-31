@@ -1490,3 +1490,19 @@ Source acquisition keeps git stdout and stderr separate. Only stdout is compared
 SHA or transferred as the tar stream, so successful git warnings cannot invalidate the pin or
 corrupt the archive. Failed source operations include stderr in their diagnostic. Installer and
 target-prerequisite calls retain the shared input lane's combined-output behavior.
+
+### Global agmsg automatic updates
+
+`POST /api/hosts/agmsg/auto-update` takes only `{ "enabled": true }` (no host) and returns
+`{ "auto_update": true }`. It is available only with Agent Board enabled (otherwise 404),
+rejects unknown fields or a missing/non-boolean enabled value (400), and reports config-save
+failures as 500 without changing the in-memory preference. It uses the existing YAML save path.
+GET/POST agmsg tool responses also contain `auto_update`, plus `auto_updated` or `auto_error`
+when this process has a result. Success belongs to the current host run, including its queued
+confirmation; a later opt-in run or a newly added host identity does not inherit earlier success.
+The checkbox controls every host; local and SSH use the same API.
+Startup and each off-to-on opt-in check all hosts; an opt-in arriving during a run queues one
+coalesced follow-up. A successfully persisted host addition checks only the new host when the
+preference is on. These checks update older installed releases only and
+retain failures for manual retry. There is no automatic Install, downgrade, recovery or periodic
+retry. See [automatic updating](../agent-board/agmsg-integration.md#automatic-updating).

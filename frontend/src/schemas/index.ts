@@ -765,6 +765,9 @@ export const CodexHookSchema = z.object({
 export type CodexHook = z.infer<typeof CodexHookSchema>
 
 export const AgmsgToolSchema = z.object({
+  auto_update: z.boolean().optional(),
+  auto_updated: z.boolean().optional(),
+  auto_error: z.string().optional(),
   error: z.string().optional(),
   status: z.enum(['absent', 'missing', 'installed', 'outdated', 'invalid', 'unknown', 'newer']),
   version: z.string().optional(),

@@ -107,8 +107,36 @@ including Claude commands, other agents' skills and Codex sandbox settings. It r
 user; operator trust covers the fixed upstream code, verified through contract tests and human
 release review, not a restricted installation sandbox. See [the security model](security-model.md).
 
-Instance-wide automatic updating is not currently executed. `agmsg_auto_update` is persisted but inactive, and
-this PR exposes no automatic-update checkbox for agmsg.
+## Automatic updating
+
+`agent_board.agmsg_auto_update` defaults to false. With Agent Board enabled and this preference
+on, panemux checks the local host and every configured SSH host in the background at startup.
+Turning on **Update automatically (all hosts)** in any host menu saves the same global config
+preference and starts those checks too. A re-enable received during an active run queues one
+follow-up check for that host; overlapping requests coalesce and never run installers concurrently.
+Adding an SSH host through the host settings checks that new host after config persistence succeeds,
+if automatic updates are on. It does not recheck existing hosts or retry their retained failures.
+Reopening a menu or collecting tasks does not retry a failed update. No periodic
+monitor is added. Turning it off prevents pending updates from starting; an installer already
+running is allowed to finish.
+
+Only an installed release older than the version pin is updated, using the same prerequisite,
+verified-source, archive and drain/pause path as manual Update. Eligibility is rechecked within
+the update reservation and update-only intent is preserved through the adapter’s final probe,
+so an external removal cannot turn an automatic Update into Install. Missing, newer, unknown and alternate installations are left alone.
+Opting in never installs agmsg on an absent host and never downgrades it.
+
+Menus show a check/update in progress and ask to reopen for the result, retain automatic failure
+reasons (including prerequisites, acquisition, installer exit/output and timeouts), and report
+successful automatic updates with agent-restart guidance. A queued confirmation keeps the notice
+for its own host run. A later opt-in run does not inherit that success, and adding a host identity
+clears results from any previous host with the same name, including late in-flight results.
+Use the host's manual Update to retry;
+a successful manual operation clears the retained automatic result. Restarting panemux or explicitly turning automatic updates off and on starts a new check. There is no automatic recovery invocation.
+
+The global checkbox is available even on a host that cannot itself be updated: it controls all
+hosts. Its consent explains that future automatic updates execute the trusted pinned installer
+without another prompt, including writes outside the skill directory.
 
 ## Two panes in one project directory
 
@@ -153,4 +181,5 @@ hermes) and the desktop agmsg-app are not detected as board agents.
 
 The public path override has been removed. The adapter owns the fixed default location.
 Relay discovery remembers confirmed absence; bootstrap rechecks presence on eligible ticks.
-Installation and invalidating an absent relay discovery after Install belong to #435's follow-up.
+The host tool manager installs the pinned source and invalidates absent relay discovery after
+an installer attempt. Successful Install can therefore join from the next poll without restart.

@@ -47,6 +47,12 @@ type Tool interface {
 	Install(context.Context, host.Host) (State, error)
 }
 
+// UpdateTool preserves update-only intent through an adapter's final probe.
+// Global automatic updates never fall back to Install.
+type UpdateTool interface {
+	Update(context.Context, host.Host) (State, error)
+}
+
 var ErrUnknownHost = hostexec.ErrUnknownHost
 var ErrUnknownTool = errors.New("unknown tool")
 
@@ -54,11 +60,14 @@ type Options struct {
 	Hosts         func() []string
 	Tools         map[ID]Tool
 	CodexHookAuto *CodexHookAutoStore
-	Logf          func(string, ...any)
+	// GlobalAuto reads instance-wide preferences; saving belongs to composition.
+	GlobalAuto map[ID]func() bool
+	Logf       func(string, ...any)
 }
 
 type Service struct {
 	opts          Options
+	globalAuto    map[callKey]globalAutoResult
 	codexHookAuto map[string]codexHookAuto
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -73,7 +82,8 @@ func New(opts Options) *Service {
 		opts.Logf = log.Printf
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{opts: opts, ctx: ctx, cancel: cancel, codexHookAuto: map[string]codexHookAuto{}}
+	return &Service{opts: opts, ctx: ctx, cancel: cancel,
+		codexHookAuto: map[string]codexHookAuto{}, globalAuto: map[callKey]globalAutoResult{}}
 }
 
 func (s *Service) checkHost(h host.Host) error {
@@ -113,7 +123,7 @@ func (s *Service) Check(ctx context.Context, id ID, h host.Host) (State, error) 
 	if id == CodexHookTool {
 		got = s.autoUpdateCodexHook(ctx, string(h), got)
 	}
-	return got, nil
+	return s.withGlobalAuto(id, h, got), nil
 }
 
 func (s *Service) Install(ctx context.Context, id ID, h host.Host) (State, error) {
@@ -129,7 +139,8 @@ func (s *Service) Install(ctx context.Context, id ID, h host.Host) (State, error
 		s.forgetCodexHookAuto(string(h))
 		got = s.withCodexHookAuto(string(h), got)
 	}
-	return got, nil
+	s.resetGlobalAuto(id, h)
+	return s.withGlobalAuto(id, h, got), nil
 }
 
 func (s *Service) checkCodexHook(ctx context.Context, name string) State {
@@ -153,11 +164,32 @@ func (s *Service) check(ctx context.Context, id ID, h host.Host, tool Tool) (Sta
 }
 
 func (s *Service) install(ctx context.Context, id ID, h host.Host, tool Tool) (State, error) {
+	return s.installWhen(ctx, id, h, tool, nil)
+}
+
+func (s *Service) installWhen(
+	ctx context.Context, id ID, h host.Host, tool Tool, eligible func(State) bool,
+) (State, error) {
 	resume, err := s.calls.Pause(ctx, id, h)
 	if err != nil {
 		return State{}, err
 	}
 	defer resume()
+	var checked State
+	if eligible != nil {
+		checked = tool.Check(ctx, h)
+		if !eligible(checked) {
+			return checked, nil
+		}
+	}
+	install := tool.Install
+	if eligible != nil {
+		updater, ok := tool.(UpdateTool)
+		if !ok {
+			return State{}, errors.New("tool does not support update without installation")
+		}
+		install = updater.Update
+	}
 	var checks []Prerequisite
 	if p, ok := tool.(PrerequisiteTool); ok {
 		checks = p.Prerequisites(h)
@@ -165,8 +197,14 @@ func (s *Service) install(ctx context.Context, id ID, h host.Host, tool Tool) (S
 	if err := CheckPrerequisites(ctx, checks); err != nil {
 		return State{}, err
 	}
+	// Acquisition may have waited for another host's source preparation.
+	// Honor opt-out again before admitting the installer, using the same
+	// checked state; UpdateTool performs its own final host probe.
+	if eligible != nil && !eligible(checked) {
+		return checked, nil
+	}
 	defer s.invalidate(id, h)
-	return tool.Install(ctx, h) //nolint:wrapcheck // preserve adapter errors
+	return install(ctx, h) //nolint:wrapcheck // preserve adapter errors
 }
 func hostName(name string) string {
 	if name == "" {

@@ -71,4 +71,9 @@ Install / Update authorizes execution as the target user of the pinned upstream 
 contract tests and human release review. The installer writes outside `~/.agents/skills` (Claude
 commands, other agents' skill directories, Codex sandbox settings and agent shims). Panemux does
 not sandbox those effects, operate on teams/DBs directly, run recovery, install dependencies or
-stop agent-owned scripts. Manual operation is implemented; unattended execution is not currently implemented.
+stop agent-owned scripts.
+
+Automatic agmsg updates use the same fixed-SHA source and installer path as manual Update. The
+instance-wide preference authorizes unattended execution on older installed copies at startup,
+on opt-in and when a configured host is added; it never authorizes automatic Install or downgrade. Eligibility is rechecked inside
+the update reservation. No new command execution sink is introduced.

@@ -683,7 +683,11 @@ menu actions. It shows Not installed / Install, older release / Update, Installe
 newer release warning (kept unchanged), Cannot install with setup reasons, or Not checked.
 Install / Update explains that the tested installer can write outside the skill directory and
 that existing agent scripts keep running. Errors preserve installer exit/output details; success
-asks agents to restart and explains that panemux participates from its next poll. No agmsg
-Update automatically checkbox is shown because instance-wide automatic updating is not currently executed.
+asks agents to restart and explains that panemux participates from its next poll.
+**Update automatically (all hosts)** is the same global preference in every host menu, including
+hosts with newer or unconfirmed copies. Consent remains visible beside it even when no manual
+action is offered, explaining unattended execution and writes outside the skill directory.
+During automatic work the menu asks to reopen for the result; automatic failures remain visible
+with manual Update available for retry, and success reports Updated automatically with restart guidance.
 
 ![agmsg manual Update in the host menu](images/agmsg-host-tool.png)

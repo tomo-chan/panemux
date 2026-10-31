@@ -218,6 +218,7 @@ func NewHandler(
 			hosttools.CodexHookTool: codexhook.New(codexhook.Options{Execution: h.execution}),
 		},
 		CodexHookAuto: hosttools.NewCodexHookAutoStore(""),
+		GlobalAuto:    map[hosttools.ID]func() bool{hosttools.AgmsgTool: h.agmsgAutoEnabled},
 	})
 	h.tasks = newTaskService(h)
 	h.taskRecords = tasks.NewRecordStore("")

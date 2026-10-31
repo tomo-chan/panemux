@@ -118,6 +118,7 @@ const roundTrips: RoundTrip[] = [
   { fixture: 'task-attach', schemaName: 'TaskAttachSchema', schema: schemas.TaskAttachSchema },
   { fixture: 'host-session-name', schemaName: 'HostSessionNameSchema', schema: schemas.HostSessionNameSchema },
   { fixture: 'host-terminal', schemaName: 'HostTerminalSchema', schema: schemas.HostTerminalSchema },
+  { fixture: 'host-agmsg-auto-update', schemaName: 'CodexHookAutoSchema', schema: schemas.CodexHookAutoSchema },
   { fixture: 'host-agmsg', schemaName: 'AgmsgToolSchema', schema: schemas.AgmsgToolSchema },
   { fixture: 'task-codex-hook', schemaName: 'CodexHookSchema', schema: schemas.CodexHookSchema },
   {
@@ -480,6 +481,8 @@ const unexercisedOptionals: Record<string, string> = {
   // the capture records them, which is the path worth pinning.
   // Set only once panemux updated a host's hook by itself (issue #402); the
   // capture's hooks.json cannot be read, so there is nothing to update.
+  'host-agmsg.auto_updated': 'the captured copy is newer than the pin; automatic success is covered by HostTools.agmsg.test.tsx and hosttools tests',
+  'host-agmsg.auto_error': 'the captured copy is newer than the pin; retained automatic failures are covered by HostTools.agmsg.test.tsx and hosttools tests',
   'host-agmsg.error': 'the captured installation has a comparable version and is reachable',
   'task-codex-hook.auto_updated': 'needs a hook updated by itself, and the captured hooks.json cannot be updated',
   'task-codex-hook.auto_error': 'needs an update by itself that fails, and the captured hooks.json cannot be updated',

@@ -115,6 +115,10 @@ func TestToolRevisionIncreasesAfterSuccessfulOrPartialInstall(t *testing.T) {
 }
 
 func (p *prerequisiteTool) Prerequisites(host.Host) []Prerequisite { return p.checks }
+func (p *prerequisiteTool) Update(ctx context.Context, h host.Host) (State, error) {
+	return p.Install(ctx, h)
+}
+
 func (p *prerequisiteTool) Install(ctx context.Context, h host.Host) (State, error) {
 	if p.install != nil {
 		return State{Status: Installed}, p.install(ctx)

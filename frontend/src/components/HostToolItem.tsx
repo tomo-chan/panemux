@@ -70,8 +70,9 @@ export const HostToolItem: React.FC<HostToolItemProps> = ({ tool, host, label = 
         return
       }
       setState({ phase: 'ready', hook: { ...hook, auto_update: result.launched.auto_update } })
-      // Turned on while it shows Update: check once, which updates it.
-      if (result.launched.auto_update && hook.status === 'outdated') {
+      // Refresh after opt-in: global work starts on the server; host work
+      // starts on an outdated check.
+      if (result.launched.auto_update && (hook.status === 'outdated' || tool.autoScope === 'global')) {
         const checked = await load(host)
         if (!mounted.current) return
         if (checked.ok) setState({ phase: 'ready', hook: checked.launched })
@@ -137,8 +138,8 @@ export const HostToolItem: React.FC<HostToolItemProps> = ({ tool, host, label = 
         )}
       </div>
       <div className="td-host-menu-codex-detail">{detail}</div>
-      {action && tool.consent && <div className="td-muted">{tool.consent}</div>}
-      {setAuto && hook && (hook.status === 'missing' || hook.status === 'outdated' || hook.status === 'installed') && (
+      {(action || (setAuto && tool.autoScope === 'global')) && tool.consent && <div className="td-muted">{tool.consent}</div>}
+      {setAuto && hook && (tool.autoScope === 'global' || hook.status === 'missing' || hook.status === 'outdated' || hook.status === 'installed') && (
         <label className="td-host-menu-codex-auto">
           <input
             type="checkbox"
@@ -146,7 +147,7 @@ export const HostToolItem: React.FC<HostToolItemProps> = ({ tool, host, label = 
             disabled={saving || installing || !!hook.auto_settings_error}
             onChange={() => toggleAuto(hook)}
           />
-          Update automatically
+          Update automatically{tool.autoScope === 'global' ? ' (all hosts)' : ''}
         </label>
       )}
       {hook?.auto_updated && !installed && (
@@ -185,6 +186,7 @@ export const HostToolItem: React.FC<HostToolItemProps> = ({ tool, host, label = 
 
 // Tool-specific copy is supplied by the adapter, while menu behavior is shared.
 export interface ToolDefinition {
+  autoScope?: 'global' | 'host'
   consent?: string
   id: string
   title: string
