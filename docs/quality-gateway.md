@@ -88,6 +88,13 @@ no real CLI runs. A detached `claude` process with a state file stands in for a 
 session, and the spec checks it is not listed: the check fails when the isolation stops working.
 The stand-ins' own behavior is tested by `make test-screenshots-check`.
 
+### agmsg release proposal automation
+
+`make test-agmsg-automation` runs offline Python tests for release/SHA resolution,
+PR scope, fixture and pin updates, and proposal deduplication/retry. It runs in `make check`
+and CI. Actual scheduled App authentication and PR delivery need owner-provided secrets;
+these remain an operational check. See [maintenance](maintenance.md#the-agmsg-compatibility-contract-job).
+
 ### Local verification execution
 
 `make verify-*` preserves the original gate results while saving checkout-local

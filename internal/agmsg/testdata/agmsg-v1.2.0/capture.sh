@@ -2,10 +2,10 @@
 # Regenerates this directory's fixtures from a REAL agmsg install, so their
 # provenance is reproducible rather than asserted. See README.md.
 #
-#   internal/agmsg/testdata/agmsg-v1.2.0/capture.sh <agmsg-source-checkout>
+#   internal/agmsg/testdata/agmsg-v1.2.0/capture.sh <agmsg-source-checkout> <commit-sha>
 #
-# The argument is a checkout of github.com/fujibee/agmsg at the tag matching
-# this directory's name. The install goes into a throwaway HOME, never the
+# The arguments are an agmsg checkout and its verified commit SHA.
+# No tag is checked out. The install goes into a throwaway HOME, never the
 # caller's own ~/.agents.
 #
 # Every value written here is a placeholder chosen for the fixture
@@ -13,22 +13,27 @@
 # path-sanitization rule forbids capturing a real working directory.
 set -euo pipefail
 
-src="${1:?usage: capture.sh <agmsg-source-checkout>}"
+src="${1:?usage: capture.sh <agmsg-source-checkout> <commit-sha>}"
+sha="${2:?expected contract-tested commit SHA}"
+[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
+[ "$(git -C "$src" rev-parse HEAD)" = "$sha" ] || exit 1
 out="$(cd "$(dirname "$0")" && pwd)"
 tag="$(basename "$out" | sed 's/^agmsg-v/v/')"
 
 command -v sqlite3 >/dev/null || { echo "sqlite3 is required" >&2; exit 1; }
 
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+work="$(mktemp -d "${TMPDIR:-/tmp}/panemux-agmsg-capture.XXXXXX")" || exit 1
+trap 'rm -r -- "$work"' EXIT
+unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME
+unset CLAUDE_CONFIG_DIR CODEX_HOME AGMSG_STORAGE_PATH
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export HOME="$work/home"
 mkdir -p "$HOME" "$work/sample-project"
 
-git -C "$src" checkout --quiet "$tag"
 (cd "$src" && ./install.sh --cmd agmsg >/dev/null)
 
 s="$HOME/.agents/skills/agmsg/scripts"
-project=/tmp/sample-project
+project="$work/sample-project"
 mkdir -p "$project"
 
 "$s/join.sh" panemux pane-a claude-code "$project" --force >/dev/null
@@ -48,4 +53,16 @@ mkdir -p "$project"
 
 "$s/version.sh" > "$out/VERSION.txt" 2>/dev/null || cat "$HOME/.agents/skills/agmsg/VERSION" > "$out/VERSION.txt"
 
-echo "captured $tag into $out"
+# Sanitize the isolated project path; never record a runner path.
+python3 - "$out" "$project" <<'PYTHON'
+import pathlib, sys
+project = pathlib.Path(sys.argv[2])
+variants = {sys.argv[2], str(project), str(project.resolve())}
+for path in pathlib.Path(sys.argv[1]).glob("*.jsonl"):
+    text = path.read_text()
+    for value in sorted(variants, key=len, reverse=True):
+        text = text.replace(value, "/tmp/sample-project")
+    path.write_text(text)
+PYTHON
+printf '%s\n' "$sha" > "$out/COMMIT.txt"
+echo "captured $tag ($sha) into $out"

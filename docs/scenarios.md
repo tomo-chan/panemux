@@ -135,7 +135,7 @@ See [agent-board/agmsg-contract.md](agent-board/agmsg-contract.md#agmsg-compatib
 
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
-| G1 | panemux parses what agmsg really prints | Real captured `api.sh` JSONL parses into rows, status reports and history exactly as the code assumes | `auto`: `internal/agmsg/agmsg_fixture_test.go` against `testdata/agmsg-v1.2.0/` (captured, not hand-written — see its README) |
+| G1 | panemux parses what agmsg really prints | Real captured `api.sh` JSONL parses into rows, status reports and history exactly as the code assumes | `auto`: `internal/agmsg/agmsg_fixture_test.go` against the capture selected by fixtureDir (captured, not hand-written — see its README) |
 | G2 | A message survives the round trip | What `send.sh` wrote comes back out of `api.sh` with team/from/to/body/timestamp intact, through the shared host execution port and the same agmsg client used in production | `auto (opt-in)`: `TestAgmsgContract_SendThenSinceRoundTrip` |
 | G3 | A body full of shell and SQL metacharacters | Stored and returned byte for byte — no expansion, no quote stripping, no SQL interpretation | `auto (opt-in)`: `TestAgmsgContract_ShellMetacharacterBodyRoundTrips` |
 | G4 | The relay's poll cursor against a real store | A poll with nothing new returns nothing; the next message, and only it, comes back | `auto (opt-in)`: `TestAgmsgContract_SinceCursorAnchorsOnReturnedOrder` — the regression test for the numeric-id cursor bug |
@@ -143,11 +143,12 @@ See [agent-board/agmsg-contract.md](agent-board/agmsg-contract.md#agmsg-compatib
 | G6 | `--limit` bounds a poll | Returns the *newest* n rows, oldest first — the assumption the accepted truncation tradeoff rests on | `auto (opt-in)`: `TestAgmsgContract_SinceLimitKeepsTheNewestRows` |
 | G7 | A `board_status` report end to end | The `_system` sentinel survives agmsg verbatim and the body is still recognized as a status report | `auto (opt-in)`: `TestAgmsgContract_StatusRowRoundTrips` |
 | G8 | A pane ID is used verbatim as the agmsg agent id | A generated ID like `pane-1787195690568-re241` registers unchanged | `auto (opt-in)`: `TestAgmsgContract_JoinUsesThePaneIDVerbatim` |
-| G9 | An agmsg release changes behavior | The canary fails against agmsg's latest tag, before anyone here bumps the pin | `auto`: `.github/workflows/agmsg-contract.yml`, `schedule` trigger (daily 06:00 UTC, doing real work once per new agmsg release) |
-| G10 | A PR bumps `agmsg.TestedAgmsgVersion` | The contract runs against the new pin and blocks the merge if real behavior differs | `auto`: same workflow, `pull_request` trigger — see [maintenance.md](maintenance.md#the-agmsg-compatibility-contract-job) for the branch-protection step this depends on |
+| G9 | An agmsg release changes behavior | The canary tests the latest stable tag's commit; failure leaves the pin unchanged and creates no proposal | `auto`: `.github/workflows/agmsg-contract.yml`, `schedule` trigger (daily 06:00 UTC, verifying each new tag/SHA pair) |
+| G10 | A PR bumps the agmsg version/SHA pin | The contract runs against the recorded commit SHA and blocks the merge if real behavior differs | `auto`: same workflow, `pull_request` trigger — see [maintenance.md](maintenance.md#the-agmsg-compatibility-contract-job) for the branch-protection step this depends on |
 | G11 | An operator installs exactly the pinned agmsg | No version warning at startup, whichever install path they used — `install.sh` writes `v1.2.0`, not `1.2.0` | `auto`: `TestVersionMismatchWarning_InstallProvenanceForms`; `auto (opt-in)`: `TestAgmsgContract_InstalledVersionDoesNotFalselyWarn` against the real installer |
 | G12 | An operator runs a newer patch of agmsg | Warn against the pinned release without blocking startup | `auto`: `TestVersionMismatchWarning_NewerPatchesWarn` |
 | G12a | An operator runs a patch *older* than the pin | Warned — it never went through the canary. Unreachable while the pin's patch is 0, so the rule is tested apart from the pin | `auto`: `TestReleaseCovered` |
+| G13 | A new release passes the scheduled contract | App-authenticated fix PR updates version/SHA and captures without duplicate proposals; missing secrets skip creation | `auto`: `scripts/agmsg_contract_test.py` (`make test-agmsg-automation`); `manual`: scheduled App/PR delivery after owner setup |
 | G13 | An operator runs a different minor/major, or an unreadable version | Warned, naming the version found and the pin | `auto`: `TestVersionMismatchWarning_StillWarnsWhereItMatters` |
 
 ## H. The core multiplexer

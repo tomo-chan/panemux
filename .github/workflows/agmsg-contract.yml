@@ -1,61 +1,22 @@
 name: agmsg-contract
 
-# Tier 2 of docs/agent-board.md's agmsg compatibility contract: runs
-# `make test-agmsg-contract` against a REAL agmsg install, which Tier 1's
-# hermetic fixtures cannot do. Tier 1 pins panemux against a fixed shape and
-# stays green when agmsg itself changes; this job is the piece that notices.
-#
-# It runs in the two situations that contract calls for, and the ref it
-# installs differs between them:
-#
-#   * On a schedule, against agmsg's LATEST release tag — an early warning
-#     that a release has broken an assumption panemux depends on, before
-#     anyone here has chosen to bump the pin. Nothing is blocked by this
-#     run; a failure is a notification, not a gate.
-#
-#     It polls DAILY rather than weekly because agmsg ships far faster than
-#     weekly: measured over its 22 releases from v1.0.2 (2026-06-08) to
-#     v1.2.2 (2026-08-20), the median gap between releases is 2.9 days and
-#     only 3 of 21 gaps exceeded a week. A weekly canary would therefore
-#     usually straddle two or three releases, and a failure could not be
-#     attributed to any one of them. A daily poll costs a few minutes a
-#     month and keeps the answer to "which release broke this" to one
-#     candidate.
-#
-#     Polling daily does not mean re-testing daily. The scope job remembers
-#     the last tag that passed and skips a run whose latest tag is already
-#     verified, so the real cadence is "once per agmsg release" — which is
-#     the cadence that actually matters, and it stays correct if agmsg
-#     speeds up or goes quiet. A tag that FAILED is never remembered, so it
-#     is retried every day until it is dealt with.
-#
-#   * On every pull request, against the PINNED version
-#     (agmsg.TestedAgmsgVersion) — so a PR that actually bumps the pin
-#     cannot merge on a version whose real behavior differs.
-#
-# The PR trigger has no `paths:` filter on purpose. A path-filtered workflow
-# reports no status at all on the PRs it skips, and a required check that
-# never reports blocks every one of them. Instead this always runs and the
-# `scope` job decides in a few seconds whether the contract is worth
-# installing agmsg for, so the check can safely be marked required.
-
+# Tier 2 tests real upstream code at an immutable commit. The schedule can
+# propose a pin bump only after success; relevant PRs recheck their pinned SHA.
 on:
   schedule:
-    # Daily, 06:00 UTC (15:00 JST).
     - cron: '0 6 * * *'
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
     inputs:
       agmsg_ref:
-        description: 'agmsg git ref to test against (default: the pinned version)'
+        description: 'Stable agmsg tag or full commit SHA (default: pinned SHA; never creates a PR)'
         required: false
         type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -66,191 +27,150 @@ jobs:
     outputs:
       run: ${{ steps.verified.outputs.run }}
       agmsg_ref: ${{ steps.decide.outputs.agmsg_ref }}
+      agmsg_tag: ${{ steps.decide.outputs.agmsg_tag }}
       cache_key: ${{ steps.decide.outputs.cache_key }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
-
-      - name: Resolve the agmsg ref to test
+          persist-credentials: false
+      - name: Resolve the contract commit
         id: decide
         env:
           EVENT: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
           DISPATCH_REF: ${{ inputs.agmsg_ref }}
-        run: |
-          set -euo pipefail
-
-          # The pin lives in Go source, as the single value the running
-          # binary also warns against at startup. Reading it here keeps this
-          # workflow from becoming a second place to update.
-          pinned="$(sed -n 's/^const TestedAgmsgVersion = "\(.*\)"$/\1/p' internal/agmsg/agmsg_version.go)"
-          if [ -z "$pinned" ]; then
-            echo "could not read TestedAgmsgVersion from internal/agmsg/agmsg_version.go" >&2
-            exit 1
-          fi
-          echo "pinned agmsg version: $pinned"
-
-          case "$EVENT" in
-            schedule)
-              # agmsg's own release tags are vN.N.N. The filter excludes the
-              # co-located app-v* lineage and every -rc tag, so "latest"
-              # means the newest core release a user would install.
-              latest="$(git ls-remote --tags --refs https://github.com/fujibee/agmsg.git 'v*' \
-                | awk -F'refs/tags/' '{print $2}' \
-                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-                | sort -V | tail -1)"
-              if [ -z "$latest" ]; then
-                echo "could not resolve agmsg's latest release tag" >&2
-                exit 1
-              fi
-              echo "run=true"           >> "$GITHUB_OUTPUT"
-              echo "agmsg_ref=$latest"  >> "$GITHUB_OUTPUT"
-              # Only the canary dedupes. A pull request always verifies the
-              # pin, however many times that same version has been tested.
-              echo "cache_key=agmsg-contract-passed-$latest" >> "$GITHUB_OUTPUT"
-              echo "canary run against agmsg's latest tag: $latest (pin is v$pinned)"
-              ;;
-            workflow_dispatch)
-              echo "run=true" >> "$GITHUB_OUTPUT"
-              echo "agmsg_ref=${DISPATCH_REF:-v$pinned}" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              # A pull request. Install agmsg only when this PR touches the
-              # pin, the contract itself, its fixtures, or the client code
-              # the contract drives — everything else cannot change what
-              # this job would assert.
-              git fetch --quiet origin "$BASE_REF"
-              changed="$(git diff --name-only "origin/$BASE_REF"...HEAD)"
-              echo "changed files:"; echo "$changed"
-              if echo "$changed" | grep -qE '^(internal/agmsg/|Makefile|\.github/workflows/agmsg-contract\.yml)'; then
-                echo "run=true" >> "$GITHUB_OUTPUT"
-                echo "agmsg_ref=v$pinned" >> "$GITHUB_OUTPUT"
-                echo "contract-relevant files changed; running against the pinned v$pinned"
-              else
-                echo "run=false" >> "$GITHUB_OUTPUT"
-                echo "agmsg_ref=" >> "$GITHUB_OUTPUT"
-                echo "no contract-relevant files changed; nothing to verify"
-              fi
-              ;;
-          esac
-
-      # A cache entry under this key exists only if the contract has already
-      # PASSED against this exact tag. Restoring it is the whole check: an
-      # exact hit means there is nothing new to verify. A failed run never
-      # writes one, so a broken release is retried on every poll rather than
-      # being marked done.
-      - name: Look up whether this tag already passed
-        id: verified_cache
+        run: python3 -B scripts/agmsg_contract.py scope
+      - name: Look up the verified tag and commit
+        id: cache
         if: steps.decide.outputs.cache_key != ''
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .agmsg-contract-passed
           key: ${{ steps.decide.outputs.cache_key }}
           lookup-only: true
-
-      - name: Skip a tag that has already been verified
+      - name: Decide whether to repeat the contract
         id: verified
         env:
           DECIDED: ${{ steps.decide.outputs.run }}
-          AGMSG_REF: ${{ steps.decide.outputs.agmsg_ref }}
-          ALREADY_PASSED: ${{ steps.verified_cache.outputs.cache-hit }}
+          PASSED: ${{ steps.cache.outputs.cache-hit }}
         run: |
-          set -euo pipefail
-          if [ "$DECIDED" = "true" ] && [ "$ALREADY_PASSED" = "true" ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "agmsg $AGMSG_REF already passed this contract; nothing new to verify."
-            echo "agmsg \`$AGMSG_REF\` has already passed this contract — no new release to check." \
-              >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PASSED" = true ]; then
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+            echo 'This tag and SHA already passed; the PR proposal can still be retried.' >> "$GITHUB_STEP_SUMMARY"
           else
             echo "run=$DECIDED" >> "$GITHUB_OUTPUT"
           fi
 
-  # This job always runs and always reports a conclusion, with its expensive
-  # steps gated individually. A job skipped by a job-level `if` reports
-  # "skipped" instead, and how branch protection scores that is exactly the
-  # ambiguity a required check should not depend on — so there is none here.
+  # Always reports a conclusion, even when no contract-relevant files changed.
+  # Keep this job suitable for branch protection: agmsg-contract / contract.
   contract:
     needs: scope
     runs-on: ubuntu-latest
     steps:
       - name: Nothing to verify
         if: needs.scope.outputs.run != 'true'
-        run: |
-          echo "No contract-relevant files changed; agmsg was not installed." \
-            >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Checkout
+        run: echo 'No new contract verification needed.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         if: needs.scope.outputs.run == 'true'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-
-      - name: Set up Go
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         if: needs.scope.outputs.run == 'true'
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: go.mod
-
       - name: Install sqlite3
         if: needs.scope.outputs.run == 'true'
-        # agmsg stores messages in SQLite and shells out to the sqlite3
-        # binary; api.sh cannot run at all without it. GitHub's ubuntu image
-        # does not ship it.
         run: |
-          set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends sqlite3
-
-      - name: Install agmsg
+      - name: Install the resolved agmsg commit in an isolated HOME
         if: needs.scope.outputs.run == 'true'
         env:
-          AGMSG_REF: ${{ needs.scope.outputs.agmsg_ref }}
+          AGMSG_SHA: ${{ needs.scope.outputs.agmsg_ref }}
         run: |
           set -euo pipefail
-          git clone --quiet https://github.com/fujibee/agmsg.git /tmp/agmsg-src
-          git -C /tmp/agmsg-src checkout --quiet "$AGMSG_REF"
-          # install.sh is agmsg's own documented installer, the same path an
-          # operator takes; --cmd makes it non-interactive. It installs into
-          # ~/.agents/skills/agmsg, which on an ephemeral runner is a
-          # throwaway home directory.
-          (cd /tmp/agmsg-src && ./install.sh --cmd agmsg)
-          echo "installed agmsg $(cat "$HOME/.agents/skills/agmsg/VERSION")"
-
+          [[ "$AGMSG_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git clone --quiet https://github.com/fujibee/agmsg.git "$RUNNER_TEMP/agmsg-src"
+          git -C "$RUNNER_TEMP/agmsg-src" checkout --quiet --detach "$AGMSG_SHA"
+          test "$(git -C "$RUNNER_TEMP/agmsg-src" rev-parse HEAD)" = "$AGMSG_SHA"
+          mkdir -p "$RUNNER_TEMP/agmsg-home"
+          (
+            unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME
+            unset CLAUDE_CONFIG_DIR CODEX_HOME AGMSG_STORAGE_PATH
+            export HOME="$RUNNER_TEMP/agmsg-home" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+            cd "$RUNNER_TEMP/agmsg-src"
+            ./install.sh --cmd agmsg
+          )
       - name: Run the contract
         if: needs.scope.outputs.run == 'true'
-        run: make test-agmsg-contract AGMSG_PATH="$HOME/.agents/skills/agmsg"
-
-      # Written only after the contract passed, so the skip in the scope job
-      # can never mark a broken release as verified.
-      - name: Remember that this tag passed
+        run: make test-agmsg-contract AGMSG_PATH="$RUNNER_TEMP/agmsg-home/.agents/skills/agmsg"
+      - name: Remember successful verification
         if: needs.scope.outputs.run == 'true' && needs.scope.outputs.cache_key != ''
         run: date -u +%FT%TZ > .agmsg-contract-passed
-
-      - name: Save the verified marker
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         if: needs.scope.outputs.run == 'true' && needs.scope.outputs.cache_key != ''
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .agmsg-contract-passed
           key: ${{ needs.scope.outputs.cache_key }}
 
-      - name: Summary
-        if: always() && needs.scope.outputs.run == 'true'
+  propose-bump:
+    needs: [scope, contract]
+    # PRs and manual dispatches never receive the App token. A cached success
+    # may retry proposal after missing credentials or a transient GitHub error.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check optional App configuration
+        id: app
         env:
-          AGMSG_REF: ${{ needs.scope.outputs.agmsg_ref }}
-          EVENT: ${{ github.event_name }}
+          APP_ID: ${{ secrets.AGMSG_BUMP_APP_ID }}
+          APP_KEY: ${{ secrets.AGMSG_BUMP_APP_PRIVATE_KEY }}
         run: |
-          {
-            echo "## agmsg compatibility contract — Tier 2"
-            echo
-            echo "| | |"
-            echo "| --- | --- |"
-            echo "| agmsg ref | \`$AGMSG_REF\` |"
-            echo "| trigger | \`$EVENT\` |"
-            echo "| result | ${{ job.status }} |"
-            echo
-            if [ "$EVENT" = "schedule" ]; then
-              echo "A failure here is an early warning against agmsg's latest release, not a gate:"
-              echo "the pinned version (\`agmsg.TestedAgmsgVersion\`) is unchanged and panemux still"
-              echo "runs against it. See docs/agent-board.md's agmsg compatibility contract."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$APP_ID" ] && [ -n "$APP_KEY" ]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'GitHub App secrets are absent; contract passed, no bump PR created.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        if: steps.app.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        if: steps.app.outputs.enabled == 'true'
+        with:
+          go-version-file: go.mod
+      - name: Recapture fixtures and update the pin
+        if: steps.app.outputs.enabled == 'true'
+        env:
+          AGMSG_TAG: ${{ needs.scope.outputs.agmsg_tag }}
+          AGMSG_SHA: ${{ needs.scope.outputs.agmsg_ref }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends sqlite3
+          git clone --quiet https://github.com/fujibee/agmsg.git "$RUNNER_TEMP/agmsg-src"
+          git -C "$RUNNER_TEMP/agmsg-src" checkout --quiet --detach "$AGMSG_SHA"
+          export AGMSG_SOURCE="$RUNNER_TEMP/agmsg-src"
+          python3 -B scripts/agmsg_contract.py prepare
+          go test ./internal/agmsg -run '^TestAgmsgFixture_' -count=1
+      # Mint only after upstream installer/capture finished. No token is given
+      # to upstream code. Git/gh below use this repository-scoped short-lived token.
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        if: steps.app.outputs.enabled == 'true'
+        id: token
+        with:
+          app-id: ${{ secrets.AGMSG_BUMP_APP_ID }}
+          private-key: ${{ secrets.AGMSG_BUMP_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Create the release-specific PR once
+        if: steps.app.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          AGMSG_TAG: ${{ needs.scope.outputs.agmsg_tag }}
+          AGMSG_SHA: ${{ needs.scope.outputs.agmsg_ref }}
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          python3 -B scripts/agmsg_contract.py pr

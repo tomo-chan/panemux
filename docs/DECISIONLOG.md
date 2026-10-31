@@ -7,6 +7,27 @@ Newest entries appear first within each topic. Dates and pull requests are inclu
 history identifies them. A decision remains here after its consequences are reflected in the
 current specification; superseded decisions are retained and labelled as such.
 
+## agmsg pin bump proposals (2026-10-31, issue #437)
+
+The daily real-install contract resolves the latest stable release tag to its commit SHA (peeling
+annotated tags), then uses that SHA throughout installation and capture. PR checks read
+TestedAgmsgCommit directly, so retagging cannot change the code under review. Successful markers
+include tag and SHA; cached successes may retry proposal creation.
+
+A GitHub App token, chosen in #437, creates fix PRs with version/SHA, captured Tier 1 fixtures and
+matching assertions. Capture works on CI with an isolated HOME; the original v1.2.0 ID-order
+regression remains frozen because fresh captures need not reproduce that ordering. Contents and
+pull-requests write suffice; the owner creates/installs the App and registers secrets. Missing
+secrets skip proposals without failing verification. Token minting follows upstream execution.
+GITHUB_TOKEN was not chosen because its events do not trigger ordinary PR CI.
+
+Release-specific branches deduplicate all PR states, including deliberate closure. A newer tag
+gets its own proposal; older proposals remain unchanged for human comparison and closure rather
+than being force-updated or automatically merged. A pushed branch without a PR is reused after a
+creation failure. Release-please is unchanged: fix triggers a patch proposal and publishing its
+draft remains manual. This is stage 5 of #438; it neither tracks upstream main nor alters #435's
+runtime acquisition design.
+
 ## Documentation structure
 
 ### The screenshots' fixed paths are links into the run's own root (2026-10-10, issue #328)

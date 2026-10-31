@@ -6,16 +6,17 @@ frozen output that panemux's own parsing is asserted against, hermetically,
 on every `make check`.
 
 These files are **captured**, not written by hand. `capture.sh` regenerates
-them end to end — it installs agmsg at the tag this directory is named for
+them end to end — it installs agmsg at the supplied verified commit SHA
 into a throwaway `HOME`, joins a team, sends the four messages Tier 1
 asserts on, and records what `scripts/api.sh` actually printed:
 
 ```sh
 git clone https://github.com/fujibee/agmsg.git /tmp/agmsg-src
-internal/agmsg/testdata/agmsg-v1.2.0/capture.sh /tmp/agmsg-src
+internal/agmsg/testdata/agmsg-v1.2.0/capture.sh /tmp/agmsg-src 3c537a51bb76a23e312e7c27770df4a58ba794ff
 ```
 
-`sqlite3` must be installed — agmsg stores messages in SQLite and `api.sh`
+Check out the supplied SHA before capture; the script never checks out a tag.
+`sqlite3` and `python3` must be installed — agmsg stores messages in SQLite and `api.sh`
 cannot run without it.
 
 Every value in these files is a placeholder chosen by `capture.sh`
