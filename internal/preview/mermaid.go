@@ -32,7 +32,7 @@ func (m *MermaidRuntime) URL() string { return m.url }
 
 // ServeHTTP serves exactly the bundled asset; there is no filesystem or SPA fallback.
 func (m *MermaidRuntime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if m == nil || r.URL.Path != m.url {
+	if r.URL.Path != m.url {
 		http.NotFound(w, r)
 		return
 	}
@@ -45,8 +45,8 @@ func (m *MermaidRuntime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func hasMermaid(source []byte) bool {
 	document := markdown.Parser().Parse(text.NewReader(source))
 	found := false
-	_ = ast.Walk(document, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		if block, ok := n.(*ast.FencedCodeBlock); entering && ok && string(block.Language(source)) == "mermaid" {
+	_ = ast.Walk(document, func(n ast.Node, _ bool) (ast.WalkStatus, error) {
+		if block, ok := n.(*ast.FencedCodeBlock); ok && string(block.Language(source)) == "mermaid" {
 			found = true
 			return ast.WalkStop, nil
 		}

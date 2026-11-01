@@ -47,11 +47,11 @@ describe('Mermaid preview', () => {
   })
 
   it.each([
-    '%%{init: {"securityLevel":"loose"}}%%\nflowchart LR\nA-->B',
-    '%%{ initialize: {} }%%\nflowchart LR\nA-->B',
-    '---\nconfig:\n  themeCSS: evil\n---\nflowchart LR\nA-->B',
-    '---\ntitle: Diagram\n---\nflowchart LR\nA-->B',
-  ])('rejects document configuration before calling Mermaid: %s', async source => {
+    { name: 'init directive', source: '%%{init: {"securityLevel":"loose"}}%%\nflowchart LR\nA-->B' },
+    { name: 'initialize directive', source: '%%{ initialize: {} }%%\nflowchart LR\nA-->B' },
+    { name: 'frontmatter config', source: '---\nconfig:\n  themeCSS: evil\n---\nflowchart LR\nA-->B' },
+    { name: 'frontmatter title', source: '---\ntitle: Diagram\n---\nflowchart LR\nA-->B' },
+  ])('rejects document configuration before calling Mermaid: $name', async ({ source }) => {
     code(source)
     await renderMermaidPreviews(document, engine)
     expect(render).not.toHaveBeenCalled()
