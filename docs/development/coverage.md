@@ -8,6 +8,8 @@
 - `make coverage-frontend` enforces at least 80% coverage across `frontend/src/hooks/`, `frontend/src/schemas/`, and `frontend/src/utils/`.
 - **The threshold stays at 80%; what gets strengthened is the scope.** Raising it works, but the cheapest way to satisfy a higher number is to generate tautological tests, which lowers both protection against regressions and resistance to refactoring. See decision D1 in [docs/quality-gateway/decisions.md](../quality-gateway/decisions.md).
 - The gated package set is checked against `go list ./...` by `TestCoverageScopeCoversEveryPackage`, so a package added to the repository fails the suite until it is either gated or explicitly excluded with a reason. Do not widen the exclusion list to make that failure go away.
+- Coverage runs have a 120-second timeout per Go package. This bounds the whole package run,
+  including its subprocess fixtures, rather than an individual test.
 - `make coverage-go` builds the frontend first: the root package is gated and `main.go` embeds `frontend/dist`.
 - The fixture agent's files build only with the `panemux_fixture_agent` tag (issue #377), which the
   coverage run does not set, so they are outside the gate, as they are outside every shipped binary;

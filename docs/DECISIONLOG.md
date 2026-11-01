@@ -2169,3 +2169,10 @@ the original source. Input limits bound work but are not a preemptive rendering 
 MathJax, GeoJSON/TopoJSON maps and ASCII STL remain separate future work; the file-type boundary
 is unchanged. GitHub compatibility concerns syntax and viewing behavior, not matching its
 private integration or a deployed library version.
+
+
+The local verification also exposed two test-harness assumptions: the login-shell fixture's
+`.profile` sources `.bashrc` when macOS `sh` is Bash, and the growing tasks package exceeded the
+coverage run's aggregate 60-second package budget while an individual test had run only one
+second. The fixture probes the actual shell without inherited startup environment, and the
+coverage package budget is 120 seconds. Production task-launch behavior is unchanged.
