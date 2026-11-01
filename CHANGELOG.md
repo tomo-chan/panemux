@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.27.0](https://github.com/tomo-chan/panemux/compare/v0.26.0...v0.27.0) (2026-10-31)
+
+
+### Features
+
+* add host tool update coordination and input streaming ([#448](https://github.com/tomo-chan/panemux/issues/448)) ([b521a6e](https://github.com/tomo-chan/panemux/commit/b521a6e706bab79547d8e28c42d9b08797908e04))
+* automatically update pinned agmsg across hosts ([#456](https://github.com/tomo-chan/panemux/issues/456)) ([77befdf](https://github.com/tomo-chan/panemux/commit/77befdf9ce850f34bd7bafd9b1d0a745cdadb7a8))
+* install pinned agmsg from host menus ([#453](https://github.com/tomo-chan/panemux/issues/453)) ([56dece3](https://github.com/tomo-chan/panemux/commit/56dece39ec5a61b90e4624dc18d30dd56842505b))
+* make agent board participation global ([#447](https://github.com/tomo-chan/panemux/issues/447)) ([4bd4e42](https://github.com/tomo-chan/panemux/commit/4bd4e423365c6ea516681820328fe6620f68cedc))
+* report agent capabilities in GET /api/tasks ([#421](https://github.com/tomo-chan/panemux/issues/421)) ([d2ac144](https://github.com/tomo-chan/panemux/commit/d2ac144caf50877935a528b4e0dc92de8b4ec8e4))
+* show agents and their operations from the agent capabilities on the dashboard ([#422](https://github.com/tomo-chan/panemux/issues/422)) ([4bfa251](https://github.com/tomo-chan/panemux/commit/4bfa251e9b11a7a17bcb5f0f20807ff0b45f3d09))
+
+
+### Bug Fixes
+
+* bump pinned agmsg to v1.7.0 ([#466](https://github.com/tomo-chan/panemux/issues/466)) ([1bd5f08](https://github.com/tomo-chan/panemux/commit/1bd5f080b8c419510891d923fe1a3ed8f2b4dd76))
+* close a ProxyCommand transport exactly once ([#454](https://github.com/tomo-chan/panemux/issues/454)) ([c451715](https://github.com/tomo-chan/panemux/commit/c451715e5c0a5eccf45f9140edc80a14393d21cf))
+* enable URL opening from host terminal popups ([#458](https://github.com/tomo-chan/panemux/issues/458)) ([a32657d](https://github.com/tomo-chan/panemux/commit/a32657d62f322912c7a7ea08dec4fc7e4d147fe0))
+* make internal/tasks tests pass on ubuntu-26.04 runners ([#424](https://github.com/tomo-chan/panemux/issues/424)) ([3a19cd2](https://github.com/tomo-chan/panemux/commit/3a19cd2f652edea1aa928702fe9aac7155b12ec5))
+* start dashboard tasks through the user's login shell so rc exports reach the agent ([#446](https://github.com/tomo-chan/panemux/issues/446)) ([588db3e](https://github.com/tomo-chan/panemux/commit/588db3ef955a59147051f3fc545e85cef17fd3dd))
+
 ## [0.26.0](https://github.com/tomo-chan/panemux/compare/v0.25.0...v0.26.0) (2026-10-18)
 
 
