@@ -58,7 +58,8 @@ The Go tests that depended on either pass on 26.04 since issue #423; `coverage-b
 
 Neither image has zsh, which the task launch tests run the agent through (issue #445). Every
 workflow that runs `internal/tasks`'s tests — `ci.yml`, `coverage-blocks.yml`, `efficacy.yml` and
-`mutation.yml` — installs it with `apt-get` first: with `CI` set, those tests fail rather than skip
+`mutation.yml`, plus the `goreleaser` job in `release-please.yml` whose before hook runs
+`make check` — installs it with `apt-get` first: with `CI` set, those tests fail rather than skip
 when a shell they need is missing, so a new such workflow needs the same step.
 
 ## Dependency Updates
