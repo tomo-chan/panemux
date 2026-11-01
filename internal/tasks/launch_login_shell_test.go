@@ -77,6 +77,8 @@ func lookUpShell(t *testing.T, name string) string {
 // claude typed into a pane (issue #445). The rc runs before the agent's own
 // command, so the agent still starts in the task's directory after an rc that
 // changes directory, and the prompt still reaches it as one argument.
+//
+//efficacy:exempt Corrects fixture expectations for Bash invoked as sh; task launch implementation is unchanged.
 func TestLaunchScript_RunsTheAgentThroughTheUsersLoginShell(t *testing.T) {
 	shells := []struct {
 		name   string
@@ -90,6 +92,17 @@ func TestLaunchScript_RunsTheAgentThroughTheUsersLoginShell(t *testing.T) {
 		for _, mode := range []launchMode{launchNew, launchResume} {
 			t.Run(sh.name+"/"+string(mode), func(t *testing.T) {
 				shell := lookUpShell(t, sh.name)
+				wantRC := sh.wantRC
+				if sh.name == "sh" {
+					// On macOS sh is Bash too, so this fixture's .profile
+					// deliberately sources .bashrc. Probe without reading rc
+					// files or inheriting the developer's BASH_ENV.
+					probe := exec.Command(shell, "-c", `test -n "${BASH_VERSION-}"`)
+					probe.Env = []string{}
+					if probe.Run() == nil {
+						wantRC = "bashrc"
+					}
+				}
 				h := newStubHost(t, true, true)
 				h.writeLoginShellRCFiles(t)
 				cwd := t.TempDir()
@@ -105,7 +118,7 @@ func TestLaunchScript_RunsTheAgentThroughTheUsersLoginShell(t *testing.T) {
 
 				require.NoError(t, parseLaunchOutput(h.run(t, script, shell)))
 
-				assert.Equal(t, []string{sh.wantRC}, h.lines(t, "claude.rc"))
+				assert.Equal(t, []string{wantRC}, h.lines(t, "claude.rc"))
 				assert.Equal(t, wantArgs, h.args(t, "claude.args"))
 				assert.Equal(t, []string{cwd}, h.lines(t, "claude.pwd"))
 				assert.Empty(t, h.launchEnv(t), "the variables that carried the arguments are not passed on")

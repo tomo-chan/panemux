@@ -291,6 +291,7 @@ type fileReader interface {
 // kept for the server's lifetime: a preview opened in another tab outlives
 // the pane, popup and session it came from.
 type Registry struct {
+	runtime *MermaidRuntime
 	byToken map[string]entry
 	byEntry map[entry]string
 	mu      sync.Mutex
@@ -300,6 +301,9 @@ type Registry struct {
 func NewRegistry() *Registry {
 	return &Registry{byToken: map[string]entry{}, byEntry: map[entry]string{}}
 }
+
+// SetMermaidRuntime installs the product runtime before the server starts.
+func (r *Registry) SetMermaidRuntime(runtime *MermaidRuntime) { r.runtime = runtime }
 
 // Open registers file, served from root, and returns the address it is
 // served at. The file must be an HTML or Markdown file within the size
@@ -388,7 +392,7 @@ func (r *Registry) Serve(w http.ResponseWriter, req *http.Request, token, rest s
 	case kindHTML:
 		serveHTML(w, req, info, f)
 	case kindMarkdown:
-		serveMarkdown(w, info.Name(), f)
+		serveMarkdown(w, info.Name(), f, r.runtime)
 	default:
 		http.ServeContent(w, req, info.Name(), info.ModTime(), f)
 	}
@@ -430,7 +434,7 @@ func (r *Registry) open(token, rest string) (fileReader, fs.FileInfo, bool) {
 	return f, info, true
 }
 
-func serveMarkdown(w http.ResponseWriter, name string, f io.Reader) {
+func serveMarkdown(w http.ResponseWriter, name string, f io.Reader, runtimes ...*MermaidRuntime) {
 	source, err := io.ReadAll(io.LimitReader(f, MaxDocumentBytes+1))
 	if err != nil {
 		http.Error(w, "reading the file failed", http.StatusInternalServerError)
@@ -445,15 +449,19 @@ func serveMarkdown(w http.ResponseWriter, name string, f io.Reader) {
 		http.Error(w, "rendering the file failed", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Security-Policy", markdownPolicy)
+	policy := markdownPolicy
+	if len(runtimes) > 0 && runtimes[0] != nil && hasMermaid(source) {
+		page, policy = runtimes[0].enable(page)
+	}
+	w.Header().Set("Content-Security-Policy", policy)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(page)
 }
 
 // markdown renders GitHub-flavored Markdown. Raw HTML in the source is
 // omitted and links with a script scheme are dropped (goldmark's defaults,
-// left unchanged on purpose, and dangerousLinks for the schemes they miss);
-// the page's policy forbids scripts besides.
+// left unchanged on purpose, and dangerousLinks for the schemes they miss).
+// Only a nonce-bearing product script may run in a Mermaid document.
 var markdown = goldmark.New(
 	goldmark.WithExtensions(extension.GFM),
 	goldmark.WithParserOptions(parser.WithASTTransformers(util.Prioritized(dangerousLinks{}, 1000))),
@@ -503,7 +511,9 @@ const markdownStyle = `body{margin:0;background:#fff;color:#1f2328;` +
 	`code{padding:.15em .35em}pre{padding:12px 14px;overflow:auto}pre code{padding:0}` +
 	`table{border-collapse:collapse}th,td{border:1px solid #d1d9e0;padding:4px 10px}` +
 	`img{max-width:100%}blockquote{margin:0;padding:0 1em;color:#59636e;border-left:4px solid #d1d9e0}` +
-	`a{color:#0969da}`
+	`a{color:#0969da}` +
+	` .pm-mermaid-drawing{overflow:auto}.pm-mermaid svg{max-width:100%;height:auto}` +
+	`.pm-mermaid summary{cursor:pointer;color:#0969da;margin:8px 0}.pm-mermaid [role=alert]{color:#a00}`
 
 func renderMarkdown(name string, source []byte) ([]byte, error) {
 	var body bytes.Buffer

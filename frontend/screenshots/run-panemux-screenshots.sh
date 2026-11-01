@@ -172,6 +172,19 @@ button { padding: 8px 16px; border: 0; background: #22332b; color: #fff; font: 1
 .results span { color: #7a7363; font: 12px monospace; margin-left: 8px; }
 CSS
 
+cat >mockups/diagram.md <<'DIAGRAM'
+# Search request flow
+
+```mermaid
+flowchart TD
+  A[Search query] --> B[Validate input]
+  B --> C[Find matching items]
+  C --> D[Return results]
+```
+
+The source stays available below the diagram.
+DIAGRAM
+
 # What the tmux pane shows: a dev server's log, printed once and then left
 # running so the session stays up for the whole run.
 cat >"$HOME/dev-server" <<'SERVER'

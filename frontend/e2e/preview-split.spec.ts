@@ -253,3 +253,56 @@ async function writeToSession(page: Page, sessionID: string, data: string) {
     { sessionID, data },
   )
 }
+
+// The real bundled library, served through the product router and its CSP.
+test('renders Mermaid in the isolated preview, after reload and in its own tab', async ({ page, context }) => {
+  const externalRequests: string[] = []
+  context.on('request', request => {
+    if (/^https?:/.test(request.url()) && new URL(request.url()).origin !== 'http://127.0.0.1:4180') {
+      externalRequests.push(request.url())
+    }
+  })
+  const source = [
+    '# Diagram preview',
+    '```mermaid', 'flowchart LR', 'A[開始] --> B[完了]', '```',
+    '```mermaid', 'sequenceDiagram', 'Alice->>Bob: Hello', '```',
+    '```mermaid', 'this is invalid', '```',
+    '```mermaid', '%%{init: {"securityLevel":"loose"}}%%', 'flowchart LR', 'A-->B', '```',
+    '```js', 'const ordinary = true', '```',
+    '<script>window.pm471Executed = true</script>',
+  ].join('\n')
+  const pane = await openPane(page, 'preview-left')
+  await writeToSession(page, 'preview-left',
+    `printf '%s' '${source.replace(/'/g, "'\\''")}' > pm471.md && clear && echo pm471.md\n`)
+  await clickRow(page, pane, /^pm471\.md\s*$/)
+  const frame = pane.frameLocator('.pm-preview-frame')
+  await expect(frame.locator('.pm-mermaid svg')).toHaveCount(2)
+  await expect(frame.locator('.pm-mermaid svg').first()).toContainText('開始')
+  await expect(frame.locator('[role=alert]')).toHaveCount(2)
+  await expect(frame.locator('code.language-js')).toContainText('ordinary')
+  await expect(frame.locator('svg').first().locator('style')).toHaveCount(1)
+  const node = frame.locator('svg').first().locator('.node rect').first()
+  await expect(node).toHaveCSS('fill', 'rgb(236, 236, 255)')
+  expect((await node.boundingBox())!.width).toBeGreaterThan(20)
+  const loaded = page.frames().find(f => /\/preview\/.*pm471\.md/.test(f.url()))!
+  expect(await loaded.evaluate(() => {
+    let isolated = false
+    try { void parent.document.body } catch { isolated = true }
+    return { isolated, executed: 'pm471Executed' in window }
+  })).toEqual({ isolated: true, executed: false })
+  await pane.getByRole('button', { name: 'Reload preview' }).click()
+  await expect(frame.locator('.pm-mermaid svg')).toHaveCount(2)
+  const opened = context.waitForEvent('page')
+  await pane.getByRole('button', { name: 'Open in new tab' }).click()
+  const tab = await opened
+  await expect(tab.locator('.pm-mermaid svg')).toHaveCount(2)
+  await pane.getByRole('button', { name: 'Close preview' }).click()
+  await tab.reload()
+  await expect(tab.locator('.pm-mermaid svg')).toHaveCount(2)
+  expect(externalRequests).toEqual([])
+  await context.route('**/preview-assets/mermaid.*.js', route => route.abort())
+  await tab.reload()
+  await expect(tab.locator('code.language-mermaid')).toHaveCount(4)
+  await expect(tab.locator('.pm-mermaid')).toHaveCount(0)
+  await tab.close()
+})

@@ -187,7 +187,7 @@ clicked. What a relay does not change:
 - **HTML** is shown as written, with its scripts running, and loads the stylesheets, scripts and
   images beside it by relative path.
 - **Markdown** is rendered as GitHub-flavored Markdown (tables, task lists, strikethrough,
-  autolinks). Raw HTML inside it is left out, and the page runs no scripts. Relative links and
+  autolinks). Raw HTML inside it is left out. Only a document containing a `mermaid` fenced code block runs the bundled Mermaid renderer; ordinary Markdown runs no scripts. Relative links and
   images resolve beside the file, so a link to another `.md` or `.html` opens it in the preview.
 
 A file is served from its **root**: the innermost working directory that holds it. Files beside it
@@ -195,6 +195,29 @@ are reachable only within that root. A path, or a symbolic link, that leads outs
 refused. A symbolic link with a relative target that stays inside the root works; one with an
 absolute target is refused even when it points inside, as is a link from one working directory into
 another (the file is then found, if at all, under the directory it really lives in).
+
+### Mermaid diagrams
+
+A fenced code block with language `mermaid` renders as an SVG diagram using the bundled
+Mermaid library. The same document renderer serves local and SSH files, panes, Type in pane,
+and tabs opened independently. Reload reads the current file and draws its diagrams again.
+No CDN or external rendering service is required. The main dashboard does not load Mermaid.
+
+Each diagram keeps its source under **Show source**. A syntax error, unsupported configuration,
+or size limit shows the reason beside that source and does not stop the next diagram. If the
+runtime cannot load, the original code blocks remain readable. Diagrams fit the preview width
+and scroll horizontally when needed.
+
+Only the first 20 Mermaid blocks are attempted, each with at most 50,000 UTF-16 code units and
+Mermaid's 500-edge limit (where the diagram type supports that limit). These are input bounds,
+not a guarantee of a rendering deadline. YAML frontmatter and legacy `%%{…}%%` directives inside
+a diagram are refused, including titles in frontmatter; use Markdown headings or Mermaid's
+accessibility title syntax instead. HTML labels, click handlers, external icon packs, CSS animations and SVG
+image elements are not supported. Raw HTML remains omitted. Mermaid's version is pinned in
+`frontend/package-lock.json`; syntax can differ from GitHub's deployed version.
+
+GitHub's MathJax expressions, GeoJSON / TopoJSON maps, and ASCII STL models are not yet rendered.
+Their code remains visible. Previewable file extensions remain HTML and Markdown.
 
 The HTML or Markdown file itself may be at most **10 MiB**; a larger one shows the reason instead.
 The files it loads beside it are not bounded.
