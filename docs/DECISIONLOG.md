@@ -38,6 +38,9 @@ for draft checks, serialized runs and partial-upload cleanup.
 
 Both release paths resolve metadata inside the publisher's `contents: write`
 job because draft visibility requires push access. They build the draft's target
+SHA; a [live Actions token check](https://github.com/tomo-chan/panemux/actions/runs/41442887780)
+successfully read and validated the actual v0.27.0 draft with that permission.
+Both paths use the recorded
 SHA rather than the triggering push SHA, and reject existing assets before
 checkout or tests. Metadata validation and upload share a per-tag concurrency
 group; GitHub can replace a pending same-tag job, while an active upload and
