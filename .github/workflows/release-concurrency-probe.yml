@@ -1,0 +1,98 @@
+name: release-concurrency-probe
+
+on:
+  push:
+    branches:
+      - feature/release-recovery
+    paths:
+      - .github/workflows/release-concurrency-probe.yml
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        type: string
+        required: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-24.04
+    outputs:
+      release_created: ${{ steps.result.outputs.release_created }}
+      tag_name: ${{ steps.result.outputs.tag_name }}
+    steps:
+      - id: result
+        run: |
+          echo 'release_created=false' >> "$GITHUB_OUTPUT"
+          echo 'tag_name=' >> "$GITHUB_OUTPUT"
+
+  hold-empty-tag-group:
+    needs: release-please
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    concurrency:
+      group: release-assets-probe-${{ github.run_id }}-${{ needs.release-please.outputs.tag_name || inputs.release_tag }}
+      cancel-in-progress: false
+    steps:
+      - name: Verify skipped job while holding the empty-tag group
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+          MANUAL_TAG: ${{ inputs.release_tag }}
+          PROBE_GROUP: release-assets-probe-${{ github.run_id }}-${{ needs.release-please.outputs.tag_name || inputs.release_tag }}
+        run: |
+          [[ -z "$RELEASE_TAG" && -z "$MANUAL_TAG" ]]
+          echo "Holding empty-tag group: $PROBE_GROUP"
+          for attempt in $(seq 1 60); do
+            jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100")
+            if jq -e '
+              any(.jobs[]; .name == "hold-empty-tag-group" and .status == "in_progress") and
+              any(.jobs[]; .name == "wait-until-held" and .conclusion == "success") and
+              any(.jobs[]; .name == "goreleaser-skipped" and .conclusion == "skipped")
+            ' >/dev/null <<< "$jobs"; then
+              jq '.jobs[] | {name, status, conclusion}' <<< "$jobs"
+              echo 'PASS: production job condition skips without waiting behind the occupied empty-tag group'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'FAIL: skipped job did not reach skipped while its group was occupied' >&2
+          exit 1
+
+  wait-until-held:
+    needs: release-please
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Make the condition wait until the group is occupied
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for attempt in $(seq 1 60); do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
+              --jq 'any(.jobs[]; .name == "hold-empty-tag-group" and .status == "in_progress")' | grep -qx true; then
+              echo 'PASS: group holder is running before the no-release job becomes eligible'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'FAIL: group holder did not start' >&2
+          exit 1
+
+  goreleaser:
+    name: goreleaser-skipped
+    needs: [release-please, wait-until-held]
+    if: >-
+      always() && !cancelled() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    concurrency:
+      group: release-assets-probe-${{ github.run_id }}-${{ needs.release-please.outputs.tag_name || inputs.release_tag }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          echo 'FAIL: no-release job must be skipped' >&2
+          exit 1
