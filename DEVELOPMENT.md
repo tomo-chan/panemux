@@ -21,6 +21,12 @@ Offline commands reuse an installed SDK. Invalid pins, unavailable SDKs, corrupt
 archives, and unsupported systems fail before the command proceeds. Inspect a stale lock or
 bad cache before removing it; the selector never overwrites a bad published SDK.
 
+The Node install lock requires exclusive non-recursive `mkdir` behavior. Ubuntu
+26.04's uutils 0.10.0 can incorrectly let concurrent creators both succeed; use
+GNU coreutils or a corrected uutils implementation before concurrent first-time
+acquisition there. CI/release builds use Ubuntu 24.04's GNU coreutils. Portable
+locking is tracked in [issue #480](https://github.com/tomo-chan/panemux/issues/480).
+
 Direct hooks, efficacy/mutation scripts, browser fixture launchers, and frontend npm scripts
 select the same contract from their checkout. For ad hoc commands use
 `scripts/runtime-shell.sh -c 'node --version; go version'`. From `frontend`, use

@@ -58,7 +58,10 @@ Node bootstrap's exclusive install lock and fails `test-node-toolchain` in the
 GoReleaser before hook. Keep the release job on 24.04 until the replacement runner
 has a corrected `mkdir` and passes the concurrent Node selector tests and full
 release quality gate. Recovery uses this runner setup even for older release
-source commits; no source override or skipped check is needed.
+source commits; no source override or skipped check is needed. Developer machines
+with the affected `mkdir` still need a conforming GNU or corrected uutils
+implementation for concurrent Node acquisition; portable locking is tracked in
+[issue #480](https://github.com/tomo-chan/panemux/issues/480).
 
 Ubuntu 26.04 also ships uutils coreutils, one multicall binary behind `/usr/bin/sleep`, `mkdir` and
 the rest. It refuses to run under another name, and its `mkdir` leaves the path out of its error.
@@ -200,20 +203,35 @@ Never hand-edit a file under `internal/board/testdata/*-transitions.json`; the n
 
 The `release-please` workflow also accepts a manual `release_tag`, for example
 `gh workflow run release-please.yml --ref main -f release_tag=v0.27.0`. Recovery
-runs only from main, after its workflow fix has merged. It requires an existing
-draft whose name and tag both match the requested tag and whose
-`target_commitish` is a full commit SHA; it checks out that SHA rather than the
-latest main. Both push and recovery refuse an existing tag that points elsewhere;
-neither path moves tags. All release workflow runs are serialized without
-cancelling an active run, so they cannot upload to the same draft concurrently.
-Recovery does not run
-release-please again or change the proposed next version. The current workflow
+has a main-ref condition to prevent accidental dispatch from another branch;
+this is not a security boundary against writers who can edit a branch's workflow.
+Use it after the workflow fix has merged to main.
+
+Both push and recovery resolve the draft inside the GoReleaser job, using
+`contents: write` because draft visibility requires push access. They require a
+draft whose name and tag match the requested tag, whose asset list is empty, and
+whose `target_commitish` is a full commit SHA. Both check out that recorded SHA,
+even when release-please creates a draft for an earlier merge than the current
+push, and verify HEAD against it before creating a local tag. Both refuse an
+existing tag that points elsewhere; neither path moves tags. Metadata lookup,
+validation and upload share a per-tag concurrency group, preventing simultaneous
+uploads to that draft without blocking builds of other tags or release-please.
+GitHub keeps one active and one pending job per group: a newer job can replace
+an older pending recovery. Check a dispatch's outcome and dispatch again if it
+was superseded; active uploads are not cancelled.
+
+Recovery does not run release-please again or change the proposed next version.
+The current workflow
 provides runner setup, while the selected release commit provides the source,
 runtime pins, GoReleaser configuration and full `make check` gate.
 
-After GoReleaser succeeds, inspect the draft's four platform archives and
-`checksums.txt`, then publish the draft. A recovery failure leaves it unpublished;
-inspect the failed check before retrying. If an upload partially succeeded,
+Manual recovery passes `--draft`: after GoReleaser succeeds, inspect the draft's
+four platform archives and `checksums.txt`, then publish it. The push path retains
+the default `release --clean` behavior, which publishes after a successful build;
+the manual inspection/publication step applies to recovery only.
+A recovery failure leaves the draft unpublished; inspect the failed check before
+retrying. Leftover assets are rejected before checkout, dependency setup or tests.
+If an upload partially succeeded,
 remove every asset left on that draft (including `checksums.txt`) with
 `gh release delete-asset <tag> <asset-name>` before retrying: the release
 configuration does not replace existing assets, and mixing builds would leave

@@ -36,6 +36,16 @@ requires a corrected `mkdir` and successful concurrent-selector and release-gate
 verification. See [release maintenance](maintenance.md#recovering-a-failed-release-build)
 for draft checks, serialized runs and partial-upload cleanup.
 
+Both release paths resolve metadata inside the publisher's `contents: write`
+job because draft visibility requires push access. They build the draft's target
+SHA rather than the triggering push SHA, and reject existing assets before
+checkout or tests. Metadata validation and upload share a per-tag concurrency
+group; GitHub can replace a pending same-tag job, while an active upload and
+other tags are unaffected. A main-ref condition prevents accidental dispatch
+from another branch but does not restrict writers who can change workflow code.
+The underlying development-tool lock limitation remains tracked in
+[issue #480](https://github.com/tomo-chan/panemux/issues/480).
+
 ## agmsg pin bump proposals (2026-10-31, issue #437)
 
 The daily real-install contract resolves the latest stable release tag to its commit SHA (peeling

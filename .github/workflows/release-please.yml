@@ -14,10 +14,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: release-please
-  cancel-in-progress: false
-
 jobs:
   release-please:
     if: github.event_name == 'push'
@@ -36,29 +32,56 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  recovery:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+  goreleaser:
     permissions:
-      contents: read
-    runs-on: ubuntu-latest
-    outputs:
-      tag_name: ${{ steps.draft.outputs.tag_name }}
-      commit: ${{ steps.draft.outputs.commit }}
+      contents: write
+    needs: release-please
+    if: >-
+      always() && !cancelled() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    concurrency:
+      group: release-assets-${{ needs.release-please.outputs.tag_name || inputs.release_tag }}
+      cancel-in-progress: false
+    # uutils mkdir 0.10.0 on Ubuntu 26.04 can report success to two concurrent
+    # lock creators. Keep GNU coreutils, as in ci.yml, for the runtime gate.
+    runs-on: ubuntu-24.04
     steps:
       - name: Resolve existing draft release
         id: draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name || inputs.release_tag }}
         run: |
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo 'recovery: expected a stable vN.N.N tag' >&2
             exit 1
           }
           metadata=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --json name,tagName,isDraft,targetCommitish)
-          commit=$(jq -er --arg tag "$RELEASE_TAG" \
-            'select(.isDraft == true and .tagName == $tag and .name == $tag) | .targetCommitish' <<< "$metadata")
+            --json name,tagName,isDraft,targetCommitish,assets) || {
+            echo 'release: cannot read release metadata; draft access requires contents: write' >&2
+            exit 1
+          }
+          jq -e '.isDraft == true' >/dev/null <<< "$metadata" || {
+            echo 'release: requested release is not a draft' >&2
+            exit 1
+          }
+          jq -e --arg tag "$RELEASE_TAG" '.tagName == $tag' >/dev/null <<< "$metadata" || {
+            echo 'release: draft tag does not match requested tag' >&2
+            exit 1
+          }
+          jq -e --arg tag "$RELEASE_TAG" '.name == $tag' >/dev/null <<< "$metadata" || {
+            echo 'release: draft name does not match requested tag' >&2
+            exit 1
+          }
+          jq -e '.assets | type == "array" and length == 0' >/dev/null <<< "$metadata" || {
+            echo 'release: draft must have an empty asset list; inspect and remove all partial assets before retrying' >&2
+            exit 1
+          }
+          commit=$(jq -er '.targetCommitish' <<< "$metadata") || {
+            echo 'recovery: draft target must be a full commit SHA' >&2
+            exit 1
+          }
           [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || {
             echo 'recovery: draft target must be a full commit SHA' >&2
             exit 1
@@ -66,29 +89,23 @@ jobs:
           echo "tag_name=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
-  goreleaser:
-    permissions:
-      contents: write
-    needs: [release-please, recovery]
-    if: >-
-      always() && !cancelled() &&
-      (needs.release-please.outputs.release_created == 'true' || needs.recovery.result == 'success')
-    # uutils mkdir 0.10.0 on Ubuntu 26.04 can report success to two concurrent
-    # lock creators. Keep GNU coreutils, as in ci.yml, for the runtime gate.
-    runs-on: ubuntu-24.04
-    steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: ${{ needs.recovery.outputs.commit || github.sha }}
+          ref: ${{ steps.draft.outputs.commit }}
           fetch-depth: 0
           fetch-tags: true
 
       - name: Create local tag for GoReleaser
         env:
-          TAG: ${{ needs.recovery.outputs.tag_name || needs.release-please.outputs.tag_name }}
+          TAG: ${{ steps.draft.outputs.tag_name }}
+          EXPECTED_SHA: ${{ steps.draft.outputs.commit }}
         run: |
           SHA=$(git rev-parse HEAD)
+          [[ "$SHA" == "$EXPECTED_SHA" ]] || {
+            echo 'release: checkout does not match the draft target commit' >&2
+            exit 1
+          }
           if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
             [[ "$(git rev-parse "refs/tags/$TAG^{commit}")" == "$SHA" ]] || {
               echo 'release: existing tag points to a different commit' >&2
@@ -122,7 +139,7 @@ jobs:
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a
         with:
           version: "~> v2"
-          args: ${{ needs.recovery.result == 'success' && 'release --clean --draft' || 'release --clean' }}
+          args: ${{ github.event_name == 'workflow_dispatch' && 'release --clean --draft' || 'release --clean' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}

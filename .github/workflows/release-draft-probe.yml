@@ -1,0 +1,32 @@
+name: release-draft-probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release-draft-probe.yml
+
+permissions:
+  contents: write
+
+jobs:
+  draft-api:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Read actual draft with the publisher token scope
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: v0.27.0
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, textwrap
+          lines = pathlib.Path('.github/workflows/release-please.yml').read_text().splitlines()
+          step = lines.index('      - name: Resolve existing draft release')
+          run = next(i for i in range(step, len(lines)) if lines[i] == '        run: |')
+          end = next(i for i in range(run + 1, len(lines)) if lines[i].startswith('      - name: '))
+          script = textwrap.dedent('\n'.join(lines[run + 1:end]))
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'draft-preflight.sh').write_text(script)
+          PY
+          bash -e -o pipefail "$RUNNER_TEMP/draft-preflight.sh"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json name,tagName,isDraft,targetCommitish,assets
