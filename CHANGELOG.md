@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/tomo-chan/panemux/compare/v0.27.0...v0.28.0) (2026-11-02)
+
+
+### Features
+
+* render Mermaid diagrams in isolated Markdown previews ([#477](https://github.com/tomo-chan/panemux/issues/477)) ([ceb42df](https://github.com/tomo-chan/panemux/commit/ceb42df5d66dbd6ae75075dc2ab275399270218d))
+
 ## [0.27.0](https://github.com/tomo-chan/panemux/compare/v0.26.0...v0.27.0) (2026-10-31)
 
 
