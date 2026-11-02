@@ -51,12 +51,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo 'recovery: expected a stable vN.N.N tag' >&2
+            exit 1
+          }
           metadata=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
             --json name,tagName,isDraft,targetCommitish)
           commit=$(jq -er --arg tag "$RELEASE_TAG" \
             'select(.isDraft == true and .tagName == $tag and .name == $tag) | .targetCommitish' <<< "$metadata")
-          [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'recovery: draft target must be a full commit SHA' >&2
+            exit 1
+          }
           echo "tag_name=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
@@ -84,7 +90,10 @@ jobs:
         run: |
           SHA=$(git rev-parse HEAD)
           if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
-            [[ "$(git rev-parse "refs/tags/$TAG^{commit}")" == "$SHA" ]]
+            [[ "$(git rev-parse "refs/tags/$TAG^{commit}")" == "$SHA" ]] || {
+              echo 'release: existing tag points to a different commit' >&2
+              exit 1
+            }
           else
             git tag "$TAG" "$SHA"
           fi

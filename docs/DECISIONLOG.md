@@ -27,7 +27,9 @@ records both installers passing lock acquisition. Local runs, including 30 with
 dash for both parent and nested shells, did not reproduce the coreutils defect.
 
 The release build job uses Ubuntu 24.04's GNU coreutils, as the regular CI job
-does. This preserves the original release's source and full quality gate rather
+does. The [GNU coreutils verification](https://github.com/tomo-chan/panemux/actions/runs/41429903531)
+ran the unchanged v0.27.0 source's Node suite 30 times, then passed its complete
+`make check build-frontend` gate. This preserves the original release's source and full quality gate rather
 than ignoring lock-cleanup errors, retrying until a race happens to pass, or
 overlaying newer scripts onto an older release. Returning to a newer runner
 requires a corrected `mkdir` and successful concurrent-selector and release-gate
