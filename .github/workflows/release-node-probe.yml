@@ -1,0 +1,38 @@
+name: release-node-probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release-node-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: c520b0490e127806d80027b863dec91c940d9c94
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - run: make install-deps-ci
+      - name: Trace original release Node tests
+        run: |
+          dash -c 'echo "shell=$0"'
+          dpkg-query -W dash coreutils rust-coreutils || true
+          sed 's/sh -c /sh -xc /g' scripts/node_toolchain_test.sh > scripts/node_toolchain_probe.sh
+          for attempt in $(seq 1 30); do
+            if sh -x scripts/node_toolchain_probe.sh > probe.log 2>&1; then
+              echo "attempt $attempt passed"
+            else
+              cat probe.log
+              exit 1
+            fi
+          done

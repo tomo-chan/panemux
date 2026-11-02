@@ -12,12 +12,18 @@ on:
         type: string
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
 
 jobs:
   release-please:
     if: github.event_name == 'push'
+    permissions:
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -31,7 +37,9 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   recovery:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     outputs:
       tag_name: ${{ steps.draft.outputs.tag_name }}
@@ -45,14 +53,16 @@ jobs:
         run: |
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           metadata=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --json tagName,isDraft,targetCommitish)
+            --json name,tagName,isDraft,targetCommitish)
           commit=$(jq -er --arg tag "$RELEASE_TAG" \
-            'select(.isDraft == true and .tagName == $tag) | .targetCommitish' <<< "$metadata")
+            'select(.isDraft == true and .tagName == $tag and .name == $tag) | .targetCommitish' <<< "$metadata")
           [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
           echo "tag_name=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
   goreleaser:
+    permissions:
+      contents: write
     needs: [release-please, recovery]
     if: >-
       always() && !cancelled() &&

@@ -190,17 +190,26 @@ Never hand-edit a file under `internal/board/testdata/*-transitions.json`; the n
 ### Recovering a failed release build
 
 The `release-please` workflow also accepts a manual `release_tag`, for example
-`gh workflow run release-please.yml -f release_tag=v0.27.0`. Use this after its
-workflow fix has merged to main. Recovery requires an existing draft whose
+`gh workflow run release-please.yml --ref main -f release_tag=v0.27.0`. Recovery
+runs only from main, after its workflow fix has merged. It requires an existing
+draft whose name and tag both match the requested tag and whose
 `target_commitish` is a full commit SHA; it checks out that SHA rather than the
-latest main, and refuses an existing tag that points elsewhere. It does not run
+latest main. Both push and recovery refuse an existing tag that points elsewhere;
+neither path moves tags. All release workflow runs are serialized without
+cancelling an active run, so they cannot upload to the same draft concurrently.
+Recovery does not run
 release-please again or change the proposed next version. The current workflow
 provides runner setup, while the selected release commit provides the source,
 runtime pins, GoReleaser configuration and full `make check` gate.
 
 After GoReleaser succeeds, inspect the draft's four platform archives and
 `checksums.txt`, then publish the draft. A recovery failure leaves it unpublished;
-inspect the failed check before retrying. Do not move an already published tag.
+inspect the failed check before retrying. If an upload partially succeeded,
+remove every asset left on that draft (including `checksums.txt`) with
+`gh release delete-asset <tag> <asset-name>` before retrying: the release
+configuration does not replace existing assets, and mixing builds would leave
+inconsistent checksums. Confirm it is still a draft before deleting any assets.
+Do not move an already published tag.
 
 ### release-please handling
 
