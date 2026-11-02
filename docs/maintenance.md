@@ -187,6 +187,21 @@ Never hand-edit a file under `internal/board/testdata/*-transitions.json`; the n
 
 ## Release Workflow
 
+### Recovering a failed release build
+
+The `release-please` workflow also accepts a manual `release_tag`, for example
+`gh workflow run release-please.yml -f release_tag=v0.27.0`. Use this after its
+workflow fix has merged to main. Recovery requires an existing draft whose
+`target_commitish` is a full commit SHA; it checks out that SHA rather than the
+latest main, and refuses an existing tag that points elsewhere. It does not run
+release-please again or change the proposed next version. The current workflow
+provides runner setup, while the selected release commit provides the source,
+runtime pins, GoReleaser configuration and full `make check` gate.
+
+After GoReleaser succeeds, inspect the draft's four platform archives and
+`checksums.txt`, then publish the draft. A recovery failure leaves it unpublished;
+inspect the failed check before retrying. Do not move an already published tag.
+
 ### release-please handling
 
 - Never manually close a release-please PR.

@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing draft release to recover (for example v0.27.0)
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -11,6 +17,7 @@ permissions:
 
 jobs:
   release-please:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -23,22 +30,52 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+  recovery:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.draft.outputs.tag_name }}
+      commit: ${{ steps.draft.outputs.commit }}
+    steps:
+      - name: Resolve existing draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          metadata=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isDraft,targetCommitish)
+          commit=$(jq -er --arg tag "$RELEASE_TAG" \
+            'select(.isDraft == true and .tagName == $tag) | .targetCommitish' <<< "$metadata")
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+          echo "tag_name=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
   goreleaser:
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: [release-please, recovery]
+    if: >-
+      always() && !cancelled() &&
+      (needs.release-please.outputs.release_created == 'true' || needs.recovery.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ needs.recovery.outputs.commit || github.sha }}
           fetch-depth: 0
           fetch-tags: true
 
       - name: Create local tag for GoReleaser
+        env:
+          TAG: ${{ needs.recovery.outputs.tag_name || needs.release-please.outputs.tag_name }}
         run: |
-          TAG="${{ needs.release-please.outputs.tag_name }}"
-          SHA="${{ github.sha }}"
-          git rev-parse "$TAG" 2>/dev/null || git tag "$TAG" "$SHA"
+          SHA=$(git rev-parse HEAD)
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            [[ "$(git rev-parse "refs/tags/$TAG^{commit}")" == "$SHA" ]]
+          else
+            git tag "$TAG" "$SHA"
+          fi
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
@@ -64,7 +101,7 @@ jobs:
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a
         with:
           version: "~> v2"
-          args: release --clean
+          args: ${{ needs.recovery.result == 'success' && 'release --clean --draft' || 'release --clean' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
