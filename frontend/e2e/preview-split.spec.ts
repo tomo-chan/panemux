@@ -273,7 +273,8 @@ test('renders Mermaid in the isolated preview, after reload and in its own tab',
   ].join('\n')
   const pane = await openPane(page, 'preview-left')
   await writeToSession(page, 'preview-left',
-    `printf '%s' '${source.replace(/'/g, "'\\''")}' > pm471.md && clear && echo pm471.md\n`)
+    `pm471_dir=$(mktemp -d "\${TMPDIR:-/tmp}/panemux-e2e-mermaid.XXXXXX") && ` +
+    `cd "$pm471_dir" && printf '%s' '${source.replace(/'/g, "'\\''")}' > pm471.md && clear && echo pm471.md\n`)
   await clickRow(page, pane, /^pm471\.md\s*$/)
   const frame = pane.frameLocator('.pm-preview-frame')
   await expect(frame.locator('.pm-mermaid svg')).toHaveCount(2)
