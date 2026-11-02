@@ -310,22 +310,24 @@ func (failingReader) Read([]byte) (int, error) { return 0, errors.New("disk gone
 
 // serveMarkdown reads through a bounded reader, so a file that fails or
 // grows after it was checked is answered rather than read without end.
+//
+//efficacy:exempt Explicit nil runtime argument only; existing read errors and limits are unchanged.
 func TestServeMarkdownReading(t *testing.T) {
 	rr := httptest.NewRecorder()
-	serveMarkdown(rr, "notes.md", failingReader{})
+	serveMarkdown(rr, "notes.md", failingReader{}, nil)
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 	assert.NotContains(t, rr.Header().Get("Content-Type"), "text/html")
 
 	rr = httptest.NewRecorder()
-	serveMarkdown(rr, "notes.md", strings.NewReader(strings.Repeat("a", int(MaxDocumentBytes)+1)))
+	serveMarkdown(rr, "notes.md", strings.NewReader(strings.Repeat("a", int(MaxDocumentBytes)+1)), nil)
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
 
 	rr = httptest.NewRecorder()
-	serveMarkdown(rr, "notes.md", strings.NewReader(strings.Repeat("a", int(MaxDocumentBytes))))
+	serveMarkdown(rr, "notes.md", strings.NewReader(strings.Repeat("a", int(MaxDocumentBytes))), nil)
 	assert.Equal(t, http.StatusOK, rr.Code, "a file of exactly the limit")
 
 	rr = httptest.NewRecorder()
-	serveMarkdown(rr, "notes.md", strings.NewReader("# ok"))
+	serveMarkdown(rr, "notes.md", strings.NewReader("# ok"), nil)
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Body.String(), "<h1>ok</h1>")
 }
@@ -558,6 +560,8 @@ func TestServeHTMLStopsAtTheCheckedSize(t *testing.T) {
 // goldmark checks a link's scheme before it decodes character references,
 // so a script scheme spelled with one survived as a live link. Every link and
 // image destination is checked again as the browser will read it.
+//
+//efficacy:exempt Adapts to the additional render metadata return; existing link validation is unchanged.
 func TestRenderMarkdownDropsEncodedScriptLinks(t *testing.T) {
 	for name, line := range map[string]string{
 		"hex reference":     "[a](jav&#x61;script:alert(1))",
@@ -573,7 +577,7 @@ func TestRenderMarkdownDropsEncodedScriptLinks(t *testing.T) {
 		"reference link":    "[a][r]\n\n[r]: jav&#x61;script:alert(1)",
 	} {
 		t.Run(name, func(t *testing.T) {
-			page, err := renderMarkdown("x.md", []byte(line))
+			page, _, err := renderMarkdown("x.md", []byte(line))
 			require.NoError(t, err)
 			assert.NotContains(t, strings.ToLower(string(page)), "script:", string(page))
 		})
@@ -587,7 +591,7 @@ func TestRenderMarkdownDropsEncodedScriptLinks(t *testing.T) {
 		"encoded letter": `[a](&#x6f;ther.md)`,
 	} {
 		t.Run("keeps "+name, func(t *testing.T) {
-			page, err := renderMarkdown("x.md", []byte(line))
+			page, _, err := renderMarkdown("x.md", []byte(line))
 			require.NoError(t, err)
 			assert.NotContains(t, string(page), `href=""`, string(page))
 		})

@@ -256,3 +256,8 @@ func writePreviewError(w http.ResponseWriter, err error) {
 	}
 	http.Error(w, err.Error(), status)
 }
+
+// SetPreviewRuntime safely installs trusted rendering code for preview requests.
+func (h *Handler) SetPreviewRuntime(runtime *preview.MermaidRuntime) {
+	h.previews.SetMermaidRuntime(runtime)
+}

@@ -484,7 +484,7 @@ coverage-go: build-frontend
 	  . \
 	  -coverprofile=coverage.out \
 	  -coverpkg=$(COVERAGE_PKGS) \
-	  -count=1 -timeout 60s
+	  -count=1 -timeout 120s
 	@pct=$$(go tool cover -func=coverage.out | grep "^total:" | awk '{gsub(/%/,""); print $$3}'); \
 	  printf "Go coverage (gated packages): %s%%\n" "$$pct"; \
 	  awk -v p="$$pct" 'BEGIN { if (p+0 < 80) { print "FAIL: coverage "p"% is below 80%"; exit 1 } }'

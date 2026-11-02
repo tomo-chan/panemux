@@ -3,7 +3,6 @@ package server
 
 import (
 	"context"
-	"embed"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -19,6 +18,7 @@ import (
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
 	"panemux/internal/portforward"
+	"panemux/internal/preview"
 	"panemux/internal/requestsecurity"
 	"panemux/internal/session"
 	"panemux/internal/taskevents"
@@ -46,7 +46,7 @@ var taskEventOptions = taskevents.Options{}
 // rather than panicking on a nil runner.
 func New(
 	cfg *config.Config, manager *session.Manager, boardCache *board.BoardCache, boardRelay *board.Relay,
-	commandRunner *commandcenter.Runner, frontendFS embed.FS, handlers ...*api.Handler,
+	commandRunner *commandcenter.Runner, frontendFS fs.FS, handlers ...*api.Handler,
 ) *Server {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -61,6 +61,16 @@ func New(
 		apiHandler = api.NewHandler(cfg, manager, boardCache, boardRelay)
 	}
 	apiHandler.SetCommandCenterAvailable(commandRunner != nil)
+	// A separate classic bundle runs only in an opaque preview origin.
+	// Empty frontendFS is used by API-only test servers; their Markdown stays
+	// readable without a runtime, with its original script-free policy.
+	if script, err := fs.ReadFile(frontendFS, "frontend/dist/preview-assets/mermaid.js"); err == nil {
+		runtime := preview.NewMermaidRuntime(script)
+		apiHandler.SetPreviewRuntime(runtime)
+		r.Get("/preview-assets/*", runtime.ServeHTTP)
+	} else {
+		r.Get("/preview-assets/*", http.NotFound)
+	}
 	// Loopback forwards are process-wide state (they bind ports on this
 	// host), so the server owns the registry and closes it on shutdown.
 	forwards := portforward.New(portforward.Options{})
@@ -92,7 +102,7 @@ func New(
 
 func registerRoutes(
 	r chi.Router, apiHandler *api.Handler, wsHandler *ws.Handler, taskEventsHandler *ws.TaskEventsHandler,
-	commandRunner *commandcenter.Runner, frontendFS embed.FS, authToken string,
+	commandRunner *commandcenter.Runner, frontendFS fs.FS, authToken string,
 ) {
 	// The route table itself lives in internal/api (api.Handler.Mount), so
 	// this wiring and the api package's own handler tests cannot describe
@@ -127,7 +137,7 @@ func registerRoutes(
 	registerFrontend(r, frontendFS)
 }
 
-func registerFrontend(r chi.Router, frontendFS embed.FS) {
+func registerFrontend(r chi.Router, frontendFS fs.FS) {
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err != nil {
 		r.Get("/*", http.FileServer(http.Dir("frontend/dist")).ServeHTTP)

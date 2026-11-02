@@ -109,6 +109,14 @@ test('documentation screenshots', async ({ page }) => {
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
     await page.mouse.move(0, 0)
     await page.screenshot({ path: imagePath('preview.png') })
+    await editor.getByRole('button', { name: 'Close preview' }).click()
+    const diagramPath = '/tmp/sample-project/mockups/diagram.md'
+    await run(page, 'editor', `echo "Diagram ready: ${diagramPath}"`, /Diagram ready:.*diagram\.md/)
+    await clickTerminalText(page, editor, diagramPath)
+    await expect(frame.locator('.pm-mermaid svg')).toHaveCount(1)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.mouse.move(0, 0)
+    await page.screenshot({ path: imagePath('mermaid-preview.png') })
   })
 })
 

@@ -321,6 +321,9 @@ rules.
 - Loading, the reason a path cannot be opened, and the choice between files a relative path names
   are shown in the preview's own area, so the terminal is never covered and keeps taking keys.
 - The preview's page is white like a browser page, framed by the dark panemux chrome.
+- Mermaid diagrams in Markdown retain a **Show source** disclosure below each drawing. A failed
+  diagram opens its source and shows its error within that block; the rest of the document stays
+  readable. SVG diagrams fit the preview width and scroll when necessary.
 - A localhost URL (issue #386) opens in the same split. Above its page, a one-line note in the same
   style as the keys note says that a page refusing to be framed stays blank and that hot reload,
   sign-in or storage can differ in a frame, pointing at `Open in new tab`: a frame cannot report
@@ -332,6 +335,8 @@ an open preview's header stays visible while another URL is asked about. The Typ
 draws the same strip over its terminal.
 
 ---
+
+![A Mermaid diagram beside the terminal, with a Show source disclosure.](images/mermaid-preview.png)
 
 ## Attention Indicators
 

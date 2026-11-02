@@ -66,6 +66,11 @@ make dev-frontend   # Vite dev server on :5173
 make dev-backend    # run backend separately while the frontend proxies /api and /ws
 ```
 
+Markdown diagrams use a separate bundled classic script. `make build-frontend` builds both the
+SPA and that runtime into `frontend/dist`; rerun it after changing the preview entry or its
+libraries, including during Vite development. Vite proxies `/preview/` and `/preview-assets/`
+to the backend. The backend must be rebuilt/restarted to embed the updated runtime.
+
 **Documentation screenshots**:
 
 ```sh

@@ -76,6 +76,7 @@ var expectedRoutes = []string{
 	"GET /api/tasks",
 	"GET /api/tasks/codex-hook",
 	"GET /api/workspaces",
+	"GET /preview-assets/*",
 	"GET /preview/{token}/*",
 	"GET /ws/tasks/events",
 	"GET /ws/{sessionID}",

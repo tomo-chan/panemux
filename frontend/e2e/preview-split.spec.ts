@@ -253,3 +253,72 @@ async function writeToSession(page: Page, sessionID: string, data: string) {
     { sessionID, data },
   )
 }
+
+// The real bundled library, served through the product router and its CSP.
+test('renders Mermaid in the isolated preview, after reload and in its own tab', async ({ page, context }) => {
+  const externalImage = 'http://example.invalid/mermaid-image.svg'
+  await context.route(externalImage, route => route.fulfill({
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>',
+  }))
+  const invalidImage = 'http://example.invalid/invalid-image.png'
+  await context.route(invalidImage, route => route.fulfill({ contentType: 'image/png', body: 'invalid image' }))
+  const externalRequests: string[] = []
+  context.on('request', request => {
+    if (/^https?:/.test(request.url()) && new URL(request.url()).origin !== 'http://127.0.0.1:4180') {
+      externalRequests.push(request.url())
+    }
+  })
+  const source = [
+    '# Diagram preview',
+    '```mermaid', 'flowchart LR', 'A[開始] --> B[完了]', '```',
+    '```mermaid', 'sequenceDiagram', 'Alice->>Bob: Hello', '```',
+    '```mermaid', 'flowchart LR',
+    `A@{ img: "${externalImage}", label: "Image", w: 60, h: 60 }`, 'A-->B', '```',
+    '```mermaid', 'flowchart LR', `C@{ img: "${invalidImage}", label: "Broken" }`, '```',
+    '```mermaid', 'this is invalid', '```',
+    '```mermaid', '%%{init: {"securityLevel":"loose"}}%%', 'flowchart LR', 'A-->B', '```',
+    '```js', 'const ordinary = true', '```',
+    '<script>window.pm471Executed = true</script>',
+  ].join('\n')
+  const pane = await openPane(page, 'preview-left')
+  await writeToSession(page, 'preview-left',
+    `pm471_dir=$(mktemp -d "\${TMPDIR:-/tmp}/panemux-e2e-mermaid.XXXXXX") && ` +
+    `cd "$pm471_dir" && printf '%s' '${source.replace(/'/g, "'\\''")}' > pm471.md && clear && echo pm471.md\n`)
+  await clickRow(page, pane, /^pm471\.md\s*$/)
+  const frame = pane.frameLocator('.pm-preview-frame')
+  await expect(frame.locator('.pm-mermaid svg')).toHaveCount(3)
+  await expect(frame.locator('.pm-mermaid svg').first()).toContainText('開始')
+  await expect(frame.locator('[role=alert]')).toHaveCount(3)
+  await expect(frame.locator('svg image')).toHaveCount(0)
+  await expect(frame.locator('[role=alert]').filter({ hasText: /image.*decod|source image/i })).toHaveCount(1)
+  await expect(frame.locator('code.language-js')).toContainText('ordinary')
+  await expect(frame.locator('svg').first().locator('style')).toHaveCount(1)
+  const node = frame.locator('svg').first().locator('.node rect').first()
+  await expect(node).toHaveCSS('fill', 'rgb(236, 236, 255)')
+  expect((await node.boundingBox())!.width).toBeGreaterThan(20)
+  const loaded = page.frames().find(f => /\/preview\/.*pm471\.md/.test(f.url()))!
+  expect(await loaded.evaluate(() => {
+    let isolated = false
+    try { void parent.document.body } catch { isolated = true }
+    return { isolated, executed: 'pm471Executed' in window }
+  })).toEqual({ isolated: true, executed: false })
+  await pane.getByRole('button', { name: 'Reload preview' }).click()
+  await expect(frame.locator('.pm-mermaid svg')).toHaveCount(3)
+  const opened = context.waitForEvent('page')
+  await pane.getByRole('button', { name: 'Open in new tab' }).click()
+  const tab = await opened
+  await expect(tab.locator('.pm-mermaid svg')).toHaveCount(3)
+  await pane.getByRole('button', { name: 'Close preview' }).click()
+  await tab.reload()
+  await expect(tab.locator('.pm-mermaid svg')).toHaveCount(3)
+  // Rendering measures live, unsanitized SVG. Images can be fetched by the
+  // existing img-src policy; only the final SVG has image elements removed.
+  expect(new Set(externalRequests)).toEqual(new Set([externalImage, invalidImage]))
+  await expect(tab.locator('svg image')).toHaveCount(0)
+  await context.route('**/preview-assets/mermaid.*.js', route => route.abort())
+  await tab.reload()
+  await expect(tab.locator('code.language-mermaid')).toHaveCount(6)
+  await expect(tab.locator('.pm-mermaid')).toHaveCount(0)
+  await tab.close()
+})

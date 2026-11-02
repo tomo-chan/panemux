@@ -17,7 +17,7 @@ response carries a `Content-Security-Policy` `sandbox` directive **without `allo
 | Response | Policy |
 |---|---|
 | HTML file | `sandbox allow-scripts; frame-ancestors 'self'` |
-| Markdown, rendered | `sandbox; default-src 'none'; img-src * data:; style-src 'unsafe-inline'; frame-ancestors 'self'` |
+| Markdown without Mermaid, rendered | `sandbox; default-src 'none'; img-src * data:; style-src 'unsafe-inline'; frame-ancestors 'self'` |
 | Anything else beside it | `sandbox; frame-ancestors 'self'` |
 
 A sandboxed document without `allow-same-origin` runs in an opaque origin, whether it is framed by the
@@ -32,8 +32,8 @@ dashboard or opened in a tab of its own. That is the isolation:
 - without `allow-top-navigation` or `allow-popups` it cannot navigate the dashboard or open windows.
 
 The frame in `PreviewSplit` repeats `sandbox="allow-scripts"`, so the page stays out of the
-dashboard's origin even if the header were lost on the way. A Markdown page runs no script at all,
-by its policy.
+dashboard's origin even if the header were lost on the way. A Markdown page without Mermaid runs
+no script at all, by its policy. A page with Mermaid permits only its nonce-bearing product script, as described below.
 
 `X-Frame-Options: DENY`, which every other response carries, is removed from preview responses so the
 dashboard can frame them; `frame-ancestors 'self'` still refuses every other site. Responses are
@@ -95,8 +95,49 @@ link and image destination again with goldmark's own `IsDangerousURL`, as the br
 references decoded, tabs and newlines removed, leading spaces and control characters trimmed — and
 empties the ones it refuses. It refuses nothing goldmark's check would let through as written. Do
 not enable goldmark's
-`WithUnsafe`; the page's policy forbids scripts besides, but the renderer is the first guard, not the
-policy.
+`WithUnsafe`; the renderer is the first guard, supplemented by the policy, including the restricted
+product script exception for Mermaid.
+
+### Mermaid rendering
+
+Markdown containing a Mermaid fenced block permits the product renderer with the following HTTP
+policy; the nonce is generated afresh for every response using `crypto/rand`:
+
+```text
+sandbox allow-scripts; default-src 'none'; script-src 'nonce-<random>';
+script-src-attr 'none'; connect-src 'none'; object-src 'none'; frame-src 'none';
+worker-src 'none'; base-uri 'none'; form-action 'none'; img-src * data:;
+style-src 'unsafe-inline'; frame-ancestors 'self'
+```
+
+The renderer is a separate, bundled classic script, served by content hash under
+`/preview-assets/`. Only the exact bundled asset exists there; unknown names return 404, with
+no filesystem lookup or SPA fallback. It contains public product code and needs no preview
+token. The nonce authorizes that script element, not arbitrary same-host scripts. Neither
+`unsafe-eval`, script `unsafe-inline`, `allow-same-origin`, nor CORS permission for `Origin: null`
+is added. The iframe keeps its existing `sandbox="allow-scripts"` and the API/WS request guard
+continues to refuse the preview's opaque origin. Markdown without Mermaid keeps its old policy.
+
+Goldmark emits escaped code; the renderer reads `textContent`, never evaluates Markdown, and
+uses Mermaid's strict security level with HTML labels disabled. All diagram frontmatter and
+legacy directives are rejected before Mermaid preprocessing can apply their configuration.
+Each diagram reinitializes product settings and never calls returned `bindFunctions` handlers.
+Mermaid first inserts unsanitized SVG and generated styles into the live preview DOM to measure
+layout. That intermediate DOM is governed by the same CSP as the document: image shapes such
+as `A@{ img: "https://example.invalid/image.png" }` can fetch their image under `img-src * data:`.
+A failed image decode fails that diagram. Sanitizing the final result cannot undo those requests.
+
+The returned SVG then passes through DOMPurify with executable, HTML, image and link elements
+forbidden; nonlocal references and unsafe CSS are removed before the final SVG is inserted.
+Both stages stay in the preview's opaque origin, never the dashboard DOM. This is not a
+network-isolated viewer: Markdown images and images requested during Mermaid measurement can
+load externally. Bundling the runtime avoids a CDN dependency; it does not prevent requests
+explicitly named by the document.
+
+The document's 10 MiB limit remains. At most 10 diagrams are attempted, with 20,000 UTF-16
+code units per diagram, 50,000 combined code units per document and Mermaid's 100-edge limit
+(where the diagram type supports it). Rejected source also consumes the document text budget.
+These bounds do not interrupt synchronous layout or guarantee a CPU deadline.
 
 ### Paths and symbolic links
 

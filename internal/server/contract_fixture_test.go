@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"panemux/internal/agent"
+	"panemux/internal/agmsg"
 	"panemux/internal/board"
 	"panemux/internal/commandcenter"
 	"panemux/internal/config"
@@ -409,9 +410,17 @@ var contractFixtures = map[string]contractFixture{
 		root := filepath.Join(e.home, ".agents", "skills", "agmsg")
 		require.NoError(t, os.MkdirAll(filepath.Join(root, "scripts"), 0700))
 		require.NoError(t, os.WriteFile(filepath.Join(root, "scripts", "api.sh"), []byte("#!/bin/sh\n"), 0600))
-		require.NoError(t, os.WriteFile(filepath.Join(root, "VERSION"), []byte("1.3.0\n"), 0600))
+		major, err := strconv.Atoi(strings.Split(agmsg.TestedAgmsgVersion, ".")[0])
+		require.NoError(t, err)
+		version := strconv.Itoa(major+1) + ".0.0\n"
+		require.NoError(t, os.WriteFile(filepath.Join(root, "VERSION"), []byte(version), 0600))
 		rr := e.do(t, http.MethodGet, "/api/hosts/agmsg?host=", "")
 		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		var status struct {
+			Status string `json:"status"`
+		}
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &status))
+		require.Equal(t, "newer", status.Status)
 		return rr.Body.Bytes(), nil
 	}},
 

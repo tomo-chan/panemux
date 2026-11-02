@@ -2147,3 +2147,48 @@ split preview #385 built, through the same registry, route and policies.
 - **The relayed page keeps its own origin.** Its frame adds `allow-same-origin`, unlike a file's,
   because development servers' module scripts and hot reload fail in an opaque origin; the relay's
   port is not the dashboard's, which the request guard refuses.
+
+
+## 2026-11-01: Mermaid inside isolated Markdown previews (#471)
+
+Markdown keeps goldmark's GFM renderer and escaped fenced-code output. An AST check enables a
+product-owned classic script only when a Mermaid block exists. Rendering in the preview itself
+keeps local/SFTP, pane/popup, and independent-tab behavior on one path. Rendering in the dashboard
+would require cross-origin messaging and a separate implementation for tabs; server-side Mermaid
+CLI would add a browser and Node to the runtime distribution.
+
+The renderer is bundled separately as one IIFE, with diagram loaders folded into that file.
+Opaque-origin previews therefore need neither ESM CORS permission nor `allow-same-origin`.
+A response-specific nonce authorizes the product script, without authorizing scripts selected by
+the Markdown. The server hashes the bundled bytes to create its asset URL; a fixed build output
+name replaces the proposed build manifest because there is only one runtime asset. Licenses stay
+in the bundle. Diagram configuration directives and frontmatter are refused rather than trying
+to enumerate the settings an evolving Mermaid version might expose. Per-block errors preserve
+the original source. Input limits bound work but are not a preemptive rendering timeout.
+
+MathJax, GeoJSON/TopoJSON maps and ASCII STL remain separate future work; the file-type boundary
+is unchanged. GitHub compatibility concerns syntax and viewing behavior, not matching its
+private integration or a deployed library version.
+
+
+The local verification also exposed two test-harness assumptions: the login-shell fixture's
+`.profile` sources `.bashrc` when macOS `sh` is Bash, and the growing tasks package exceeded the
+coverage run's aggregate 60-second package budget while an individual test had run only one
+second. The fixture probes the actual shell without inherited startup environment, and the
+coverage package budget is 120 seconds. Production task-launch behavior is unchanged.
+
+
+## 2026-11-02: Mermaid measurement and final-output sanitization (#477 review)
+
+Mermaid needs a live DOM to measure its unsanitized SVG before returning the final drawing.
+The existing Markdown image policy also applies during that measurement, so image metadata can
+make external requests. Final SVG sanitization removes image elements but cannot retract an
+already-issued request. Behavior/security guidance and a browser test cover both successful
+image loading and a decode failure; there is no claim that diagram rendering is network-isolated.
+
+The renderer now limits a document to 10 attempts and 50,000 UTF-16 code units, with 20,000 per
+diagram and 100 edges where Mermaid supports the edge cap. These tighten the library defaults
+without claiming a preemptive CPU deadline. Detection reuses the rendered Markdown AST, runtime
+replacement is atomic, and build notices fall back to declared package licenses or fail when
+neither source of license information exists. Mermaid 12.2.0 replaces the version whose KaTeX
+dependency was affected by GHSA-238p-pmpm-9mq7.
