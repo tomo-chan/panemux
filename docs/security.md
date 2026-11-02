@@ -68,6 +68,8 @@ version and bundled npm, and publishes the SDK atomically under an install lock.
 preinstalled local SDKs are trusted developer tools; they must still start with the exact version
 and provide npm/npx. A bad published cache is an error, not a reason to silently use another
 runtime. This is development tooling, with no product/user-input route into its commands.
+Exclusive locking assumes a conforming `mkdir`; affected uutils 0.10.0 is unsuitable
+for concurrent acquisition. The platform limitation and follow-up are in the runtime contract.
 See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
 
 ## agmsg release proposal CI

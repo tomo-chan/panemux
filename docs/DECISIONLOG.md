@@ -7,6 +7,55 @@ Newest entries appear first within each topic. Dates and pull requests are inclu
 history identifies them. A decision remains here after its consequences are reflected in the
 current specification; superseded decisions are retained and labelled as such.
 
+## Release recovery uses the original source with GNU coreutils (2026-11-02, PR #479)
+
+The v0.27.0 draft was created before its GoReleaser build failed. Later main pushes
+do not emit `release_created` for that draft, and rerunning its old workflow does
+not acquire newer runner setup. Recovery therefore resolves the existing draft's
+full target SHA and uses the current main workflow to build that source. It leaves
+the release in draft for asset verification and publication, without adding later
+product features or changing the next release proposal.
+
+Installing zsh alone did not resolve the original failure. An Ubuntu 26.04 probe
+of the unchanged release source reproduced two successful `mkdir` calls for the
+same install lock, followed by the second `rmdir` failing. Its uutils 0.10.0 checks
+existence before creation, then incorrectly accepts `EEXIST` even without `-p`;
+the upstream correction is
+[mkdir: do not ignore EEXIST on non-recursive creation](https://github.com/uutils/coreutils/commit/bf423f388d543b9180db6b7283d82b301f138913).
+The [failing probe](https://github.com/tomo-chan/panemux/actions/runs/41428251934)
+records both installers passing lock acquisition. Local runs, including 30 with
+dash for both parent and nested shells, did not reproduce the coreutils defect.
+
+The release build job uses Ubuntu 24.04's GNU coreutils, as the regular CI job
+does. The [GNU coreutils verification](https://github.com/tomo-chan/panemux/actions/runs/41429903531)
+ran the unchanged v0.27.0 source's Node suite 30 times, then passed its complete
+`make check build-frontend` gate. This preserves the original release's source and full quality gate rather
+than ignoring lock-cleanup errors, retrying until a race happens to pass, or
+overlaying newer scripts onto an older release. Returning to a newer runner
+requires a corrected `mkdir` and successful concurrent-selector and release-gate
+verification. See [release maintenance](maintenance.md#recovering-a-failed-release-build)
+for draft checks, serialized runs and partial-upload cleanup.
+
+Both release paths resolve metadata inside the publisher's `contents: write`
+job because draft visibility requires push access. They build the draft's target
+SHA; a [live Actions token check](https://github.com/tomo-chan/panemux/actions/runs/41442887780)
+successfully read and validated the actual v0.27.0 draft with that permission.
+Both paths use the recorded
+SHA rather than the triggering push SHA, and reject existing assets before
+checkout or tests. Metadata validation and upload share a per-tag concurrency
+group; GitHub can replace a pending same-tag job, while an active upload and
+other tags are unaffected. A main-ref condition prevents accidental dispatch
+from another branch but does not restrict writers who can change workflow code.
+The [GitHub concurrency probe](https://github.com/tomo-chan/panemux/actions/runs/41447379449)
+used the production job condition and cancellation policy in an isolated group
+with an empty tag. A readiness job ensured that group was already occupied before
+the no-release job became eligible. The holder ran from 12:46:15 to 12:46:20 UTC,
+while the no-release job became `skipped` at 12:46:19 UTC, without waiting for the
+group. The read-only probe never built, uploaded or published a release, and its
+temporary workflow was removed after verification.
+The underlying development-tool lock limitation remains tracked in
+[issue #480](https://github.com/tomo-chan/panemux/issues/480).
+
 ## agmsg pin bump proposals (2026-10-31, issue #437)
 
 The daily real-install contract resolves the latest stable release tag to its commit SHA (peeling
