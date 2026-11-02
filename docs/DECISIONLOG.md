@@ -46,6 +46,13 @@ checkout or tests. Metadata validation and upload share a per-tag concurrency
 group; GitHub can replace a pending same-tag job, while an active upload and
 other tags are unaffected. A main-ref condition prevents accidental dispatch
 from another branch but does not restrict writers who can change workflow code.
+The [GitHub concurrency probe](https://github.com/tomo-chan/panemux/actions/runs/41447379449)
+used the production job condition and cancellation policy in an isolated group
+with an empty tag. A readiness job ensured that group was already occupied before
+the no-release job became eligible. The holder ran from 12:46:15 to 12:46:20 UTC,
+while the no-release job became `skipped` at 12:46:19 UTC, without waiting for the
+group. The read-only probe never built, uploaded or published a release, and its
+temporary workflow was removed after verification.
 The underlying development-tool lock limitation remains tracked in
 [issue #480](https://github.com/tomo-chan/panemux/issues/480).
 
