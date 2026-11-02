@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   probe:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -22,17 +22,17 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .node-version
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
       - run: make install-deps-ci
-      - name: Trace original release Node tests
+      - name: Check original release on GNU coreutils
         run: |
-          dash -c 'echo "shell=$0"'
-          dpkg-query -W dash coreutils rust-coreutils || true
-          sed 's/sh -c /sh -xc /g' scripts/node_toolchain_test.sh > scripts/node_toolchain_probe.sh
+          dpkg-query -W dash coreutils
           for attempt in $(seq 1 30); do
-            if sh -x scripts/node_toolchain_probe.sh > probe.log 2>&1; then
+            if sh scripts/node_toolchain_test.sh > probe.log 2>&1; then
               echo "attempt $attempt passed"
             else
               cat probe.log
               exit 1
             fi
           done
+          make check build-frontend

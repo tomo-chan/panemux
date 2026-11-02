@@ -42,14 +42,23 @@ Why this matters:
 
 ## Runner Images
 
-Workflows run on `ubuntu-latest`, now Ubuntu 26.04, except `ci.yml`, which is pinned to
-`ubuntu-24.04`. It installs Playwright's Chromium, and the pinned Playwright (1.59.1) refuses that
+Workflows run on `ubuntu-latest`, now Ubuntu 26.04, except `ci.yml` and the release
+workflow's `goreleaser` job, which are pinned to `ubuntu-24.04`. CI installs
+Playwright's Chromium, and the pinned Playwright (1.59.1) refuses that
 platform: `Playwright does not support chromium on ubuntu26.04-x64`. Playwright 1.62 and later know
 it.
 
 Return `ci.yml` to `ubuntu-latest` once Playwright is updated to a version that installs Chromium on
 Ubuntu 26.04 and the job passes there (issue #425). Until then, add no new job that installs
 Playwright on `ubuntu-latest`.
+
+Release builds use GNU coreutils because Ubuntu 26.04's uutils `mkdir` 0.10.0 can
+report success to both concurrent creators of a lock directory. That breaks the
+Node bootstrap's exclusive install lock and fails `test-node-toolchain` in the
+GoReleaser before hook. Keep the release job on 24.04 until the replacement runner
+has a corrected `mkdir` and passes the concurrent Node selector tests and full
+release quality gate. Recovery uses this runner setup even for older release
+source commits; no source override or skipped check is needed.
 
 Ubuntu 26.04 also ships uutils coreutils, one multicall binary behind `/usr/bin/sleep`, `mkdir` and
 the rest. It refuses to run under another name, and its `mkdir` leaves the path out of its error.
