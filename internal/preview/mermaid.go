@@ -9,7 +9,6 @@ import (
 	"net/http"
 
 	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/text"
 )
 
 // MermaidRuntime contains only trusted product code, never a previewed file.
@@ -42,8 +41,7 @@ func (m *MermaidRuntime) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(m.script)
 }
 
-func hasMermaid(source []byte) bool {
-	document := markdown.Parser().Parse(text.NewReader(source))
+func hasMermaid(document ast.Node, source []byte) bool {
 	found := false
 	_ = ast.Walk(document, func(n ast.Node, _ bool) (ast.WalkStatus, error) {
 		if block, ok := n.(*ast.FencedCodeBlock); ok && string(block.Language(source)) == "mermaid" {

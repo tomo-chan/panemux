@@ -201,19 +201,24 @@ another (the file is then found, if at all, under the directory it really lives 
 A fenced code block with language `mermaid` renders as an SVG diagram using the bundled
 Mermaid library. The same document renderer serves local and SSH files, panes, Type in pane,
 and tabs opened independently. Reload reads the current file and draws its diagrams again.
-No CDN or external rendering service is required. The main dashboard does not load Mermaid.
+The runtime requires no CDN or external rendering service. The main dashboard does not load
+Mermaid. Diagram-specified images can still load externally during layout, as described below.
 
 Each diagram keeps its source under **Show source**. A syntax error, unsupported configuration,
 or size limit shows the reason beside that source and does not stop the next diagram. If the
 runtime cannot load, the original code blocks remain readable. Diagrams fit the preview width
 and scroll horizontally when needed.
 
-Only the first 20 Mermaid blocks are attempted, each with at most 50,000 UTF-16 code units and
-Mermaid's 500-edge limit (where the diagram type supports that limit). These are input bounds,
+Only the first 10 Mermaid blocks are attempted, each with at most 20,000 UTF-16 code units and
+Mermaid's 100-edge limit (where the diagram type supports that limit). Their combined source text
+is limited to 50,000 code units per document, including rejected source. These are input bounds,
 not a guarantee of a rendering deadline. YAML frontmatter and legacy `%%{…}%%` directives inside
 a diagram are refused, including titles in frontmatter; use Markdown headings or Mermaid's
-accessibility title syntax instead. HTML labels, click handlers, external icon packs, CSS animations and SVG
-image elements are not supported. Raw HTML remains omitted. Mermaid's version is pinned in
+accessibility title syntax instead. HTML labels, click handlers, external icon packs and CSS
+animations are not supported. Image shapes can fetch external images while Mermaid measures
+the unsanitized SVG in the live preview DOM. The final SVG has image elements removed; a decode
+failure instead shows an error and the source for that block. Raw HTML remains omitted.
+Mermaid's version is pinned in
 `frontend/package-lock.json`; syntax can differ from GitHub's deployed version.
 
 GitHub's MathJax expressions, GeoJSON / TopoJSON maps, and ASCII STL models are not yet rendered.

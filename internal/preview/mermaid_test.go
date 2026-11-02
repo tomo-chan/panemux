@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -53,7 +54,7 @@ func TestMermaidSourceIsData(t *testing.T) {
 	assert.NotContains(t, rr.Body.String(), "<img")
 	// A missing runtime degrades to readable code, with the original policy.
 	rr = httptest.NewRecorder()
-	serveMarkdown(rr, "diagram.md", strings.NewReader("```mermaid\nA-->B\n```"))
+	serveMarkdown(rr, "diagram.md", strings.NewReader("```mermaid\nA-->B\n```"), nil)
 	assert.Contains(t, rr.Body.String(), "A--&gt;B")
 	assert.Equal(t, markdownPolicy, rr.Header().Get("Content-Security-Policy"))
 }
@@ -90,4 +91,33 @@ func TestMermaidRemoteMarkdown(t *testing.T) {
 	assert.Contains(t, response.Body.String(), runtime.URL())
 	assert.Contains(t, response.Body.String(), "A--&gt;B")
 	assert.Equal(t, []string{"allow-scripts"}, sandboxTokens(t, response.Header().Get("Content-Security-Policy")))
+}
+
+func TestMermaidRuntimeCanChangeWhileServing(t *testing.T) {
+	root := realDir(t)
+	file := writeFile(t, filepath.Join(root, "diagram.md"), "```mermaid\nflowchart LR\nA-->B\n```")
+	registry := NewRegistry()
+	url, err := registry.Open(root, file)
+	require.NoError(t, err)
+	token, rest, ok := strings.Cut(strings.TrimPrefix(url, RoutePrefix+"/"), "/")
+	require.True(t, ok)
+	runtime := NewMermaidRuntime([]byte("trusted"))
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 100 {
+			registry.SetMermaidRuntime(runtime)
+			registry.SetMermaidRuntime(nil)
+		}
+	}()
+	for range 100 {
+		rr := httptest.NewRecorder()
+		registry.Serve(rr, httptest.NewRequest("GET", url, nil), token, rest)
+		assert.Equal(t, 200, rr.Code)
+		if rr.Header().Get("Content-Security-Policy") != markdownPolicy {
+			assert.Contains(t, rr.Body.String(), runtime.URL())
+		}
+	}
+	wg.Wait()
 }

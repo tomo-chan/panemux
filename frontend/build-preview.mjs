@@ -1,4 +1,5 @@
 import { build } from 'esbuild'
+import { previewLicenseNotice } from './src/utils/previewLicense.ts'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 
 // Mermaid's diagram loaders use dynamic imports. A single IIFE deliberately
@@ -27,11 +28,10 @@ const notices = []
 for (const directory of [...packages].sort()) {
   const pkg = JSON.parse(await readFile(`${directory}/package.json`, 'utf8'))
   const files = (await readdir(directory, { withFileTypes: true }))
-    .filter(file => file.isFile() && /^(?:licen[cs]e|notice)(?:\..*)?$/i.test(file.name))
+    .filter(file => file.isFile() && /^(?:licen[cs]e|notice)(?:[-.].*)?$/i.test(file.name))
     .map(file => file.name).sort()
-  for (const file of files) {
-    notices.push(`${pkg.name}@${pkg.version}\n${await readFile(`${directory}/${file}`, 'utf8')}`)
-  }
+  const texts = await Promise.all(files.map(file => readFile(`${directory}/${file}`, 'utf8')))
+  notices.push(previewLicenseNotice(pkg, texts))
 }
 const licenseComment = `\n/*! Third-party notices\n${notices.join('\n\n').replace(/\*\//g, '* /')}\n*/\n`
 await mkdir('dist/preview-assets', { recursive: true })

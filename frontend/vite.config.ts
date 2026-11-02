@@ -10,7 +10,6 @@ export default defineConfig({
   server: {
     proxy: {
       '/preview': { target: 'http://localhost:8080', changeOrigin: false },
-      '/preview-assets': { target: 'http://localhost:8080', changeOrigin: false },
       '/api': { target: 'http://localhost:8080', changeOrigin: false },
       '/ws': {
         target: 'ws://localhost:8080',

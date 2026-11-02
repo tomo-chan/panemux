@@ -122,13 +122,22 @@ Goldmark emits escaped code; the renderer reads `textContent`, never evaluates M
 uses Mermaid's strict security level with HTML labels disabled. All diagram frontmatter and
 legacy directives are rejected before Mermaid preprocessing can apply their configuration.
 Each diagram reinitializes product settings and never calls returned `bindFunctions` handlers.
-SVG output passes through DOMPurify with executable, HTML, image and link elements forbidden;
-nonlocal references and unsafe CSS are removed before the resulting SVG is inserted. Drawing
-occurs within the preview origin, never in the dashboard DOM. Existing Markdown image loading
-is governed by `img-src`; this is not a network-isolated viewer of an untrusted document.
+Mermaid first inserts unsanitized SVG and generated styles into the live preview DOM to measure
+layout. That intermediate DOM is governed by the same CSP as the document: image shapes such
+as `A@{ img: "https://example.invalid/image.png" }` can fetch their image under `img-src * data:`.
+A failed image decode fails that diagram. Sanitizing the final result cannot undo those requests.
 
-The document's 10 MiB limit remains. Diagram count, text size and Mermaid's edge limit bound
-inputs; they do not interrupt synchronous browser layout or guarantee a CPU deadline.
+The returned SVG then passes through DOMPurify with executable, HTML, image and link elements
+forbidden; nonlocal references and unsafe CSS are removed before the final SVG is inserted.
+Both stages stay in the preview's opaque origin, never the dashboard DOM. This is not a
+network-isolated viewer: Markdown images and images requested during Mermaid measurement can
+load externally. Bundling the runtime avoids a CDN dependency; it does not prevent requests
+explicitly named by the document.
+
+The document's 10 MiB limit remains. At most 10 diagrams are attempted, with 20,000 UTF-16
+code units per diagram, 50,000 combined code units per document and Mermaid's 100-edge limit
+(where the diagram type supports it). Rejected source also consumes the document text budget.
+These bounds do not interrupt synchronous layout or guarantee a CPU deadline.
 
 ### Paths and symbolic links
 

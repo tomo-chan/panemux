@@ -31,7 +31,7 @@ describe('Mermaid preview', () => {
     expect(document.querySelectorAll('details code')).toHaveLength(2)
     expect(document.querySelector('code.language-js')).toHaveTextContent('const x = 1')
     expect(render.mock.calls[0][0]).not.toEqual(render.mock.calls[1][0])
-    expect(initialize).toHaveBeenCalledWith(expect.objectContaining({ securityLevel: 'strict', htmlLabels: false, startOnLoad: false }))
+    expect(initialize).toHaveBeenCalledWith(expect.objectContaining({ securityLevel: 'strict', htmlLabels: false, startOnLoad: false, maxTextSize: 20_000, maxEdges: 100 }))
     expect(document.querySelector('svg')).toHaveAttribute('role', 'img')
   })
 
@@ -59,10 +59,10 @@ describe('Mermaid preview', () => {
   })
 
   it('bounds source and diagram count before rendering', async () => {
-    code('a'.repeat(50_001))
-    for (let i = 0; i < 21; i++) code('flowchart LR\nA-->B')
+    code('a'.repeat(20_001))
+    for (let i = 0; i < 11; i++) code('flowchart LR\nA-->B')
     await renderMermaidPreviews(document, engine)
-    expect(render).toHaveBeenCalledTimes(19)
+    expect(render).toHaveBeenCalledTimes(9)
     expect(document.querySelectorAll('[role=alert]')).toHaveLength(3)
   })
 
@@ -95,4 +95,11 @@ it('keeps ordinary SVG styles while removing at-rules and external CSS', () => {
   expect(svg.querySelector('style')?.textContent).toContain('url(#arrow)')
   expect(svg.querySelector('style')?.textContent).not.toMatch(/@|example.invalid/)
   expect(svg.querySelector('g')?.getAttribute('transform')).toBe('translate(10,20)')
+})
+
+it('bounds the combined text of a document before rendering further diagrams', async () => {
+  for (let i = 0; i < 3; i++) code('a'.repeat(20_000))
+  await renderMermaidPreviews(document, engine)
+  expect(render).toHaveBeenCalledTimes(2)
+  expect(document.querySelector('[role=alert]')).toHaveTextContent('document')
 })

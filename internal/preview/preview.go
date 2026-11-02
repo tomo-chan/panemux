@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/yuin/goldmark"
@@ -291,7 +292,7 @@ type fileReader interface {
 // kept for the server's lifetime: a preview opened in another tab outlives
 // the pane, popup and session it came from.
 type Registry struct {
-	runtime *MermaidRuntime
+	runtime atomic.Pointer[MermaidRuntime]
 	byToken map[string]entry
 	byEntry map[entry]string
 	mu      sync.Mutex
@@ -302,8 +303,8 @@ func NewRegistry() *Registry {
 	return &Registry{byToken: map[string]entry{}, byEntry: map[entry]string{}}
 }
 
-// SetMermaidRuntime installs the product runtime before the server starts.
-func (r *Registry) SetMermaidRuntime(runtime *MermaidRuntime) { r.runtime = runtime }
+// SetMermaidRuntime safely replaces the immutable product runtime.
+func (r *Registry) SetMermaidRuntime(runtime *MermaidRuntime) { r.runtime.Store(runtime) }
 
 // Open registers file, served from root, and returns the address it is
 // served at. The file must be an HTML or Markdown file within the size
@@ -392,7 +393,7 @@ func (r *Registry) Serve(w http.ResponseWriter, req *http.Request, token, rest s
 	case kindHTML:
 		serveHTML(w, req, info, f)
 	case kindMarkdown:
-		serveMarkdown(w, info.Name(), f, r.runtime)
+		serveMarkdown(w, info.Name(), f, r.runtime.Load())
 	default:
 		http.ServeContent(w, req, info.Name(), info.ModTime(), f)
 	}
@@ -434,7 +435,7 @@ func (r *Registry) open(token, rest string) (fileReader, fs.FileInfo, bool) {
 	return f, info, true
 }
 
-func serveMarkdown(w http.ResponseWriter, name string, f io.Reader, runtimes ...*MermaidRuntime) {
+func serveMarkdown(w http.ResponseWriter, name string, f io.Reader, runtime *MermaidRuntime) {
 	source, err := io.ReadAll(io.LimitReader(f, MaxDocumentBytes+1))
 	if err != nil {
 		http.Error(w, "reading the file failed", http.StatusInternalServerError)
@@ -444,14 +445,14 @@ func serveMarkdown(w http.ResponseWriter, name string, f io.Reader, runtimes ...
 		http.Error(w, ErrTooLarge.Error(), http.StatusRequestEntityTooLarge)
 		return
 	}
-	page, err := renderMarkdown(name, source)
+	page, mermaid, err := renderMarkdown(name, source)
 	if err != nil { //coverage:exempt renderMarkdown fails only where its own exempt branch does
 		http.Error(w, "rendering the file failed", http.StatusInternalServerError)
 		return
 	}
 	policy := markdownPolicy
-	if len(runtimes) > 0 && runtimes[0] != nil && hasMermaid(source) {
-		page, policy = runtimes[0].enable(page)
+	if runtime != nil && mermaid {
+		page, policy = runtime.enable(page)
 	}
 	w.Header().Set("Content-Security-Policy", policy)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -515,10 +516,11 @@ const markdownStyle = `body{margin:0;background:#fff;color:#1f2328;` +
 	` .pm-mermaid-drawing{overflow:auto}.pm-mermaid svg{max-width:100%;height:auto}` +
 	`.pm-mermaid summary{cursor:pointer;color:#0969da;margin:8px 0}.pm-mermaid [role=alert]{color:#a00}`
 
-func renderMarkdown(name string, source []byte) ([]byte, error) {
+func renderMarkdown(name string, source []byte) ([]byte, bool, error) {
+	document := markdown.Parser().Parse(text.NewReader(source))
 	var body bytes.Buffer
-	if err := markdown.Convert(source, &body); err != nil { //coverage:exempt rendering into a bytes.Buffer does not fail
-		return nil, fmt.Errorf("rendering %s: %w", name, err)
+	if err := markdown.Renderer().Render(&body, source, document); err != nil { //coverage:exempt bytes.Buffer cannot fail
+		return nil, false, fmt.Errorf("rendering %s: %w", name, err)
 	}
 	var page bytes.Buffer
 	page.WriteString(`<!doctype html><html><head><meta charset="utf-8">`)
@@ -527,5 +529,5 @@ func renderMarkdown(name string, source []byte) ([]byte, error) {
 	page.WriteString("<style>" + markdownStyle + "</style></head><body><main>")
 	page.Write(body.Bytes())
 	page.WriteString("</main></body></html>")
-	return page.Bytes(), nil
+	return page.Bytes(), hasMermaid(document, source), nil
 }
