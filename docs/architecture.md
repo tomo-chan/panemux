@@ -73,6 +73,11 @@ layout rendering, terminal emulation, interaction state, and presentation.
 - The session manager owns live terminal sessions and replay buffers; the browser does not own
   process lifetime.
 - Each terminal pane owns one browser-side terminal instance and WebSocket lifecycle.
+- App owns dashboard search/filter state across workspace switches and restores Group from
+  versioned, Zod-validated browser preferences. The record also carries view/sort preferences;
+  cards keep their existing order. Storage failure falls back to defaults or in-memory state.
+  Shared list filtering includes Show done before grouping and attention reporting. Pure row-sort
+  utilities share elapsed-time semantics with display and never mutate collection or group order.
 - The backend resolves live Git/PR context from the active pane work directory and caches the
   result for the behavior-defined interval.
 - The API handler owns the shared `internal/hostexec` pool for its process-service lifetime; closing

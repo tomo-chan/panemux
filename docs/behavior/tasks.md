@@ -1099,12 +1099,32 @@ never holds it.
 
 The dashboard and the workspaces are switched with the `← Tasks` and `Workspaces` buttons or with
 `Cmd/Ctrl+Shift+<display.task_dashboard_shortcut>` (`S` unless configured), from either layer.
-The search text, host and label filters, Rows mode and Done column setting belong to App's
+The search text, host and label filters, Group mode and Show done setting belong to App's
 in-memory `TaskDashboardViewState` and survive switching to any workspace and back in the same
 browser tab. The dashboard is still unmounted when leaving, ending its temporary terminal
 attachments and timers; selection, details, popups and scroll position are not retained.
-Reloading the page resets the five settings to empty search, All hosts, All labels, None for Rows
-and Done column off; they are not saved through an API, a config file or browser storage.
+Reloading resets search, host and label filters and Show done to empty search, All hosts,
+All labels and off. Group (None / Host / Label / Repository) is restored from versioned
+localStorage, independently of these transient filters. No API or config file stores display preferences.
+The browser preference record also validates and round-trips view mode (cards / table) and a single
+sort key/direction; the current UI still renders cards in their existing collection order.
+Defaults are Cards / None / State ascending. Unknown enums (including unavailable Session group),
+corrupt JSON and unsupported versions fall back to defaults. Denied or full storage leaves settings
+usable in memory. Loading fallback defaults does not overwrite the stored record; an explicit
+Group change writes the new preference while preserving any successfully loaded view mode and sort.
+Search, selection and terminal connections are never stored there.
+
+The shared listed-task set applies search, host, label and Show done before grouping, and its unique
+task IDs feed attention tracking. A restarted task marked done remains in its live state. The row-sort
+utility leaves the source array and group order intact, sorting only within each group, including
+label duplicates and catch-all groups. Session title, host and agent display name (unknown agents use
+their ID), repository and branch use fixed-English natural, case-insensitive comparison. State uses
+board column order, with Running / unknown tied; only stopped tasks marked done sort as Done.
+Elapsed uses the same status timestamp and numeric seconds as display, with no fallback to start
+time: invalid or missing timestamps are unknown, future timestamps are zero. Every sort uses one
+reference time; display ticks alone need not re-sort. Missing values stay last in either direction;
+ties use fixed task-ID order, also when descending. New keys start ascending except Elapsed (longest
+first); selecting the current key reverses direction. These utilities expose no table or sort controls.
 A stored host or label absent from the current list is displayed and applied as All, while the
 stored value is kept through loading and collection failures and restored when available again.
 A notification opening a task still clears the filters that hide it, and those cleared settings

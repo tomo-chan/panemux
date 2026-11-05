@@ -410,7 +410,7 @@ describe('TaskDashboard', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Show host' }), { target: { value: '' } })
     expect(screen.getAllByTestId(/^task-card-/)).toHaveLength(4)
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Split rows by' }), { target: { value: 'repo' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Group tasks by' }), { target: { value: 'repo' } })
     expect(screen.getAllByRole('heading', { level: 3, name: 'Not in a Git repository' }).length).toBeGreaterThan(0)
   })
 
@@ -520,7 +520,7 @@ describe('TaskDashboard done and labels', () => {
     expect(screen.queryByRole('region', { name: 'Done' })).not.toBeInTheDocument()
     expect(cardIds()).toEqual(['busy-done', 'codex-with-session', 'codex', 'stop-open'])
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Show Done column' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show done' }))
     const done = screen.getByRole('region', { name: 'Done' })
     expect(within(done).getByTestId('task-card-stop-done')).toBeInTheDocument()
     expect(within(done).getByRole('heading', { level: 2 })).toHaveTextContent('Done1')
@@ -551,7 +551,7 @@ describe('TaskDashboard done and labels', () => {
     expect(cardIds()).toEqual(['busy-done'])
 
     fireEvent.change(labelFilter, { target: { value: '\u0000all' } })
-    fireEvent.change(screen.getByRole('combobox', { name: 'Split rows by' }), { target: { value: 'label' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Group tasks by' }), { target: { value: 'label' } })
     const working = screen.getByRole('region', { name: 'Working' })
     expect(within(working).getAllByRole('heading', { level: 3 }).map((el) => el.textContent)).toEqual(['payment', 'sprint-42'])
     expect(within(working).getAllByTestId('task-card-busy-done')).toHaveLength(2)
@@ -567,7 +567,7 @@ describe('TaskDashboard done and labels', () => {
     fireEvent.click(within(detail()).getByRole('button', { name: 'Mark done' }))
     expect(saveRecord).not.toHaveBeenCalled()
     expect(detail()).toHaveTextContent(
-      "Mark this task done? It moves to the Done column, which is hidden until 'Done column' is checked.",
+      "Mark this task done? It moves to the Done column, which is hidden until 'Show done' is checked.",
     )
     fireEvent.click(within(detail()).getByRole('button', { name: 'Cancel' }))
     expect(detail()).not.toHaveTextContent('Mark this task done?')
@@ -754,7 +754,7 @@ describe('TaskDashboard done and labels', () => {
     expect(confirmText('codex-with-session')).toBe(
       'Mark this task done? It stays in its column while it runs, and moves to Done when it stops.',
     )
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Show Done column' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show done' }))
     expect(confirmText('stop-open')).toBe('Mark this task done? It moves to the Done column.')
   })
 
@@ -783,7 +783,7 @@ describe('TaskDashboard done and labels', () => {
     renderDashboard(tasksState({
       data: { ...recorded, tasks: [task({ id: 'proto', state: 'busy', labels: ['__proto__', 'constructor'] })] },
     }))
-    fireEvent.change(screen.getByRole('combobox', { name: 'Split rows by' }), { target: { value: 'label' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Group tasks by' }), { target: { value: 'label' } })
     const working = screen.getByRole('region', { name: 'Working' })
     expect(within(working).getAllByRole('heading', { level: 3 }).map((el) => el.textContent)).toEqual([
       '__proto__',
@@ -1196,7 +1196,7 @@ describe('TaskDashboard summaries', () => {
   it('does not call a task marked done a candidate', () => {
     const data = { ...summarized, tasks: summarized.tasks.map((t) => (t.id === 'stop-done' ? { ...t, done: true } : t)) }
     renderDashboard(tasksState({ data }))
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Show Done column' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Show done' }))
     const card = screen.getByTestId('task-card-stop-done')
     expect(card).toHaveTextContent('service-b was released.')
     expect(within(card).queryByText('Done?')).toBeNull()
@@ -1375,7 +1375,7 @@ describe('TaskDashboard focus request (issue #279)', () => {
       data: { ...response, tasks: [...response.tasks, task({ id: 'wait-done', state: 'wait', done: true })] },
     })
     renderWithFocus({ taskId: 'wait-done', seq: 1 }, doneState)
-    expect(screen.getByRole('checkbox', { name: 'Show Done column' })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Show done' })).not.toBeChecked()
     expect(screen.getByTestId('task-card-wait-done')).toHaveAttribute('data-selected', 'true')
   })
 

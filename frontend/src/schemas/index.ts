@@ -429,6 +429,22 @@ export const TaskStateSchema = z.enum(['busy', 'wait', 'idle', 'run', 'unknown',
 
 export type TaskState = z.infer<typeof TaskStateSchema>
 
+// Browser display preferences; independent of the task API and transient filters.
+export const TaskGroupModeSchema = z.enum(['none', 'host', 'label', 'repo'])
+export type TaskGroupMode = z.infer<typeof TaskGroupModeSchema>
+export const TaskSortSchema = z.object({
+  key: z.enum(['session', 'state', 'elapsed', 'host', 'agent', 'repository', 'branch']),
+  direction: z.enum(['asc', 'desc']),
+})
+export type TaskSort = z.infer<typeof TaskSortSchema>
+export const TaskDashboardPrefsSchema = z.object({
+  version: z.literal(1),
+  viewMode: z.enum(['cards', 'table']),
+  groupMode: TaskGroupModeSchema,
+  sort: TaskSortSchema,
+})
+export type TaskDashboardPrefs = z.infer<typeof TaskDashboardPrefsSchema>
+
 export const TaskLocationSchema = z.object({
   // daemon: a codex session run by codex's shared app-server daemon, which
   // no pane can be told to show (issue #264).

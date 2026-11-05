@@ -199,6 +199,7 @@ beforeEach(() => {
   taskEventsMock.state = { store: null, status: 'connecting' }
   taskEventsMock.onChange = null
   window.sessionStorage.clear()
+  window.localStorage.clear()
 })
 
 // Issue #404: a pane whose task waits on a codex permission request.
@@ -973,8 +974,8 @@ describe('App workspace deletion', () => {
     fireEvent.change(screen.getByLabelText('Filter tasks'), { target: { value: 'hidden' } })
     fireEvent.change(screen.getByLabelText('Show host'), { target: { value: 'dev-server' } })
     fireEvent.change(screen.getByLabelText('Show label'), { target: { value: 'hidden-label' } })
-    fireEvent.change(screen.getByLabelText('Split rows by'), { target: { value: 'host' } })
-    fireEvent.click(screen.getByLabelText('Show Done column'))
+    fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'host' } })
+    fireEvent.click(screen.getByLabelText('Show done'))
     fireEvent.click(screen.getByRole('button', { name: 'Workspaces' }))
     emitTaskSnapshot([daemonTask])
     expect(window.Notification).toHaveBeenCalledWith('Agent waiting', { body: 'codex on Local: other', tag: 'e1-e0-3' })
@@ -988,8 +989,8 @@ describe('App workspace deletion', () => {
       expect(screen.getByLabelText('Filter tasks')).toHaveValue('')
       expect(screen.getByLabelText('Show host')).toHaveValue('\u0000all')
       expect(screen.getByLabelText('Show label')).toHaveValue('\u0000all')
-      expect(screen.getByLabelText('Split rows by')).toHaveValue('host')
-      expect(screen.getByLabelText('Show Done column')).toBeChecked()
+      expect(screen.getByLabelText('Group tasks by')).toHaveValue('host')
+      expect(screen.getByLabelText('Show done')).toBeChecked()
     }
     expectCleared()
     fireEvent.click(screen.getByRole('button', { name: 'Workspaces' }))
@@ -1246,6 +1247,48 @@ describe('App adding an SSH host from the pane settings dialog', () => {
 })
 
 describe('App task dashboard layer', () => {
+  it('leaves an unsupported preference record untouched on mount until Group changes', () => {
+    const key = 'panemux:task-dashboard-prefs'
+    const raw = JSON.stringify({ version: 2, viewMode: 'future-view', groupMode: 'future-group', extra: 'keep' })
+    window.localStorage.setItem(key, raw)
+    render(<App />)
+    expect(window.localStorage.getItem(key)).toBe(raw)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    expect(screen.getByLabelText('Group tasks by')).toHaveValue('none')
+    expect(window.localStorage.getItem(key)).toBe(raw)
+    fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'repo' } })
+    expect(JSON.parse(window.localStorage.getItem(key)!)).toEqual({
+      version: 1, viewMode: 'cards', groupMode: 'repo', sort: { key: 'state', direction: 'asc' },
+    })
+  })
+
+  it('keeps stored view mode and sort when Group changes, including returning to the loaded group', () => {
+    const key = 'panemux:task-dashboard-prefs'
+    const prefs = { version: 1, viewMode: 'table', groupMode: 'none', sort: { key: 'elapsed', direction: 'desc' } }
+    window.localStorage.setItem(key, JSON.stringify(prefs))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    for (const groupMode of ['repo', 'host', 'none']) {
+      fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: groupMode } })
+      expect(JSON.parse(window.localStorage.getItem(key)!)).toEqual({ ...prefs, groupMode })
+    }
+  })
+
+  it('restores Group after reload while keeping search and Show done transient', () => {
+    const first = render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'repo' } })
+    fireEvent.change(screen.getByLabelText('Filter tasks'), { target: { value: 'temporary' } })
+    fireEvent.click(screen.getByLabelText('Show done'))
+    first.unmount()
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    expect(screen.getByLabelText('Group tasks by')).toHaveValue('repo')
+    expect(screen.getByLabelText('Filter tasks')).toHaveValue('')
+    expect(screen.getByLabelText('Show done')).not.toBeChecked()
+    expect(screen.getByText('Group', { selector: 'label' })).toBeInTheDocument()
+  })
+
   beforeEach(() => {
     currentWorkspaces = workspaces
     mockUseBrowserNotificationPermission.mockImplementation(() => {})
@@ -1314,28 +1357,28 @@ describe('App task dashboard layer', () => {
     change('Filter tasks', 'alpha')
     change('Show host', 'dev-server')
     change('Show label', 'feature')
-    change('Split rows by', 'host')
-    fireEvent.click(screen.getByLabelText('Show Done column'))
+    change('Group tasks by', 'host')
+    fireEvent.click(screen.getByLabelText('Show done'))
     roundTrip()
     expect(screen.getByLabelText('Filter tasks')).toHaveValue('alpha')
     expect(screen.getByLabelText('Show host')).toHaveValue('dev-server')
     expect(screen.getByLabelText('Show label')).toHaveValue('feature')
-    expect(screen.getByLabelText('Split rows by')).toHaveValue('host')
-    expect(screen.getByLabelText('Show Done column')).toBeChecked()
+    expect(screen.getByLabelText('Group tasks by')).toHaveValue('host')
+    expect(screen.getByLabelText('Show done')).toBeChecked()
     expect(within(screen.getByRole('region', { name: 'Done' })).getByRole('heading', { level: 3 })).toHaveTextContent('dev-server')
     expect(cards()).toEqual(['task-card-remote-done'])
 
     change('Filter tasks', 'beta')
     change('Show host', '') // The local host must stay distinct from All.
     change('Show label', 'infra')
-    change('Split rows by', 'label')
-    fireEvent.click(screen.getByLabelText('Show Done column'))
+    change('Group tasks by', 'label')
+    fireEvent.click(screen.getByLabelText('Show done'))
     roundTrip()
     expect(screen.getByLabelText('Filter tasks')).toHaveValue('beta')
     expect(screen.getByLabelText('Show host')).toHaveValue('')
     expect(screen.getByLabelText('Show label')).toHaveValue('infra')
-    expect(screen.getByLabelText('Split rows by')).toHaveValue('label')
-    expect(screen.getByLabelText('Show Done column')).not.toBeChecked()
+    expect(screen.getByLabelText('Group tasks by')).toHaveValue('label')
+    expect(screen.getByLabelText('Show done')).not.toBeChecked()
     expect(screen.queryByRole('region', { name: 'Done' })).not.toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'Working' })).getByRole('heading', { level: 3 })).toHaveTextContent('infra')
     expect(cards()).toEqual(['task-card-local'])
@@ -1343,13 +1386,13 @@ describe('App task dashboard layer', () => {
     change('Filter tasks', '')
     change('Show host', '\u0000all')
     change('Show label', '\u0000all')
-    change('Split rows by', 'none')
+    change('Group tasks by', 'none')
     roundTrip()
     expect(screen.getByLabelText('Filter tasks')).toHaveValue('')
     expect(screen.getByLabelText('Show host')).toHaveValue('\u0000all')
     expect(screen.getByLabelText('Show label')).toHaveValue('\u0000all')
-    expect(screen.getByLabelText('Split rows by')).toHaveValue('none')
-    expect(screen.getByLabelText('Show Done column')).not.toBeChecked()
+    expect(screen.getByLabelText('Group tasks by')).toHaveValue('none')
+    expect(screen.getByLabelText('Show done')).not.toBeChecked()
     expect(cards()).toHaveLength(3)
   })
 

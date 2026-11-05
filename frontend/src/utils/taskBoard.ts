@@ -7,6 +7,7 @@ import type {
   TaskAction,
   TaskActions,
   TaskHost,
+  TaskGroupMode,
   TaskRecord,
   TaskState,
   TaskSummary,
@@ -278,7 +279,12 @@ export function filterTasks(tasks: Task[], filter: TaskFilter): Task[] {
   })
 }
 
-export type LaneMode = 'none' | 'host' | 'label' | 'repo'
+/** The filter-matching set shared by list views, before grouping or duplication. */
+export function listedTasks(tasks: Task[], filter: TaskFilter, showDone: boolean): Task[] {
+  return filterTasks(tasks, filter).filter((task) => showDone || columnForTask(task) !== 'done')
+}
+
+export type LaneMode = TaskGroupMode
 
 // The keys of the lanes that collect "everything else". A control character
 // keeps them apart from any repository or label, which cannot contain one,
@@ -495,12 +501,18 @@ export function waitingCount(tasks: Task[]): number {
   return tasks.filter((task) => task.state === 'wait').length
 }
 
-/** A compact age, such as "3m" or "2h"; "" when there is no time to show. */
-export function formatElapsed(since: string | undefined, now: number): string {
-  if (!since) return ''
+/** Elapsed state seconds; unknown timestamps stay distinct from zero. */
+export function elapsedSeconds(since: string | undefined, now: number): number | null {
+  if (!since) return null
   const at = Date.parse(since)
-  if (Number.isNaN(at)) return ''
-  const seconds = Math.max(0, Math.floor((now - at) / 1000))
+  if (!Number.isFinite(at) || !Number.isFinite(now)) return null
+  return Math.max(0, Math.floor((now - at) / 1000))
+}
+
+/** A compact age, using the same numeric value as the table comparator. */
+export function formatElapsed(since: string | undefined, now: number): string {
+  const seconds = elapsedSeconds(since, now)
+  if (seconds === null) return ''
   if (seconds < 60) return 'just now'
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m`

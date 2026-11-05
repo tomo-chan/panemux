@@ -8,6 +8,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { CommandHistoryPanel } from './components/CommandHistoryPanel'
 import { BoardDashboardPanel } from './components/BoardDashboardPanel'
 import { TaskDashboard, INITIAL_TASK_DASHBOARD_VIEW_STATE, type TaskDashboardViewState } from './components/TaskDashboard'
+import { loadTaskDashboardPrefs, saveTaskDashboardPrefs } from './utils/taskDashboardPrefs'
 import type { BoardPaneRef } from './components/BoardDashboardPanel'
 import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
@@ -111,7 +112,17 @@ export const App: React.FC = () => {
     setWorkspaceTabPosition,
     setWorkspaceVerticalBarWidth,
   } = useLayout()
-  const [taskDashboardViewState, setTaskDashboardViewState] = useState<TaskDashboardViewState>(INITIAL_TASK_DASHBOARD_VIEW_STATE)
+  const [taskDashboardPrefs] = useState(loadTaskDashboardPrefs)
+  const [taskDashboardViewState, setTaskDashboardViewState] = useState<TaskDashboardViewState>(() => ({
+    ...INITIAL_TASK_DASHBOARD_VIEW_STATE, laneMode: taskDashboardPrefs.groupMode,
+  }))
+  const savedTaskGroupMode = useRef(taskDashboardPrefs.groupMode)
+  useEffect(() => {
+    // Loading defaults must not replace a record this build cannot understand.
+    if (savedTaskGroupMode.current === taskDashboardViewState.laneMode) return
+    saveTaskDashboardPrefs({ ...taskDashboardPrefs, groupMode: taskDashboardViewState.laneMode })
+    savedTaskGroupMode.current = taskDashboardViewState.laneMode
+  }, [taskDashboardPrefs, taskDashboardViewState.laneMode])
   const [maximizedPaneIdsByWorkspace, setMaximizedPaneIdsByWorkspace] = useState<Record<string, string | null>>({})
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
   const [activePaneId, setActivePaneId] = useState<string | null>(null)
