@@ -498,7 +498,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
   repeated presses reverse direction. Sorting stays within groups and does not reorder cards.
   One focusable horizontal scroll region holds the entire table, with sticky column headers.
   Narrow screens retain the existing responsive details panel and scroll the table horizontally.
-  Collection updates retain keyed task focus; notification jumps focus and scroll the active list.
+  Collection updates retain keyed task focus; each notification jump focuses and scrolls the active
+  list once. A view change during the highlight keeps focus on the view switch and does not restart it.
 
   ![Task table with independent sortable columns and the shared details panel.](images/task-dashboard-table.png)
 - **Kanban.** Columns in the order a person should look at them: Waiting for input (highlighted in

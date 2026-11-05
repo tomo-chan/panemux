@@ -183,7 +183,8 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   // The host whose connection menu is open (issue #314), one at a time.
   const [hostMenu, setHostMenu] = useState<string | null>(null)
   const [unreadableOpen, setUnreadableOpen] = useState(false)
-  const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
+  const [flashRequest, setFlashRequest] = useState<TaskDashboardProps['focusRequest']>(null)
+  const flashTaskId = flashRequest?.taskId ?? null
   const ownHostsState = useSSHConnections()
   const hostsDialogState = hostsState ?? ownHostsState
   // A task that was started but is not listed yet: claude writes the state
@@ -304,19 +305,24 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     setPendingLaunch(null)
     setSelectedId(target.id)
     setDetailOpen(true)
-    setFlashTaskId(target.id)
+    setFlashRequest({ taskId: target.id, seq: focusRequest.seq })
     onFocusRequestHandled?.()
   }, [activeHost, activeLabel, focusRequest, onFocusRequestHandled, onViewStateChange, query, tasks])
 
+  const focusedRequestSeq = useRef<number | null>(null)
   useEffect(() => {
-    if (!flashTaskId) return
+    if (!flashRequest || focusedRequestSeq.current === flashRequest.seq) return
+    focusedRequestSeq.current = flashRequest.seq
     const target = rootRef.current
-      ?.querySelector<HTMLElement>(`[data-task-view="${viewMode}"] [data-task-id="${CSS.escape(flashTaskId)}"]`)
+      ?.querySelector<HTMLElement>(`[data-task-view="${viewMode}"] [data-task-id="${CSS.escape(flashRequest.taskId)}"]`)
     target?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
     target?.querySelector<HTMLElement>('[data-task-select]')?.focus({ preventScroll: true })
-    const timeoutId = window.setTimeout(() => setFlashTaskId(null), TASK_CARD_FLASH_MS)
+  }, [flashRequest, viewMode])
+  useEffect(() => {
+    if (!flashRequest) return
+    const timeoutId = window.setTimeout(() => setFlashRequest(null), TASK_CARD_FLASH_MS)
     return () => window.clearTimeout(timeoutId)
-  }, [flashTaskId, viewMode])
+  }, [flashRequest])
 
   // A person selecting a task: a stopped one is summarized only when asked.
   const pick = (task: Task) => {
@@ -646,7 +652,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
             {tableGroups.length === 0 && <tbody><tr><td colSpan={9} className="td-empty">No matching sessions</td></tr></tbody>}
             {tableGroups.map((group) => (
               <tbody key={group.key}>
-                {laneMode !== 'none' && <tr className="td-table-group"><th scope="rowgroup" colSpan={9}>{group.title} · {group.tasks.length} sessions</th></tr>}
+                {laneMode !== 'none' && <tr className="td-table-group"><th scope="rowgroup" colSpan={9}>{group.title} · {group.tasks.length} {group.tasks.length === 1 ? 'session' : 'sessions'}</th></tr>}
                 {group.tasks.map((task) => (
                   <TaskTableRow key={task.id} task={task} pane={panes.get(task.id) ?? null}
                     selected={task.id === selectedId} flashing={task.id === flashTaskId} nowMs={nowMs}

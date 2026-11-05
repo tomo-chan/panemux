@@ -1647,7 +1647,7 @@
 .td-table-scroll { padding-top: 0; }
 .td-table { width: 100%; min-width: 1140px; border-collapse: separate; border-spacing: 0; font-size: 12px; }
 .td-table th, .td-table td { padding: 10px; text-align: left; vertical-align: top; border-bottom: 1px solid #303238; }
-.td-table thead th { position: sticky; top: 0; z-index: 2; background: var(--td-ground); white-space: nowrap; }
+.td-table thead th { vertical-align: middle; position: sticky; top: 0; z-index: 2; background: var(--td-ground); white-space: nowrap; }
 .td-table thead button { font: inherit; color: inherit; background: transparent; border: 0; padding: 4px 0; cursor: pointer; }
 .td-table tbody tr[data-selected='true'] { background: #1f2c40; }
 .td-table tbody tr:hover { background: #24272d; }

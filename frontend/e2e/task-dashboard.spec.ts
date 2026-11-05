@@ -523,6 +523,13 @@ test('table supports keyboard sorting, shared details, scrolling and narrow scre
   const table = page.getByRole('table', { name: 'Tasks' })
   const list = page.getByRole('region', { name: 'Task table', exact: true })
   await expect(table).toBeVisible()
+  const headingCenters = await table.getByRole('columnheader').evaluateAll(headings => headings.map(heading => {
+    const range = document.createRange()
+    range.selectNodeContents(heading.querySelector('button') || heading)
+    const rect = range.getBoundingClientRect()
+    return rect.y + rect.height / 2
+  }))
+  expect(Math.max(...headingCenters) - Math.min(...headingCenters)).toBeLessThan(2)
   const sort = table.getByRole('button', { name: /Sort by Session/ })
   await sort.focus()
   await page.keyboard.press('Enter')
@@ -557,8 +564,4 @@ test('table supports keyboard sorting, shared details, scrolling and narrow scre
   await list.focus()
   await page.keyboard.press('ArrowRight')
   await expect.poll(() => list.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
-  await page.screenshot({ path: '/tmp/panemux-487-table-narrow.png' })
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await table.getByRole('button', { name: 'session-2', exact: true }).click()
-  await page.screenshot({ path: '/tmp/panemux-487-table-wide.png' })
 })
