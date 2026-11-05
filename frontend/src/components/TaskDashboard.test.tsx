@@ -1,9 +1,16 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { TaskDashboard } from './TaskDashboard'
+import { useState } from 'react'
+import { TaskDashboard as ControlledTaskDashboard, INITIAL_TASK_DASHBOARD_VIEW_STATE, type TaskDashboardProps } from './TaskDashboard'
 import type { TasksState } from '../hooks/useTasks'
 import type { SSHConnectionsState } from '../hooks/useSSHConnections'
 import type { AgentInfo, Task, TasksResponse, Workspace } from '../schemas'
+
+// Keep view settings in a parent, as App does, including across rerenders.
+function TaskDashboard(props: Omit<TaskDashboardProps, 'viewState' | 'onViewStateChange'>) {
+  const [viewState, setViewState] = useState(INITIAL_TASK_DASHBOARD_VIEW_STATE)
+  return <ControlledTaskDashboard {...props} viewState={viewState} onViewStateChange={setViewState} />
+}
 
 const NOW = Date.parse('2026-09-25T12:00:00Z')
 

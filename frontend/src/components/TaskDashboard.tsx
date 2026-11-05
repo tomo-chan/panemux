@@ -88,7 +88,26 @@ const ALL_LABELS = '\u0000all'
 // Below this width the Type in pane popup is a full sheet from the start.
 const NARROW_QUERY = '(max-width: 720px)'
 
+/** Board settings held by App for the lifetime of this page. */
+export interface TaskDashboardViewState {
+  query: string
+  laneMode: LaneMode
+  hostFilter: string
+  labelFilter: string
+  showDone: boolean
+}
+
+export const INITIAL_TASK_DASHBOARD_VIEW_STATE: TaskDashboardViewState = {
+  query: '',
+  laneMode: 'none',
+  hostFilter: ALL_HOSTS,
+  labelFilter: ALL_LABELS,
+  showDone: false,
+}
+
 export interface TaskDashboardProps {
+  viewState: TaskDashboardViewState
+  onViewStateChange: React.Dispatch<React.SetStateAction<TaskDashboardViewState>>
   agentBoardEnabled?: boolean
   tasksState: TasksState
   /**
@@ -133,6 +152,8 @@ function stateStyle(state: Task['state']): StateVars {
 
 export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   tasksState,
+  viewState,
+  onViewStateChange,
   agentBoardEnabled = false,
   hostsState,
   workspaces,
@@ -147,11 +168,10 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
 }) => {
   const { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume, requestSummary, inputGiven } =
     tasksState
-  const [query, setQuery] = useState('')
-  const [laneMode, setLaneMode] = useState<LaneMode>('none')
-  const [hostFilter, setHostFilter] = useState(ALL_HOSTS)
-  const [labelFilter, setLabelFilter] = useState(ALL_LABELS)
-  const [showDone, setShowDone] = useState(false)
+  const { query, laneMode, hostFilter, labelFilter, showDone } = viewState
+  const updateViewState = <K extends keyof TaskDashboardViewState>(key: K, value: TaskDashboardViewState[K]) => {
+    onViewStateChange((previous) => ({ ...previous, [key]: value }))
+  }
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
@@ -227,11 +247,13 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   // offers the labels on the board. None are offered while the record file
   // cannot be read; a label can still be typed.
   const knownLabels = useMemo(() => (data?.records_error ? [] : data?.known_labels ?? []), [data])
-  // A label no task carries any more falls back to every label.
+  // Keep unavailable choices so they return after a temporary loading/error
+  // state or when a host/label reappears; display and filter as All meanwhile.
+  const activeHost = hosts.some((host) => host.name === hostFilter) ? hostFilter : null
   const activeLabel = labelFilter !== ALL_LABELS && labels.includes(labelFilter) ? labelFilter : null
   const visible = useMemo(
-    () => filterTasks(tasks, { query, host: hostFilter === ALL_HOSTS ? null : hostFilter, label: activeLabel }),
-    [activeLabel, hostFilter, query, tasks],
+    () => filterTasks(tasks, { query, host: activeHost, label: activeLabel }),
+    [activeHost, activeLabel, query, tasks],
   )
   useEffect(() => {
     if (!onListedTasksChange) return
@@ -268,18 +290,16 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     const target = tasks.find((task) => task.id === focusRequest.taskId)
     if (!target) return
     handledFocusSeq.current = focusRequest.seq
-    const filter = { query, host: hostFilter === ALL_HOSTS ? null : hostFilter, label: activeLabel }
+    const filter = { query, host: activeHost, label: activeLabel }
     if (filterTasks([target], filter).length === 0) {
-      setQuery('')
-      setHostFilter(ALL_HOSTS)
-      setLabelFilter(ALL_LABELS)
+      onViewStateChange((previous) => ({ ...previous, query: '', hostFilter: ALL_HOSTS, labelFilter: ALL_LABELS }))
     }
     setPendingLaunch(null)
     setSelectedId(target.id)
     setDetailOpen(true)
     setFlashTaskId(target.id)
     onFocusRequestHandled?.()
-  }, [activeLabel, focusRequest, hostFilter, onFocusRequestHandled, query, tasks])
+  }, [activeHost, activeLabel, focusRequest, onFocusRequestHandled, onViewStateChange, query, tasks])
 
   useEffect(() => {
     if (!flashTaskId) return
@@ -504,11 +524,11 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           placeholder="Filter by directory, branch, PR or session"
           aria-label="Filter tasks"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => updateViewState('query', event.target.value)}
         />
         <label>
           Rows
-          <select aria-label="Split rows by" value={laneMode} onChange={(event) => setLaneMode(event.target.value as LaneMode)}>
+          <select aria-label="Split rows by" value={laneMode} onChange={(event) => updateViewState('laneMode', event.target.value as LaneMode)}>
             <option value="none">None</option>
             <option value="host">Host</option>
             <option value="label">Label</option>
@@ -517,7 +537,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         </label>
         <label>
           Host
-          <select aria-label="Show host" value={hostFilter} onChange={(event) => setHostFilter(event.target.value)}>
+          <select aria-label="Show host" value={activeHost ?? ALL_HOSTS} onChange={(event) => updateViewState('hostFilter', event.target.value)}>
             <option value={ALL_HOSTS}>All</option>
             {hosts.map((host) => (
               <option key={host.name} value={host.name}>
@@ -528,7 +548,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         </label>
         <label>
           Label
-          <select aria-label="Show label" value={activeLabel ?? ALL_LABELS} onChange={(event) => setLabelFilter(event.target.value)}>
+          <select aria-label="Show label" value={activeLabel ?? ALL_LABELS} onChange={(event) => updateViewState('labelFilter', event.target.value)}>
             <option value={ALL_LABELS}>All</option>
             {labels.map((label) => (
               <option key={label} value={label}>
@@ -542,7 +562,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
             type="checkbox"
             aria-label="Show Done column"
             checked={showDone}
-            onChange={(event) => setShowDone(event.target.checked)}
+            onChange={(event) => updateViewState('showDone', event.target.checked)}
           />
           Done column
         </label>
