@@ -477,7 +477,14 @@ terminal that had focus cannot receive what is typed into the dashboard.
   or it is outdated, and a summary that arrives re-filters the board at once. Every session the dashboard starts is
   named `task-<8 hex>`, so `task` matches all of them, and a short number can match the hex of one. Rows split by none,
   host, label, or repository; a host filter; a label filter listing every label on the board; and a `Done column`
-  checkbox, off by default.
+  checkbox, off by default. Search text, host, label, Rows and Done column settings stay in effect
+  when switching to any workspace and back, for the lifetime of the page in that browser tab.
+  Reloading starts with empty search, All hosts and labels, None for Rows and Done column off.
+  A selected host or label missing from the current list displays and filters as All without
+  discarding the choice; it takes effect again when that host or label returns, including after
+  loading or collection failures. Opening a task from a notification clears hiding filters, and
+  the cleared settings carry over to the next round trip. Task selection, the detail panel,
+  popups and scroll position are reset when leaving the dashboard.
 - **Kanban.** Columns in the order a person should look at them: Waiting for input (highlighted in
   gold, "Needs you"), Working, Idle, Running / unknown, Stopped, and Done when the checkbox asks for
   it. A task marked done sits in Done only while it is stopped, so with the column hidden a finished

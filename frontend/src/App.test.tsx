@@ -966,9 +966,16 @@ describe('App workspace deletion', () => {
       state: 'wait', waiting_for: 'input needed', wait_id: 'e1-e0-3',
       location: { kind: 'daemon', attachable: false },
     }
-    mockUseTasks.mockReturnValue(tasksStateWith([{ ...daemonTask, state: 'busy', waiting_for: undefined, wait_id: undefined }]))
+    mockUseTasks.mockReturnValue(tasksStateWith([{ ...daemonTask, state: 'busy', waiting_for: undefined, wait_id: undefined }, paneTask('hidden', 'nowhere', 'busy', { host: 'dev-server', labels: ['hidden-label'] })]))
 
     render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.change(screen.getByLabelText('Filter tasks'), { target: { value: 'hidden' } })
+    fireEvent.change(screen.getByLabelText('Show host'), { target: { value: 'dev-server' } })
+    fireEvent.change(screen.getByLabelText('Show label'), { target: { value: 'hidden-label' } })
+    fireEvent.change(screen.getByLabelText('Split rows by'), { target: { value: 'host' } })
+    fireEvent.click(screen.getByLabelText('Show Done column'))
+    fireEvent.click(screen.getByRole('button', { name: 'Workspaces' }))
     emitTaskSnapshot([daemonTask])
     expect(window.Notification).toHaveBeenCalledWith('Agent waiting', { body: 'codex on Local: other', tag: 'e1-e0-3' })
 
@@ -977,6 +984,18 @@ describe('App workspace deletion', () => {
     const card = await screen.findByTestId('task-card-local:codex:d1')
     await waitFor(() => expect(card).toHaveAttribute('data-selected', 'true'))
     expect(card).toHaveClass('td-card-flash')
+    const expectCleared = () => {
+      expect(screen.getByLabelText('Filter tasks')).toHaveValue('')
+      expect(screen.getByLabelText('Show host')).toHaveValue('\u0000all')
+      expect(screen.getByLabelText('Show label')).toHaveValue('\u0000all')
+      expect(screen.getByLabelText('Split rows by')).toHaveValue('host')
+      expect(screen.getByLabelText('Show Done column')).toBeChecked()
+    }
+    expectCleared()
+    fireEvent.click(screen.getByRole('button', { name: 'Workspaces' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    expectCleared()
+    expect(screen.getByTestId('task-card-local:codex:d1')).toBeInTheDocument()
   })
 
   it('does not notify a wait the dashboard on screen lists, and notifies one it does not', () => {
@@ -1272,6 +1291,101 @@ describe('App task dashboard layer', () => {
     expect(mockUseTasks).toHaveBeenLastCalledWith(false)
     expect(screen.getByTestId('workspace-layer')).not.toHaveAttribute('inert')
   })
+
+  it('keeps all five board settings and their results across workspace round trips, including edits and clearing', () => {
+    const tasks = [
+      paneTask('remote-done', 'nowhere', 'stop', { host: 'dev-server', cwd: '/workspace/user/alpha', labels: ['feature'], done: true }),
+      paneTask('local', 'nowhere', 'busy', { cwd: '/workspace/user/beta', labels: ['infra'] }),
+      paneTask('other-label', 'nowhere', 'busy', { host: 'dev-server', cwd: '/workspace/user/alpha', labels: ['infra'] }),
+      paneTask('other-query', 'nowhere', 'busy', { host: 'dev-server', cwd: '/workspace/user/gamma', labels: ['feature'] }),
+    ]
+    mockUseTasks.mockReturnValue(tasksStateWith(tasks))
+    render(<App />)
+    const open = () => fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    const roundTrip = () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Workspaces' }))
+      expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('tab', { name: /^Ops\b/ }))
+      open()
+    }
+    const change = (name: string, value: string) => fireEvent.change(screen.getByLabelText(name), { target: { value } })
+    const cards = () => screen.queryAllByTestId(/^task-card-/).map((card) => card.getAttribute('data-testid'))
+    open()
+    change('Filter tasks', 'alpha')
+    change('Show host', 'dev-server')
+    change('Show label', 'feature')
+    change('Split rows by', 'host')
+    fireEvent.click(screen.getByLabelText('Show Done column'))
+    roundTrip()
+    expect(screen.getByLabelText('Filter tasks')).toHaveValue('alpha')
+    expect(screen.getByLabelText('Show host')).toHaveValue('dev-server')
+    expect(screen.getByLabelText('Show label')).toHaveValue('feature')
+    expect(screen.getByLabelText('Split rows by')).toHaveValue('host')
+    expect(screen.getByLabelText('Show Done column')).toBeChecked()
+    expect(within(screen.getByRole('region', { name: 'Done' })).getByRole('heading', { level: 3 })).toHaveTextContent('dev-server')
+    expect(cards()).toEqual(['task-card-remote-done'])
+
+    change('Filter tasks', 'beta')
+    change('Show host', '') // The local host must stay distinct from All.
+    change('Show label', 'infra')
+    change('Split rows by', 'label')
+    fireEvent.click(screen.getByLabelText('Show Done column'))
+    roundTrip()
+    expect(screen.getByLabelText('Filter tasks')).toHaveValue('beta')
+    expect(screen.getByLabelText('Show host')).toHaveValue('')
+    expect(screen.getByLabelText('Show label')).toHaveValue('infra')
+    expect(screen.getByLabelText('Split rows by')).toHaveValue('label')
+    expect(screen.getByLabelText('Show Done column')).not.toBeChecked()
+    expect(screen.queryByRole('region', { name: 'Done' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Working' })).getByRole('heading', { level: 3 })).toHaveTextContent('infra')
+    expect(cards()).toEqual(['task-card-local'])
+
+    change('Filter tasks', '')
+    change('Show host', '\u0000all')
+    change('Show label', '\u0000all')
+    change('Split rows by', 'none')
+    roundTrip()
+    expect(screen.getByLabelText('Filter tasks')).toHaveValue('')
+    expect(screen.getByLabelText('Show host')).toHaveValue('\u0000all')
+    expect(screen.getByLabelText('Show label')).toHaveValue('\u0000all')
+    expect(screen.getByLabelText('Split rows by')).toHaveValue('none')
+    expect(screen.getByLabelText('Show Done column')).not.toBeChecked()
+    expect(cards()).toHaveLength(3)
+  })
+
+  it.each(['loading', 'error', 'missing-host'] as const)(
+    'keeps unavailable host and label choices through %s and workspace round trips', (condition) => {
+      const local = paneTask('local', 'nowhere', 'busy', { labels: ['infra'] })
+      const remote = paneTask('remote', 'nowhere', 'busy', { host: 'dev-server', labels: ['feature'] })
+      const full = tasksStateWith([local, remote])
+      mockUseTasks.mockReturnValue(full)
+      const { rerender } = render(<App />)
+      const open = () => fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+      const roundTrip = () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Workspaces' }))
+        open()
+      }
+      open()
+      fireEvent.change(screen.getByLabelText('Show host'), { target: { value: 'dev-server' } })
+      fireEvent.change(screen.getByLabelText('Show label'), { target: { value: 'feature' } })
+      const unavailable = condition === 'missing-host'
+        ? { ...full, data: { hosts: [{ name: '', status: 'ok' }], tasks: [local] } }
+        : { ...full, data: null, loading: condition === 'loading', error: condition === 'error' ? 'Collection failed' : null }
+      mockUseTasks.mockReturnValue(unavailable)
+      rerender(<App />)
+      roundTrip()
+      expect(screen.getByLabelText('Show host')).toHaveValue('\u0000all')
+      expect(screen.getByLabelText('Show label')).toHaveValue('\u0000all')
+      if (condition === 'missing-host') expect(screen.getByTestId('task-card-local')).toBeInTheDocument()
+      mockUseTasks.mockReturnValue(full)
+      rerender(<App />)
+      roundTrip()
+      expect(screen.getByLabelText('Show host')).toHaveValue('dev-server')
+      expect(screen.getByLabelText('Show label')).toHaveValue('feature')
+      expect(screen.getByTestId('task-card-remote')).toBeInTheDocument()
+      expect(screen.queryByTestId('task-card-local')).not.toBeInTheDocument()
+    },
+  )
 
   it('switches layers with Cmd/Ctrl+Shift+S by default, even from inside a terminal', () => {
     render(<App />)

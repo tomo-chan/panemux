@@ -7,7 +7,7 @@ import { WorkspaceTabs } from './components/WorkspaceTabs'
 import { CommandPalette } from './components/CommandPalette'
 import { CommandHistoryPanel } from './components/CommandHistoryPanel'
 import { BoardDashboardPanel } from './components/BoardDashboardPanel'
-import { TaskDashboard } from './components/TaskDashboard'
+import { TaskDashboard, INITIAL_TASK_DASHBOARD_VIEW_STATE, type TaskDashboardViewState } from './components/TaskDashboard'
 import type { BoardPaneRef } from './components/BoardDashboardPanel'
 import { useLayout } from './hooks/useLayout'
 import { usePaneSettings } from './hooks/usePaneSettings'
@@ -111,6 +111,7 @@ export const App: React.FC = () => {
     setWorkspaceTabPosition,
     setWorkspaceVerticalBarWidth,
   } = useLayout()
+  const [taskDashboardViewState, setTaskDashboardViewState] = useState<TaskDashboardViewState>(INITIAL_TASK_DASHBOARD_VIEW_STATE)
   const [maximizedPaneIdsByWorkspace, setMaximizedPaneIdsByWorkspace] = useState<Record<string, string | null>>({})
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
   const [activePaneId, setActivePaneId] = useState<string | null>(null)
@@ -914,6 +915,8 @@ export const App: React.FC = () => {
         </div>
         {layer === 'tasks' && (
           <TaskDashboard
+            viewState={taskDashboardViewState}
+            onViewStateChange={setTaskDashboardViewState}
             agentBoardEnabled={agentBoardEnabled}
             tasksState={dashboardTasksState}
             workspaces={workspaces?.items ?? []}

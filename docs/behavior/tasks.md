@@ -1099,6 +1099,16 @@ never holds it.
 
 The dashboard and the workspaces are switched with the `← Tasks` and `Workspaces` buttons or with
 `Cmd/Ctrl+Shift+<display.task_dashboard_shortcut>` (`S` unless configured), from either layer.
+The search text, host and label filters, Rows mode and Done column setting belong to App's
+in-memory `TaskDashboardViewState` and survive switching to any workspace and back in the same
+browser tab. The dashboard is still unmounted when leaving, ending its temporary terminal
+attachments and timers; selection, details, popups and scroll position are not retained.
+Reloading the page resets the five settings to empty search, All hosts, All labels, None for Rows
+and Done column off; they are not saved through an API, a config file or browser storage.
+A stored host or label absent from the current list is displayed and applied as All, while the
+stored value is kept through loading and collection failures and restored when available again.
+A notification opening a task still clears the filters that hide it, and those cleared settings
+are kept on the next round trip.
 
 ### Opening a host
 
