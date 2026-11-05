@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { Task, TaskHost, TaskIssueLink, TaskLaunchResponse, Workspace } from '../schemas'
+import type { Task, TaskDashboardPrefs, TaskSort, TaskHost, TaskIssueLink, TaskLaunchResponse, Workspace } from '../schemas'
 import type { HostTerminalType, TasksState } from '../hooks/useTasks'
 import { TASKS_POLL_INTERVAL_MS } from '../hooks/useTasks'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
@@ -47,6 +47,7 @@ import {
   visibleColumns,
 } from '../utils/taskBoard'
 import type { LaneMode, LaunchedTaskRef, TaskInputAction, TaskOpenAction, TaskPaneRef } from '../utils/taskBoard'
+import { nextTaskSort, sortTaskGroups } from '../utils/taskTable'
 import { matchLabelSuggestions } from '../utils/labelSuggestions'
 import { unreadableRows } from '../utils/unreadableState'
 import UnreadableStateDialog from './UnreadableStateDialog'
@@ -90,7 +91,7 @@ const ALL_LABELS = '\u0000all'
 const NARROW_QUERY = '(max-width: 720px)'
 
 /** Board settings held by App for the lifetime of this page. */
-export interface TaskDashboardViewState {
+export interface TaskDashboardViewState extends Pick<TaskDashboardPrefs, 'viewMode' | 'sort'> {
   query: string
   laneMode: LaneMode
   hostFilter: string
@@ -100,6 +101,8 @@ export interface TaskDashboardViewState {
 
 export const INITIAL_TASK_DASHBOARD_VIEW_STATE: TaskDashboardViewState = {
   query: '',
+  viewMode: 'cards',
+  sort: { key: 'state', direction: 'asc' },
   laneMode: 'none',
   hostFilter: ALL_HOSTS,
   labelFilter: ALL_LABELS,
@@ -169,7 +172,7 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
 }) => {
   const { data, error, loading, updatedAt, refresh, reconnect, saveRecord, launch, resume, requestSummary, inputGiven } =
     tasksState
-  const { query, laneMode, hostFilter, labelFilter, showDone } = viewState
+  const { query, laneMode, hostFilter, labelFilter, showDone, viewMode, sort } = viewState
   const updateViewState = <K extends keyof TaskDashboardViewState>(key: K, value: TaskDashboardViewState[K]) => {
     onViewStateChange((previous) => ({ ...previous, [key]: value }))
   }
@@ -180,7 +183,8 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   // The host whose connection menu is open (issue #314), one at a time.
   const [hostMenu, setHostMenu] = useState<string | null>(null)
   const [unreadableOpen, setUnreadableOpen] = useState(false)
-  const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
+  const [flashRequest, setFlashRequest] = useState<TaskDashboardProps['focusRequest']>(null)
+  const flashTaskId = flashRequest?.taskId ?? null
   const ownHostsState = useSSHConnections()
   const hostsDialogState = hostsState ?? ownHostsState
   // A task that was started but is not listed yet: claude writes the state
@@ -256,6 +260,10 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     () => listedTasks(tasks, { query, host: activeHost, label: activeLabel }, showDone),
     [activeHost, activeLabel, query, tasks, showDone],
   )
+  const tableGroups = useMemo(
+    () => sortTaskGroups(groupIntoLanes(visible, laneMode), sort, now(), agents),
+    [visible, laneMode, sort, agents, now],
+  )
   useEffect(() => {
     if (!onListedTasksChange) return
     onListedTasksChange(new Set(visible.map((task) => task.id)))
@@ -297,18 +305,24 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     setPendingLaunch(null)
     setSelectedId(target.id)
     setDetailOpen(true)
-    setFlashTaskId(target.id)
+    setFlashRequest({ taskId: target.id, seq: focusRequest.seq })
     onFocusRequestHandled?.()
   }, [activeHost, activeLabel, focusRequest, onFocusRequestHandled, onViewStateChange, query, tasks])
 
+  const focusedRequestSeq = useRef<number | null>(null)
   useEffect(() => {
-    if (!flashTaskId) return
-    rootRef.current
-      ?.querySelector<HTMLElement>(`[data-testid="task-card-${CSS.escape(flashTaskId)}"]`)
-      ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
-    const timeoutId = window.setTimeout(() => setFlashTaskId(null), TASK_CARD_FLASH_MS)
+    if (!flashRequest || focusedRequestSeq.current === flashRequest.seq) return
+    focusedRequestSeq.current = flashRequest.seq
+    const target = rootRef.current
+      ?.querySelector<HTMLElement>(`[data-task-view="${viewMode}"] [data-task-id="${CSS.escape(flashRequest.taskId)}"]`)
+    target?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    target?.querySelector<HTMLElement>('[data-task-select]')?.focus({ preventScroll: true })
+  }, [flashRequest, viewMode])
+  useEffect(() => {
+    if (!flashRequest) return
+    const timeoutId = window.setTimeout(() => setFlashRequest(null), TASK_CARD_FLASH_MS)
     return () => window.clearTimeout(timeoutId)
-  }, [flashTaskId])
+  }, [flashRequest])
 
   // A person selecting a task: a stopped one is summarized only when asked.
   const pick = (task: Task) => {
@@ -362,11 +376,11 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     if (inputOpen || !target) return
     focusAfterClose.current = null
     const fallback = rootRef.current?.querySelector<HTMLElement>(
-      `[data-type-in="${CSS.escape(target.taskId)}"][data-origin="${target.origin}"]`,
+      `${target.origin === 'card' ? `[data-task-view="${viewMode}"] ` : ''}[data-type-in="${CSS.escape(target.taskId)}"][data-origin="${target.origin}"]`,
     )
-    const element = target.element?.isConnected ? target.element : fallback
+    const element = target.element?.isConnected && !target.element.closest('[hidden]') ? target.element : fallback
     ;(element ?? rootRef.current)?.focus({ preventScroll: true })
-  }, [inputOpen])
+  }, [inputOpen, viewMode])
 
   // Everything but the popup is inert while it is open — the top bar, the
   // filters, the board and the detail panel — so no key and no click reaches
@@ -566,13 +580,21 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           />
           Show done
         </label>
+        <div className="td-view-switch" role="group" aria-label="Task view">
+          {(['cards', 'table'] as const).map((mode) => (
+            <button type="button" className="td-btn" key={mode} aria-pressed={viewMode === mode}
+              onClick={() => updateViewState('viewMode', mode)}>
+              {mode === 'cards' ? 'Cards' : 'Table'}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="td-main">
         {/* The board scrolls sideways when its columns are wider than the
             space left, and with no task card nothing in it takes focus, so the
             board is a tab stop of its own for scrolling it from the keyboard. */}
-        <div className="td-board" role="region" aria-label="Task board" tabIndex={0}>
+        <div className="td-board" role="region" aria-label="Task board" tabIndex={0} data-task-view="cards" hidden={viewMode !== 'cards'}>
           <div className="td-cols">
             {visibleColumns(showDone).map((column) => {
               const inColumn = visible.filter((task) => columnForTask(task) === column.id)
@@ -613,6 +635,34 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
               )
             })}
           </div>
+        </div>
+        <div className="td-board td-table-scroll" role="region" aria-label="Task table" tabIndex={0} data-task-view="table" hidden={viewMode !== 'table'}>
+          <table className="td-table" aria-label="Tasks">
+            <thead><tr>
+              {TABLE_COLUMNS.map(({ key, title }) => (
+                <th key={key} scope="col" aria-sort={sort.key === key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : undefined}>
+                  <button type="button" onClick={() => updateViewState('sort', nextTaskSort(sort, key))}
+                    aria-label={`Sort by ${title}${sort.key === key ? `, ${sort.direction === 'asc' ? 'ascending' : 'descending'}` : ''}`}>
+                    {title}{sort.key === key && <span aria-hidden="true"> {sort.direction === 'asc' ? '↑' : '↓'}</span>}
+                  </button>
+                </th>
+              ))}
+              <th scope="col">Labels</th><th scope="col">Actions</th>
+            </tr></thead>
+            {tableGroups.length === 0 && <tbody><tr><td colSpan={9} className="td-empty">No matching sessions</td></tr></tbody>}
+            {tableGroups.map((group) => (
+              <tbody key={group.key}>
+                {laneMode !== 'none' && <tr className="td-table-group"><th scope="rowgroup" colSpan={9}>{group.title} · {group.tasks.length} {group.tasks.length === 1 ? 'session' : 'sessions'}</th></tr>}
+                {group.tasks.map((task) => (
+                  <TaskTableRow key={task.id} task={task} pane={panes.get(task.id) ?? null}
+                    selected={task.id === selectedId} flashing={task.id === flashTaskId} nowMs={nowMs}
+                    onSelect={pick} onOpen={open} onResume={(t) => void resumeTask(t)} resuming={resumingIds.has(task.id)}
+                    onTypeIn={typeIn} inputMark={inputMark(task)} knownAgent={isKnownAgent(agents, task.agent)}
+                    agentName={agents?.find((agent) => agent.id === task.agent)?.display_name} />
+                ))}
+              </tbody>
+            ))}
+          </table>
         </div>
         <TaskDetail
           task={selected}
@@ -881,6 +931,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
     <article
       className={flashing ? 'td-card td-card-flash' : 'td-card'}
       data-testid={`task-card-${task.id}`}
+      data-task-id={task.id}
       data-selected={selected}
       style={stateStyle(task.state)}
       onClick={(event) => {
@@ -906,7 +957,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
           </span>
         )}
       </div>
-      <button type="button" className="td-card-title" aria-pressed={selected} onClick={() => onSelect(task)}>
+      <button type="button" className="td-card-title" data-task-select aria-pressed={selected} onClick={() => onSelect(task)}>
         {taskTitle(task)}
       </button>
       {task.cwd && <div className="td-card-cwd" title={task.cwd}>{task.cwd}</div>}
@@ -933,6 +984,49 @@ const TaskCard: React.FC<TaskCardProps> = ({
         <ResumeButton task={task} resuming={resuming} onResume={onResume} small />
       </div>
     </article>
+  )
+}
+
+const TABLE_COLUMNS: { key: TaskSort['key']; title: string }[] = [
+  { key: 'session', title: 'Session' }, { key: 'state', title: 'State' },
+  { key: 'elapsed', title: 'Elapsed' }, { key: 'host', title: 'Host' },
+  { key: 'agent', title: 'Agent' }, { key: 'repository', title: 'Repository' },
+  { key: 'branch', title: 'Branch' },
+]
+
+const TaskTableRow: React.FC<TaskCardProps & { agentName?: string }> = ({
+  task, pane, selected, flashing, nowMs, onSelect, onOpen, onResume, resuming, onTypeIn, inputMark, knownAgent, agentName,
+}) => {
+  const action = taskOpenAction(task, pane)
+  const column = columnForTask(task)
+  const summary = task.state === 'wait' ? task.waiting_for || 'waiting' : task.summary?.text
+  return (
+    <tr data-testid={`task-row-${task.id}`} data-task-id={task.id} data-selected={selected}
+      className={flashing ? 'td-card-flash' : undefined}>
+      <td className="td-table-session">
+        <button type="button" className="td-card-title" data-task-select aria-pressed={selected} onClick={() => onSelect(task)}>{taskTitle(task)}</button>
+        {summary && <div className="td-summary" title={summary} data-outdated={task.state !== 'wait' && (task.summary?.outdated ?? false)}>{summary}</div>}
+        {inputMark === 'typing' && <span className="td-typing-badge">Typing</span>}
+      </td>
+      <td><span className="td-table-state" style={{ color: COLUMN_COLORS[column] }}>{TASK_COLUMNS.find((item) => item.id === column)?.title}</span></td>
+      <td>{formatElapsed(task.status_since, nowMs) || '—'}</td>
+      <td>{hostLabel(task.host)}</td>
+      <td>{knownAgent ? agentName || task.agent : agentLabel(task.agent, false)}</td>
+      <td>
+        {task.git?.repo || '—'}
+        {task.git?.pr_url && task.git.pr_number !== undefined && (
+          <a className="td-table-pr" href={task.git.pr_url} target="_blank" rel="noopener noreferrer">PR #{task.git.pr_number}</a>
+        )}
+      </td>
+      <td className="td-table-branch" title={task.git?.branch}>{task.git?.branch || '—'}</td>
+      <td><LabelChips labels={task.labels ?? []} /></td>
+      <td><div className="td-table-actions">
+        {action.kind === 'unavailable' && <span className="td-where">{whereLabel(task, pane)}</span>}
+        <TypeInButton task={task} action={taskInputAction(task, pane)} mark={inputMark} origin="card" onTypeIn={onTypeIn} small />
+        <OpenButton task={task} action={action} onOpen={onOpen} small />
+        <ResumeButton task={task} resuming={resuming} onResume={onResume} small />
+      </div></td>
+    </tr>
   )
 }
 

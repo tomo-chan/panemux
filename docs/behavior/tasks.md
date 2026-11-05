@@ -1099,19 +1099,23 @@ never holds it.
 
 The dashboard and the workspaces are switched with the `← Tasks` and `Workspaces` buttons or with
 `Cmd/Ctrl+Shift+<display.task_dashboard_shortcut>` (`S` unless configured), from either layer.
-The search text, host and label filters, Group mode and Show done setting belong to App's
+The search text, host and label filters, Group mode, Cards/Table view, sort and Show done setting belong to App's
 in-memory `TaskDashboardViewState` and survive switching to any workspace and back in the same
 browser tab. The dashboard is still unmounted when leaving, ending its temporary terminal
 attachments and timers; selection, details, popups and scroll position are not retained.
 Reloading resets search, host and label filters and Show done to empty search, All hosts,
-All labels and off. Group (None / Host / Label / Repository) is restored from versioned
-localStorage, independently of these transient filters. No API or config file stores display preferences.
-The browser preference record also validates and round-trips view mode (cards / table) and a single
-sort key/direction; the current UI still renders cards in their existing collection order.
+All labels and off. Group (None / Host / Label / Repository), Cards/Table and sort are restored from
+versioned localStorage, independently of these transient filters. No API or config file stores display preferences.
+Table has separate Session, State, Elapsed, Host, Agent, Repository, Branch, Labels and Actions
+columns. Session buttons select details; PR links and shared Open / Go to pane, Type in pane and
+Resume controls act independently. Done and labels remain editable in details. Group headings span
+the table within separate row groups; label groups may repeat sessions. Switching lists preserves
+selection, details and the terminal popup without reconnecting it, and each list retains its own
+scroll position. Cards keep their existing collection order.
 Defaults are Cards / None / State ascending. Unknown enums (including unavailable Session group),
 corrupt JSON and unsupported versions fall back to defaults. Denied or full storage leaves settings
 usable in memory. Loading fallback defaults does not overwrite the stored record; an explicit
-Group change writes the new preference while preserving any successfully loaded view mode and sort.
+Group, view or sort change writes the current display preferences.
 Search, selection and terminal connections are never stored there.
 
 The shared listed-task set applies search, host, label and Show done before grouping, and its unique
@@ -1124,7 +1128,12 @@ Elapsed uses the same status timestamp and numeric seconds as display, with no f
 time: invalid or missing timestamps are unknown, future timestamps are zero. Every sort uses one
 reference time; display ticks alone need not re-sort. Missing values stay last in either direction;
 ties use fixed task-ID order, also when descending. New keys start ascending except Elapsed (longest
-first); selecting the current key reverses direction. These utilities expose no table or sort controls.
+first); selecting the current column heading reverses direction. Only the active heading has
+`aria-sort`, with an arrow and direction in its button name. Labels and Actions are not sortable.
+The table uses one horizontal scroll region with sticky column headers, including on narrow screens.
+Each notification jump scrolls and focuses the task selection button once in the active list.
+Switching views during its highlight preserves focus on the view control and does not extend the highlight. Collection updates
+keep keyed rows, selection and keyboard focus attached to the same task ID.
 A stored host or label absent from the current list is displayed and applied as All, while the
 stored value is kept through loading and collection failures and restored when available again.
 A notification opening a task still clears the filters that hide it, and those cleared settings

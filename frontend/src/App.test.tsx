@@ -1274,15 +1274,19 @@ describe('App task dashboard layer', () => {
     }
   })
 
-  it('restores Group after reload while keeping search and Show done transient', () => {
+  it('restores Group, view and sort after reload while keeping search and Show done transient', () => {
     const first = render(<App />)
     fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
     fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'repo' } })
     fireEvent.change(screen.getByLabelText('Filter tasks'), { target: { value: 'temporary' } })
     fireEvent.click(screen.getByLabelText('Show done'))
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+    fireEvent.click(screen.getByRole('button', { name: /Sort by Elapsed/ }))
     first.unmount()
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    expect(screen.getByRole('button', { name: 'Table' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('columnheader', { name: /Elapsed/ })).toHaveAttribute('aria-sort', 'descending')
     expect(screen.getByLabelText('Group tasks by')).toHaveValue('repo')
     expect(screen.getByLabelText('Filter tasks')).toHaveValue('')
     expect(screen.getByLabelText('Show done')).not.toBeChecked()

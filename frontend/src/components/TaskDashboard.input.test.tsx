@@ -946,3 +946,26 @@ describe('TaskDashboard Type in pane: preview', () => {
     expect(dialog().contains(document.activeElement)).toBe(true)
   })
 })
+
+
+it('keeps a table attach and terminal mounted across view and sort changes', async () => {
+  const { state } = renderDashboard()
+  fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+  await act(async () => {
+    fireEvent.click(within(screen.getByTestId('task-row-wait-1')).getByRole('button', { name: /^Type in pane:/ }))
+  })
+  const terminal = screen.getByTestId('task-terminal')
+  const mounts = terminals.mounts.length
+  // The toolbar is inert in a browser while typing. Drive its state here to
+  // prove the common popup does not belong to either list's lifecycle.
+  fireEvent.click(screen.getByRole('button', { name: 'Cards' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+  fireEvent.click(screen.getByRole('button', { name: /Sort by Session/ }))
+  expect(screen.getByTestId('task-terminal')).toBe(terminal)
+  expect(terminals.mounts).toHaveLength(mounts)
+  expect(state.attach).toHaveBeenCalledTimes(1)
+  expect(state.detach).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Cards' }))
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+  expect(typeIn('wait-1')).toHaveFocus()
+})

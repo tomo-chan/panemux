@@ -250,7 +250,7 @@ test('types into a waiting tmux task from a popup on the board, and closes back 
   await expect(dialog.getByTestId('task-input-status')).toHaveText('Connected')
   await expect(dialog).toContainText('Local · claude · tmux: e2e-task-dashboard')
   expect(await page.locator('.td-top').evaluate((el) => el.closest('[inert]') !== null)).toBe(true)
-  expect(await page.locator('.td-board').evaluate((el) => el.closest('[inert]') !== null)).toBe(true)
+  expect(await page.getByRole('region', { name: 'Task board', exact: true }).evaluate((el) => el.closest('[inert]') !== null)).toBe(true)
 
   const terminalInput = dialog.locator('.xterm-helper-textarea')
   await expect(terminalInput).toBeFocused()
@@ -504,4 +504,64 @@ test('lists nothing running outside the fixture', async ({ request }) => {
     (t) => t.cwd && !/^\/(private\/)?tmp(\/e2e-stopped)?$|\/panemux-e2e-task-dashboard-home(\/|$)/.test(t.cwd),
   )
   expect(outside.map((t) => `${t.id} ${t.cwd}`)).toEqual([])
+})
+
+
+test('table supports keyboard sorting, shared details, scrolling and narrow screens', async ({ page, request }) => {
+  const data = await (await request.get('/api/tasks')).json()
+  const template = data.tasks.find((task: { state: string }) => task.state !== 'stop')
+  expect(template).toBeTruthy()
+  await page.route('**/api/tasks', route => route.fulfill({ json: { ...data,
+    tasks: Array.from({ length: 35 }, (_, index) => ({ ...template,
+      id: `table-${index}`, cwd: `/tmp/sample-project/session-${index}`,
+      summary: { state: 'ready', text: 'A long session summary that stays inside its own cell while every independent column remains readable.' },
+    })),
+  } }))
+  await openDashboard(page)
+  await page.getByRole('button', { name: 'Table', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  const table = page.getByRole('table', { name: 'Tasks' })
+  const list = page.getByRole('region', { name: 'Task table', exact: true })
+  await expect(table).toBeVisible()
+  const headingCenters = await table.getByRole('columnheader').evaluateAll(headings => headings.map(heading => {
+    const range = document.createRange()
+    range.selectNodeContents(heading.querySelector('button') || heading)
+    const rect = range.getBoundingClientRect()
+    return rect.y + rect.height / 2
+  }))
+  expect(Math.max(...headingCenters) - Math.min(...headingCenters)).toBeLessThan(2)
+  const sort = table.getByRole('button', { name: /Sort by Session/ })
+  await sort.focus()
+  await page.keyboard.press('Enter')
+  await expect(table.getByRole('columnheader', { name: /Session/ })).toHaveAttribute('aria-sort', 'ascending')
+  const session = table.getByRole('button', { name: 'session-2', exact: true })
+  await session.focus()
+  await page.keyboard.press('Enter')
+  const details = page.getByRole('complementary', { name: 'Task details' })
+  await expect(details).toBeVisible()
+  await expect(session).toHaveAttribute('aria-pressed', 'true')
+  await list.evaluate(element => { element.scrollTop = 200; element.scrollLeft = 150 })
+  const before = await table.getByRole('columnheader', { name: /Session/ }).boundingBox()
+  const viewport = await list.boundingBox()
+  expect(Math.abs(before!.y - viewport!.y)).toBeLessThan(3)
+  await page.getByRole('button', { name: 'Cards', exact: true }).click()
+  await page.getByRole('button', { name: 'Table', exact: true }).click()
+  expect(await list.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+  await expect(session).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click()
+  await page.getByRole('button', { name: /^Tasks/ }).click()
+  await expect(table).toBeVisible()
+  await expect(table.getByRole('columnheader', { name: /Session/ })).toHaveAttribute('aria-sort', 'ascending')
+  await page.reload()
+  await page.getByRole('button', { name: /^Tasks/ }).click()
+  await expect(table).toBeVisible()
+  await expect(table.getByRole('columnheader', { name: /Session/ })).toHaveAttribute('aria-sort', 'ascending')
+  const axe = await new AxeBuilder({ page }).include('.td-table-scroll').analyze()
+  expect(axe.violations.map(v => `${v.id}: ${v.help}`)).toEqual([])
+  await page.setViewportSize({ width: 600, height: 700 })
+  await expect(table).toBeVisible()
+  expect(await list.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+  await list.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => list.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
 })

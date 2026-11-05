@@ -479,13 +479,29 @@ terminal that had focus cannot receive what is typed into the dashboard.
   host, label, or repository; a host filter; a label filter listing every label on the board; and a `Show done`
   checkbox, off by default. Search text, host, label, Group and Show done settings stay in effect
   when switching to any workspace and back, for the lifetime of the page in that browser tab.
-  Group is restored after reload from versioned, Zod-validated browser storage; without valid
-  storage it starts at None. Reloading starts with empty search, All hosts and labels and Show done off.
+  Group, Cards/Table and table sorting are restored after reload from versioned, Zod-validated
+  browser storage; without valid storage they start at Cards / None / State ascending. Reloading starts with empty search, All hosts and labels and Show done off.
   A selected host or label missing from the current list displays and filters as All without
   discarding the choice; it takes effect again when that host or label returns, including after
   loading or collection failures. Opening a task from a notification clears hiding filters, and
   the cleared settings carry over to the next round trip. Task selection, the detail panel,
   popups and scroll position are reset when leaving the dashboard.
+- **Cards / Table.** Native pressed-state buttons change only the list. Selection, details and the
+  Type in pane popup keep their lifecycle; each list retains an independent scroll position.
+  Table uses a single semantic table with Session (title and short summary or wait reason), State,
+  Elapsed, Host, Agent display name, Repository and PR link, Branch, Labels and Actions. A Session
+  button selects details; links and action buttons do not select the row. Done and label editing
+  remain in details. Shared action capability checks and running indicators apply to both views.
+  Group headings span all nine columns in separate row groups, retaining the existing group order.
+  Each sortable column has a native button; only the selected heading has `aria-sort` and an arrow,
+  with the direction in its accessible name. New keys start ascending, except Elapsed (longest first);
+  repeated presses reverse direction. Sorting stays within groups and does not reorder cards.
+  One focusable horizontal scroll region holds the entire table, with sticky column headers.
+  Narrow screens retain the existing responsive details panel and scroll the table horizontally.
+  Collection updates retain keyed task focus; each notification jump focuses and scrolls the active
+  list once. A view change during the highlight keeps focus on the view switch and does not restart it.
+
+  ![Task table with independent sortable columns and the shared details panel.](images/task-dashboard-table.png)
 - **Kanban.** Columns in the order a person should look at them: Waiting for input (highlighted in
   gold, "Needs you"), Working, Idle, Running / unknown, Stopped, and Done when the checkbox asks for
   it. A task marked done sits in Done only while it is stopped, so with the column hidden a finished
