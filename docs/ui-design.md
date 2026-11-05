@@ -475,11 +475,12 @@ terminal that had focus cannot receive what is typed into the dashboard.
   tmux session name and summary text, matching any part of one ignoring case. The summary text matches whether the card
   shows it or, for a task waiting for input, only the details do; it stays searchable while a newer summary is pending
   or it is outdated, and a summary that arrives re-filters the board at once. Every session the dashboard starts is
-  named `task-<8 hex>`, so `task` matches all of them, and a short number can match the hex of one. Rows split by none,
-  host, label, or repository; a host filter; a label filter listing every label on the board; and a `Done column`
-  checkbox, off by default. Search text, host, label, Rows and Done column settings stay in effect
+  named `task-<8 hex>`, so `task` matches all of them, and a short number can match the hex of one. Group splits by none,
+  host, label, or repository; a host filter; a label filter listing every label on the board; and a `Show done`
+  checkbox, off by default. Search text, host, label, Group and Show done settings stay in effect
   when switching to any workspace and back, for the lifetime of the page in that browser tab.
-  Reloading starts with empty search, All hosts and labels, None for Rows and Done column off.
+  Group is restored after reload from versioned, Zod-validated browser storage; without valid
+  storage it starts at None. Reloading starts with empty search, All hosts and labels and Show done off.
   A selected host or label missing from the current list displays and filters as All without
   discarding the choice; it takes effect again when that host or label returns, including after
   loading or collection failures. Opening a task from a notification clears hiding filters, and
@@ -539,7 +540,7 @@ terminal that had focus cannot receive what is typed into the dashboard.
   poll.
   `Mark done` asks first, inside the panel, and says where the task will be afterwards: a running
   task stays in its column until it stops; a stopped one moves to Done, and the question adds that
-  the column is hidden until `Done column` is checked when it is. `Mark not done` does not ask.
+  the column is hidden until `Show done` is checked when it is. `Mark not done` does not ask.
   `Input given` does not ask either: the task shows as its turn reads (usually Working) at once, also
   while the task event stream still has the wait, and a failure is shown under the actions as
   "Could not mark the input given: <reason>" ([behavior](behavior/tasks.md#codex-permission-requests)). Labels

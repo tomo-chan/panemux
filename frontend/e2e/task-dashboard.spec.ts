@@ -120,11 +120,11 @@ test('labels a task and marks it done, and both survive a reload', async ({ page
 
     await page.reload()
     await page.getByRole('button', { name: /^Tasks/ }).click()
-    await page.getByRole('checkbox', { name: 'Show Done column' }).check()
+    await page.getByRole('checkbox', { name: 'Show done' }).check()
     const done = page.getByRole('region', { name: 'Done' }).getByTestId('task-card-local:claude:e2e-stopped')
     await expect(done.getByRole('list', { name: 'Labels' })).toHaveText('e2e-label')
 
-    await page.getByRole('combobox', { name: 'Split rows by' }).selectOption('label')
+    await page.getByRole('combobox', { name: 'Group tasks by' }).selectOption('label')
     await expect(page.getByRole('region', { name: 'Done' }).getByRole('heading', { level: 3 })).toHaveText('e2e-label')
   } finally {
     expect((await clear()).ok()).toBe(true)

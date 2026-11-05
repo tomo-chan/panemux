@@ -30,6 +30,7 @@ import {
   canSummarize,
   columnForTask,
   filterTasks,
+  listedTasks,
   findLaunchedTask,
   findTaskPane,
   isPermissionWait,
@@ -252,14 +253,13 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
   const activeHost = hosts.some((host) => host.name === hostFilter) ? hostFilter : null
   const activeLabel = labelFilter !== ALL_LABELS && labels.includes(labelFilter) ? labelFilter : null
   const visible = useMemo(
-    () => filterTasks(tasks, { query, host: activeHost, label: activeLabel }),
-    [activeHost, activeLabel, query, tasks],
+    () => listedTasks(tasks, { query, host: activeHost, label: activeLabel }, showDone),
+    [activeHost, activeLabel, query, tasks, showDone],
   )
   useEffect(() => {
     if (!onListedTasksChange) return
-    const columns = new Set(visibleColumns(showDone).map((column) => column.id))
-    onListedTasksChange(new Set(visible.filter((task) => columns.has(columnForTask(task))).map((task) => task.id)))
-  }, [onListedTasksChange, showDone, visible])
+    onListedTasksChange(new Set(visible.map((task) => task.id)))
+  }, [onListedTasksChange, visible])
   useEffect(() => () => onListedTasksChange?.(new Set()), [onListedTasksChange])
   const panes = useMemo(() => {
     const byTask = new Map<string, TaskPaneRef | null>()
@@ -527,8 +527,8 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
           onChange={(event) => updateViewState('query', event.target.value)}
         />
         <label>
-          Rows
-          <select aria-label="Split rows by" value={laneMode} onChange={(event) => updateViewState('laneMode', event.target.value as LaneMode)}>
+          Group
+          <select aria-label="Group tasks by" value={laneMode} onChange={(event) => updateViewState('laneMode', event.target.value as LaneMode)}>
             <option value="none">None</option>
             <option value="host">Host</option>
             <option value="label">Label</option>
@@ -560,11 +560,11 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
         <label>
           <input
             type="checkbox"
-            aria-label="Show Done column"
+            aria-label="Show done"
             checked={showDone}
             onChange={(event) => updateViewState('showDone', event.target.checked)}
           />
-          Done column
+          Show done
         </label>
       </div>
 
@@ -1495,7 +1495,7 @@ function markDoneQuestion(task: Task, showDone: boolean): string {
     return 'Mark this task done? It stays in its column while it runs, and moves to Done when it stops.'
   }
   if (showDone) return 'Mark this task done? It moves to the Done column.'
-  return "Mark this task done? It moves to the Done column, which is hidden until 'Done column' is checked."
+  return "Mark this task done? It moves to the Done column, which is hidden until 'Show done' is checked."
 }
 
 // What the task's state means: the note its agent's collect adapter gives
