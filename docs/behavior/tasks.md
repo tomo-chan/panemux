@@ -1110,7 +1110,9 @@ The browser preference record also validates and round-trips view mode (cards / 
 sort key/direction; the current UI still renders cards in their existing collection order.
 Defaults are Cards / None / State ascending. Unknown enums (including unavailable Session group),
 corrupt JSON and unsupported versions fall back to defaults. Denied or full storage leaves settings
-usable in memory. Search, selection and terminal connections are never stored there.
+usable in memory. Loading fallback defaults does not overwrite the stored record; an explicit
+Group change writes the new preference while preserving any successfully loaded view mode and sort.
+Search, selection and terminal connections are never stored there.
 
 The shared listed-task set applies search, host, label and Show done before grouping, and its unique
 task IDs feed attention tracking. A restarted task marked done remains in its live state. The row-sort
