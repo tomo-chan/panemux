@@ -1114,7 +1114,9 @@ selection, details and the terminal popup without reconnecting it, and each list
 scroll position. Cards keep their existing collection order.
 Defaults are Cards / None / State ascending. Unknown enums (including unavailable Session group),
 corrupt JSON and unsupported versions fall back to defaults. Denied or full storage leaves settings
-usable in memory. Search, selection and terminal connections are never stored there.
+usable in memory. Loading fallback defaults does not overwrite the stored record; an explicit
+Group, view or sort change writes the current display preferences.
+Search, selection and terminal connections are never stored there.
 
 The shared listed-task set applies search, host, label and Show done before grouping, and its unique
 task IDs feed attention tracking. A restarted task marked done remains in its live state. The row-sort

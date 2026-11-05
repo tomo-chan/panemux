@@ -1247,6 +1247,33 @@ describe('App adding an SSH host from the pane settings dialog', () => {
 })
 
 describe('App task dashboard layer', () => {
+  it('leaves an unsupported preference record untouched on mount until Group changes', () => {
+    const key = 'panemux:task-dashboard-prefs'
+    const raw = JSON.stringify({ version: 2, viewMode: 'future-view', groupMode: 'future-group', extra: 'keep' })
+    window.localStorage.setItem(key, raw)
+    render(<App />)
+    expect(window.localStorage.getItem(key)).toBe(raw)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    expect(screen.getByLabelText('Group tasks by')).toHaveValue('none')
+    expect(window.localStorage.getItem(key)).toBe(raw)
+    fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'repo' } })
+    expect(JSON.parse(window.localStorage.getItem(key)!)).toEqual({
+      version: 1, viewMode: 'cards', groupMode: 'repo', sort: { key: 'state', direction: 'asc' },
+    })
+  })
+
+  it('keeps stored view mode and sort when Group changes, including returning to the loaded group', () => {
+    const key = 'panemux:task-dashboard-prefs'
+    const prefs = { version: 1, viewMode: 'table', groupMode: 'none', sort: { key: 'elapsed', direction: 'desc' } }
+    window.localStorage.setItem(key, JSON.stringify(prefs))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    for (const groupMode of ['repo', 'host', 'none']) {
+      fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: groupMode } })
+      expect(JSON.parse(window.localStorage.getItem(key)!)).toEqual({ ...prefs, groupMode })
+    }
+  })
+
   it('restores Group, view and sort after reload while keeping search and Show done transient', () => {
     const first = render(<App />)
     fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))

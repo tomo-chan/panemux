@@ -117,9 +117,16 @@ export const App: React.FC = () => {
     ...INITIAL_TASK_DASHBOARD_VIEW_STATE, laneMode: taskDashboardPrefs.groupMode,
     viewMode: taskDashboardPrefs.viewMode, sort: taskDashboardPrefs.sort,
   }))
+  const savedTaskPrefs = useRef(taskDashboardPrefs)
   useEffect(() => {
-    saveTaskDashboardPrefs({ version: 1, groupMode: taskDashboardViewState.laneMode,
-      viewMode: taskDashboardViewState.viewMode, sort: taskDashboardViewState.sort })
+    // Loading defaults must not replace a record this build cannot understand.
+    const prefs: typeof taskDashboardPrefs = { version: 1, groupMode: taskDashboardViewState.laneMode,
+      viewMode: taskDashboardViewState.viewMode, sort: taskDashboardViewState.sort }
+    const previous = savedTaskPrefs.current
+    if (previous.groupMode === prefs.groupMode && previous.viewMode === prefs.viewMode &&
+      previous.sort.key === prefs.sort.key && previous.sort.direction === prefs.sort.direction) return
+    saveTaskDashboardPrefs(prefs)
+    savedTaskPrefs.current = prefs
   }, [taskDashboardViewState.laneMode, taskDashboardViewState.viewMode, taskDashboardViewState.sort])
   const [maximizedPaneIdsByWorkspace, setMaximizedPaneIdsByWorkspace] = useState<Record<string, string | null>>({})
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
