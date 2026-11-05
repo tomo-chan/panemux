@@ -1638,3 +1638,23 @@
   flex: 1;
   min-height: 0;
 }
+
+
+/* One scrolling table; its header stays within that same viewport. */
+.td-view-switch { display: flex; gap: 2px; margin-left: auto; }
+.td-view-switch [aria-pressed='true'] { background: #293c55; color: #d9e9ff; border-color: #6fa3ed; }
+.td-board[hidden] { display: none; }
+.td-table-scroll { padding-top: 0; }
+.td-table { width: 100%; min-width: 1140px; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.td-table th, .td-table td { padding: 10px; text-align: left; vertical-align: top; border-bottom: 1px solid #303238; }
+.td-table thead th { position: sticky; top: 0; z-index: 2; background: var(--td-ground); white-space: nowrap; }
+.td-table thead button { font: inherit; color: inherit; background: transparent; border: 0; padding: 4px 0; cursor: pointer; }
+.td-table tbody tr[data-selected='true'] { background: #1f2c40; }
+.td-table tbody tr:hover { background: #24272d; }
+.td-table-session { min-width: 220px; max-width: 320px; overflow-wrap: anywhere; }
+.td-table-session .td-card-title { font-size: 13px; }
+.td-table-state { white-space: nowrap; font-weight: 600; }
+.td-table-branch { max-width: 200px; overflow-wrap: anywhere; }
+.td-table-pr { display: block; color: var(--td-link, #8dbbfa); white-space: nowrap; }
+.td-table-actions { display: flex; gap: 5px; flex-wrap: wrap; min-width: 150px; }
+.td-table-group th { background: var(--td-col); color: var(--td-muted); font-weight: 500; }

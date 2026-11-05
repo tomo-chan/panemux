@@ -82,6 +82,9 @@ test('documentation screenshots', async ({ page }) => {
       dashboard.getByRole('complementary', { name: 'Task details' }).getByText('Add pagination to the search endpoint'),
     ).toBeVisible()
     await page.screenshot({ path: imagePath('task-dashboard.png') })
+    await dashboard.getByRole('button', { name: 'Table', exact: true }).click()
+    await page.screenshot({ path: imagePath('task-dashboard-table.png') })
+    await dashboard.getByRole('button', { name: 'Cards', exact: true }).click()
   })
 
   await test.step('agmsg host tool', async () => {

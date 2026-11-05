@@ -1542,3 +1542,122 @@ describe('TaskDashboard Input given', () => {
     expect(within(detail()).queryByRole('button', { name: 'Input given' })).toBeNull()
   })
 })
+
+
+describe('task table view', () => {
+  const table = () => screen.getByRole('table', { name: 'Tasks' })
+  const rows = () => within(table()).getAllByTestId(/^task-row-/).map(row => row.getAttribute('data-task-id'))
+  it('switches only the list, sorts columns, and preserves selection and card order', () => {
+    renderDashboard()
+    fireEvent.click(within(screen.getByTestId('task-card-busy-1')).getByRole('button', { name: 'payment' }))
+    const detail = screen.getByRole('complementary', { name: 'Task details' })
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+    expect(rows()).toEqual(['wait-1', 'busy-1', 'idle-1', 'run-1', 'stop-1'])
+    expect(screen.getByRole('columnheader', { name: /State/ })).toHaveAttribute('aria-sort', 'ascending')
+    fireEvent.click(within(table()).getByRole('button', { name: /Sort by State/ }))
+    expect(rows()).toEqual(['stop-1', 'run-1', 'idle-1', 'busy-1', 'wait-1'])
+    expect(screen.getByRole('columnheader', { name: /State/ })).toHaveAttribute('aria-sort', 'descending')
+    fireEvent.click(within(table()).getByRole('button', { name: /Sort by Elapsed/ }))
+    expect(screen.getByRole('columnheader', { name: /Elapsed/ })).toHaveAttribute('aria-sort', 'descending')
+    expect(table().querySelectorAll('[aria-sort]')).toHaveLength(1)
+    expect(screen.getByRole('complementary', { name: 'Task details' })).toBe(detail)
+    expect(within(screen.getByTestId('task-row-busy-1')).getByRole('button', { name: 'payment' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'Cards' }))
+    expect(screen.getByTestId('task-card-busy-1')).toHaveAttribute('data-selected', 'true')
+  })
+
+  it('uses common actions without selecting the row and exposes independent columns', () => {
+    const { onOpenTask } = renderDashboard()
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+    const row = screen.getByTestId('task-row-busy-1')
+    expect(within(table()).getAllByRole('columnheader')).toHaveLength(9)
+    expect(row).toHaveTextContent('Claude Code')
+    expect(row).toHaveTextContent('PAY-418-retry')
+    fireEvent.click(within(row).getByRole('link', { name: 'PR #87' }))
+    expect(row).toHaveAttribute('data-selected', 'false')
+    fireEvent.click(within(row).getByRole('button', { name: /^Go to pane/ }))
+    expect(onOpenTask).toHaveBeenCalledTimes(1)
+    expect(row).toHaveAttribute('data-selected', 'false')
+    expect(within(screen.getByTestId('task-row-stop-1')).getByRole('button', { name: /^Resume/ })).toBeDisabled()
+    expect(within(screen.getByTestId('task-row-idle-1')).queryByRole('button', { name: /^Open/ })).not.toBeInTheDocument()
+  })
+
+  it('shares filters, label duplicates, done visibility, and empty results', () => {
+    const tasks = [task({ id: 'a', labels: ['red', 'blue'] }), task({ id: 'done', state: 'stop', done: true })]
+    const onListedTasksChange = vi.fn()
+    render(<TaskDashboard tasksState={tasksState({ data: { ...response, tasks } })} workspaces={[]} onOpenTask={vi.fn()} onShowWorkspaces={vi.fn()} onListedTasksChange={onListedTasksChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+    fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'label' } })
+    expect(rows()).toEqual(['a', 'a'])
+    expect(onListedTasksChange).toHaveBeenLastCalledWith(new Set(['a']))
+    fireEvent.click(screen.getByLabelText('Show done'))
+    expect(rows()).toEqual(['a', 'a', 'done'])
+    fireEvent.change(screen.getByLabelText('Filter tasks'), { target: { value: 'no-match' } })
+    expect(within(table()).getByText('No matching sessions')).toBeInTheDocument()
+  })
+
+  it('retains separate list scroll positions and focuses notification targets in the table', () => {
+    const state = tasksState()
+    const props = { tasksState: state, workspaces, onOpenTask: vi.fn(), onShowWorkspaces: vi.fn() }
+    const view = render(<TaskDashboard {...props} />)
+    const board = screen.getByRole('region', { name: 'Task board' })
+    board.scrollTop = 90
+    board.scrollLeft = 120
+    fireEvent.scroll(board)
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+    const list = screen.getByRole('region', { name: 'Task table' })
+    expect(list.scrollLeft).toBe(0)
+    list.scrollTop = 40
+    list.scrollLeft = 230
+    fireEvent.scroll(list)
+    fireEvent.click(screen.getByRole('button', { name: 'Cards' }))
+    expect(screen.getByRole('region', { name: 'Task board' }).scrollLeft).toBe(120)
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+    expect(screen.getByRole('region', { name: 'Task table' }).scrollLeft).toBe(230)
+    view.rerender(<TaskDashboard {...props} focusRequest={{ taskId: 'busy-1', seq: 1 }} />)
+    expect(within(screen.getByTestId('task-row-busy-1')).getByRole('button', { name: 'payment' })).toHaveFocus()
+  })
+})
+
+
+it.each(['Session', 'State', 'Elapsed', 'Host', 'Agent', 'Repository', 'Branch'])('toggles the %s table heading using a native button', (title) => {
+  renderDashboard()
+  fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+  const heading = screen.getByRole('columnheader', { name: new RegExp(title) })
+  const button = within(heading).getByRole('button')
+  fireEvent.click(button)
+  const first = heading.getAttribute('aria-sort')
+  fireEvent.click(button)
+  expect(heading).toHaveAttribute('aria-sort', first === 'ascending' ? 'descending' : 'ascending')
+  expect(screen.getByRole('table').querySelectorAll('[aria-sort]')).toHaveLength(1)
+})
+
+it('preserves task focus, selection, and sorting when a collection changes state', () => {
+  const state = tasksState()
+  const props = { tasksState: state, workspaces, onOpenTask: vi.fn(), onShowWorkspaces: vi.fn() }
+  const rendered = render(<TaskDashboard {...props} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+  const button = within(screen.getByTestId('task-row-busy-1')).getByRole('button', { name: 'payment' })
+  fireEvent.click(button)
+  button.focus()
+  rendered.rerender(<TaskDashboard {...props} tasksState={{ ...state, data: { ...response, tasks: response.tasks.map(t => t.id === 'busy-1' ? { ...t, state: 'wait' } : t) } }} />)
+  expect(button).toHaveFocus()
+  expect(button).toHaveAttribute('aria-pressed', 'true')
+  expect(within(screen.getByRole('table')).getAllByTestId(/^task-row-/)[0]).toHaveAttribute('data-task-id', 'busy-1')
+})
+
+
+it('updates elapsed display without recomputing table order on clock ticks', () => {
+  vi.useFakeTimers()
+  try {
+    const clock = vi.fn(() => NOW)
+    render(<TaskDashboard tasksState={tasksState()} workspaces={[]} onOpenTask={vi.fn()} onShowWorkspaces={vi.fn()} now={clock} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+    fireEvent.click(screen.getByRole('button', { name: /Sort by Elapsed/ }))
+    clock.mockClear()
+    act(() => { vi.advanceTimersByTime(5000) })
+    expect(clock).toHaveBeenCalledTimes(1)
+  } finally {
+    vi.useRealTimers()
+  }
+})

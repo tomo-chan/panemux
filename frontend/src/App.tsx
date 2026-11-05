@@ -115,10 +115,12 @@ export const App: React.FC = () => {
   const [taskDashboardPrefs] = useState(loadTaskDashboardPrefs)
   const [taskDashboardViewState, setTaskDashboardViewState] = useState<TaskDashboardViewState>(() => ({
     ...INITIAL_TASK_DASHBOARD_VIEW_STATE, laneMode: taskDashboardPrefs.groupMode,
+    viewMode: taskDashboardPrefs.viewMode, sort: taskDashboardPrefs.sort,
   }))
   useEffect(() => {
-    saveTaskDashboardPrefs({ ...taskDashboardPrefs, groupMode: taskDashboardViewState.laneMode })
-  }, [taskDashboardPrefs, taskDashboardViewState.laneMode])
+    saveTaskDashboardPrefs({ version: 1, groupMode: taskDashboardViewState.laneMode,
+      viewMode: taskDashboardViewState.viewMode, sort: taskDashboardViewState.sort })
+  }, [taskDashboardViewState.laneMode, taskDashboardViewState.viewMode, taskDashboardViewState.sort])
   const [maximizedPaneIdsByWorkspace, setMaximizedPaneIdsByWorkspace] = useState<Record<string, string | null>>({})
   const [dragSourcePaneId, setDragSourcePaneId] = useState<string | null>(null)
   const [activePaneId, setActivePaneId] = useState<string | null>(null)
