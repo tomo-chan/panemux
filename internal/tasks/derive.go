@@ -60,6 +60,9 @@ type Location struct {
 
 // Task is one agent session on one host.
 type Task struct {
+	// LivePIDs preserves the process set before display deduplication. Only
+	// internal observers use it; task/event API shapes remain unchanged.
+	LivePIDs    []int      `json:"-"`
 	StatusSince *time.Time `json:"status_since,omitempty"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	// Log is the version of the session's conversation log the collection
@@ -210,6 +213,7 @@ type stateDiagnostics interface {
 }
 
 type taskBuilder struct {
+	livePIDs    map[string][]int
 	collectedAt time.Time
 	procs       map[int]process
 	panes       map[int]string
@@ -227,6 +231,7 @@ type builderAgent struct {
 
 func newTaskBuilder(host string, raw rawSnapshot, collectedAt time.Time) *taskBuilder {
 	b := &taskBuilder{
+		livePIDs:    map[string][]int{},
 		host:        host,
 		raw:         raw,
 		collectedAt: collectedAt,
@@ -255,9 +260,23 @@ func (b *taskBuilder) liveTasks() []Task {
 	for _, a := range b.agents {
 		live = append(live, a.collected.liveTasks(b)...)
 	}
+	for i := range live {
+		live[i].LivePIDs = append([]int(nil), b.livePIDs[live[i].ID]...)
+		sort.Ints(live[i].LivePIDs)
+	}
 	//mutation:exempt[CONDITIONALS_BOUNDARY] equivalent — ids are unique within a host, so no two compare equal
 	sort.Slice(live, func(i, j int) bool { return live[i].ID < live[j].ID })
 	return live
+}
+
+func (b *taskBuilder) recordLivePID(agent, sessionID string, pid int) {
+	id := b.id(agent, sessionID)
+	for _, known := range b.livePIDs[id] {
+		if known == pid {
+			return
+		}
+	}
+	b.livePIDs[id] = append(b.livePIDs[id], pid)
 }
 
 // stoppedTasks are the sessions no live task handles, newest first across

@@ -78,7 +78,9 @@ of its conversation (see [Summaries](#summaries)).
 Collection runs only when the dashboard asks for it — every 10 seconds while the dashboard is on
 screen and the page is visible, and on the Refresh button — or while the
 [task event stream](task-events.md) has a subscriber, which observes the running tasks on every host
-every 5 seconds. Nothing collects when neither asks.
+every 5 seconds. The publisher also supports internal subscriptions to those same live
+observations; these keep collection running without a browser until cancelled. Nothing collects
+when neither the dashboard nor any browser/internal subscriber asks.
 
 The dashboard shows a running task's `state`, `waiting_for`, wait and `status_since` from the task
 event stream whenever the stream is live and has that task, so a change appears when it is published rather than at the
@@ -153,7 +155,10 @@ ends before its terminating marker — a connection dropped mid-run — fails th
   files does not make every running agent look stopped.
 - A running `unknown` claude task is taken to be writing the newest conversation log in its working
   directory: that log is not listed again as a stopped task.
-- Two live state files for one session ID keep the one updated most recently.
+- Two live state files for one session ID keep the one updated most recently. Internal observers
+  also receive the set of live PIDs before this collapse; the task list and JSON shape stay the same.
+  Codex likewise preserves PID sets before collapsing its TUI or daemon sessions. A duplicated
+  descriptor is counted once, and a TUI without a rollout is tracked by its PID.
 - `stop` covers a host restart, a crash and a normal exit alike; the dashboard does not tell them
   apart. Whether a task's work is finished cannot be read off a process, so no state means "done":
   done is what a person records ([Done and labels](#done-and-labels)), and it never changes `state`.

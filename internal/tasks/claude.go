@@ -174,6 +174,7 @@ func (c *claudeCollected) liveSessionTasks(b *taskBuilder) []Task {
 			continue
 		}
 
+		b.recordLivePID(AgentClaude, st.SessionID, st.PID)
 		since := firstNonZero(st.StatusUpdatedAt, st.UpdatedAt, st.StartedAt)
 		if prev, ok := sinceMillis[st.SessionID]; ok && prev >= since {
 			continue

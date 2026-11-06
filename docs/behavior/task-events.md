@@ -192,12 +192,23 @@ no history to replay.
 
 ### Lifecycle
 
+`Publisher.SubscribeInternal` registers an in-process consumer of the same live/attention
+collection. It receives every completed host observation, including unchanged task state and
+host failures, with the pre-deduplication live PID sets. These process sets are internal metadata:
+neither task JSON nor browser frames expose them. The existing interval (five seconds after each
+host completes) and host scope are shared; there is no second collection loop or stopped-log scan.
+Callbacks run serially with publisher updates and cancellation, must be short, and must not call
+back into the publisher. Cancellation is idempotent; no callback runs after it returns. Closing
+the publisher removes all internal subscriptions and cancels in-flight collection. A browser that
+falls behind can still be dropped without stopping observation for internal consumers.
+
+
 ```text
  subscribers: 0 ──open──▶ 1..n ──last close──▶ 0
  observation:  stopped ──▶ running ──none left──▶ stopped (model kept)
 ```
 
-- **Observation runs only while the stream has a subscriber**, and once however many there are. The
+- **Observation runs while a browser or internal subscriber exists**, and once however many there are. The
   first subscriber starts it; every host is observed at once and the subscriber's snapshot shows
   hosts not answered yet as `pending`.
 - **Each host has its own cycle.** A host is observed again 5 seconds after its previous observation
@@ -205,7 +216,8 @@ no history to replay.
   per-host timeout ([Hosts and connections](tasks.md#hosts-and-connections)) — lengthens only its own
   cycle. The hosts are read again on every cycle, so a host added to or removed from
   `ssh_connections` is picked up.
-- **Observation stops when the last subscriber leaves.** A page reload therefore stops it and starts
+- **Observation stops when the last browser and internal subscriber leaves.** Without an internal
+  subscriber, a page reload stops it and starts
   it again, observing every host once more. What was last observed, the epoch, `seq` and the unsigned
   wait IDs are kept, so a reload does not give a still-unsigned wait a new ID; when observation starts
   again every host is `pending` until it answers, and the differences from what was kept are

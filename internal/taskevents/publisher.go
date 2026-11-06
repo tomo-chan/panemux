@@ -36,8 +36,8 @@ const (
 	defaultEventBuffer   = 256
 )
 
-// Publisher observes the hosts while the stream has a subscriber and fans
-// every change out to the subscribers.
+// Publisher observes hosts while browser or internal subscribers exist. Browser
+// subscribers receive changes; internal subscribers receive every observation.
 type Publisher struct {
 	src Source
 	// ctx ends only when the publisher closes: an observation in flight
@@ -46,8 +46,9 @@ type Publisher struct {
 	cancel context.CancelFunc
 
 	// mu guards everything below it.
-	model *eventModel
-	subs  map[*eventSubscriber]struct{}
+	model    *eventModel
+	subs     map[*eventSubscriber]struct{}
+	internal map[*internalSubscriber]struct{}
 	// stop is closed when observation stops.
 	stop chan struct{}
 	// looping is the hosts whose observation loop is running.
@@ -64,7 +65,41 @@ type eventSubscriber struct {
 	frames chan Frame
 }
 
-// New makes a publisher. Nothing is observed until Subscribe.
+type internalSubscriber struct {
+	observe func(string, tasks.HostResult, []tasks.Task)
+}
+
+// SubscribeInternal shares each host observation, including unchanged tasks and
+// process sets, without exposing that private metadata in browser frames. The
+// callback must be short and must not call back into Publisher. Callbacks are
+// serialized with cancellation, so none can run after cancel returns.
+func (p *Publisher) SubscribeInternal(observe func(string, tasks.HostResult, []tasks.Task)) func() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return func() {}
+	}
+	sub := &internalSubscriber{observe: observe}
+	p.internal[sub] = struct{}{}
+	if !p.observing {
+		p.startLocked()
+	}
+	return func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		delete(p.internal, sub)
+		p.stopIfIdleLocked()
+	}
+}
+
+func (p *Publisher) stopIfIdleLocked() {
+	if len(p.subs) == 0 && len(p.internal) == 0 && p.observing {
+		p.observing = false
+		close(p.stop)
+	}
+}
+
+// New makes a publisher. Nothing is observed until a subscription is registered.
 func New(src Source, opts Options) *Publisher {
 	if opts.Interval <= 0 {
 		opts.Interval = defaultEventInterval
@@ -74,13 +109,14 @@ func New(src Source, opts Options) *Publisher {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Publisher{
-		src:     src,
-		opts:    opts,
-		ctx:     ctx,
-		cancel:  cancel,
-		model:   newEventModel(newEpoch()),
-		subs:    map[*eventSubscriber]struct{}{},
-		looping: map[string]bool{},
+		src:      src,
+		opts:     opts,
+		ctx:      ctx,
+		cancel:   cancel,
+		model:    newEventModel(newEpoch()),
+		subs:     map[*eventSubscriber]struct{}{},
+		internal: map[*internalSubscriber]struct{}{},
+		looping:  map[string]bool{},
 	}
 }
 
@@ -119,10 +155,7 @@ func (p *Publisher) unsubscribe(sub *eventSubscriber) {
 	}
 	delete(p.subs, sub)
 	close(sub.frames)
-	if len(p.subs) == 0 && p.observing {
-		p.observing = false
-		close(p.stop)
-	}
+	p.stopIfIdleLocked()
 }
 
 // Close stops observation, cancels any observation in flight and closes
@@ -135,6 +168,7 @@ func (p *Publisher) Close() {
 		return
 	}
 	p.closed = true
+	clear(p.internal)
 	if p.observing {
 		p.observing = false
 		close(p.stop)
@@ -211,6 +245,9 @@ func (p *Publisher) observeHost(name string) {
 			return
 		}
 		p.publishLocked(p.model.applyHost(name, result, observed))
+		for sub := range p.internal {
+			sub.observe(name, result, observed)
+		}
 		stop := p.stop
 		p.mu.Unlock()
 
@@ -254,8 +291,7 @@ func (p *Publisher) publishLocked(frames []Frame) {
 			}
 		}
 	}
-	if dropped && len(p.subs) == 0 && p.observing {
-		p.observing = false
-		close(p.stop)
+	if dropped {
+		p.stopIfIdleLocked()
 	}
 }

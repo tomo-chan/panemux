@@ -2259,3 +2259,16 @@ changes and removal invalidate it. Managed tool pauses skip checks silently with
 a PTY lease. Remove the unused bootstrap-state reader/writer and its self-tests, leaving old files
 untouched. Defer the unreachable frontend `instruction sent` branch and its test to #510 (S8),
 where the participation API/UI changes together.
+
+### 2026-11-07: share task observations with internal consumers (#504, #495 S2 first part)
+
+S2 is split into shared observation and the participant model to bound implementation context.
+The publisher accepts short, serialized internal callbacks and keeps the existing per-host
+live/attention collection running while either browser or internal consumers remain. Consumers
+receive successful and failed observations even when browser-visible state is unchanged. Tasks
+retain live PID sets before display deduplication, with duplicate descriptors counted once and
+no change to task JSON or event frames. This avoids a second process-detection loop when Board
+is connected in the next part. The five-second interval and all configured hosts follow #495 §8.
+The Board subscription, participant lifecycle, registry migration, pane-bootstrap removal, old
+API projection, and SSH cost measurement belong to the second part; this part does not enable
+background Board collection by itself.

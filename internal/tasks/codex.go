@@ -621,6 +621,9 @@ func (c *codexCollected) daemonTasks(b *taskBuilder) []Task {
 	for _, o := range c.Open {
 		proc, alive := b.procs[o.PID]
 		daemonTUISession := alive && isCodexDaemon(proc.Command) && o.Rollout.Originator == codexOriginatorTUI
+		if daemonTUISession {
+			b.recordLivePID(AgentCodex, o.Rollout.SessionID, o.PID)
+		}
 		if !daemonTUISession || listed[o.Rollout.SessionID] {
 			continue
 		}
@@ -664,6 +667,11 @@ func (c *codexCollected) tuiTasks(b *taskBuilder) []Task {
 			continue
 		}
 		o, ok := current[p.PID]
+		key := "pid-" + strconv.Itoa(p.PID)
+		if ok {
+			key = o.Rollout.SessionID
+		}
+		b.recordLivePID(AgentCodex, key, p.PID)
 		if ok && sessions[o.Rollout.SessionID] {
 			continue
 		}
