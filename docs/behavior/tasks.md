@@ -1164,6 +1164,7 @@ first); selecting the current column heading reverses direction. Only the active
 `aria-sort`, with an arrow and direction in its button name. Labels and Actions are not sortable.
 The table uses one horizontal scroll region with sticky column headers, including on narrow screens.
 Each notification jump scrolls and focuses the task selection button once in the active list.
+In grouped Cards, the card is uncovered below its group's variable-height sticky header band.
 Switching views during its highlight preserves focus on the view control and does not extend the highlight. Collection updates
 keep keyed rows, selection and keyboard focus attached to the same task ID.
 A stored host or label absent from the current list is displayed and applied as All, while the

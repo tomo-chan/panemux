@@ -527,7 +527,8 @@ terminal that had focus cannot receive what is typed into the dashboard.
   Repository create full-width group rows: one group heading and count, followed by all state
   headings with group-local counts and equal-height column bodies. Empty columns retain `None`;
   the tallest card stack sets each row's height, without clipping or individual scroll areas.
-  The group name and state headings form one sticky band, replaced by the next group's band.
+  State titles align along the top. The group name and state headings form one sticky band,
+  replaced by the next group's band. Notification jumps reveal their card below the active band.
   All rows share column widths and one horizontal scroll position, including below 560 px and
   beside details; None retains the single board and its narrow-screen vertical columns.
   Groups are derived after filtering and Done exclusion; empty groups disappear, and an empty

@@ -141,6 +141,33 @@ function hostsState(overrides: Partial<SSHConnectionsState> = {}): SSHConnection
 }
 
 describe('TaskDashboard', () => {
+  it.each([120, 180])('compensates notification overlap and leaves uncovered cards in place (%s px band)', bandBottom => {
+    let cardTop = 90
+    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const top = this.dataset.taskId === 'busy-1' ? cardTop : 0
+      const bottom = this.classList.contains('td-group-band') ? bandBottom : top
+      return { top, bottom, left: 0, right: 0, x: 0, y: top, width: 0, height: bottom - top, toJSON: () => ({}) }
+    })
+    try {
+      const props = { tasksState: tasksState(), workspaces, onOpenTask: vi.fn(), onShowWorkspaces: vi.fn() }
+      const view = render(<TaskDashboard {...props} />)
+      fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'host' } })
+      const board = screen.getByRole('region', { name: 'Task board' })
+      board.scrollTop = 200
+      view.rerender(<TaskDashboard {...props} focusRequest={{ taskId: 'busy-1', seq: 1 }} />)
+      const uncoveredScrollTop = 200 - (bandBottom - cardTop)
+      expect(board.scrollTop).toBe(uncoveredScrollTop)
+      for (const [index, top] of [bandBottom, bandBottom + 30].entries()) {
+        cardTop = top
+        view.rerender(<TaskDashboard {...props} focusRequest={{ taskId: 'busy-1', seq: index + 2 }} />)
+        expect(board.scrollTop).toBe(uncoveredScrollTop)
+      }
+      expect(within(screen.getByTestId('task-card-busy-1')).getByRole('button', { name: 'payment' })).toHaveFocus()
+    } finally {
+      geometry.mockRestore()
+    }
+  })
+
   // A board wider than the space beside the detail panel scrolls sideways;
   // with no task card in it nothing else takes focus, so the board itself does.
   it('lets the keyboard reach and scroll the board, empty or not', () => {

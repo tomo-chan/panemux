@@ -537,6 +537,7 @@
 
 .td-group .td-colh {
   position: static;
+  align-content: flex-start;
   min-width: 0;
   overflow-wrap: anywhere;
 }

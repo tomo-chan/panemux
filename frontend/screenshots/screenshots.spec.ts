@@ -86,6 +86,7 @@ test('documentation screenshots', async ({ page }) => {
     await dashboard.getByRole('button', { name: 'Table', exact: true }).click()
     await page.screenshot({ path: imagePath('task-dashboard-table.png') })
     await dashboard.getByRole('button', { name: 'Cards', exact: true }).click()
+    await dashboard.getByLabel('Group tasks by').selectOption('none')
   })
 
   await test.step('agmsg host tool', async () => {
