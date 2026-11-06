@@ -2,79 +2,40 @@ package agmsg
 
 import (
 	"fmt"
-	"strings"
 
 	"panemux/internal/agent"
 )
 
-// boardAdapters is every agent that can join Agent Board, each registered
-// under the registry ID whose Board capability it implements. Nothing
-// registers itself. What every agent shares — joining, sending, the status
-// report and the delivery mode — is buildBootstrapInstruction's; an adapter
-// supplies only what differs per agent. The agents are found in a pane by
-// the registry's Board rules, which mirror agmsg's own detection and so stay
-// apart from the other rules; the capability depends on agmsg being present
-// on the pane's host, which the watcher checks before writing anything.
-// TestBoardAdapters_MatchTheRegistry keeps the list and the registry's
-// declarations in step.
+// boardAdapters retains registry ID to agmsg type mappings for registration.
 func boardAdapters() []registeredBoard {
 	return []registeredBoard{
-		{id: agent.Claude, agmsgType: "claude-code", adapter: claudeBoard{}},
-		{id: agent.Codex, agmsgType: string(agent.Codex), adapter: plainBoard{}},
-		{id: agent.Cursor, agmsgType: string(agent.Cursor), adapter: plainBoard{}},
-		{id: agent.Gemini, agmsgType: string(agent.Gemini), adapter: plainBoard{}},
-		{id: agent.GrokBuild, agmsgType: string(agent.GrokBuild), adapter: plainBoard{}},
-		{id: agent.OpenCode, agmsgType: string(agent.OpenCode), adapter: plainBoard{}},
+		{id: agent.Claude, agmsgType: "claude-code"},
+		{id: agent.Codex, agmsgType: string(agent.Codex)},
+		{id: agent.Cursor, agmsgType: string(agent.Cursor)},
+		{id: agent.Gemini, agmsgType: string(agent.Gemini)},
+		{id: agent.GrokBuild, agmsgType: string(agent.GrokBuild)},
+		{id: agent.OpenCode, agmsgType: string(agent.OpenCode)},
 	}
 }
 
 type registeredBoard struct {
-	adapter   boardAdapter
 	id        agent.ID
 	agmsgType string
 }
 
-// boardAdapter is what joining Agent Board differs in per agent.
-type boardAdapter interface {
-	// writeIdentityClaim writes the steps that make the pane's agmsg
-	// identity exclusive to this session, numbering each with nextStep, or
-	// writes nothing when the agent has no verified way to name its session.
-	writeIdentityClaim(b *strings.Builder, join boardJoin, nextStep func() int)
-}
+// Validate the retained mapping at startup, as well as in registry contract tests.
+var boardAdaptersByID = mustBoardAdapters(agent.All(), boardAdapters())
 
-// boardJoin is what an adapter's steps are written from.
-type boardJoin struct {
-	agmsgPath string
-	paneID    string
-	agmsgType string
-	// mode is the pane's agent_board.mode, "" meaning monitor.
-	mode string
-}
-
-// boardAdaptersByType indexes the transport types used to render instructions.
-// The mapping is checked against registry declarations when panemux starts.
-var boardAdaptersByType = mustBoardAdapters(agent.All(), boardAdapters())
-
-func mustBoardAdapters(defs []agent.Definition, adapters []registeredBoard) map[string]boardAdapter {
+func mustBoardAdapters(defs []agent.Definition, adapters []registeredBoard) map[agent.ID]string {
 	//coverage:exempt the registered set is checked by TestBoardAdapters_MatchTheRegistry
 	if err := validateBoardAdapters(defs, adapters); err != nil {
 		panic(err)
 	}
-	byType := make(map[string]boardAdapter, len(adapters))
-	for _, r := range adapters {
-		byType[r.agmsgType] = r.adapter
+	byID := make(map[agent.ID]string, len(adapters))
+	for _, entry := range adapters {
+		byID[entry.id] = entry.agmsgType
 	}
-	return byType
-}
-
-// boardAdapterFor chooses the steps for a transport type. JoinInstruction
-// converts a detected registry ID through the validated mapping first, so the
-// fallback — shared steps without an identity claim — is not used in practice.
-func boardAdapterFor(agmsgType string) boardAdapter {
-	if a, ok := boardAdaptersByType[agmsgType]; ok {
-		return a
-	}
-	return plainBoard{}
+	return byID
 }
 
 // validateBoardAdapters checks adapters against the registry: each is
@@ -109,61 +70,4 @@ func validateBoardAdapters(defs []agent.Definition, adapters []registeredBoard) 
 		}
 	}
 	return nil
-}
-
-// plainBoard is an agent that joins with the shared steps alone. agmsg's
-// per-type type.conf `detect` key names a session-id source for some of
-// them (CODEX_THREAD_ID for codex) and none for others (opencode, cursor),
-// but none is verified, and guessing one wrong would hand actas-claim.sh an
-// empty session id, so none of them claims its identity.
-type plainBoard struct{}
-
-func (plainBoard) writeIdentityClaim(*strings.Builder, boardJoin, func() int) {}
-
-// claudeBoard is Claude Code, the one agent whose session-id source panemux
-// has verified.
-type claudeBoard struct{}
-
-// claudeCodeSessionIDVar is Claude Code's own session-id environment
-// variable, taken from agmsg's type.conf rather than assumed.
-const claudeCodeSessionIDVar = "$CLAUDE_CODE_SESSION_ID"
-
-// writeIdentityClaim emits the step that makes this pane's agmsg identity
-// exclusive to this process, and (when a watcher is running) narrows that
-// watcher to it.
-//
-// Without it, two board-enabled panes whose agents run in the SAME project
-// directory each receive the other's messages. Verified in agmsg's own
-// source (v1.2.0, unchanged in v1.2.2): scripts/watch.sh resolves its
-// subscription through identities.sh <project> <type>, which returns every
-// (team, agent) pair registered for that project and type — both pane IDs.
-// Handed no 4th <agent> argument the watcher subscribes broadly, dropping
-// only pairs another live session already holds an actas lock on and
-// claiming none itself. agmsg's scripts/lib/actas-lock.sh states the same
-// failure in its own words, and its claude-code template calls
-// actas-claim.sh directly after join.sh for exactly this reason. The call
-// order and the argument shapes here are that template's, not invented.
-//
-// The claim also covers turn mode, where there is no watcher at all:
-// check-inbox.sh resolves its pairs through the same subscription helper.
-// The watcher is replaced with Claude Code's own TaskList, TaskStop and
-// Monitor tools.
-func (claudeBoard) writeIdentityClaim(b *strings.Builder, join boardJoin, nextStep func() int) {
-	fmt.Fprintf(b, "%d. Claim that identity for this process, so a second agent running in the same\n", nextStep())
-	b.WriteString("   directory does not also receive messages addressed to this pane:\n")
-	fmt.Fprintf(b, "   %s/scripts/actas-claim.sh \"$(pwd)\" %q %q %q\n",
-		join.agmsgPath, join.agmsgType, join.paneID, claudeCodeSessionIDVar)
-	b.WriteString("   Expect \"status=ok\". If it prints \"status=held\", another live session already owns\n")
-	b.WriteString("   this pane ID — say so and stop here; do not touch the running inbox stream.\n")
-	if !runsAgmsgMonitor(join.mode) {
-		return
-	}
-	b.WriteString("   Then replace your inbox stream so it only receives messages addressed to this\n")
-	b.WriteString("   pane, since the one already running was started without that restriction:\n")
-	b.WriteString("   - Run TaskList. If a task's description starts with \"agmsg inbox stream\",\n")
-	b.WriteString("     TaskStop it. If there is none, skip this — do not guess a task id.\n")
-	b.WriteString("   - Invoke the Monitor tool with persistent: true, description\n")
-	fmt.Fprintf(b, "     \"agmsg inbox stream (acting as %s)\", and command:\n", join.paneID)
-	fmt.Fprintf(b, "     %s/scripts/watch.sh %q \"$(pwd)\" %q %q\n",
-		join.agmsgPath, claudeCodeSessionIDVar, join.agmsgType, join.paneID)
 }

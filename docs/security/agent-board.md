@@ -30,9 +30,7 @@ mitigation until verified.
 Fixed probes resolve the remote home, test the read script/version marker, discover alternate
 `.agmsg` installations and check installation prerequisites. Variable values must be positional arguments, not embedded in probe text.
 
-Bootstrap's onboarding text is a PTY write, not an `exec.Command` sink. Shell-escaping rules do not
-apply to that text, but all interpolated identifiers must still pass Agent Board validation so the
-instruction and later agmsg routing agree.
+Agent Board never writes participation instructions or fallback input to terminal PTYs.
 
 ### Agent-reported values in the dashboard UI
 
@@ -54,10 +52,9 @@ security sink and requires dedicated validation.
 is a valid relay identity, including a shell pane without a detected agent. The sender must still
 belong to the source host; `_system` still requires the own-send ledger. Increasing the number of
 allowed names does not strengthen same-user authentication. Agent detection and dashboard visibility
-are presentation and onboarding concerns, not sender authorization.
+are presentation concerns, not sender authorization.
 
-Global `turn`/`both` modes allow onboarding to write project-local agmsg delivery hooks through the
-agent. These persist after disablement. The host menu can run the pinned installer with explicit consent.
+`agent_board.mode` is ignored. The host menu can run the pinned installer with explicit consent.
 
 ### Pinned installer trust
 

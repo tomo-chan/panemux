@@ -117,10 +117,10 @@ the one it asked for, or says nothing.
 
 `board` uses messaging and participation ports defined by `internal/board`. Session detection returns
 an `agent.ID` from the registry's Board rules. The external adapter supplies the transport type and
-participation instruction; its mapping must cover exactly the agents declaring `board`, checked
+availability checks; its mapping must cover exactly the agents declaring `board`, checked
 at startup and in tests. See [agmsg integration](agent-board/agmsg-integration.md#agent-type-mapping)
-for that mapping and the per-agent onboarding requirements. A capability declaration does not mean
-the transport is installed on a host; bootstrap checks availability before writing to the pane.
+for that mapping. A capability declaration does not mean
+the transport is installed on a host; detection checks availability without writing to the pane.
 
 Which agents can be given a done or label record (`internal/tasks`'s `recordable`) is read from the
 `collect` declarations; a stored record of any other agent is kept and written back unchanged

@@ -5,7 +5,7 @@
 ## Integration with agmsg
 
 `internal/agmsg` implements the board-owned message and participation ports. It owns all script
-contracts, path resolution, parsing, versions, and participation text. Panemux uses agmsg's public scripts and never reads its database or team files. The required
+contracts, path resolution, parsing, versions, and availability checks. Panemux uses agmsg's public scripts and never reads its database or team files. The required
 contract is:
 
 | Operation | Script contract |
@@ -14,7 +14,6 @@ contract is:
 | list members | `api.sh get teams <team> members` |
 | read messages | `api.sh get teams <team> messages [--agent <name>] [--limit N] [--before-id <id>]` |
 | send | `send.sh <team> <from> <to> <body> --force` |
-| join | `join.sh <team> <agent-id> <agent-type> <project-path> --force` |
 
 `api.sh` returns JSONL oldest-first and does not mark messages as read. Message IDs are opaque
 strings: they are matched for equality only, never parsed, sorted, or compared across hosts.
@@ -97,7 +96,7 @@ or GitHub connectivity. Failures show the exit error and captured output, includ
 Tool management announces a pause before draining existing panemux calls. New sends fail promptly
 with an updating error; paused status checks return 200 / unknown and overlapping writes 502.
 Relay holds leases for the source batch and its destinations before changing history or cursors;
-a paused destination keeps that batch retryable. Bootstrap holds a lease through its PTY write.
+a paused destination keeps that batch retryable. Detection only admits individual availability probes; it holds no lease around terminal input.
 Installer attempts invalidate discovery caches, so successful Install can participate from the next
 poll without restarting panemux. Pause ends on success, failure or cancellation.
 
@@ -144,24 +143,11 @@ Pane identity is always the pane ID, never the project path. Two same-type agent
 would otherwise be discovered by agmsg as the same subscription set and could receive each other's
 messages.
 
-The adapter owns each agent's transport type and onboarding differences (`internal/agmsg/agent_adapters.go`).
-At package initialization it checks that every agent declaring `board` has exactly one entry, that
-no other agent has one, and that transport type names are valid and unique. Tests cover the same
-matrix. Session detection returns registry IDs; conversion happens only inside the adapter. For
-`claude-code`, the only adapter that claims an identity, bootstrap follows agmsg's act-as protocol:
-
-1. join with the pane ID;
-2. claim that identity with the current Claude session ID;
-3. when monitor delivery is active, run a watcher restricted to that pane ID.
-
-If another live session holds the identity, onboarding stops and reports the conflict. The claim is
-still made for `turn` and `off`, but those modes do not start a watcher.
-
-This protection is currently verified only for `claude-code`; the other five share an adapter that
-writes the common steps alone, and agent types in the same project
-directory can still cross-receive. Claims are made only during bootstrap, so restarting an agent
-inside the same unchanged pane does not automatically claim again. These bounds are documented in
-[Known limitations](limitations.md#known-limitations).
+The adapter retains registry ID to transport type mappings for registration work. The mappings
+cover exactly the agents declaring `board`, with valid, unique transport type names.
+Panemux does not currently join or claim identities, replace watchers, or issue participation
+instructions. Same-project subscriptions remain the operator's responsibility until hook-based
+participation is implemented; detection alone does not establish identity isolation.
 
 ## Agent type mapping
 
@@ -182,4 +168,4 @@ hermes) and the desktop agmsg-app are not detected as board agents.
 The public path override has been removed. The adapter owns the fixed default location.
 Relay discovery remembers confirmed absence; bootstrap rechecks presence on eligible ticks.
 The host tool manager installs the pinned source and invalidates absent relay discovery after
-an installer attempt. Successful Install can therefore join from the next poll without restart.
+an installer attempt. Successful Install is observed on the next presence check without restart.

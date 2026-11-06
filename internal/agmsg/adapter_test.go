@@ -12,44 +12,13 @@ import (
 	"panemux/internal/board"
 )
 
-func TestAdapterImplementsBoardPorts(t *testing.T) {
-	var messages board.MessageClient = NewClient(ClientConfig{HostID: "host-a"})
-	var participation board.Participation = NewClient(ClientConfig{HostID: "host-a", Path: "/opt/agmsg"})
-	assert.Equal(t, "host-a", messages.HostID())
-	text, err := participation.JoinInstruction(context.Background(), board.JoinRequest{
-		Agent: agent.Claude, Team: "panemux", PaneID: "pane-a", Mode: "both",
-	})
-	require.NoError(t, err)
-	assert.Contains(t, text, `/opt/agmsg/scripts/join.sh "panemux" "pane-a" "claude-code" "$(pwd)" --force`)
-	assert.Contains(t, text, `/opt/agmsg/scripts/delivery.sh set "both" "claude-code" "$(pwd)"`)
-}
-
-func TestAdapterRejectsInvalidParticipationBeforeExecution(t *testing.T) {
-	for _, request := range []board.JoinRequest{
-		{Agent: agent.Claude, Team: "bad;team", PaneID: "pane-a"},
-		{Agent: agent.Claude, Team: "panemux", PaneID: "bad pane"},
-		{Agent: "unknown", Team: "panemux", PaneID: "pane-a"},
-	} {
-		t.Run(request.Team+request.PaneID+string(request.Agent), func(t *testing.T) {
-			client := NewClient(ClientConfig{Path: "~/agmsg"})
-			_, err := client.JoinInstruction(context.Background(), request)
-			require.Error(t, err)
-		})
-	}
-}
-
 func TestAdapterMapsRegisteredIDsToTransportTypes(t *testing.T) {
 	for id, want := range map[agent.ID]string{
 		agent.Claude: "claude-code", agent.Codex: "codex", agent.Cursor: "cursor",
 		agent.Gemini: "gemini", agent.GrokBuild: "grok-build", agent.OpenCode: "opencode",
 	} {
 		t.Run(string(id), func(t *testing.T) {
-			client := NewClient(ClientConfig{Path: "/opt/agmsg"})
-			text, err := client.JoinInstruction(context.Background(), board.JoinRequest{
-				Agent: id, Team: "panemux", PaneID: "pane-a",
-			})
-			require.NoError(t, err)
-			assert.Contains(t, text, `"panemux" "pane-a" "`+want+`" "$(pwd)" --force`)
+			assert.Equal(t, want, boardAdaptersByID[id])
 		})
 	}
 }
@@ -81,8 +50,6 @@ func TestParticipationRetriesDiscoveryAndPresenceIndependentlyOfRelay(t *testing
 	client := NewClient(ClientConfig{HostID: "host-a", Path: "~/agmsg", Runner: runner})
 	_, err := client.Available(ctx)
 	require.ErrorContains(t, err, "offline")
-	_, err = client.JoinInstruction(ctx, board.JoinRequest{Agent: agent.Codex, Team: "panemux", PaneID: "pane-a"})
-	require.ErrorContains(t, err, "offline")
 	runner.failHome = false
 	present, err := client.Available(ctx)
 	require.NoError(t, err)
@@ -95,9 +62,8 @@ func TestParticipationRetriesDiscoveryAndPresenceIndependentlyOfRelay(t *testing
 	require.NoError(t, err)
 	assert.True(t, present)
 	before := runner.homes
-	text, err := client.JoinInstruction(ctx, board.JoinRequest{Agent: agent.Codex, Team: "panemux", PaneID: "pane-a"})
+	_, err = client.Available(ctx)
 	require.NoError(t, err)
-	assert.Contains(t, text, "/remote/home/demo/agmsg/scripts/join.sh")
 	assert.Equal(t, before, runner.homes, "successful path resolution is reused")
 	require.ErrorContains(t, client.Send(ctx, "panemux", "pane-a", "pane-b", "hello"), "not installed")
 }

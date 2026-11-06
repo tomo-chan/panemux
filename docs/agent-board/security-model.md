@@ -66,12 +66,12 @@ rules continue to apply.
 
 ### Global participation consent
 
-Top-level enablement authorizes participation instructions to all detected agent panes on hosts
-with agmsg. Global `turn` and `both` modes allow agmsg to write project-local hooks. Disabling
-Agent Board does not remove those files. Sender validation now accepts every configured pane
-on its owning host, including shells that have never been detected as agents or bootstrapped.
-The same-host, same-user trust boundary is unchanged, but more configured identities can be
-impersonated by a process inside that boundary. Visibility in the dashboard grants no authority.
+Top-level enablement authorizes detection, display, and relay polling. Board never writes to a PTY
+or asks agents to join, claim an identity, or install project-local delivery hooks. Delivery mode is
+ignored. Existing agmsg registrations and hook files remain untouched after disablement.
+Sender validation accepts every configured pane on its owning host, including shells without a
+detected agent. The same-host, same-user trust boundary is unchanged. Visibility in the dashboard
+grants no authority.
 
 Manual Install / Update requires trust in panemux's pinned agmsg code on the target host.
 The installer can write outside the skill directory, including agent settings and commands;

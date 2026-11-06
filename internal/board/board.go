@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"panemux/internal/agent"
 	"time"
 )
 
@@ -62,14 +61,6 @@ type MessageClient interface {
 	Since(ctx context.Context, team, afterID string, limit int) ([]Row, error)
 }
 
-// JoinRequest describes one pane joining board messaging.
-type JoinRequest struct {
-	Agent  agent.ID
-	Team   string
-	PaneID string
-	Mode   string
-}
-
 // ErrParticipationPath marks a path-discovery failure, distinct from a presence
 // probe failure. Callers can suppress and recover their warning streaks separately.
 var ErrParticipationPath = errors.New("resolve messaging path")
@@ -81,13 +72,12 @@ type ParticipationDescription struct {
 	PathSetting string
 }
 
-// Participation supplies host availability and the instruction written to a pane.
+// Participation supplies host availability for pane detection.
 // Address validation is available before process detection or host I/O.
 type Participation interface {
 	Description() ParticipationDescription
 	ValidateAddress(team, paneID string) error
 	Available(context.Context) (bool, error)
-	JoinInstruction(context.Context, JoinRequest) (string, error)
 }
 
 type statusPayload struct {

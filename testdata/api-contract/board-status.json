@@ -16,7 +16,7 @@
     "pane-editor": {
       "agent_type": "claude",
       "host": "local",
-      "instructed": true,
+      "instructed": false,
       "last_report": "2026-01-01T00:00:00Z",
       "pane_id": "pane-editor"
     },

@@ -51,7 +51,7 @@ Verification column values:
 | B4 | Editing the layout afterwards | Global board configuration survives an unrelated layout save | `auto`: `internal/config` — `TestGlobalBoardSettingsPersistOnUnrelatedLayoutSave` |
 | B5 | An invalid `agent_board.mode` | Startup fails validation; every valid value is accepted | `auto`: `internal/config` — `TestValidate_AgentBoardMode_InvalidValue_Error`, `TestValidate_AgentBoardMode_ValidValues_NoError` |
 | B6 | `agent_board.team` set to the reserved `_system` | Rejected | `auto`: `internal/config` — `TestValidate_AgentBoardTeam_ReservedSystemID_Error` |
-| B7 | Global delivery mode | All eligible panes use the same mode | `auto`: root — `TestCurrentPaneModes`, `TestBootstrapWatcherReadsModeLive` |
+| B7 | Legacy delivery mode is configured | Value is validated, one warning per config load, and no effect on Board behavior | `auto`: `internal/config` — `TestAgentBoardModeWarnsOnceWhenLoaded`, `TestValidate_AgentBoardMode_InvalidValue_Error`; root — `TestBoardDetectionNeverWritesToPTY` |
 | B8 | Removed pane board settings or path override | Startup reports a migration error | `auto`: `internal/config` — `TestRemovedBoardSettingsFailWithMigrationHelp` |
 | B9 | Configured shell addresses under global enablement | Local and SSH shell IDs are valid relay addresses even without agent detection | `auto`: root — `TestGlobalBoardIncludesShellAddressesAndPublishesParticipation`, `TestBoardTracksPanesAddedAndRemovedAfterStartup` |
 
@@ -60,13 +60,13 @@ Verification column values:
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
 | C1 | agmsg is not installed on the host | No PTY write, one warning, retried on later ticks — the pane's shell is unaffected | `auto`: root — `TestBootstrapWatcher_AgmsgNotPresent_NoWrite_WarnsOnce` |
-| C2 | agmsg is present and an agent is detected | The onboarding instruction is written into the pane once | `auto`: root — `TestBootstrapWatcher_PersistSuccessfulBootstrap`, `TestBootstrapWatcher_AlreadyBootstrapped_NoRewrite` |
+| C2 | agmsg is present and an agent is detected | Detection is visible, instructed stays false, and no PTY input is sent | `auto`: root — `TestBoardDetectionNeverWritesToPTY`, `TestGlobalBoardIncludesShellAddressesAndPublishesParticipation` |
 | C3 | No agent running in the pane | Nothing is written | `auto`: root — `TestBootstrapWatcher_NoAgentDetected_NoWrite` |
-| C4 | The instruction's content | Names the pane ID as the agmsg `agent_id`, defines what a `summary` is, and never uses a slash-command prefix | `auto`: `internal/agmsg` — `TestBuildBootstrapInstruction_*` |
-| C5 | Two board panes in one project directory | Each claims its own identity, so neither receives the other's messages | `auto`: `internal/agmsg` — `TestBuildBootstrapInstruction_ClaimsItsOwnIdentity` (the instruction) plus C6 (the agmsg behavior it relies on) |
+| C4 | Participation instructions | Retired; no instruction generation or PTY fallback | `auto`: root — `TestBoardDetectionNeverWritesToPTY` |
+| C5 | Participation registration | Detection does not join, claim, or configure delivery; hook participation is follow-up work | `auto`: root — `TestBoardDetectionNeverWritesToPTY` |
 | C6 | agmsg really does need that claim, and honors it | Without a claim, one pane's watcher receives the *other* pane's messages; after `actas-claim.sh` it receives only its own | `auto (opt-in)`: `make test-agmsg-contract AGMSG_PATH=~/.agents/skills/agmsg` — `internal/agmsg/agmsg_contract_test.go`; runs in CI via `.github/workflows/agmsg-contract.yml` |
-| C7 | A remote (SSH) host | Presence is probed through the shared host execution port, and a transport error is distinguished from "absent" | `auto`: root — `TestBootstrapWatcher_RemotePresenceCheck_YesWritesNoDoesNot`, `..._RemotePresenceCheckTransportError_DistinctFromNo` |
-| C8 | The PTY write fails or is short | A short write is never retried; a clean failure is retried up to the limit | `auto`: root — `TestBootstrapWatcher_ShortWrite_GivesUpImmediately_NeverRetries`, `..._WriteError_RetriedUpToLimitThenGivesUp` |
+| C7 | A remote (SSH) host | Presence is probed through shared execution; errors differ from absence and never trigger PTY input | `auto`: root — `TestBootstrapWatcher_RemotePresenceCheckTransportError_DistinctFromNo`, `TestBootstrapPreservesSeparatePathAndPresenceWarnings` |
+| C8 | Failure, retry, recovery, or session restart | No Board path writes to the PTY | `auto`: root — `TestBoardDetectionNeverWritesToPTY` |
 | C9 | A pane keeps failing the same way — a tmux server that went away, agmsg still not installed | The warning is logged once per failing streak rather than once per tick, so one broken pane cannot drown out the rest of the log; a failure that returns after a recovery is logged again — including the recovery of a restarted pane, whose new session inherits no suppression — and one kind of warning never suppresses another for the same pane | `auto`: root — `TestCheckPaneLogsADetectionFailureOncePerStreakAndDropsThePane`, `TestCheckPaneWarnsAgainAfterADetectionFailureStreakEnds`, `TestBootstrapWarningsOfDifferentKindsDoNotSuppressEachOther`, `TestClearingOneWarningKindLeavesTheOthersSuppressed`, `TestARestartedPaneWarnsAboutTheSameFailureAgain`, `TestAPaneThatDisappearsDropsItsSuppressedWarnings`, `TestBootstrapPreservesSeparatePathAndPresenceWarnings`, `TestBootstrapPreservesIdentifierWarning` |
 
 | C439a | Configured SSH host has no pane and is initially offline | Relay recovers on a later poll and shares the task board connection | `auto`: root — `TestBoardHostWithoutPanesSharesTaskConnectionAndRecovers` |
@@ -83,7 +83,7 @@ Verification column values:
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
 | D1 | A pane reports status | Its card shows state, summary, last tool and how long ago | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts` |
-| D2 | A configured shell has neither a detected agent nor a report | It is omitted; detected agents show instruction state | `auto`: `frontend/e2e/agent-board.spec.ts`, `frontend/e2e/agent-board-agmsg.spec.ts` |
+| D2 | A configured shell has neither a detected agent nor a report | It is omitted; detected agents show detection state | `auto`: `frontend/e2e/agent-board.spec.ts`, `frontend/e2e/agent-board-agmsg.spec.ts` |
 | D3 | A long summary | Rendered in full over several lines, not clipped to one | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts` (asserts the rendered height) |
 | D4 | repo / branch / PR | Not rendered, and the card contains no link | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts`, `frontend/src/components/BoardDashboardPanel.test.tsx` |
 | D5 | A cross-pane message arrives while the panel is open | It appears without reopening the panel | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts` |

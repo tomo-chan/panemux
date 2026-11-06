@@ -30,23 +30,23 @@ The capability flags are independent. `agent_board_enabled` reflects top-level `
 `command_center_enabled` reflects command-center configuration. The frontend uses them to expose
 the two surfaces separately.
 
-For every eligible configured pane, background bootstrap detects a supported agent on two consecutive
-polls, confirms agmsg on that host, and writes one onboarding instruction. There is no REST endpoint
+For every eligible configured pane, background polling detects supported agents for display
+and checks host availability after two consecutive detections. It never writes to a PTY. There is no REST endpoint
 for this process; see [Bootstrap flow](../agent-board/bootstrap.md#bootstrap-flow).
 
 ### `GET /api/board/status`
 
 Returns the current in-memory status and participation snapshots without contacting agmsg.
 `participation` is keyed by pane ID and includes host, detected registry agent type (empty when none),
-`instructed` (the instruction was sent, not proof it was executed), and optional `last_report`.
-Detection and instruction state follow the current pane session. Reports can outlive a session.
+`instructed` (always false, retained for compatibility), and optional `last_report`.
+Detection follows the current pane session. Reports can outlive a session.
 The dashboard lists a pane when its agent type is non-empty or a status report exists.
 
 ```json
 {
   "participation": {
     "pane-a": {
-      "pane_id": "pane-a", "host": "local", "agent_type": "codex", "instructed": true,
+      "pane_id": "pane-a", "host": "local", "agent_type": "codex", "instructed": false,
       "last_report": "2026-08-10T12:00:00Z"
     }
   },

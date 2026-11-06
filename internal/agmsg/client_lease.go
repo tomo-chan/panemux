@@ -33,13 +33,6 @@ func (c *Client) LeaseMessages() (board.MessageClient, func(), error) {
 	}
 	return leasedClient{c}, release, nil
 }
-func (c *Client) LeaseParticipation() (board.Participation, func(), error) {
-	release, err := c.begin()
-	if err != nil {
-		return nil, nil, err
-	}
-	return leasedClient{c}, release, nil
-}
 
 type leasedClient struct{ *Client }
 
@@ -50,9 +43,6 @@ func (c leasedClient) Send(ctx context.Context, team, from, to, body string) err
 	return c.send(ctx, team, from, to, body)
 }
 func (c leasedClient) Available(ctx context.Context) (bool, error) { return c.available(ctx) }
-func (c leasedClient) JoinInstruction(ctx context.Context, request board.JoinRequest) (string, error) {
-	return c.joinInstruction(ctx, request)
-}
 
 func (c *Client) Since(ctx context.Context, team, after string, limit int) ([]board.Row, error) {
 	release, err := c.begin()
@@ -77,12 +67,4 @@ func (c *Client) Available(ctx context.Context) (bool, error) {
 	}
 	defer release()
 	return c.available(ctx)
-}
-func (c *Client) JoinInstruction(ctx context.Context, request board.JoinRequest) (string, error) {
-	release, err := c.begin()
-	if err != nil {
-		return "", err
-	}
-	defer release()
-	return c.joinInstruction(ctx, request)
 }

@@ -708,8 +708,8 @@ Agent Board reuses the existing modal, panel, color, status, and focus-restorati
   disabled.
 - Appears as a right-side overlay and closes by button, backdrop, or `Escape`.
 - Lists panes with a detected agent or a status report. Idle shells remain hidden until reporting.
-  A detected pane without a report shows `agent detected` or `instruction sent`; neither claims a
-  successful join. Pane Settings has no board controls; global enablement and mode live in YAML.
+  A detected pane without a report shows `agent detected`, which does not claim a successful join.
+  Pane Settings has no board controls; global enablement lives in YAML and mode is ignored.
 - Shows pane ID, title, state, summary, last tool, and report age. It does not show self-reported
   repository, branch, or PR values because the pane header already provides panemux-derived values.
 - Treats state as free text and maps known states to the existing status palette: `working` green,

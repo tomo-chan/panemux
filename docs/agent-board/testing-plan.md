@@ -36,9 +36,10 @@ Tests must protect these contracts rather than mirror implementation structure.
 - Once a host path is resolved, a missing installation or failed presence probe never writes to the
   PTY and remains retryable; path-resolution failures retry through shared host execution on later polls.
 - Home-path expansion produces absolute local and remote paths before command construction.
-- Detection, debounce, warning suppression, write retry, partial-write abandonment, and
-  tmux-only restart persistence follow [Bootstrap flow](bootstrap.md#bootstrap-flow).
-- Onboarding preserves pane IDs and same-project Claude identity isolation.
+- Detection, presence debounce, and warning suppression follow [Bootstrap flow](bootstrap.md#bootstrap-flow).
+- No Board path calls `Session.Write`, including recovery and restarted sessions.
+- Legacy mode is validated, warned about once per configuration load, and ignored.
+- Retired bootstrap state is left untouched.
 
 ### Command center
 

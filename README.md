@@ -214,7 +214,6 @@ command_center:
 agent_board:
     team: panemux                      # shared agmsg team for all participating panes
     enabled: true                     # default false; all configured panes
-    mode: monitor                     # monitor | turn | both | off
     agmsg_auto_update: false           # update older installed copies on all hosts
 
 workspaces:
@@ -233,86 +232,29 @@ workspaces:
 Pane ids become board addresses, so give them names you will recognize (`api`, `web`, `infra`) rather
 than `pane-1`. `_system` is reserved and rejected at config validation.
 
-Set enablement and mode in the top-level YAML block. Pane Settings has no board controls.
+Set enablement in the top-level YAML block. Pane Settings has no board controls.
 With Agent Board enabled, each task-board host menu can Install / Update the tested agmsg source.
 Dependencies must already be installed. The menu explains installer effects and restart guidance;
 newer versions are kept unchanged. See [manual installation](docs/agent-board/agmsg-integration.md#manual-install--update).
-Enabling Agent Board consents to participation instructions for every detected agent on hosts
-with agmsg. With `turn` or `both`, that consent includes project-local hook writes. Removed
-pane-level `agent_board` and `agent_board.agmsg_path` settings cause migration errors.
+Enabling Agent Board authorizes detection and relay polling. It never writes instructions into
+terminal panes or changes agent delivery settings. Removed pane-level `agent_board` and
+`agent_board.agmsg_path` settings cause migration errors.
 
-### How a pane joins
+### Pane detection and participation
 
-Joining is automatic — you do not run anything by hand.
+Start an interactive agent in a configured pane. Panemux polls every 5s and displays detected agents
+without sending terminal input. It checks agmsg availability after two consecutive detections.
+Detection is not proof of registration or reception. Hook-based participation is follow-up work in
+[#495](https://github.com/tomo-chan/panemux/issues/495); automatic registration is not available here.
+Existing registrations and delivery hooks are left untouched, as is `board-bootstrap-state.json`.
 
-1. Start your agent in the pane as usual (`claude`, `codex`, `cursor-agent`, `gemini`, `grok`, or
-   `opencode`). panemux polls every 5s and needs to see it on two consecutive polls.
-2. panemux confirms agmsg exists at `~/.agents/skills/agmsg` on that pane's host.
-3. It writes a **one-time instruction into the pane's terminal**, asking the agent to run agmsg's
-   `join.sh` using the pane id as its agmsg agent id, and from then on to send board messages with
-   `send.sh` and to self-report its status periodically.
-
-You will see that instruction appear in the pane, and the agent's replies to it. That is expected —
-it is written into the terminal the same way your own keystrokes are, so nothing happens mid-command
-that you cannot see. It is written once per pane; panemux remembers which panes are done across
-restarts.
-
-The pane id is used deliberately as the agmsg agent id: every board address assumes `from`/`to` are
-pane ids, so an agent that picks its own name breaks addressing.
-
-### Delivery mode, and the one setup step it needs
-
-`agent_board.mode` decides whether messages *reach* a pane's agent. It is worth understanding before
-you pick a value, because the default is the quiet one:
-
-| mode | Writes into your repository | Broadcasts reach the agent |
-|---|---|---|
-| `monitor` (default) | no | **no** — they sit in agmsg until the agent looks |
-| `turn` / `both` | yes, one file | yes |
-
-With `monitor`, panemux does not run agmsg's `delivery.sh` at all, so no delivery hooks exist and the
-board is effectively read-only: panes report their status and you can see it, but a broadcast is not
-pushed to anyone. Choose `turn` or `both` if you want the messaging half to work.
-
-`turn` and `both` have the agent run agmsg's `delivery.sh`, and **agmsg** — not panemux — writes a
-hook file into the pane's project directory. The path is agmsg's own per-type convention
-(`scripts/drivers/types/<type>/type.conf`, `hooks_file=`), and agmsg deliberately rejects any
-non-project-relative value, so it cannot be redirected to a user-scope location:
-
-| agent type | file agmsg writes |
-|---|---|
-| claude-code | `.claude/settings.local.json` |
-| codex | `.codex/hooks.json` |
-| gemini | `.agent/rules/agmsg.md` |
-| opencode | `.opencode/rules/agmsg.md` |
-| cursor | `.cursor/rules/agmsg.mdc` |
-| grok-build | `.grok/rules/agmsg.md` |
-
-These are local, machine-specific files — none of them belong in version control. Rather than editing
-`.gitignore` in every repository you work in, set a global exclude file once per machine:
-
-```sh
-git config --global core.excludesFile ~/.gitignore_global
-cat >> ~/.gitignore_global <<'EOF'
-.claude/settings.local.json
-.codex/hooks.json
-.agent/rules/agmsg.md
-.opencode/rules/agmsg.md
-.cursor/rules/agmsg.mdc
-.grok/rules/agmsg.md
-EOF
-```
-
-Repeat that once on each host that runs `ssh`/`ssh_tmux` panes. Writes are idempotent — each
-`delivery.sh set` strips agmsg's own hook entries before re-adding them — but they persist after the
-pane closes, and panemux never reverts them, including when a pane later sets
-`agent_board.enabled: false`. Removing them is done through agmsg (`delivery.sh set off`), outside
-panemux.
+`agent_board.mode` is deprecated for one release: values are still validated, but a configured key
+produces one warning per load and is ignored. It does not configure agmsg delivery.
 
 ### Checking that it worked
 
-Open the dashboard. A pane appears there only after its agent has actually sent a status report, so
-give it a moment after the agent starts.
+Open the dashboard. A pane appears after agent detection or a status report. A detected
+agent without a report is labeled `agent detected`.
 
 Nothing showing up? In order of likelihood:
 
