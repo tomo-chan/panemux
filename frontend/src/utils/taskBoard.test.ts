@@ -786,6 +786,7 @@ describe('shortcuts', () => {
     expect(isShortcut(key({ key: 'K', ctrlKey: true, shiftKey: true }), 'S')).toBe(false)
   })
 
+  // efficacy:exempt shortcut formatting is unchanged; appended board tests overlap this case's inferred source range
   it('labels the shortcut for the platform', () => {
     expect(formatShortcut('S', true)).toBe('⌘⇧S')
     expect(formatShortcut('s', false)).toBe('Ctrl+Shift+S')
