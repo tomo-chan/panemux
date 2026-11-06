@@ -74,6 +74,46 @@ function workspace(id: string, panes: Array<Record<string, unknown>>): Workspace
   }
 }
 
+describe('card board groups', () => {
+  it.each(['none', 'host', 'label', 'repo'] as const)('retains every column and input order in %s groups', mode => {
+    const tasks = [
+      task({ id: 'first', labels: ['alpha', 'beta', 'alpha'], git: { repo: 'alpha' } }),
+      task({ id: 'second', state: 'wait', labels: ['alpha'], git: { repo: 'alpha' } }),
+      task({ id: 'third', state: 'busy', done: true }),
+    ]
+    const groups = boardGroups(groupIntoLanes(tasks, mode), false, mode)
+    expect(groups.length).toBeGreaterThan(0)
+    for (const group of groups) {
+      expect(group.columns.map(c => c.id)).toEqual(['wait', 'busy', 'idle', 'other', 'stop'])
+      expect(new Set(group.tasks.map(t => t.id)).size).toBe(group.tasks.length)
+      expect(group.columns.flatMap(c => c.tasks).length).toBe(group.tasks.length)
+      expect(group.columns.find(c => c.id === 'busy')?.tasks.map(t => t.id)).toEqual(group.tasks.filter(t => t.state === 'busy').map(t => t.id))
+      expect(group.columns.find(c => c.id === 'stop')?.tasks).toEqual([])
+    }
+  })
+
+  it.each([false, true])('uses the Done classification and keeps empty columns (showDone=%s)', showDone => {
+    const tasks = [task({ id: 'live', done: true }), task({ id: 'done', state: 'stop', done: true })]
+    const displayed = tasks.filter(t => showDone || columnForTask(t) !== 'done')
+    const [group] = boardGroups(groupIntoLanes(displayed, 'host'), showDone, 'host')
+    expect(group.tasks.map(t => t.id)).toEqual(showDone ? ['live', 'done'] : ['live'])
+    expect(group.columns.find(c => c.id === 'busy')?.tasks.map(t => t.id)).toEqual(['live'])
+    expect(group.columns.at(-1)?.id).toBe(showDone ? 'done' : 'stop')
+  })
+
+  it('keeps an empty ungrouped board and no empty grouped rows', () => {
+    expect(boardGroups([], false, 'host')).toEqual([])
+    expect(boardGroups([], false, 'none')[0].columns).toHaveLength(5)
+  })
+
+  it('keeps local and a connection named Local distinct with stable raw host keys', () => {
+    const groups = groupIntoLanes([task({ id: 'ssh', host: 'Local' }), task({ id: 'here' })], 'host')
+    expect(groups.map(g => [g.key, g.title, g.tasks.map(t => t.id)])).toEqual([
+      ['', 'Local', ['here']], ['Local', 'Local (SSH)', ['ssh']],
+    ])
+  })
+})
+
 describe('TASK_COLUMNS', () => {
   it('puts every state in exactly one column, in the dashboard order', () => {
     expect(TASK_COLUMNS.map((column) => column.id)).toEqual(['wait', 'busy', 'idle', 'other', 'stop', 'done'])
@@ -786,50 +826,8 @@ describe('shortcuts', () => {
     expect(isShortcut(key({ key: 'K', ctrlKey: true, shiftKey: true }), 'S')).toBe(false)
   })
 
-  // efficacy:exempt shortcut formatting is unchanged; appended board tests overlap this case's inferred source range
   it('labels the shortcut for the platform', () => {
     expect(formatShortcut('S', true)).toBe('⌘⇧S')
     expect(formatShortcut('s', false)).toBe('Ctrl+Shift+S')
-  })
-})
-
-
-describe('card board groups', () => {
-  it.each(['none', 'host', 'label', 'repo'] as const)('retains every column and input order in %s groups', mode => {
-    const tasks = [
-      task({ id: 'first', labels: ['alpha', 'beta', 'alpha'], git: { repo: 'alpha' } }),
-      task({ id: 'second', state: 'wait', labels: ['alpha'], git: { repo: 'alpha' } }),
-      task({ id: 'third', state: 'busy', done: true }),
-    ]
-    const groups = boardGroups(groupIntoLanes(tasks, mode), false, mode)
-    expect(groups.length).toBeGreaterThan(0)
-    for (const group of groups) {
-      expect(group.columns.map(c => c.id)).toEqual(['wait', 'busy', 'idle', 'other', 'stop'])
-      expect(new Set(group.tasks.map(t => t.id)).size).toBe(group.tasks.length)
-      expect(group.columns.flatMap(c => c.tasks).length).toBe(group.tasks.length)
-      expect(group.columns.find(c => c.id === 'busy')?.tasks.map(t => t.id)).toEqual(group.tasks.filter(t => t.state === 'busy').map(t => t.id))
-      expect(group.columns.find(c => c.id === 'stop')?.tasks).toEqual([])
-    }
-  })
-
-  it.each([false, true])('uses the Done classification and keeps empty columns (showDone=%s)', showDone => {
-    const tasks = [task({ id: 'live', done: true }), task({ id: 'done', state: 'stop', done: true })]
-    const displayed = tasks.filter(t => showDone || columnForTask(t) !== 'done')
-    const [group] = boardGroups(groupIntoLanes(displayed, 'host'), showDone, 'host')
-    expect(group.tasks.map(t => t.id)).toEqual(showDone ? ['live', 'done'] : ['live'])
-    expect(group.columns.find(c => c.id === 'busy')?.tasks.map(t => t.id)).toEqual(['live'])
-    expect(group.columns.at(-1)?.id).toBe(showDone ? 'done' : 'stop')
-  })
-
-  it('keeps an empty ungrouped board and no empty grouped rows', () => {
-    expect(boardGroups([], false, 'host')).toEqual([])
-    expect(boardGroups([], false, 'none')[0].columns).toHaveLength(5)
-  })
-
-  it('keeps local and a connection named Local distinct with stable raw host keys', () => {
-    const groups = groupIntoLanes([task({ id: 'ssh', host: 'Local' }), task({ id: 'here' })], 'host')
-    expect(groups.map(g => [g.key, g.title, g.tasks.map(t => t.id)])).toEqual([
-      ['', 'Local', ['here']], ['Local', 'Local (SSH)', ['ssh']],
-    ])
   })
 })
