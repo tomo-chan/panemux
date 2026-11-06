@@ -17,17 +17,18 @@ func TestInternalSubscriberKeepsObservationWithoutBrowser(t *testing.T) {
 	task := tasks.Task{ID: "local:claude:s", Agent: "claude", SessionID: "s",
 		State: tasks.StateBusy, LivePIDs: []int{12, 13}}
 	src.answer(t, "", tasks.HostResult{Status: tasks.HostOK}, task)
-	require.Equal(t, []int{12, 13}, (<-observed)[0].LivePIDs)
+	require.Equal(t, []int{12, 13}, receiveInternal(t, observed)[0].LivePIDs)
 	_, frames, browserCancel := p.Subscribe()
 	browserCancel()
 	require.Empty(t, frames)
 	src.answer(t, "", tasks.HostResult{Status: tasks.HostOK}, task)
-	require.Len(t, <-observed, 1, "unchanged tasks must still reach internal consumers")
+	require.Len(t, receiveInternal(t, observed), 1, "unchanged tasks must still reach internal consumers")
 	cancel()
 	cancel()
 	p.mu.Lock()
-	require.False(t, p.observing)
+	observing := p.observing
 	p.mu.Unlock()
+	require.False(t, observing)
 }
 
 func TestInternalSubscriberSurvivesSlowBrowserAndCloses(t *testing.T) {
@@ -39,11 +40,17 @@ func TestInternalSubscriberSurvivesSlowBrowserAndCloses(t *testing.T) {
 	_, frames, _ := p.Subscribe()
 	for _, status := range []tasks.HostStatus{tasks.HostOK, tasks.HostError, tasks.HostOK} {
 		src.answer(t, "", tasks.HostResult{Status: status})
-		require.Equal(t, status, <-calls)
+		require.Equal(t, status, receiveInternal(t, calls))
 	}
 	require.Equal(t, FrameHost, nextFrame(t, frames).Type)
-	_, open := <-frames
-	require.False(t, open, "slow browser is closed while internal observation continues")
+	require.Eventually(t, func() bool {
+		select {
+		case _, open := <-frames:
+			return !open
+		default:
+			return false
+		}
+	}, 2*time.Second, time.Millisecond, "slow browser closes while internal observation continues")
 	p.Close()
 	cancel()
 	called := false
@@ -66,13 +73,13 @@ func TestInternalSubscriptionsShareAndReleaseObservation(t *testing.T) {
 	cancelSecond := p.SubscribeInternal(func(string, tasks.HostResult, []tasks.Task) { second <- struct{}{} })
 	_, frames, cancelBrowser := p.Subscribe()
 	src.answer(t, "", tasks.HostResult{Status: tasks.HostOK})
-	<-first
-	<-second
-	<-frames
+	receiveInternal(t, first)
+	receiveInternal(t, second)
+	nextFrame(t, frames)
 	cancelFirst()
 	src.answer(t, "", tasks.HostResult{Status: tasks.HostError})
-	<-second
-	<-frames
+	receiveInternal(t, second)
+	nextFrame(t, frames)
 	require.Empty(t, first, "canceled consumers receive no later observations")
 	cancelSecond()
 	src.answer(t, "", tasks.HostResult{Status: tasks.HostOK})
@@ -80,6 +87,20 @@ func TestInternalSubscriptionsShareAndReleaseObservation(t *testing.T) {
 	require.Empty(t, second)
 	cancelBrowser()
 	p.mu.Lock()
-	require.False(t, p.observing)
+	observing := p.observing
 	p.mu.Unlock()
+	require.False(t, observing)
+}
+
+// Bound callback waits so a broken lifecycle fails without hanging the suite.
+func receiveInternal[T any](t *testing.T, ch <-chan T) T {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(2 * time.Second):
+		t.Fatal("internal observation was not delivered")
+		var zero T
+		return zero
+	}
 }
