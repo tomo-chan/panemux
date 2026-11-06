@@ -1371,7 +1371,7 @@ describe('App task dashboard layer', () => {
     expect(screen.getByLabelText('Show label')).toHaveValue('feature')
     expect(screen.getByLabelText('Group tasks by')).toHaveValue('host')
     expect(screen.getByLabelText('Show done')).toBeChecked()
-    expect(within(screen.getByRole('region', { name: 'Done' })).getByRole('heading', { level: 3 })).toHaveTextContent('dev-server')
+    expect(screen.getByRole('region', { name: 'dev-server — Done' })).toBeInTheDocument()
     expect(cards()).toEqual(['task-card-remote-done'])
 
     change('Filter tasks', 'beta')
@@ -1385,8 +1385,8 @@ describe('App task dashboard layer', () => {
     expect(screen.getByLabelText('Show label')).toHaveValue('infra')
     expect(screen.getByLabelText('Group tasks by')).toHaveValue('label')
     expect(screen.getByLabelText('Show done')).not.toBeChecked()
-    expect(screen.queryByRole('region', { name: 'Done' })).not.toBeInTheDocument()
-    expect(within(screen.getByRole('region', { name: 'Working' })).getByRole('heading', { level: 3 })).toHaveTextContent('infra')
+    expect(screen.queryByRole('region', { name: / — Done$/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'infra — Working' })).toBeInTheDocument()
     expect(cards()).toEqual(['task-card-local'])
 
     change('Filter tasks', '')

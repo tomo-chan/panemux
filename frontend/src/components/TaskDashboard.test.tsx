@@ -141,6 +141,33 @@ function hostsState(overrides: Partial<SSHConnectionsState> = {}): SSHConnection
 }
 
 describe('TaskDashboard', () => {
+  it.each([120, 180])('compensates notification overlap and leaves uncovered cards in place (%s px band)', bandBottom => {
+    let cardTop = 90
+    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const top = this.dataset.taskId === 'busy-1' ? cardTop : 0
+      const bottom = this.classList.contains('td-group-band') ? bandBottom : top
+      return { top, bottom, left: 0, right: 0, x: 0, y: top, width: 0, height: bottom - top, toJSON: () => ({}) }
+    })
+    try {
+      const props = { tasksState: tasksState(), workspaces, onOpenTask: vi.fn(), onShowWorkspaces: vi.fn() }
+      const view = render(<TaskDashboard {...props} />)
+      fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'host' } })
+      const board = screen.getByRole('region', { name: 'Task board' })
+      board.scrollTop = 200
+      view.rerender(<TaskDashboard {...props} focusRequest={{ taskId: 'busy-1', seq: 1 }} />)
+      const uncoveredScrollTop = 200 - (bandBottom - cardTop)
+      expect(board.scrollTop).toBe(uncoveredScrollTop)
+      for (const [index, top] of [bandBottom, bandBottom + 30].entries()) {
+        cardTop = top
+        view.rerender(<TaskDashboard {...props} focusRequest={{ taskId: 'busy-1', seq: index + 2 }} />)
+        expect(board.scrollTop).toBe(uncoveredScrollTop)
+      }
+      expect(within(screen.getByTestId('task-card-busy-1')).getByRole('button', { name: 'payment' })).toHaveFocus()
+    } finally {
+      geometry.mockRestore()
+    }
+  })
+
   // A board wider than the space beside the detail panel scrolls sideways;
   // with no task card in it nothing else takes focus, so the board itself does.
   it('lets the keyboard reach and scroll the board, empty or not', () => {
@@ -414,7 +441,7 @@ describe('TaskDashboard', () => {
     expect(screen.getAllByTestId(/^task-card-/)).toHaveLength(4)
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Group tasks by' }), { target: { value: 'repo' } })
-    expect(screen.getAllByRole('heading', { level: 3, name: 'Not in a Git repository' }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('heading', { level: 2, name: 'Not in a Git repository · 4 tasks' })).toBeInTheDocument()
   })
 
   it("shows the note the task's agent gives on its state, and none of its own for an agent", () => {
@@ -555,11 +582,10 @@ describe('TaskDashboard done and labels', () => {
 
     fireEvent.change(labelFilter, { target: { value: '\u0000all' } })
     fireEvent.change(screen.getByRole('combobox', { name: 'Group tasks by' }), { target: { value: 'label' } })
-    const working = screen.getByRole('region', { name: 'Working' })
-    expect(within(working).getAllByRole('heading', { level: 3 }).map((el) => el.textContent)).toEqual(['payment', 'sprint-42'])
-    expect(within(working).getAllByTestId('task-card-busy-done')).toHaveLength(2)
-    expect(within(screen.getByRole('region', { name: 'Running / unknown' })).getByRole('heading', { level: 3 }))
-      .toHaveTextContent('No label')
+    for (const title of ['payment', 'sprint-42']) {
+      expect(within(screen.getByRole('region', { name: `${title} — Working` })).getByTestId('task-card-busy-done')).toBeInTheDocument()
+    }
+    expect(screen.getByRole('region', { name: 'No label — Running / unknown' })).toBeInTheDocument()
   })
 
   it('marks a task done only after it is confirmed', async () => {
@@ -781,17 +807,14 @@ describe('TaskDashboard done and labels', () => {
     expect(within(detail()).getByRole('textbox', { name: 'Add a label' })).toHaveValue('typing')
   })
 
-  // efficacy:exempt unchanged by this branch; the new describe block after it falls inside its line range
   it('splits rows by a label named like an inherited object property', () => {
     renderDashboard(tasksState({
       data: { ...recorded, tasks: [task({ id: 'proto', state: 'busy', labels: ['__proto__', 'constructor'] })] },
     }))
     fireEvent.change(screen.getByRole('combobox', { name: 'Group tasks by' }), { target: { value: 'label' } })
-    const working = screen.getByRole('region', { name: 'Working' })
-    expect(within(working).getAllByRole('heading', { level: 3 }).map((el) => el.textContent)).toEqual([
-      '__proto__',
-      'constructor',
-    ])
+    for (const title of ['__proto__', 'constructor']) {
+      expect(within(screen.getByRole('region', { name: `${title} — Working` })).getByTestId('task-card-proto')).toBeInTheDocument()
+    }
   })
 })
 
@@ -1694,4 +1717,55 @@ it.each(['Cards', 'Table'])('keeps the view toggle focused when leaving %s durin
   } finally {
     vi.useRealTimers()
   }
+})
+
+
+it.each(['host', 'label', 'repo'])('renders %s as named groups containing every state, with group counts', mode => {
+  const data = { ...response, tasks: [
+    task({ id: 'a', state: 'busy', labels: ['alpha', 'beta'], git: { repo: 'alpha' } }),
+    task({ id: 'b', host: 'build-box', state: 'wait', labels: ['beta'], git: { repo: 'beta' } }),
+  ] }
+  const listed = vi.fn()
+  render(<TaskDashboard tasksState={tasksState({ data })} workspaces={[]} onOpenTask={vi.fn()} onShowWorkspaces={vi.fn()} onListedTasksChange={listed} />)
+  fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: mode } })
+  const board = screen.getByRole('region', { name: 'Task board' })
+  const title = mode === 'host' ? 'Local' : 'alpha'
+  const group = within(board).getByRole('region', { name: `${title} · 1 task` })
+  expect(within(group).getAllByRole('heading', { level: 2 })).toHaveLength(1)
+  expect(within(group).getAllByRole('heading', { level: 3 })).toHaveLength(5)
+  expect(within(group).getByRole('heading', { level: 3, name: /Working/ })).toHaveTextContent('Working1')
+  expect(within(group).getByRole('heading', { level: 3, name: /Stopped/ })).toHaveTextContent('Stopped0')
+  expect(within(group).getByRole('region', { name: `${title} — Working` })).toHaveTextContent('panemux')
+  expect(within(group).getByRole('region', { name: `${title} — Stopped` })).toHaveTextContent('None')
+  expect(listed).toHaveBeenLastCalledWith(new Set(['a', 'b']))
+  fireEvent.click(within(group).getByRole('button', { name: 'panemux' }))
+  expect(screen.getByRole('complementary', { name: 'Task details' })).toBeInTheDocument()
+  if (mode === 'label') {
+    const copies = within(board).getAllByTestId('task-card-a')
+    expect(copies).toHaveLength(2)
+    copies.forEach(copy => expect(copy).toHaveAttribute('data-selected', 'true'))
+  }
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'no-such-task' } })
+  expect(within(board).getByText('No tasks')).toBeInTheDocument()
+  expect(within(board).queryByRole('heading')).toBeNull()
+})
+
+it('keeps selected task details as a poll moves it across host and state groups', () => {
+  const state = tasksState()
+  const props = { tasksState: state, workspaces, onOpenTask: vi.fn(), onShowWorkspaces: vi.fn() }
+  const view = render(<TaskDashboard {...props} />)
+  fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'host' } })
+  fireEvent.click(within(screen.getByTestId('task-card-busy-1')).getByRole('button', { name: 'payment' }))
+  view.rerender(<TaskDashboard {...props} tasksState={{ ...state, data: { ...response, tasks: response.tasks.map(t => t.id === 'busy-1' ? { ...t, host: '', state: 'wait' } : t) } }} />)
+  const moved = within(screen.getByRole('region', { name: 'Local — Waiting for input' })).getByTestId('task-card-busy-1')
+  expect(moved).toHaveAttribute('data-selected', 'true')
+  expect(screen.getByRole('complementary', { name: 'Task details' })).toHaveTextContent('payment')
+})
+
+it('keeps Local and the SSH connection Local separate in the table too', () => {
+  renderDashboard(tasksState({ data: { ...response, tasks: [task({ id: 'here' }), task({ id: 'ssh', host: 'Local' })] } }))
+  fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'host' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+  expect(screen.getByRole('rowheader', { name: 'Local · 1 session' })).toBeInTheDocument()
+  expect(screen.getByRole('rowheader', { name: 'Local (SSH) · 1 session' })).toBeInTheDocument()
 })

@@ -523,10 +523,19 @@ terminal that had focus cannot receive what is typed into the dashboard.
   it. A task marked done sits in Done only while it is stopped, so with the column hidden a finished
   task leaves the board rather than crowding Stopped; one that runs again stays in its state's
   column. Column headers stay visible while the board scrolls; the board is a tab stop of its own
-  ("Task board") so the keyboard can scroll it sideways even with no card in it. Each column is split into the
-  chosen rows, with the catch-all row ("Not in a Git repository", "No label") last. Split by label, a
+  ("Task board") so the keyboard can scroll it sideways even with no card in it. Host, Label and
+  Repository create full-width group rows: one group heading and count, followed by all state
+  headings with group-local counts and equal-height column bodies. Empty columns retain `None`;
+  the tallest card stack sets each row's height, without clipping or individual scroll areas.
+  State titles align along the top. The group name and state headings form one sticky band,
+  replaced by the next group's band. Notification jumps reveal their card below the active band.
+  All rows share column widths and one horizontal scroll position, including below 560 px and
+  beside details; None retains the single board and its narrow-screen vertical columns.
+  Groups are derived after filtering and Done exclusion; empty groups disappear, and an empty
+  grouped board says `No tasks`. The catch-all row ("Not in a Git repository", "No label") is last. Split by label, a
   task with two labels appears in both rows. A catch-all row is keyed apart from every name, so a
-  label or repository that happens to be called "No label" gets a row of its own.
+  label or repository that happens to be called "No label" gets a row of its own. Local and an SSH
+  connection named Local remain separate, with the latter headed `Local (SSH)`.
 - **Cards.** A left border in the state's color; host, agent and how long the task has been in its
   state; the working directory's last segment as the title with the full directory under it; for a
   waiting task its reason and "open the pane to respond", and for any other task its summary, two

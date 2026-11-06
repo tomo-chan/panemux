@@ -979,3 +979,43 @@ it('keeps a table attach and terminal mounted across view and sort changes', asy
   fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
   expect(typeIn('wait-1')).toHaveFocus()
 })
+
+
+it('keeps the popup attached across duplicated group moves and returns focus to the surviving copy', async () => {
+  const state = tasksState({}, [{ ...waiting, labels: ['alpha', 'beta'] }])
+  const { rerenderWith } = renderDashboard(state)
+  fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'label' } })
+  const original = within(screen.getByRole('region', { name: 'alpha — Waiting for input' })).getByRole('button', { name: /^Type in pane:/ })
+  await act(async () => { fireEvent.click(original) })
+  setStatus('connected')
+  const mounts = terminals.mounts.length
+  rerenderWith(tasksState({ attach: state.attach, detach: state.detach }, [{ ...waiting, state: 'idle', labels: ['beta'] }]))
+  expect(screen.getByTestId('task-terminal')).toBeInTheDocument()
+  expect(terminals.mounts).toHaveLength(mounts)
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+  expect(within(screen.getByRole('region', { name: 'beta — Idle' })).getByRole('button', { name: /^Type in pane:/ })).toHaveFocus()
+})
+
+
+it.each(['Cards', 'Table'])('returns focus to the visible %s list if the input task disappears', async mode => {
+  const state = tasksState({}, [waiting])
+  const { rerenderWith } = renderDashboard(state)
+  fireEvent.click(screen.getByRole('button', { name: mode }))
+  const list = screen.getByRole('region', { name: mode === 'Cards' ? 'Task board' : 'Task table' })
+  const button = within(list).getByRole('button', { name: /^Type in pane:/ })
+  await act(async () => { fireEvent.click(button) })
+  rerenderWith(tasksState({ attach: state.attach, detach: state.detach }, []))
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+  expect(list).toHaveFocus()
+})
+
+
+it('returns focus to the task selection action when a group move removes Type in pane', async () => {
+  const state = tasksState({}, [{ ...waiting, labels: ['alpha'] }])
+  const { rerenderWith } = renderDashboard(state)
+  fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'label' } })
+  await openPopup()
+  rerenderWith(tasksState({ attach: state.attach, detach: state.detach }, [{ ...waiting, state: 'busy', labels: ['beta'] }]))
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+  expect(within(screen.getByRole('region', { name: 'beta — Working' })).getByRole('button', { name: 'review-api' })).toHaveFocus()
+})

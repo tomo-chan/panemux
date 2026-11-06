@@ -1136,6 +1136,20 @@ usable in memory. Loading fallback defaults does not overwrite the stored record
 Group, view or sort change writes the current display preferences.
 Search, selection and terminal connections are never stored there.
 
+In Cards, Host / Label / Repository groups are rows spanning all visible state columns. Each row
+has one heading and task count, repeated state headings with local counts, and equal-height column
+bodies that grow to fit the largest stack. Empty columns show `None`. Done adds a column to every
+row at once. Empty groups are omitted; no displayed tasks yields one `No tasks` message. None keeps
+the single board and its empty columns. Group rows retain their column widths on narrow screens,
+with one shared horizontal and vertical scroll area; None stacks columns below 560 px. The group
+and state headings stick as one band within their group, giving way at the next group boundary.
+The details panel remains outside that scroll area. Group keys use raw host identity, displaying
+an SSH connection named Local as `Local (SSH)`. Catch-all keys stay distinct from actual names.
+Label duplicates count once per group, while notification visibility counts unique task IDs.
+Selection, notification highlighting and temporary input remain attached to task IDs across group
+or state changes. Closing input returns focus to its surviving origin, another visible input button
+for that task, its selection action, or the visible list if the task is no longer displayed.
+
 The shared listed-task set applies search, host, label and Show done before grouping, and its unique
 task IDs feed attention tracking. A restarted task marked done remains in its live state. The row-sort
 utility leaves the source array and group order intact, sorting only within each group, including
@@ -1150,6 +1164,7 @@ first); selecting the current column heading reverses direction. Only the active
 `aria-sort`, with an arrow and direction in its button name. Labels and Actions are not sortable.
 The table uses one horizontal scroll region with sticky column headers, including on narrow screens.
 Each notification jump scrolls and focuses the task selection button once in the active list.
+In grouped Cards, the card is uncovered below its group's variable-height sticky header band.
 Switching views during its highlight preserves focus on the view control and does not extend the highlight. Collection updates
 keep keyed rows, selection and keyboard focus attached to the same task ID.
 A stored host or label absent from the current list is displayed and applied as All, while the
