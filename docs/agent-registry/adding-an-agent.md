@@ -46,7 +46,7 @@ end to end; it is the example below.
 | `resume` | `resumeAdapter` (`internal/tasks/launch_adapters.go`) | `resumeAdapters` | `TestLaunchAdapters_MatchTheRegistry` | `tasks[].actions.resume`; the Resume button; `POST /api/tasks/resume` |
 | `summary` | `summarySource` and `summaryRunner` (`internal/tasks/summary_adapters.go`) | `summaryAdapters` | `TestSummaryAdapters_MatchTheRegistry`, `TestSummaryAdapters_Contract` | `tasks[].actions.summary` and `tasks[].summary`; the Work section and Summarize |
 | `workdir` | `workdirAdapter` (`internal/session/workdir.go`) | `workdirAdapters` | `TestWorkdirAdaptersMatchDeclarations` | A pane's working directory and log follow its agent's session |
-| `board` | `MessageClient` / `Participation` (`internal/board`), implemented by `internal/agmsg` | agent ID → transport type and participation differences (`internal/agmsg/agent_adapters.go`) | `TestBoardAdapters_MatchTheRegistry` | It can join Agent Board |
+| `board` | `MessageClient` / `Participation` (`internal/board`), implemented by `internal/agmsg` | agent ID → transport type (`internal/agmsg/agent_adapters.go`) | `TestBoardAdapters_MatchTheRegistry` | It can be detected for Agent Board display; detection does not join it |
 | `usage` | — (declared by no agent yet, [#345](https://github.com/tomo-chan/panemux/issues/345)) | — | — | — |
 
 An absent capability is absent everywhere: no availability row, no action on its tasks, no button,
