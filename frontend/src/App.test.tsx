@@ -1518,7 +1518,7 @@ describe('App task dashboard layer', () => {
     await waitFor(() => expect(mockCreatePane).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'dev'))
   })
 
-  it.each([true, false])('creates and names the workspace before opening, naming succeeds=%s', async (success) => {
+  const checkWorkspaceNaming = async (success: boolean) => {
     mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
     if (success) mockCreateNamedWorkspace.mockResolvedValueOnce('new')
     else mockCreateNamedWorkspace.mockRejectedValueOnce(new Error('Naming failed'))
@@ -1535,9 +1535,12 @@ describe('App task dashboard layer', () => {
       expect(await screen.findByRole('alert')).toHaveTextContent('Naming failed')
       expect(mockCreatePane).not.toHaveBeenCalled()
     }
-  })
+  }
+  it('creates and names the workspace before opening its pane', () => checkWorkspaceNaming(true))
+  it('does not open a pane when naming the new workspace fails', () => checkWorkspaceNaming(false))
 
-  it.each(['naming', 'pane'])('reuses the created workspace after %s fails', async (failure) => {
+
+  const checkRetainedWorkspace = async (failure: 'naming' | 'pane') => {
     mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
     mockCreateNamedWorkspace.mockImplementationOnce(async (_name, onCreated) => {
       currentWorkspaces = { ...workspaces, items: [...workspaces.items, { id: 'new', title: failure === 'naming' ? 'Workspace 3' : 'Review', layout: devLayout }] }
@@ -1561,7 +1564,10 @@ describe('App task dashboard layer', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Open in workspace' })).toBeNull())
     expect(mockCreateNamedWorkspace).toHaveBeenCalledTimes(callsBefore + 1)
     expect(mockCreatePane).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 'new')
-  })
+  }
+  it('reuses the created workspace after naming fails', () => checkRetainedWorkspace('naming'))
+  it('reuses the created workspace after pane creation fails', () => checkRetainedWorkspace('pane'))
+
 
   it('cancels task opening without creating a pane or leaving the dashboard', () => {
     mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))

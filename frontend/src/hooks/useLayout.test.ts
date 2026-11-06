@@ -937,13 +937,18 @@ describe('useLayout', () => {
   })
 
   describe('createNamedWorkspace', () => {
-    it.each(['', '   ', 'Dev', ' Dev '])('refuses invalid workspace name %j before POST', async (name) => {
+    const checkInvalidWorkspaceName = async (name: string) => {
       window.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => validWorkspaces })
       const { result } = renderHook(() => useLayout())
       await waitFor(() => expect(result.current.workspaces).not.toBeNull())
       await act(async () => { await expect(result.current.createNamedWorkspace(name)).rejects.toThrow() })
       expect(window.fetch).not.toHaveBeenCalledWith('/api/workspaces', { method: 'POST' })
-    })
+    }
+    it('refuses an empty workspace name before POST', () => checkInvalidWorkspaceName(''))
+    it('refuses a whitespace workspace name before POST', () => checkInvalidWorkspaceName('   '))
+    it('refuses a duplicate workspace name before POST', () => checkInvalidWorkspaceName('Dev'))
+    it('refuses a trimmed duplicate workspace name before POST', () => checkInvalidWorkspaceName(' Dev '))
+
 
     it('reports workspace creation failure without naming or creating a pane', async () => {
       window.fetch = vi.fn().mockImplementation(async (_url, init) => init?.method === 'POST'
@@ -955,7 +960,7 @@ describe('useLayout', () => {
       expect(window.fetch).not.toHaveBeenCalledWith('/api/workspaces/new', expect.anything())
     })
 
-    it.each([true, false])('keeps the created workspace when naming succeeds=%s', async (renameOK) => {
+    const checkCreatedWorkspace = async (renameOK: boolean) => {
       const created = { ...validWorkspaces, active: 'new', items: [...validWorkspaces.items,
         { id: 'new', title: 'Workspace 3', layout: validLayout }] }
       window.fetch = vi.fn().mockImplementation(async (_url, init) => {
@@ -974,7 +979,10 @@ describe('useLayout', () => {
       expect(result.current.workspaces?.items.at(-1)?.title).toBe(renameOK ? 'Review' : 'Workspace 3')
       expect(window.fetch).toHaveBeenCalledWith('/api/workspaces/new', expect.objectContaining({ body: JSON.stringify({ title: 'Review' }) }))
       expect(window.fetch).not.toHaveBeenCalledWith('/api/sessions', expect.anything())
-    })
+    }
+    it('keeps the created workspace when naming succeeds', () => checkCreatedWorkspace(true))
+    it('keeps the created workspace when naming fails', () => checkCreatedWorkspace(false))
+
   })
 
   describe('createPane', () => {
@@ -1006,7 +1014,7 @@ describe('useLayout', () => {
       }))
     })
 
-    it.each(['layout', 'activation'])('resumes after a transient %s failure without duplicate sessions or panes', async (failure) => {
+    const checkPaneRetry = async (failure: 'layout' | 'activation') => {
       let server = structuredClone(validWorkspaces)
       let created = false
       let failed = false
@@ -1045,7 +1053,10 @@ describe('useLayout', () => {
       expect(result.current.workspaces?.items[0]).toEqual(validWorkspaces.items[0])
       expect(result.current.workspaces?.active).toBe('ops')
       expect(collectPanes(result.current.layout!).map(p => p.id)).toEqual(['ops-main', 'created'])
-    })
+    }
+    it('resumes after layout failure without duplicate sessions or panes', () => checkPaneRetry('layout'))
+    it('resumes after activation failure without duplicate sessions or panes', () => checkPaneRetry('activation'))
+
 
     it('refuses a selected workspace deleted on the server without creating a session', async () => {
       window.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => validWorkspaces })
