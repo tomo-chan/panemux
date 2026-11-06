@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.29.0](https://github.com/tomo-chan/panemux/compare/v0.28.0...v0.29.0) (2026-11-06)
+
+
+### Features
+
+* add task table view and sortable columns ([#489](https://github.com/tomo-chan/panemux/issues/489)) ([73ab20d](https://github.com/tomo-chan/panemux/commit/73ab20d3dd36562a83c62de1784fdcef2fc6ac12))
+* align task board groups across state columns ([#500](https://github.com/tomo-chan/panemux/issues/500)) ([896b90f](https://github.com/tomo-chan/panemux/commit/896b90f52bb2019db6c921805297fcb16b1605c8))
+* choose the workspace when opening a pane from the task dashboard ([#496](https://github.com/tomo-chan/panemux/issues/496)) ([a2839a3](https://github.com/tomo-chan/panemux/commit/a2839a3e8e8a0dc4740b9bb4b3000d088c358983))
+* persist task dashboard grouping and prepare row sorting ([#488](https://github.com/tomo-chan/panemux/issues/488)) ([c769e8c](https://github.com/tomo-chan/panemux/commit/c769e8c279d4afbd0ad038f5fe7fb2c33118a68e))
+
+
+### Bug Fixes
+
+* bump pinned agmsg to v1.7.1 ([#482](https://github.com/tomo-chan/panemux/issues/482)) ([f842219](https://github.com/tomo-chan/panemux/commit/f8422194acc27bd66eeb845f153946eb84c99bca))
+* keep task board filters across workspace switches ([#483](https://github.com/tomo-chan/panemux/issues/483)) ([befe047](https://github.com/tomo-chan/panemux/commit/befe047253dc883043f2fa57096882fabe91e998))
+
 ## [0.28.0](https://github.com/tomo-chan/panemux/compare/v0.27.0...v0.28.0) (2026-11-02)
 
 
