@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useId, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Task, TaskDashboardPrefs, TaskSort, TaskHost, TaskIssueLink, TaskLaunchResponse, Workspace } from '../schemas'
 import type { HostTerminalType, TasksState } from '../hooks/useTasks'
 import { TASKS_POLL_INTERVAL_MS } from '../hooks/useTasks'
@@ -44,9 +44,9 @@ import {
   taskInputAction,
   taskOpenAction,
   taskTitle,
-  visibleColumns,
+  boardGroups,
 } from '../utils/taskBoard'
-import type { LaneMode, LaunchedTaskRef, TaskInputAction, TaskOpenAction, TaskPaneRef } from '../utils/taskBoard'
+import type { TaskBoardGroup, LaneMode, LaunchedTaskRef, TaskInputAction, TaskOpenAction, TaskPaneRef } from '../utils/taskBoard'
 import { nextTaskSort, sortTaskGroups } from '../utils/taskTable'
 import { matchLabelSuggestions } from '../utils/labelSuggestions'
 import { unreadableRows } from '../utils/unreadableState'
@@ -260,9 +260,11 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     () => listedTasks(tasks, { query, host: activeHost, label: activeLabel }, showDone),
     [activeHost, activeLabel, query, tasks, showDone],
   )
+  const groups = useMemo(() => groupIntoLanes(visible, laneMode), [visible, laneMode])
+  const cardGroups = useMemo(() => boardGroups(groups, showDone, laneMode), [groups, showDone, laneMode])
   const tableGroups = useMemo(
-    () => sortTaskGroups(groupIntoLanes(visible, laneMode), sort, now(), agents),
-    [visible, laneMode, sort, agents, now],
+    () => sortTaskGroups(groups, sort, now(), agents),
+    [groups, sort, agents, now],
   )
   useEffect(() => {
     if (!onListedTasksChange) return
@@ -316,6 +318,14 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     const target = rootRef.current
       ?.querySelector<HTMLElement>(`[data-task-view="${viewMode}"] [data-task-id="${CSS.escape(flashRequest.taskId)}"]`)
     target?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    // Only a notification jump measures the variable header band; row heights
+    // remain entirely CSS-driven, including after card content changes.
+    const band = target?.closest('.td-group')?.querySelector('.td-group-band')
+    const board = target?.closest<HTMLElement>('.td-board')
+    if (target && band && board) {
+      const overlap = band.getBoundingClientRect().bottom - target.getBoundingClientRect().top
+      if (overlap > 0) board.scrollTop -= overlap
+    }
     target?.querySelector<HTMLElement>('[data-task-select]')?.focus({ preventScroll: true })
   }, [flashRequest, viewMode])
   useEffect(() => {
@@ -378,8 +388,11 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
     const fallback = rootRef.current?.querySelector<HTMLElement>(
       `${target.origin === 'card' ? `[data-task-view="${viewMode}"] ` : ''}[data-type-in="${CSS.escape(target.taskId)}"][data-origin="${target.origin}"]`,
     )
-    const element = target.element?.isConnected && !target.element.closest('[hidden]') ? target.element : fallback
-    ;(element ?? rootRef.current)?.focus({ preventScroll: true })
+    const selection = rootRef.current?.querySelector<HTMLElement>(
+      `[data-task-view="${viewMode}"] [data-task-id="${CSS.escape(target.taskId)}"] [data-task-select]`,
+    )
+    const element = target.element?.isConnected && !target.element.closest('[hidden]') ? target.element : fallback ?? selection
+    ;(element ?? rootRef.current?.querySelector<HTMLElement>(`[data-task-view="${viewMode}"]`) ?? rootRef.current)?.focus({ preventScroll: true })
   }, [inputOpen, viewMode])
 
   // Everything but the popup is inert while it is open — the top bar, the
@@ -595,46 +608,13 @@ export const TaskDashboard: React.FC<TaskDashboardProps> = ({
             space left, and with no task card nothing in it takes focus, so the
             board is a tab stop of its own for scrolling it from the keyboard. */}
         <div className="td-board" role="region" aria-label="Task board" tabIndex={0} data-task-view="cards" hidden={viewMode !== 'cards'}>
-          <div className="td-cols">
-            {visibleColumns(showDone).map((column) => {
-              const inColumn = visible.filter((task) => columnForTask(task) === column.id)
-              return (
-                <section key={column.id} className="td-col" data-column={column.id} aria-label={column.title}>
-                  <h2 className="td-colh">
-                    <span className="td-colh-dot" style={{ background: COLUMN_COLORS[column.id] }} />
-                    {column.title}
-                    <span className="td-colh-count">{inColumn.length}</span>
-                    {column.hint && <span className="td-colh-hint">{column.hint}</span>}
-                  </h2>
-                  <div className="td-colbody">
-                    {inColumn.length === 0 && <div className="td-empty">None</div>}
-                    {groupIntoLanes(inColumn, laneMode).map((lane) => (
-                      <React.Fragment key={lane.key}>
-                        {laneMode !== 'none' && <h3 className="td-lane">{lane.title}</h3>}
-                        {lane.tasks.map((task) => (
-                          <TaskCard
-                            key={task.id}
-                            task={task}
-                            pane={panes.get(task.id) ?? null}
-                            selected={task.id === selectedId}
-                            flashing={task.id === flashTaskId}
-                            nowMs={nowMs}
-                            onSelect={pick}
-                            onOpen={open}
-                            onResume={(t) => void resumeTask(t)}
-                            resuming={resumingIds.has(task.id)}
-                            onTypeIn={typeIn}
-                            inputMark={inputMark(task)}
-                            knownAgent={isKnownAgent(agents, task.agent)}
-                          />
-                        ))}
-                      </React.Fragment>
-                    ))}
-                  </div>
-                </section>
-              )
-            })}
-          </div>
+          <TaskBoard groups={cardGroups} grouped={laneMode !== 'none'} renderCard={(task) => (
+            <TaskCard key={task.id} task={task} pane={panes.get(task.id) ?? null}
+              selected={task.id === selectedId} flashing={task.id === flashTaskId}
+              nowMs={nowMs} onSelect={pick} onOpen={open} onResume={(t) => void resumeTask(t)}
+              resuming={resumingIds.has(task.id)} onTypeIn={typeIn} inputMark={inputMark(task)}
+              knownAgent={isKnownAgent(agents, task.agent)} />
+          )} />
         </div>
         <div className="td-board td-table-scroll" role="region" aria-label="Task table" tabIndex={0} data-task-view="table" hidden={viewMode !== 'table'}>
           <table className="td-table" aria-label="Tasks">
@@ -899,6 +879,45 @@ const HostChip: React.FC<HostChipProps> = ({ host, running, onReconnect, menu })
       )}
     </li>
   )
+}
+
+/** Group sections constrain each sticky header band to its own card row. */
+const TaskBoard: React.FC<{
+  groups: TaskBoardGroup[]
+  grouped: boolean
+  renderCard: (task: Task) => React.ReactNode
+}> = ({ groups, grouped, renderCard }) => {
+  const prefix = useId()
+  if (groups.length === 0) return <div className="td-empty">No tasks</div>
+  const heading = (column: TaskBoardGroup['columns'][number]) => <>
+    <span className="td-colh-dot" style={{ background: COLUMN_COLORS[column.id] }} />
+    {column.title}<span className="td-colh-count">{column.tasks.length}</span>
+    {column.hint && <span className="td-colh-hint">{column.hint}</span>}
+  </>
+  return <div className={grouped ? 'td-groups' : 'td-single'} style={{ '--td-column-count': groups[0].columns.length } as React.CSSProperties}>
+    {groups.map((group, index) => {
+      const groupId = `${prefix}-${index}`
+      const bodies = <div className={grouped ? 'td-group-columns' : 'td-cols'}>
+        {group.columns.map(column => <section key={column.id} className="td-col" data-column={column.id}
+          aria-label={grouped ? `${group.title} — ${column.title}` : column.title}>
+          {!grouped && <h2 className="td-colh">{heading(column)}</h2>}
+          <div className="td-colbody">
+            {column.tasks.length === 0 && <div className="td-empty">None</div>}
+            {column.tasks.map(renderCard)}
+          </div>
+        </section>)}
+      </div>
+      return grouped ? <section className="td-group" key={group.key} aria-labelledby={groupId}>
+        <div className="td-group-band">
+          <h2 className="td-group-title" id={groupId}><span>{group.title} · {group.tasks.length} {group.tasks.length === 1 ? 'task' : 'tasks'}</span></h2>
+          <div className="td-group-columns">
+            {group.columns.map(column => <h3 key={column.id} className="td-colh">{heading(column)}</h3>)}
+          </div>
+        </div>
+        {bodies}
+      </section> : <React.Fragment key={group.key}>{bodies}</React.Fragment>
+    })}
+  </div>
 }
 
 interface TaskCardProps {

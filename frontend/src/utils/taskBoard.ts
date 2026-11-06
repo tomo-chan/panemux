@@ -312,7 +312,7 @@ export function laneTitle(key: string): string {
 export function laneKeys(task: Task, mode: LaneMode): string[] {
   switch (mode) {
     case 'host':
-      return [hostLabel(task.host)]
+      return [task.host]
     case 'label':
       return task.labels && task.labels.length > 0 ? [...task.labels] : [NO_LABEL_LANE]
     case 'repo':
@@ -330,22 +330,26 @@ export interface TaskLane {
 
 export function groupIntoLanes(tasks: Task[], mode: LaneMode): TaskLane[] {
   const lanes = new Map<string, Task[]>()
+  const seen = new Set<string>()
   for (const task of tasks) {
-    for (const key of laneKeys(task, mode)) {
+    if (seen.has(task.id)) continue
+    seen.add(task.id)
+    for (const key of new Set(laneKeys(task, mode))) {
       const lane = lanes.get(key)
       if (lane) lane.push(task)
       else lanes.set(key, [task])
     }
   }
+  const title = (key: string) => mode === 'host' ? (key === 'Local' ? 'Local (SSH)' : hostLabel(key)) : laneTitle(key)
   return [...lanes.entries()]
     .sort(([a], [b]) => {
       // Lanes that collect "everything else" sort after every named lane.
       const aLast = CATCH_ALL_TITLES.has(a)
       const bLast = CATCH_ALL_TITLES.has(b)
       if (aLast !== bLast) return aLast ? 1 : -1
-      return a.localeCompare(b)
+      return title(a).localeCompare(title(b)) || a.localeCompare(b)
     })
-    .map(([key, laneTasks]) => ({ key, title: laneTitle(key), tasks: laneTasks }))
+    .map(([key, laneTasks]) => ({ key, title: title(key), tasks: laneTasks }))
 }
 
 export interface TaskPaneRef {
@@ -548,4 +552,19 @@ export function isTerminalMaximizeShortcut(event: KeyboardEvent): boolean {
 export function formatShortcut(letter: string, isMac: boolean): string {
   const key = letter.toUpperCase()
   return isMac ? `⌘⇧${key}` : `Ctrl+Shift+${key}`
+}
+
+export interface TaskBoardGroup extends TaskLane {
+  columns: Array<TaskColumn & { tasks: Task[] }>
+}
+
+/** Cards alone distribute the shared groups into the common state columns. */
+export function boardGroups(groups: TaskLane[], showDone: boolean, mode: LaneMode): TaskBoardGroup[] {
+  const source = mode === 'none' && groups.length === 0 ? [{ key: '', title: '', tasks: [] }] : groups
+  return source.map(group => {
+    const columns = visibleColumns(showDone).map(column => ({ ...column, tasks: [] as Task[] }))
+    const byId = new Map(columns.map(column => [column.id, column]))
+    for (const task of group.tasks) byId.get(columnForTask(task))?.tasks.push(task)
+    return { ...group, columns }
+  })
 }

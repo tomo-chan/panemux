@@ -81,6 +81,7 @@ test('documentation screenshots', async ({ page }) => {
     await expect(
       dashboard.getByRole('complementary', { name: 'Task details' }).getByText('Add pagination to the search endpoint'),
     ).toBeVisible()
+    await dashboard.getByLabel('Group tasks by').selectOption('host')
     await page.screenshot({ path: imagePath('task-dashboard.png') })
     await dashboard.getByRole('button', { name: 'Table', exact: true }).click()
     await page.screenshot({ path: imagePath('task-dashboard-table.png') })
