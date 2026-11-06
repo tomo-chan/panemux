@@ -778,6 +778,15 @@ describe('TaskDashboard Type in pane: while open', () => {
     expect(within(dialog()).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 
+  it('routes popup Open through the shared task opening callback and ends its attach', async () => {
+    const { state, onOpenTask } = renderDashboard()
+    await openPopup('wait-1')
+    fireEvent.click(within(dialog()).getByRole('button', { name: /^Open:/ }))
+    expect(onOpenTask).toHaveBeenCalledWith(waiting, expect.objectContaining({ kind: 'open' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(state.detach).toHaveBeenCalled()
+  })
+
   it('offers Go to pane and says who sizes the window when a workspace pane shows the same session', async () => {
     const onOpenTask = vi.fn()
     const { state } = renderDashboard(tasksState(), onOpenTask)

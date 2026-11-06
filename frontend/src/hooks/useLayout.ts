@@ -276,8 +276,20 @@ export function useLayout() {
     [layout, saveLayout],
   )
 
-  const createPane = useCallback(async (pane: PaneConfig, placement: CreatePanePlacement) => {
-    if (!layout) return
+  // Explicit destinations are read afresh: selecting a workspace must never
+  // insert into the layout captured before a switch (or silently fall back).
+  const createPane = useCallback(async (pane: PaneConfig, placement: CreatePanePlacement, workspaceId?: string) => {
+    let destination = workspaces
+    if (workspaceId) {
+      const response = await fetch('/api/workspaces')
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      destination = WorkspacesResponseSchema.parse(await response.json())
+    }
+    const targetId = workspaceId ?? destination?.active
+    const target = destination?.items.find(workspace => workspace.id === targetId)
+    if (workspaceId && !target) throw new Error('Workspace no longer exists')
+    const targetLayout = target?.layout ?? layout
+    if (!targetLayout) throw new Error('Workspace no longer exists')
     const paneWithDefaults = await ensurePaneDefaults(pane)
     setError(null)
 
@@ -286,17 +298,49 @@ export function useLayout() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(paneWithDefaults),
     })
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
     const newLayout = placement.type === 'workspace-edge'
-      ? insertPaneAtWorkspaceEdge(layout, placement.edge, paneWithDefaults)
-      : insertPaneBesideTargetPane(layout, placement.targetPaneId, placement.edge, paneWithDefaults)
+      ? insertPaneAtWorkspaceEdge(targetLayout, placement.edge, paneWithDefaults)
+      : insertPaneBesideTargetPane(targetLayout, placement.targetPaneId, placement.edge, paneWithDefaults)
+    const saved = await fetch(targetId ? `/api/workspaces/${encodeURIComponent(targetId)}/layout` : '/api/layout', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newLayout),
+    })
+    if (!saved.ok) throw new Error(`HTTP ${saved.status}`)
+    if (workspaceId) {
+      const activated = await fetch('/api/workspaces/active', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: workspaceId }),
+      })
+      if (!activated.ok) throw new Error(`HTTP ${activated.status}`)
+    }
+    setWorkspaces(current => {
+      const source = workspaceId ? destination : current
+      return source ? { ...source, active: targetId ?? source.active,
+        items: source.items.map(workspace => workspace.id === targetId ? { ...workspace, layout: newLayout } : workspace) } : source
+    })
     setLayout(newLayout)
-    setWorkspaces((current) => current ? replaceActiveWorkspaceLayout(current, newLayout) : current)
-    await saveLayout(newLayout, true)
-  }, [ensurePaneDefaults, layout, saveLayout])
+  }, [ensurePaneDefaults, layout, workspaces])
+
+  const createNamedWorkspace = useCallback(async (name: string): Promise<string> => {
+    const title = name.trim()
+    if (!title) throw new Error('Enter a workspace name')
+    if (workspaces?.items.some(workspace => workspace.title === title)) throw new Error('A workspace with this name already exists')
+    const apply = (parsed: WorkspacesResponse) => {
+      setWorkspaces(parsed)
+      setLayout((parsed.items.find(workspace => workspace.id === parsed.active) ?? parsed.items[0]).layout)
+    }
+    const created = await fetch('/api/workspaces', { method: 'POST' })
+    if (!created.ok) throw new Error(`HTTP ${created.status}`)
+    const parsed = WorkspacesResponseSchema.parse(await created.json())
+    apply(parsed) // Keep the workspace even if setting its name fails.
+    const id = parsed.active
+    const renamed = await fetch(`/api/workspaces/${encodeURIComponent(id)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }),
+    })
+    if (!renamed.ok) throw new Error(`HTTP ${renamed.status}`)
+    apply(WorkspacesResponseSchema.parse(await renamed.json()))
+    return id
+  }, [workspaces])
 
   const movePane = useCallback(async (sourcePaneId: string, placement: MovePanePlacement) => {
     if (!layout || !workspaces) return
@@ -365,6 +409,7 @@ export function useLayout() {
     closePane,
     swapPanes,
     createPane,
+    createNamedWorkspace,
     movePane,
     setActiveWorkspace,
     addWorkspace,

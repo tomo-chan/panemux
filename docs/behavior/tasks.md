@@ -1024,14 +1024,26 @@ See [Codex summary runner and rollout reader](../security/command-execution.md#c
 | Task | Result |
 |---|---|
 | In tmux, with a pane already attached | The pane's workspace becomes active and the pane takes focus |
-| In tmux, no pane yet, attachable | A `tmux` (panemux host) or `ssh_tmux` (its connection) pane attaching to the session is added at the right edge of the active workspace, through the ordinary `POST /api/sessions` and layout save; the pane's `tmux new-session -A` attaches to the running session |
+| In tmux, no pane yet, attachable | A `tmux` (panemux host) or `ssh_tmux` (its connection) pane attaching to the session is added at the right edge of the workspace chosen in Open in workspace, through the ordinary `POST /api/sessions` and layout save; the pane's `tmux new-session -A` attaches to the running session |
 | In tmux, not attachable | Not opened; the reason is shown |
 | Outside tmux, in a `local` / `ssh` pane the workspaces hold | That pane's workspace becomes active and the pane takes focus |
 | Outside tmux, naming a pane no workspace holds, or no pane | Not opened; the reason is shown |
 | Stopped | Not opened; a stopped task whose agent resumes offers `Resume` ([Resuming a task](#resuming-a-task)) |
 | Unknown | Not opened |
 
-Either way the dashboard closes and the pane is briefly outlined. Opening the same tmux session again
+For a new pane, cards, details and the Type in pane popup all open **Open in workspace**.
+It always appears, even with one workspace, listing workspace names as radio options with the
+active workspace selected. **Open here** confirms the destination. **+ New workspace** reveals a
+name field and changes confirmation to **Create and open**. A blank name after trimming, or a name
+identical to an existing workspace title, shows an input error without creating anything.
+A new workspace is created with `POST /api/workspaces`, then named with
+`PUT /api/workspaces/{id}`, before creating the pane. If naming fails, the workspace remains,
+an error appears and no pane is created. A selected workspace that no longer exists, or a failed
+request, shows an error without falling back to another workspace. Cancel, Escape and × close
+the picker without creating a pane; confirmation disables its controls until the request completes.
+
+After a successful Open, the chosen workspace becomes active, the dashboard closes and the pane
+takes focus and is briefly outlined. Go to pane bypasses the picker and navigates immediately. Opening the same tmux session again
 while its pane is still being created does not create a second pane.
 
 **Type in pane.** A task waiting for input or idle can also be answered without leaving the
@@ -1161,8 +1173,9 @@ The connection menu is a dialog under the chip ([UI](../ui-design.md#task-dashbo
   and `Type in pane` stay disabled until it arrives. The name is the connection name with every
   character outside `[a-zA-Z0-9_.-]` replaced by `-`, then `-` and 8 random hex digits
   (`gpu-box-1a2b3c4d`). A failed request is shown in the menu.
-- **`Open`** adds a new `ssh` or `ssh_tmux` pane on that connection at the right edge of the active
-  workspace, through the ordinary `POST /api/sessions`, closes the dashboard and outlines the pane.
+- **`Open`** adds a new `ssh` or `ssh_tmux` pane on that connection at the right edge of the workspace chosen in **Open in workspace**, using the same picker,
+  new-workspace creation and failure handling as [Opening a task](#opening-a-task). Successful
+  confirmation closes the dashboard, activates the destination workspace, focuses and outlines the pane.
   It never moves to a pane the host already has; every press adds one. An `ssh_tmux` pane creates
   the named session (`tmux new-session -A`).
 - **`Type in pane`** (the emphasised action) opens a popup over the board holding a host terminal

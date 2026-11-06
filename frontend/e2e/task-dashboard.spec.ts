@@ -54,6 +54,9 @@ test('opens a session running in tmux as a pane attached to it', async ({ page, 
   await expect(card).toContainText('tmux e2e-task-dashboard · no pane')
 
   await card.getByRole('button', { name: /^Open/ }).click()
+  const picker = page.getByRole('dialog', { name: 'Open in workspace' })
+  await expect(picker.getByRole('radio', { name: 'Default' })).toBeChecked()
+  await picker.getByRole('button', { name: 'Open here' }).click()
 
   await expect(page.getByRole('region', { name: 'Task dashboard' })).toHaveCount(0)
   const pane = page.locator('[data-pane-id]').filter({ hasText: 'e2e-task-dashboard' })
