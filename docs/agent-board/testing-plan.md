@@ -39,7 +39,10 @@ Tests must protect these contracts rather than mirror implementation structure.
 - Detection, presence debounce, and warning suppression follow [Bootstrap flow](bootstrap.md#bootstrap-flow).
 - No Board path calls `Session.Write`, including recovery and restarted sessions.
 - Legacy mode is validated, warned about once per configuration load, and ignored.
-- Retired bootstrap state is left untouched.
+- Presence checks require two consecutive detections, stop after success for the pane session,
+  retry failures, reset on session/host changes and removal, and treat managed pauses silently.
+- Saving config omits legacy mode without changing its in-memory API value or regenerating warnings.
+- Retired bootstrap state is left untouched; the reader/writer implementation is removed.
 
 ### Command center
 

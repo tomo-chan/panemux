@@ -2,7 +2,9 @@ package agmsg
 
 import (
 	"context"
+	"errors"
 	"panemux/internal/board"
+	"panemux/internal/hosttools"
 )
 
 func (c *Client) begin() (func(), error) {
@@ -63,6 +65,9 @@ func (c *Client) Send(ctx context.Context, team, from, to, body string) error {
 func (c *Client) Available(ctx context.Context) (bool, error) {
 	release, err := c.begin()
 	if err != nil {
+		if errors.Is(err, hosttools.ErrUpdating) {
+			return false, errors.Join(board.ErrParticipationPaused, err)
+		}
 		return false, err
 	}
 	defer release()

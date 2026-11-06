@@ -243,13 +243,15 @@ terminal panes or changes agent delivery settings. Removed pane-level `agent_boa
 ### Pane detection and participation
 
 Start an interactive agent in a configured pane. Panemux polls every 5s and displays detected agents
-without sending terminal input. It checks agmsg availability after two consecutive detections.
+without sending terminal input. It checks agmsg availability after two consecutive detections, retrying until confirmed and then
+skipping further probes for that session. Host changes and session replacement reset confirmation.
 Detection is not proof of registration or reception. Hook-based participation is follow-up work in
 [#495](https://github.com/tomo-chan/panemux/issues/495); automatic registration is not available here.
 Existing registrations and delivery hooks are left untouched, as is `board-bootstrap-state.json`.
 
 `agent_board.mode` is deprecated for one release: values are still validated, but a configured key
-produces one warning per load and is ignored. It does not configure agmsg delivery.
+produces one warning per load and is ignored. Saving configuration removes this deprecated key.
+It does not configure agmsg delivery.
 
 ### Checking that it worked
 

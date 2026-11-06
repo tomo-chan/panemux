@@ -48,6 +48,7 @@ type bootstrapWatcher struct {
 	paneHosts            map[string]string
 	participationForHost func(string) board.Participation
 	pending              map[string]session.Session
+	confirmed            map[string]session.Session
 	// warned tracks which warning kinds are currently being suppressed for a
 	// pane. A kind is added when its warning is logged and removed when the
 	// condition it reports clears, so each warning is logged once per failing
@@ -98,6 +99,7 @@ func newBootstrapWatcher(cfg bootstrapWatcherConfig) *bootstrapWatcher {
 		participationForHost: cfg.ParticipationForHost,
 		team:                 cfg.Team,
 		pending:              map[string]session.Session{},
+		confirmed:            map[string]session.Session{},
 		warned:               map[string]warnedPane{},
 	}
 }
@@ -147,6 +149,7 @@ func (b *bootstrapWatcher) refreshPanes() {
 	for id, host := range b.paneHosts {
 		if next, exists := current[id]; !exists || next != host {
 			delete(b.pending, id)
+			delete(b.confirmed, id)
 			delete(b.warned, id)
 		}
 	}
@@ -165,6 +168,7 @@ func (b *bootstrapWatcher) sessionFor(paneID string) (session.Session, bool) {
 	sess, ok := b.manager.Get(paneID)
 	if !ok {
 		delete(b.pending, paneID)
+		delete(b.confirmed, paneID)
 		delete(b.warned, paneID)
 		return nil, false
 	}
@@ -224,6 +228,9 @@ func (b *bootstrapWatcher) checkPaneWithParticipant(
 		return
 	}
 	detectedKind = string(agentID)
+	if b.confirmed[paneID] == sess {
+		return
+	}
 	// Keep presence checks debounced while detection remains visible each tick.
 	if pendingSess, isPending := b.pending[paneID]; !isPending || pendingSess != sess {
 		b.pending[paneID] = sess
@@ -242,6 +249,7 @@ func (b *bootstrapWatcher) checkPaneWithParticipant(
 		return
 	}
 	b.clearWarning(paneID, warnKindAbsent)
+	b.confirmed[paneID] = sess
 }
 
 func (b *bootstrapWatcher) observePane(paneID, host string, kind *string) {
@@ -264,6 +272,9 @@ func (b *bootstrapWatcher) messagingPresent(
 	probeCtx, cancel := context.WithTimeout(ctx, bootstrapProbeTimeout)
 	defer cancel()
 	present, err := participant.Available(probeCtx)
+	if errors.Is(err, board.ErrParticipationPaused) {
+		return false, false
+	}
 	description := participant.Description()
 	if errors.Is(err, board.ErrParticipationPath) {
 		b.warnOnce(paneID, warnKindPath, fmt.Sprintf(
@@ -309,6 +320,7 @@ func (b *bootstrapWatcher) noteSession(paneID string, sess session.Session) {
 	if entry, seen := b.warned[paneID]; seen && entry.sess == sess {
 		return
 	}
+	delete(b.confirmed, paneID)
 	b.warned[paneID] = warnedPane{sess: sess, kinds: map[string]bool{}}
 }
 

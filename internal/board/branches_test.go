@@ -51,13 +51,10 @@ func brokenParent(t *testing.T, name string) string {
 // A missing file is the normal state before the first run and is not an
 // error. Every other read failure is, and folding the two together would let
 // an unreadable file look like a fresh install — silently discarding the
-// panes already onboarded, or the relay's place in the message stream.
+// the relay's place in the message stream.
+//
+//efficacy:exempt preserves unchanged relay cursor behavior after removing retired bootstrap-store assertions
 func TestStateFilesDistinguishMissingFromUnreadable(t *testing.T) {
-	paneIDs, err := LoadBootstrapState(brokenParent(t, "board-bootstrap-state.json"))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reading bootstrap state file")
-	assert.Nil(t, paneIDs, "an unreadable file must not look like an empty one")
-
 	entries, err := LoadCursorFile(brokenParent(t, "board-relay-cursor.json"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reading relay cursor file")
@@ -67,12 +64,14 @@ func TestStateFilesDistinguishMissingFromUnreadable(t *testing.T) {
 // The temp-file-plus-rename discipline itself lives in internal/fileops and
 // is tested there, including the arms only its seam can reach. What is still
 // this package's own is the label each save passes: a failure has to name the
-// file that failed, since both saves are called from a background goroutine
+// file that failed, since saves are called from a background goroutine
 // where a log line is all anyone will ever see.
 //
 // The rename is the step that makes the write atomic, and the one that can
 // still fail after everything before it succeeded. Renaming onto an existing
 // directory fails, which stands in for any rename failure.
+//
+//efficacy:exempt preserves unchanged relay cursor behavior after removing retired bootstrap-store assertions
 func TestStateSavesNameTheFileThatFailedToBeRenamed(t *testing.T) {
 	for _, tt := range []struct {
 		save func(path string) error
@@ -85,11 +84,6 @@ func TestStateSavesNameTheFileThatFailedToBeRenamed(t *testing.T) {
 				return SaveCursorFile(path, []CursorEntry{{Host: "local", Team: "panemux"}})
 			},
 			want: "replacing relay cursor file",
-		},
-		{
-			name: "bootstrap state",
-			save: func(path string) error { return SaveBootstrapState(path, []string{"pane-a"}) },
-			want: "replacing bootstrap state file",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -114,6 +108,8 @@ func TestStateSavesNameTheFileThatFailedToBeRenamed(t *testing.T) {
 // going read-only — is what the temp file exists for, and is reachable only
 // through internal/fileops' seam: the file being written is one the write
 // created itself moments earlier, so no fixture can make it fail.
+//
+//efficacy:exempt preserves unchanged relay cursor behavior after removing retired bootstrap-store assertions
 func TestStateSavesReportAFailureMidWrite(t *testing.T) {
 	for _, tt := range []struct {
 		save func(path string) error
@@ -126,11 +122,6 @@ func TestStateSavesReportAFailureMidWrite(t *testing.T) {
 				return SaveCursorFile(path, []CursorEntry{{Host: "local", Team: "panemux"}})
 			},
 			want: "writing temp relay cursor file",
-		},
-		{
-			name: "bootstrap state",
-			save: func(path string) error { return SaveBootstrapState(path, []string{"pane-a"}) },
-			want: "writing temp bootstrap state file",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

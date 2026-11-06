@@ -2251,3 +2251,11 @@ false. Existing `board-bootstrap-state.json` files remain untouched. For one rel
 validation and serialization, warn once when loaded, and ignore it (Q7). Hook registration and
 message wrappers are separate changes. Review S1 first, but merge only when S6 and S7 are ready,
 to avoid a released interval without participation setup.
+
+S1 review follow-up: configuration saves omit deprecated mode instead of regenerating the warning
+on every restart; the API default remains in memory. Presence confirmation is per pane session,
+with two consecutive detections before probing and retries only until successful. Session/host
+changes and removal invalidate it. Managed tool pauses skip checks silently without reinstating
+a PTY lease. Remove the unused bootstrap-state reader/writer and its self-tests, leaving old files
+untouched. Defer the unreachable frontend `instruction sent` branch and its test to #510 (S8),
+where the participation API/UI changes together.

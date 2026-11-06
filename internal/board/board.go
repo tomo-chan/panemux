@@ -65,6 +65,9 @@ type MessageClient interface {
 // probe failure. Callers can suppress and recover their warning streaks separately.
 var ErrParticipationPath = errors.New("resolve messaging path")
 
+// ErrParticipationPaused indicates a managed tool update, not a host failure.
+var ErrParticipationPaused = errors.New("messaging participation is paused")
+
 // ParticipationDescription names the operator-facing tool and its path setting.
 // The adapter owns these labels; board orchestration only formats their context.
 type ParticipationDescription struct {

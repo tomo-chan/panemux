@@ -97,6 +97,7 @@ Tool management announces a pause before draining existing panemux calls. New se
 with an updating error; paused status checks return 200 / unknown and overlapping writes 502.
 Relay holds leases for the source batch and its destinations before changing history or cursors;
 a paused destination keeps that batch retryable. Detection only admits individual availability probes; it holds no lease around terminal input.
+A managed pause skips the check without a warning and remains retryable.
 Installer attempts invalidate discovery caches, so successful Install can participate from the next
 poll without restarting panemux. Pause ends on success, failure or cancellation.
 
@@ -166,6 +167,6 @@ registry owns transport-independent process matching. Explicit-only types (antig
 hermes) and the desktop agmsg-app are not detected as board agents.
 
 The public path override has been removed. The adapter owns the fixed default location.
-Relay discovery remembers confirmed absence; bootstrap rechecks presence on eligible ticks.
+Relay discovery remembers confirmed absence; bootstrap retries presence on eligible ticks until confirmed for the pane session.
 The host tool manager installs the pinned source and invalidates absent relay discovery after
 an installer attempt. Successful Install is observed on the next presence check without restart.

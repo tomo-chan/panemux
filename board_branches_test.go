@@ -28,6 +28,8 @@ import (
 // a log line, so a wrong answer here is silent: a host quietly off the board,
 // or a stale cursor file quietly ignored.
 
+const legacyBootstrapStateFileName = "board-bootstrap-state.json"
+
 // isolatedHome points the home-directory seam at a directory this test owns,
 // so anything resolving ~/.config/panemux touches the fixture and never the
 // developer's real cursor or bootstrap-state files.
@@ -133,8 +135,7 @@ func TestSetupBoard_UnparsableCursorFile_LogsAndContinues(t *testing.T) {
 func TestSetupBoard_UnparsableBootstrapStateFile_LogsAndContinues(t *testing.T) {
 	home := isolatedHome(t)
 	panemuxConfigDir(t, home)
-	statePath, err := board.DefaultBootstrapStateFilePath()
-	require.NoError(t, err)
+	statePath := filepath.Join(home, ".config", "panemux", legacyBootstrapStateFileName)
 	require.NoError(t, os.WriteFile(statePath, []byte("{not json"), 0o600))
 
 	buf := captureBoardLog(t)
@@ -160,9 +161,8 @@ func TestSetupBoard_ValidPersistedState_IsLoadedIntoTheRelayAndWatcher(t *testin
 	cursors := []board.CursorEntry{{Host: boardHostIDLocal, Team: "panemux", Cursor: "42"}}
 	require.NoError(t, board.SaveCursorFile(cursorPath, cursors))
 
-	statePath, err := board.DefaultBootstrapStateFilePath()
-	require.NoError(t, err)
-	require.NoError(t, board.SaveBootstrapState(statePath, []string{"pane-a"}))
+	statePath := filepath.Join(home, ".config", "panemux", legacyBootstrapStateFileName)
+	require.NoError(t, os.WriteFile(statePath, []byte(`["pane-a"]`), 0o600))
 
 	buf := captureBoardLog(t)
 	installAgmsg(t, "")

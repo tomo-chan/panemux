@@ -10,7 +10,7 @@
   wait 60 seconds, a connection lost during use can reconnect immediately, and the task host menu
   reconnect discards the shared connection and cooldown. No restart or pane is needed.
 - A confirmed missing agmsg installation is cached as absent until a managed installer attempt; bootstrap
-  continues checking presence. Successful manual Install clears absence and is observed on the next poll.
+  continues checking presence until it succeeds for that pane session. Successful manual Install clears absence and is observed on the next poll.
 - Updates pause only panemux calls. Existing agent-owned scripts can see files being replaced;
   restart agents after Install / Update. Failed installers may require manual recovery.
 - An SSH pane whose `connection` exists only in `~/.ssh/config` is outside Agent Board. Add a
@@ -83,3 +83,7 @@ detected agents and plain shells. Local panes each request a process listing; tm
 also query tmux, and SSH panes run a remote detection command. Process listings are currently not
 shared across panes. This steady-state work grows with the number of panes; detection does not
 stop after an initial detection because the API keeps the detected type current.
+
+Availability probes wait for two consecutive detections and stop after confirmation for that pane
+session. Failed checks retry on later polls; managed tool-update pauses are silent and retryable.
+Session replacement, host changes, and pane removal invalidate confirmation.

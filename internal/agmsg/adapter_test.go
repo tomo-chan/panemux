@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"panemux/internal/agent"
 	"panemux/internal/board"
+	"panemux/internal/hosttools"
 )
 
 func TestAdapterMapsRegisteredIDsToTransportTypes(t *testing.T) {
@@ -79,6 +80,18 @@ func TestAvailableClassifiesOnlyPathFailures(t *testing.T) {
 			assert.Equal(t, wantPathError, errors.Is(err, board.ErrParticipationPath))
 			want := board.ParticipationDescription{Name: "agmsg", PathSetting: "agmsg installation path"}
 			assert.Equal(t, want, client.Description())
+		})
+	}
+}
+
+func TestAvailabilityClassifiesOnlyManagedPauses(t *testing.T) {
+	for _, cause := range []error{hosttools.ErrUpdating, errors.New("admission failed")} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			client := NewClient(ClientConfig{BeginCall: func() (func(), error) { return nil, cause }})
+			present, err := client.Available(context.Background())
+			require.False(t, present)
+			require.ErrorIs(t, err, cause)
+			require.Equal(t, errors.Is(cause, hosttools.ErrUpdating), errors.Is(err, board.ErrParticipationPaused))
 		})
 	}
 }

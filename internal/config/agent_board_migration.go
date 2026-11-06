@@ -30,7 +30,7 @@ func rejectPaneBoardSettings(value any) error {
 	case map[string]any:
 		_, pane := node["id"]
 		if _, removed := node["agent_board"]; pane && removed {
-			return errors.New("pane agent_board was removed; set top-level agent_board.enabled and agent_board.mode")
+			return errors.New("pane agent_board was removed; set top-level agent_board.enabled")
 		}
 		for _, child := range node {
 			if err := rejectPaneBoardSettings(child); err != nil {
