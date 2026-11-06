@@ -778,6 +778,7 @@ describe('TaskDashboard Type in pane: while open', () => {
     expect(within(dialog()).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 
+  //efficacy:exempt Pins the existing popup-to-App callback and attach cleanup; this PR changes App destination handling only.
   it('routes popup Open through the shared task opening callback and ends its attach', async () => {
     const { state, onOpenTask } = renderDashboard()
     await openPopup('wait-1')

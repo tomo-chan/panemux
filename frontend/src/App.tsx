@@ -560,14 +560,14 @@ export const App: React.FC = () => {
     if (pane) setPendingOpen({ pane })
   }, [])
 
-  const openInWorkspace = async (destination: WorkspaceDestination) => {
+  const openInWorkspace = async (destination: WorkspaceDestination, onWorkspaceCreated: (id: string) => void) => {
     if (!pendingOpen) return
     const { pane, sessionKey } = pendingOpen
     if (sessionKey && openingTaskSessionsRef.current.has(sessionKey)) return
     if (sessionKey) openingTaskSessionsRef.current.add(sessionKey)
     try {
       const workspaceId = 'newName' in destination
-        ? await createNamedWorkspace(destination.newName) : destination.workspaceId
+        ? await createNamedWorkspace(destination.newName, onWorkspaceCreated) : destination.workspaceId
       await createPane(pane, { type: 'workspace-edge', edge: 'right' }, workspaceId)
       setPendingOpen(null)
       setLayer('workspaces')

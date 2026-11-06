@@ -25,6 +25,7 @@ export function useLayout() {
   const [workspaces, setWorkspaces] = useState<WorkspacesResponse | null>(null)
   const [displayConfig, setDisplayConfig] = useState<DisplayConfig | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const createdPaneSessionsRef = useRef(new Set<string>())
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const workspaceBarWidthSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -290,23 +291,34 @@ export function useLayout() {
     if (workspaceId && !target) throw new Error('Workspace no longer exists')
     const targetLayout = target?.layout ?? layout
     if (!targetLayout) throw new Error('Workspace no longer exists')
+    const existingWorkspace = destination?.items.find(workspace => layoutContainsPane(workspace.layout, pane.id))
+    if (existingWorkspace && existingWorkspace.id !== targetId) {
+      throw new Error(`Terminal is already in workspace ${existingWorkspace.title}; choose it to finish opening`)
+    }
     const paneWithDefaults = await ensurePaneDefaults(pane)
     setError(null)
 
-    const response = await fetch('/api/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(paneWithDefaults),
-    })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    // A failed save/activation leaves the picker available for retry. Resume
+    // completed steps instead of POSTing the same session id again (409).
+    if (!existingWorkspace && !createdPaneSessionsRef.current.has(pane.id)) {
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(paneWithDefaults),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      createdPaneSessionsRef.current.add(pane.id)
+    }
 
-    const newLayout = placement.type === 'workspace-edge'
+    const newLayout = existingWorkspace ? targetLayout : placement.type === 'workspace-edge'
       ? insertPaneAtWorkspaceEdge(targetLayout, placement.edge, paneWithDefaults)
       : insertPaneBesideTargetPane(targetLayout, placement.targetPaneId, placement.edge, paneWithDefaults)
-    const saved = await fetch(targetId ? `/api/workspaces/${encodeURIComponent(targetId)}/layout` : '/api/layout', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newLayout),
-    })
-    if (!saved.ok) throw new Error(`HTTP ${saved.status}`)
+    if (!existingWorkspace) {
+      const saved = await fetch(targetId ? `/api/workspaces/${encodeURIComponent(targetId)}/layout` : '/api/layout', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newLayout),
+      })
+      if (!saved.ok) throw new Error(`HTTP ${saved.status}`)
+    }
     if (workspaceId) {
       const activated = await fetch('/api/workspaces/active', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: workspaceId }),
@@ -319,9 +331,10 @@ export function useLayout() {
         items: source.items.map(workspace => workspace.id === targetId ? { ...workspace, layout: newLayout } : workspace) } : source
     })
     setLayout(newLayout)
+    createdPaneSessionsRef.current.delete(pane.id)
   }, [ensurePaneDefaults, layout, workspaces])
 
-  const createNamedWorkspace = useCallback(async (name: string): Promise<string> => {
+  const createNamedWorkspace = useCallback(async (name: string, onCreated?: (id: string) => void): Promise<string> => {
     const title = name.trim()
     if (!title) throw new Error('Enter a workspace name')
     if (workspaces?.items.some(workspace => workspace.title === title)) throw new Error('A workspace with this name already exists')
@@ -334,6 +347,7 @@ export function useLayout() {
     const parsed = WorkspacesResponseSchema.parse(await created.json())
     apply(parsed) // Keep the workspace even if setting its name fails.
     const id = parsed.active
+    onCreated?.(id)
     const renamed = await fetch(`/api/workspaces/${encodeURIComponent(id)}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }),
     })

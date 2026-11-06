@@ -240,7 +240,10 @@ focuses **Workspace name**; **Open here** becomes **Create and open**. Names are
 or duplicate names show an inline error. Cancel, Escape and × dismiss it without adding a pane,
 returning focus to the opener when still present. During confirmation controls are disabled and
 Escape does not dismiss it. Request failures stay in the dialog; a workspace created before its
-name fails to save remains available. Successful confirmation activates the chosen workspace and
+name fails to save remains selected under its default title; retrying **Open here** reuses it.
+A newly created workspace includes its default local **Terminal** shell, with the requested pane
+added at the right edge. Retrying after a session or layout was created resumes those completed
+steps without duplicating them. Successful confirmation activates the chosen workspace and
 focuses and outlines the new pane. **Go to pane** navigates immediately without this dialog.
 
 ### Confirmation dialog

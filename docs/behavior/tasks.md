@@ -1037,9 +1037,15 @@ active workspace selected. **Open here** confirms the destination. **+ New works
 name field and changes confirmation to **Create and open**. A blank name after trimming, or a name
 identical to an existing workspace title, shows an input error without creating anything.
 A new workspace is created with `POST /api/workspaces`, then named with
-`PUT /api/workspaces/{id}`, before creating the pane. If naming fails, the workspace remains,
-an error appears and no pane is created. A selected workspace that no longer exists, or a failed
-request, shows an error without falling back to another workspace. Cancel, Escape and × close
+`PUT /api/workspaces/{id}`, before creating the pane. The workspace already contains its default
+local **Terminal** shell pane; the requested task or host pane is added to its right. Once created, the workspace becomes
+the picker selection, so a retry uses that workspace rather than creating another one. If naming
+fails, the workspace remains with its default title, an error appears and no task or host pane is
+created by that attempt; **Open here** can then open in the retained workspace. A failure after
+session creation resumes without creating the same session again, and a pane already saved in the
+destination layout is not inserted twice when activation is retried. If the pane was already saved
+in a different workspace, the error asks to select that workspace to finish opening. A selected
+workspace that no longer exists, or a failed request, shows an error without falling back to another workspace. Cancel, Escape and × close
 the picker without creating a pane; confirmation disables its controls until the request completes.
 
 After a successful Open, the chosen workspace becomes active, the dashboard closes and the pane

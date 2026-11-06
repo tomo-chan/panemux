@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkspacePickerDialog } from './WorkspacePickerDialog'
 
@@ -17,7 +17,7 @@ describe('WorkspacePickerDialog', () => {
     expect(screen.getByRole('radio', { name: 'Ops' })).toHaveFocus()
     fireEvent.click(screen.getByRole('radio', { name: 'Dev' }))
     fireEvent.click(screen.getByRole('button', { name: 'Open here' }))
-    await waitFor(() => expect(onOpen).toHaveBeenCalledWith({ workspaceId: 'dev' }))
+    await waitFor(() => expect(onOpen).toHaveBeenCalledWith({ workspaceId: 'dev' }, expect.any(Function)))
   })
   it('still asks when there is only one workspace', () => {
     setup([items[1]])
@@ -57,6 +57,28 @@ describe('WorkspacePickerDialog', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Workspace no longer exists')
     expect(onOpen).not.toHaveBeenCalled()
   })
+  it('returns focus to the opener when cancelled and unmounted', () => {
+    const opener = document.createElement('button')
+    document.body.append(opener)
+    opener.focus()
+    const onCancel = vi.fn()
+    const { unmount } = render(<WorkspacePickerDialog workspaces={items} active="ops" onOpen={vi.fn()} onCancel={onCancel} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onCancel).toHaveBeenCalledOnce()
+    unmount()
+    expect(opener).toHaveFocus()
+    opener.remove()
+  })
+  it('does not dismiss on Escape while confirmation is pending', async () => {
+    let finish: () => void = () => {}
+    const { onOpen, onCancel } = setup()
+    onOpen.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open here' }))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Opening…' })).toBeDisabled()
+    await act(async () => finish())
+  })
   it('trims a new name and reports asynchronous errors', async () => {
     const { onOpen } = setup()
     onOpen.mockRejectedValueOnce(new Error('HTTP 500'))
@@ -66,6 +88,6 @@ describe('WorkspacePickerDialog', () => {
     fireEvent.change(input, { target: { value: ' Review ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create and open' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 500')
-    expect(onOpen).toHaveBeenCalledWith({ newName: 'Review' })
+    expect(onOpen).toHaveBeenCalledWith({ newName: 'Review' }, expect.any(Function))
   })
 })

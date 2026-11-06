@@ -1537,6 +1537,32 @@ describe('App task dashboard layer', () => {
     }
   })
 
+  it.each(['naming', 'pane'])('reuses the created workspace after %s fails', async (failure) => {
+    mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
+    mockCreateNamedWorkspace.mockImplementationOnce(async (_name, onCreated) => {
+      currentWorkspaces = { ...workspaces, items: [...workspaces.items, { id: 'new', title: failure === 'naming' ? 'Workspace 3' : 'Review', layout: devLayout }] }
+      onCreated('new')
+      if (failure === 'naming') throw new Error('Naming failed')
+      return 'new'
+    })
+    if (failure === 'pane') mockCreatePane.mockRejectedValueOnce(new Error('Pane failed'))
+    const { rerender } = render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    fireEvent.click(screen.getByRole('radio', { name: /New workspace/ }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Workspace name' }), { target: { value: 'Review' } })
+    const callsBefore = mockCreateNamedWorkspace.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: 'Create and open' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(failure === 'naming' ? 'Naming failed' : 'Pane failed')
+    if (failure === 'naming') expect(mockCreatePane).not.toHaveBeenCalled()
+    rerender(<App />)
+    expect(screen.getByRole('radio', { name: failure === 'naming' ? 'Workspace 3' : 'Review' })).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Open here' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Open in workspace' })).toBeNull())
+    expect(mockCreateNamedWorkspace).toHaveBeenCalledTimes(callsBefore + 1)
+    expect(mockCreatePane).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 'new')
+  })
+
   it('cancels task opening without creating a pane or leaving the dashboard', () => {
     mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
     render(<App />)
@@ -1574,7 +1600,7 @@ describe('App task dashboard layer', () => {
     expect(pane).toEqual(expect.objectContaining({ type: 'tmux', tmux_session: 'task-a', title: 'task-a' }))
     expect(mockCreatePane.mock.calls[0][2]).toBe('ops')
     expect(placement).toEqual({ type: 'workspace-edge', edge: 'right' })
-    expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument())
   })
 
   it('opens a remote task in an ssh_tmux pane on its connection', async () => {
@@ -1640,6 +1666,7 @@ describe('App task dashboard layer', () => {
     expect(await screen.findByRole('alert')).toBeInTheDocument()
   })
 
+  //efficacy:exempt Go to pane must preserve direct navigation without a picker; that behavior predates this PR.
   it('goes to the workspace of a pane already attached to the task', async () => {
     currentWorkspaces = {
       ...workspaces,

@@ -6,7 +6,7 @@ export type WorkspaceDestination = { workspaceId: string } | { newName: string }
 interface Props {
   workspaces: { id: string; title: string }[]
   active: string
-  onOpen: (destination: WorkspaceDestination) => Promise<void>
+  onOpen: (destination: WorkspaceDestination, onWorkspaceCreated: (id: string) => void) => Promise<void>
   onCancel: () => void
 }
 const button: React.CSSProperties = { padding: '6px 14px', border: '1px solid #555', borderRadius: 3,
@@ -45,7 +45,7 @@ export function WorkspacePickerDialog({ workspaces, active, onOpen, onCancel }: 
     setBusy(true)
     setError(null)
     try {
-      await onOpen(selected === null ? { newName: title } : { workspaceId: selected })
+      await onOpen(selected === null ? { newName: title } : { workspaceId: selected }, setSelected)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to open terminal')
     } finally {
