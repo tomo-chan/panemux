@@ -201,6 +201,12 @@ Callbacks run serially with publisher updates and cancellation, must be short, a
 back into the publisher. Cancellation is idempotent; no callback runs after it returns. Closing
 the publisher removes all internal subscriptions and cancels in-flight collection. A browser that
 falls behind can still be dropped without stopping observation for internal consumers.
+When a host is removed from configuration, each internal consumer receives one
+`HostRemoved` (`removed`) result naming that host, with no tasks. This is an internal-only
+notification; browser removal frames keep their existing shape. Removal is not proof that the
+host's sessions stopped: consumers must invalidate reachability rather than retain the last OK
+observation or infer a successful empty collection. A collection result arriving after removal
+is discarded for internal consumers as well as browsers.
 
 
 ```text

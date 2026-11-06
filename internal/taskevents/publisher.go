@@ -36,6 +36,10 @@ const (
 	defaultEventBuffer   = 256
 )
 
+// HostRemoved is delivered only to internal subscribers when a host leaves the
+// configuration. Removal is not evidence that the host's sessions have stopped.
+const HostRemoved tasks.HostStatus = "removed"
+
 // Publisher observes hosts while browser or internal subscribers exist. Browser
 // subscribers receive changes; internal subscribers receive every observation.
 type Publisher struct {
@@ -70,7 +74,8 @@ type internalSubscriber struct {
 }
 
 // SubscribeInternal shares each host observation, including unchanged tasks and
-// process sets, without exposing that private metadata in browser frames. The
+// process sets, without exposing that private metadata in browser frames. A host
+// removed from configuration is delivered as HostRemoved with no tasks. The
 // callback must be short and must not call back into Publisher. Callbacks are
 // serialized with cancellation, so none can run after cancel returns.
 func (p *Publisher) SubscribeInternal(observe func(string, tasks.HostResult, []tasks.Task)) func() {
@@ -196,7 +201,14 @@ func (p *Publisher) startLocked() {
 // and starts an observation loop for each host that has none.
 func (p *Publisher) syncHostsLocked() {
 	names := append([]string{""}, p.src.Hosts()...)
-	p.publishLocked(p.model.syncHosts(names))
+	frames := p.model.syncHosts(names)
+	p.publishLocked(frames)
+	for _, frame := range frames {
+		if frame.Type == FrameHost && frame.Op == OpRemoved {
+			name := frame.Host.Name
+			p.observeInternalLocked(name, tasks.HostResult{Name: name, Status: HostRemoved}, nil)
+		}
+	}
 	if !p.observing {
 		// Publishing dropped the last subscriber: nobody is left to
 		// observe a host just added for.
@@ -245,9 +257,7 @@ func (p *Publisher) observeHost(name string) {
 			return
 		}
 		p.publishLocked(p.model.applyHost(name, result, observed))
-		for sub := range p.internal {
-			sub.observe(name, result, observed)
-		}
+		p.observeInternalLocked(name, result, observed)
 		stop := p.stop
 		p.mu.Unlock()
 
@@ -261,6 +271,12 @@ func (p *Publisher) observeHost(name string) {
 			return
 		}
 		p.mu.Unlock()
+	}
+}
+
+func (p *Publisher) observeInternalLocked(name string, result tasks.HostResult, observed []tasks.Task) {
+	for sub := range p.internal {
+		sub.observe(name, result, observed)
 	}
 }
 

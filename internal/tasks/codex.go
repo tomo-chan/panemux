@@ -621,12 +621,12 @@ func (c *codexCollected) daemonTasks(b *taskBuilder) []Task {
 	for _, o := range c.Open {
 		proc, alive := b.procs[o.PID]
 		daemonTUISession := alive && isCodexDaemon(proc.Command) && o.Rollout.Originator == codexOriginatorTUI
-		if daemonTUISession {
-			b.recordLivePID(AgentCodex, o.Rollout.SessionID, o.PID)
-		}
 		if !daemonTUISession || listed[o.Rollout.SessionID] {
 			continue
 		}
+		// A helper holding a TUI-owned rollout is not another agent. For a
+		// daemon-only session, retain only the displayed representative PID.
+		b.recordLivePID(AgentCodex, o.Rollout.SessionID, o.PID)
 		listed[o.Rollout.SessionID] = true
 		task := Task{
 			Host:      b.host,

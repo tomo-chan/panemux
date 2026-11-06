@@ -159,6 +159,11 @@ ends before its terminating marker — a connection dropped mid-run — fails th
   also receive the set of live PIDs before this collapse; the task list and JSON shape stay the same.
   Codex likewise preserves PID sets before collapsing its TUI or daemon sessions. A duplicated
   descriptor is counted once, and a TUI without a rollout is tracked by its PID.
+  When a TUI owns the session, daemon/app-server helpers holding the same rollout are not
+  independent agents and do not add PIDs. A daemon-only session retains the displayed
+  representative PID, even when several helper processes hold it. Two independent TUIs holding
+  the same session still contribute both PIDs. Claude's PID-keyed fallback tasks also retain
+  their own live PID when the state file is missing, unreadable, or malformed.
 - `stop` covers a host restart, a crash and a normal exit alike; the dashboard does not tell them
   apart. Whether a task's work is finished cannot be read off a process, so no state means "done":
   done is what a person records ([Done and labels](#done-and-labels)), and it never changes `state`.

@@ -2272,3 +2272,10 @@ is connected in the next part. The five-second interval and all configured hosts
 The Board subscription, participant lifecycle, registry migration, pane-bootstrap removal, old
 API projection, and SSH cost measurement belong to the second part; this part does not enable
 background Board collection by itself.
+
+S2 first-part review follow-up: notify internal consumers explicitly when a configured host is
+removed, so the participant model can invalidate reachability without inventing another host
+poller. Removal carries no tasks and is not evidence of session exit; late collection results
+are discarded. Count independent Codex TUIs, not daemon/app-server helpers holding the same
+session's rollout. A daemon-only session keeps the displayed representative PID. Preserve the
+live PID of Claude's PID-keyed fallback tasks when their state files cannot be read.

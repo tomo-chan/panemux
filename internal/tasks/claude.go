@@ -264,9 +264,11 @@ func (c *claudeCollected) unexplainedTasks(b *taskBuilder, known []Task) []Task 
 		if explained[p.PID] || !isInteractiveClaude(p.Command) {
 			continue
 		}
+		key := "pid-" + strconv.Itoa(p.PID)
+		b.recordLivePID(AgentClaude, key, p.PID)
 		tasks = append(tasks, Task{
 			Host:     b.host,
-			ID:       b.id(AgentClaude, "pid-"+strconv.Itoa(p.PID)),
+			ID:       b.id(AgentClaude, key),
 			Agent:    AgentClaude,
 			CWD:      b.raw.ProcessCWDs[p.PID],
 			State:    StateUnknown,

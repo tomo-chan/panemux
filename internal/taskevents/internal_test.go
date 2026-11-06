@@ -92,6 +92,66 @@ func TestInternalSubscriptionsShareAndReleaseObservation(t *testing.T) {
 	require.False(t, observing)
 }
 
+func TestInternalSubscriberReceivesHostRemoval(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		known   bool
+		browser bool
+	}{
+		{name: "known_without_browser", known: true},
+		{name: "pending_without_browser"},
+		{name: "known_with_browser", known: true, browser: true},
+		{name: "pending_with_browser", browser: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := newFakeSource("gpu")
+			p := newTestPublisher(t, src)
+			events := make(chan hostAnswer, 8)
+			cancel := p.SubscribeInternal(func(name string, result tasks.HostResult, ts []tasks.Task) {
+				if name == "gpu" {
+					events <- hostAnswer{result: result, tasks: ts}
+				}
+			})
+			defer cancel()
+			var frames <-chan Frame
+			if tc.browser {
+				_, next, cancelBrowser := p.Subscribe()
+				frames = next
+				defer cancelBrowser()
+			}
+			task := tasks.Task{ID: "ssh:gpu:claude:s", Agent: "claude", SessionID: "s",
+				State: tasks.StateBusy, LivePIDs: []int{12}}
+			if tc.known {
+				src.answer(t, "gpu", tasks.HostResult{Status: tasks.HostOK}, task)
+				require.Equal(t, tasks.HostOK, receiveInternal(t, events).result.Status)
+			}
+			// Remove the host while its next observation is still in flight.
+			src.awaitStart(t, "gpu")
+			src.setHosts()
+			removed := receiveInternal(t, events)
+			require.Equal(t, tasks.HostResult{Name: "gpu", Status: HostRemoved}, removed.result)
+			require.Nil(t, removed.tasks, "removal must not replay the last live tasks")
+			if tc.browser {
+				for {
+					frame := nextFrame(t, frames)
+					if frame.Type == FrameHost && frame.Op == OpRemoved {
+						require.Equal(t, "gpu", frame.Host.Name)
+						break
+					}
+				}
+			}
+			// A late OK must not resurrect the removed host for internal consumers.
+			src.answerChan("gpu") <- hostAnswer{result: tasks.HostResult{Status: tasks.HostOK}, tasks: []tasks.Task{task}}
+			require.Eventually(t, func() bool {
+				p.mu.Lock()
+				defer p.mu.Unlock()
+				return !p.looping["gpu"]
+			}, 2*time.Second, time.Millisecond)
+			require.Empty(t, events, "removal is emitted once, and late observations are discarded")
+		})
+	}
+}
+
 // Bound callback waits so a broken lifecycle fails without hanging the suite.
 func receiveInternal[T any](t *testing.T, ch <-chan T) T {
 	t.Helper()
