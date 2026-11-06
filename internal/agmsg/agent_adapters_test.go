@@ -66,11 +66,6 @@ func TestValidateBoardAdapters_RefusesASetThatDoesNotMatch(t *testing.T) {
 	assert.NoError(t, validateBoardAdapters(defs, []registeredBoard{{id: "one", agmsgType: "one"}}))
 }
 
-// Which agent claims its identity is the adapter's to say: only Claude
-// Code's session-id source is verified.
-
-// A type no adapter is registered for gets the shared steps and no claim.
-
 func TestBoardAdapterTypesRejectMissingInvalidAndDuplicateNames(t *testing.T) {
 	defs := []agent.Definition{{ID: "one", Capabilities: []agent.Capability{agent.Board}},
 		{ID: "two", Capabilities: []agent.Capability{agent.Board}}}
