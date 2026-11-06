@@ -78,7 +78,8 @@ There is no separate edit mode. Layout editing is part of the normal interface.
 
 - Pane split, close, maximize, settings, new terminal creation, workspace add/rename/delete, and pane move are all available from the standard UI.
 - Terminal keyboard input remains active during normal use because drag initiation is restricted to the pane header handle.
-- Layout and workspace mutations are persisted immediately to the active workspace config.
+- Layout and workspace mutations are persisted immediately to the affected workspace config.
+  Task and host Open select a destination before creating a pane ([Opening a task](tasks.md#opening-a-task)).
 - The workspace bar is always visible, even when only one workspace exists, so workspace actions remain discoverable.
 
 Drag-and-drop pane movement works like this:

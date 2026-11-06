@@ -214,7 +214,7 @@ The frontend now uses modal dialogs for higher-friction configuration tasks, rat
 
 `aria-modal="true"` promises that the rest of the page is inert, and nothing in the DOM makes that
 true on its own. `useModalKeyboard` supplies the two behaviours that attribute implies, and every
-surface that declares it uses the hook: `ConfirmDialog`, `AddSSHHostDialog`, `HostConnectDialog`, `PaneSettingsDialog`,
+surface that declares it uses the hook: `WorkspacePickerDialog`, `ConfirmDialog`, `AddSSHHostDialog`, `HostConnectDialog`, `PaneSettingsDialog`,
 `CommandPalette`, `CommandHistoryPanel` and `BoardDashboardPanel`.
 
 - **Focus stays inside.** Tab and Shift+Tab cycle within the dialog, and a Tab arriving from outside
@@ -229,6 +229,22 @@ surface that declares it uses the hook: `ConfirmDialog`, `AddSSHHostDialog`, `Ho
   focus trap still applies, so "you cannot leave yet" does not become "you cannot see where you are".
 - A nested modal wins: while `PaneSettingsDialog`'s directory browser is open, the trap follows it
   and the form behind stays out of reach.
+
+### Open in workspace
+
+A task's Open (card, details or Type in pane popup) and a host menu's Open use
+`WorkspacePickerDialog`, centred on a dimmed backdrop with the shared dialog surface and keyboard
+trap. It lists workspace names as radios, focuses and selects the active workspace on opening,
+and always appears even with one workspace. The last option, **+ New workspace**, reveals and
+focuses **Workspace name**; **Open here** becomes **Create and open**. Names are trimmed; blank
+or duplicate names show an inline error. Cancel, Escape and × dismiss it without adding a pane,
+returning focus to the opener when still present. During confirmation controls are disabled and
+Escape does not dismiss it. Request failures stay in the dialog; a workspace created before its
+name fails to save remains selected under its default title; retrying **Open here** reuses it.
+A newly created workspace includes its default local **Terminal** shell, with the requested pane
+added at the right edge. Retrying after a session or layout was created resumes those completed
+steps without duplicating them. Successful confirmation activates the chosen workspace and
+focuses and outlines the new pane. **Go to pane** navigates immediately without this dialog.
 
 ### Confirmation dialog
 

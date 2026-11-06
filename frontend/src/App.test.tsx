@@ -52,6 +52,7 @@ const mockSwapPanes = vi.fn()
 const mockCreatePane = vi.fn().mockResolvedValue(undefined)
 const mockMovePane = vi.fn().mockResolvedValue(undefined)
 const mockAddWorkspace = vi.fn()
+const mockCreateNamedWorkspace = vi.fn().mockResolvedValue('new')
 const taskEventsMock = vi.hoisted(() => ({
   onChange: null as null | ((change: unknown) => void),
   state: { store: null as unknown, status: 'connecting' as string },
@@ -76,6 +77,7 @@ vi.mock('./hooks/useLayout', () => ({
     movePane: mockMovePane,
     setActiveWorkspace: mockSetActiveWorkspace,
     addWorkspace: mockAddWorkspace,
+    createNamedWorkspace: mockCreateNamedWorkspace,
     deleteWorkspace: mockDeleteWorkspace,
     renameWorkspace: mockRenameWorkspace,
     setWorkspaceTabPosition: mockSetWorkspaceTabPosition,
@@ -1491,22 +1493,90 @@ describe('App task dashboard layer', () => {
     vi.unstubAllGlobals()
   })
 
-  it('opens one pane when Open is pressed twice before the first one exists', async () => {
+  it('opens one pane when confirm is pressed twice before the first one exists', async () => {
     let finish: () => void = () => {}
     mockCreatePane.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve }))
     mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
     render(<App />)
-
     fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
-    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    const confirm = screen.getByRole('button', { name: 'Open here' })
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
     expect(mockCreatePane).toHaveBeenCalledTimes(1)
-
     await act(async () => finish())
+  })
+
+  it('opens from the detail panel through the same picker', async () => {
+    mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByTestId(`task-card-${waitingTask.id}`))
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Task details' })).getByRole('button', { name: 'Open: panemux' }))
+    expect(mockCreatePane).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Open here' }))
+    await waitFor(() => expect(mockCreatePane).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'dev'))
+  })
+
+  const checkWorkspaceNaming = async (success: boolean) => {
+    mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
+    if (success) mockCreateNamedWorkspace.mockResolvedValueOnce('new')
+    else mockCreateNamedWorkspace.mockRejectedValueOnce(new Error('Naming failed'))
+    render(<App />)
     fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
-    expect(mockCreatePane).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('radio', { name: /New workspace/ }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Workspace name' }), { target: { value: 'Review' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create and open' }))
+    if (success) {
+      await waitFor(() => expect(mockCreatePane).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'new'))
+      expect(mockCreateNamedWorkspace.mock.invocationCallOrder.at(-1)).toBeLessThan(mockCreatePane.mock.invocationCallOrder.at(-1)!)
+    } else {
+      expect(await screen.findByRole('alert')).toHaveTextContent('Naming failed')
+      expect(mockCreatePane).not.toHaveBeenCalled()
+    }
+  }
+  it('creates and names the workspace before opening its pane', () => checkWorkspaceNaming(true))
+  it('does not open a pane when naming the new workspace fails', () => checkWorkspaceNaming(false))
+
+
+  const checkRetainedWorkspace = async (failure: 'naming' | 'pane') => {
+    mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
+    mockCreateNamedWorkspace.mockImplementationOnce(async (_name, onCreated) => {
+      currentWorkspaces = { ...workspaces, items: [...workspaces.items, { id: 'new', title: failure === 'naming' ? 'Workspace 3' : 'Review', layout: devLayout }] }
+      onCreated('new')
+      if (failure === 'naming') throw new Error('Naming failed')
+      return 'new'
+    })
+    if (failure === 'pane') mockCreatePane.mockRejectedValueOnce(new Error('Pane failed'))
+    const { rerender } = render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    fireEvent.click(screen.getByRole('radio', { name: /New workspace/ }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Workspace name' }), { target: { value: 'Review' } })
+    const callsBefore = mockCreateNamedWorkspace.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: 'Create and open' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(failure === 'naming' ? 'Naming failed' : 'Pane failed')
+    if (failure === 'naming') expect(mockCreatePane).not.toHaveBeenCalled()
+    rerender(<App />)
+    expect(screen.getByRole('radio', { name: failure === 'naming' ? 'Workspace 3' : 'Review' })).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Open here' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Open in workspace' })).toBeNull())
+    expect(mockCreateNamedWorkspace).toHaveBeenCalledTimes(callsBefore + 1)
+    expect(mockCreatePane).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 'new')
+  }
+  it('reuses the created workspace after naming fails', () => checkRetainedWorkspace('naming'))
+  it('reuses the created workspace after pane creation fails', () => checkRetainedWorkspace('pane'))
+
+
+  it('cancels task opening without creating a pane or leaving the dashboard', () => {
+    mockUseTasks.mockReturnValue(tasksStateWith([waitingTask]))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(mockCreatePane).not.toHaveBeenCalled()
+    expect(screen.getByRole('region', { name: 'Task dashboard' })).toBeInTheDocument()
   })
 
   it('keeps the panes mounted while the dashboard is shown', () => {
@@ -1528,12 +1598,15 @@ describe('App task dashboard layer', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Ops' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open here' }))
 
     await waitFor(() => expect(mockCreatePane).toHaveBeenCalledTimes(1))
     const [pane, placement] = mockCreatePane.mock.calls[0]
     expect(pane).toEqual(expect.objectContaining({ type: 'tmux', tmux_session: 'task-a', title: 'task-a' }))
+    expect(mockCreatePane.mock.calls[0][2]).toBe('ops')
     expect(placement).toEqual({ type: 'workspace-edge', edge: 'right' })
-    expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument())
   })
 
   it('opens a remote task in an ssh_tmux pane on its connection', async () => {
@@ -1541,6 +1614,8 @@ describe('App task dashboard layer', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Ops' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open here' }))
 
     await waitFor(() => expect(mockCreatePane).toHaveBeenCalledTimes(1))
     expect(mockCreatePane.mock.calls[0][0]).toEqual(
@@ -1553,6 +1628,7 @@ describe('App task dashboard layer', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Open a terminal on dev-server' }))
     fireEvent.click(screen.getByRole('button', { name: 'Open: dev-server' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open here' }))
 
     await waitFor(() => expect(mockCreatePane).toHaveBeenCalledTimes(1))
     const [pane, placement] = mockCreatePane.mock.calls[0]
@@ -1573,6 +1649,7 @@ describe('App task dashboard layer', () => {
       const open = screen.getByRole('button', { name: 'Open: dev-server' })
       await waitFor(() => expect(open).toBeEnabled())
       fireEvent.click(open)
+      fireEvent.click(screen.getByRole('button', { name: 'Open here' }))
       await waitFor(() => expect(mockCreatePane).toHaveBeenCalledTimes(i + 1))
     }
     for (const [pane] of mockCreatePane.mock.calls) {
@@ -1589,10 +1666,13 @@ describe('App task dashboard layer', () => {
     render(<App />)
     fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Open: panemux' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Ops' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open here' }))
 
-    expect(await screen.findByText('Failed to create terminal: HTTP 500')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
   })
 
+  //efficacy:exempt Go to pane must preserve direct navigation without a picker; that behavior predates this PR.
   it('goes to the workspace of a pane already attached to the task', async () => {
     currentWorkspaces = {
       ...workspaces,
@@ -1616,6 +1696,7 @@ describe('App task dashboard layer', () => {
 
     expect(mockSetActiveWorkspace).toHaveBeenCalledWith('ops')
     expect(mockCreatePane).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Open in workspace' })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Task dashboard' })).not.toBeInTheDocument()
   })
 })
