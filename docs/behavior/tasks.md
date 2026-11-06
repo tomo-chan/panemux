@@ -164,6 +164,7 @@ ends before its terminating marker — a connection dropped mid-run — fails th
   representative PID, even when several helper processes hold it. Two independent TUIs holding
   the same session still contribute both PIDs. Claude's PID-keyed fallback tasks also retain
   their own live PID when the state file is missing, unreadable, or malformed.
+  Multiple readable state files naming the same PID contribute that PID only once.
 - `stop` covers a host restart, a crash and a normal exit alike; the dashboard does not tell them
   apart. Whether a task's work is finished cannot be read off a process, so no state means "done":
   done is what a person records ([Done and labels](#done-and-labels)), and it never changes `state`.
