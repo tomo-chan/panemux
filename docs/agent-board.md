@@ -72,7 +72,7 @@ Exact request/response behavior lives in [Agent Board REST API](behavior/board-a
 | What agmsg contract does panemux rely on? | [Integration with agmsg](agent-board/agmsg-integration.md) |
 | How do status and messages flow? | [Message flow](agent-board/message-flow.md) |
 | How are cross-host messages relayed? | [Relay](agent-board/relay.md) |
-| How is an interactive agent onboarded? | [Bootstrap](agent-board/bootstrap.md) |
+| How are agent panes detected? | [Bootstrap](agent-board/bootstrap.md) |
 | How does the headless coordinator work? | [Command center](agent-board/command-center.md) |
 | What are the exact API and config surfaces? | [API and config](agent-board/api-and-config.md) |
 | Which threats and trust assumptions apply? | [Security model](agent-board/security-model.md) |

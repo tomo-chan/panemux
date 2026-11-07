@@ -184,23 +184,3 @@ func (c *Client) available(ctx context.Context) (bool, error) {
 	}
 	return RemoteAgmsgPresent(ctx, c.runner, path)
 }
-func (c *Client) joinInstruction(ctx context.Context, request board.JoinRequest) (string, error) {
-	if err := c.ValidateAddress(request.Team, request.PaneID); err != nil {
-		return "", err
-	}
-	var typeName string
-	for _, entry := range boardAdapters() {
-		if entry.id == request.Agent {
-			typeName = entry.agmsgType
-			break
-		}
-	}
-	if typeName == "" {
-		return "", fmt.Errorf("agmsg: no board adapter for agent %q", request.Agent)
-	}
-	path, err := c.participationRoot(ctx)
-	if err != nil {
-		return "", err
-	}
-	return buildBootstrapInstruction(path, request.Team, request.PaneID, typeName, request.Mode), nil
-}

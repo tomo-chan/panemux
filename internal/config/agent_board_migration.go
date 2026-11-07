@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"gopkg.in/yaml.v3"
+	"log"
 )
 
 // Decode the raw document before obsolete struct fields can be silently discarded.
@@ -14,6 +15,9 @@ func rejectRemovedBoardSettings(data []byte) error {
 		return fmt.Errorf("parsing config: %w", err)
 	}
 	if ab, ok := raw["agent_board"].(map[string]any); ok {
+		if _, configured := ab["mode"]; configured {
+			log.Print("Warning: agent_board.mode is deprecated and ignored; remove it from configuration")
+		}
 		if _, removed := ab["agmsg_path"]; removed {
 			return errors.New("agent_board.agmsg_path was removed; agmsg uses ~/.agents/skills/agmsg on each host")
 		}
@@ -26,7 +30,7 @@ func rejectPaneBoardSettings(value any) error {
 	case map[string]any:
 		_, pane := node["id"]
 		if _, removed := node["agent_board"]; pane && removed {
-			return errors.New("pane agent_board was removed; set top-level agent_board.enabled and agent_board.mode")
+			return errors.New("pane agent_board was removed; set top-level agent_board.enabled")
 		}
 		for _, child := range node {
 			if err := rejectPaneBoardSettings(child); err != nil {

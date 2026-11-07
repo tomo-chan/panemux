@@ -57,16 +57,6 @@ func configWithPanes(panes ...*config.PaneConfig) *config.Config {
 	}}
 }
 
-func TestCurrentPaneModes(t *testing.T) {
-	cfg := configWithPanes(paneConfig("a"), paneConfig("b"))
-	assert.Empty(t, currentPaneModes(cfg))
-	cfg.AgentBoard.Enabled = true
-	for _, mode := range []string{"monitor", "turn", "both", "off"} {
-		cfg.AgentBoard.Mode = mode
-		assert.Equal(t, map[string]string{"a": mode, "b": mode}, currentPaneModes(cfg))
-	}
-}
-
 // The "ssh:" prefix is what keeps an SSH connection alias named literally
 // "local" from colliding with boardHostIDLocal — nothing in the config's own
 // connection-name validation forbids that alias, so the separation has to be
@@ -124,31 +114,6 @@ func TestPersistBoardCursors_UnwritableLocation_DoesNotPanic(t *testing.T) {
 	})
 
 	path, err := board.DefaultCursorFilePath()
-	require.NoError(t, err)
-	_, statErr := os.Stat(path)
-	assert.Error(t, statErr, "the save must actually have failed for this test to mean anything")
-}
-
-func TestPersistBootstrapState_WritesAFileLoadBootstrapStateCanReadBack(t *testing.T) {
-	home := t.TempDir()
-	homedir.SetForTest(t, home)
-	require.NoError(t, os.MkdirAll(filepath.Join(home, ".config", "panemux"), 0o700))
-
-	persistBootstrapState([]string{"pane-a", "pane-b"})
-
-	path, err := board.DefaultBootstrapStateFilePath()
-	require.NoError(t, err)
-	got, err := board.LoadBootstrapState(path)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"pane-a", "pane-b"}, got)
-}
-
-func TestPersistBootstrapState_UnwritableLocation_DoesNotPanic(t *testing.T) {
-	unwritableHome(t)
-
-	assert.NotPanics(t, func() { persistBootstrapState([]string{"pane-a"}) })
-
-	path, err := board.DefaultBootstrapStateFilePath()
 	require.NoError(t, err)
 	_, statErr := os.Stat(path)
 	assert.Error(t, statErr, "the save must actually have failed for this test to mean anything")

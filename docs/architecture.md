@@ -93,7 +93,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 - The task event stream's last observation, `epoch`, `seq` and unsigned wait IDs are in memory and
   last until the server restarts. Which waits a tab has already notified is in that tab's
   session storage; the server keeps no per-viewer state.
-- Agent Board's status/history cache is in memory. Relay cursors, bootstrap state, command-center
+- Agent Board's status/history cache is in memory. Relay cursors, command-center
   history/session state, and the task dashboard's done and label records and summaries use dedicated
   persisted files.
 - Host tool management owns Codex hook settings in `~/.config/panemux/codex-hook.json` and the
@@ -253,7 +253,7 @@ frames a localhost page. Behavior is in [the split preview](behavior/preview.md)
 - [Quality gateway](quality-gateway.md) — how architectural contracts are verified.
 - [Decision log](DECISIONLOG.md) — tradeoffs and superseded approaches removed from this guide.
 
-Agent Board enablement and delivery mode are instance-wide. Its relay accepts all configured
+Agent Board enablement is instance-wide; delivery mode is deprecated and ignored. Its relay accepts all configured
 pane identities on their owning hosts; bootstrap supplies a synchronized participation snapshot
 for the authenticated status API. Dashboard membership is based on detected agents or reports.
 The agmsg installation location is fixed per host. Host tool management coordinates manual

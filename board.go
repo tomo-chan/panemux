@@ -54,11 +54,6 @@ func setupBoard(
 		CurrentPaneHosts:  func() map[string]string { return routing().PaneHosts },
 		WatchEnabled:      cfg.AgentBoard.Enabled,
 		SyncParticipation: cache.SyncParticipation,
-		PaneModes: func() map[string]string {
-			var modes map[string]string
-			readConfig(func(current *config.Config) { modes = currentPaneModes(current) })
-			return modes
-		},
 		ParticipationForHost: func(id string) board.Participation {
 			client := routing().Clients[id]
 			if client == nil {
@@ -66,16 +61,9 @@ func setupBoard(
 			}
 			return client.(board.Participation)
 		},
-		Team: cfg.AgentBoard.Team, Persist: persistBootstrapState,
+		Team:    cfg.AgentBoard.Team,
 		Observe: cache.RecordParticipation,
 	})
-	if path, err := board.DefaultBootstrapStateFilePath(); err == nil {
-		if ids, err := board.LoadBootstrapState(path); err == nil {
-			bootstrap.LoadPersistedState(ids)
-		} else {
-			log.Printf("Warning: agent board bootstrap: loading bootstrap state file: %v", err)
-		}
-	}
 	return cache, relay, bootstrap
 }
 func configuredBoardPanes(cfg *config.Config, warn bool) map[string]string {
@@ -132,15 +120,6 @@ func newBoardRouting(
 	}
 }
 
-func currentPaneModes(cfg *config.Config) map[string]string {
-	modes := map[string]string{}
-	for _, p := range cfg.AllPanes() {
-		if cfg.AgentBoard.Enabled {
-			modes[p.ID] = cfg.AgentBoard.Mode
-		}
-	}
-	return modes
-}
 func boardHostForPane(cfg *config.Config, pane *config.PaneConfig) (host.Host, bool) {
 	if pane.Type == string(session.TypeSSH) || pane.Type == string(session.TypeSSHTmux) {
 		_, ok := cfg.SSHConnections[pane.Connection]
@@ -156,16 +135,5 @@ func persistBoardCursors(entries []board.CursorEntry) {
 	}
 	if err := board.SaveCursorFile(path, entries); err != nil {
 		log.Printf("Warning: agent board: persisting relay cursor: %v", err)
-	}
-}
-
-func persistBootstrapState(paneIDs []string) {
-	path, err := board.DefaultBootstrapStateFilePath()
-	if err != nil {
-		log.Printf("Warning: agent board bootstrap: resolving bootstrap state file path: %v", err)
-		return
-	}
-	if err := board.SaveBootstrapState(path, paneIDs); err != nil {
-		log.Printf("Warning: agent board bootstrap: persisting bootstrap state: %v", err)
 	}
 }

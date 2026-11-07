@@ -4,9 +4,11 @@
 
 ## agmsg compatibility contract
 
-Agent Board depends on agmsg scripts whose write and onboarding behavior is not covered by agmsg's
-read-API compatibility promise. The consumer contract must detect drift before users encounter
-silent delivery failure.
+Agent Board reads through `api.sh`, sends through `send.sh`, and uses the pinned `install.sh` for
+managed Install / Update. Sending and installation are not covered by agmsg's read-API compatibility
+promise. The consumer contract must detect drift before users encounter silent delivery failure.
+Compatibility tests also exercise agmsg's official participation workflow; panemux does not invoke
+its join or delivery setup scripts.
 
 The contract verifies observable behavior, not log wording or private storage:
 
@@ -23,7 +25,7 @@ The contract verifies observable behavior, not log wording or private storage:
 Every `make check` run verifies panemux's command construction and parses captured JSONL fixtures
 from the tested agmsg release selected by `fixtureDir` in `internal/agmsg/agmsg_fixture_test.go`.
 The original `internal/agmsg/testdata/agmsg-v1.2.0/` capture also protects the historical ID-order regression.
-Parser, cursor, command-wrapper, participation golden, and real-install contract tests live in
+Parser, cursor, command-wrapper, availability, and real-install contract tests live in
 `internal/agmsg`; the relay and own-send transition tests remain in `internal/board`. Fixtures are regenerated from a verified release commit SHA, never
 hand-authored. This tier catches regressions in panemux without requiring agmsg, a network, or
 external state.

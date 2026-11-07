@@ -34,12 +34,16 @@ command_center:
 
 agent_board:
   enabled: false # opt in for the whole instance
-  mode: monitor  # monitor | turn | both | off
+  # mode: monitor # deprecated: validated, warned about once per load, and ignored
   team: "panemux"
   agmsg_auto_update: false # update older installed copies on all hosts
 ```
 
-Enablement, delivery mode, and team are instance-wide. There are no pane or host overrides.
+Enablement and team are instance-wide. For one release, `agent_board.mode` accepts
+`monitor`, `turn`, `both`, `off`, or an empty value, emits one warning per configuration load when
+present, and has no effect on detection, registration, delivery, or relay behavior. Saving the config
+omits the key, including an explicit legacy value; the in-memory API mode is unchanged by saving.
+Loading a config without the key keeps the API default `monitor` without a deprecation warning. There are no pane or host overrides.
 Configure these settings in YAML; Pane Settings does not expose them. Each host uses
 `~/.agents/skills/agmsg` relative to its own home. Local discovery uses the injectable home-directory
 seam. The removed pane `agent_board` block and `agent_board.agmsg_path` produce migration errors.

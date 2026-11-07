@@ -10,7 +10,7 @@
   wait 60 seconds, a connection lost during use can reconnect immediately, and the task host menu
   reconnect discards the shared connection and cooldown. No restart or pane is needed.
 - A confirmed missing agmsg installation is cached as absent until a managed installer attempt; bootstrap
-  continues checking presence. Successful manual Install clears absence and joins on the next poll.
+  continues checking presence until it succeeds for that pane session. Successful manual Install clears absence and is observed on the next poll.
 - Updates pause only panemux calls. Existing agent-owned scripts can see files being replaced;
   restart agents after Install / Update. Failed installers may require manual recovery.
 - An SSH pane whose `connection` exists only in `~/.ssh/config` is outside Agent Board. Add a
@@ -21,7 +21,7 @@
   row back. The visible lag is at most one poll interval under normal operation.
 
 Configured shell panes are valid senders and recipients on their owning hosts even when they
-never receive a participation instruction. The UI lists only detected agents or reporting panes.
+have no detected agent or self-report. The UI lists only detected agents or reporting panes.
 
 ### Delivery guarantees
 
@@ -36,18 +36,14 @@ never receive a participation instruction. The UI lists only detected agents or 
 
 ### Bootstrap
 
-- Onboarding writes synthesized text into the PTY. The two-poll debounce reduces but cannot remove
-  the risk of interleaving with user keystrokes.
-- Bootstrap tracks the pane session, not the agent process. Restarting an agent inside the same pane
-  does not trigger onboarding again; recreating the pane does.
-- Same-project identity isolation is verified only for `claude-code`. Other supported agent types
-  may cross-receive when multiple panes share a project directory.
-- The multiline input encoding has not been verified against live instances of all detectable agent
-  types; an incompatible client could receive fragmented prompts.
+- Detection and display do not register participation or configure delivery. PTY onboarding is
+  disabled. Participation, identity selection, and reception follow agmsg's official workflow.
+  Board relay and status require membership in the configured team under the pane ID on its owning host.
+- Detection alone provides no same-project identity isolation or proof of message reception.
 - Process detection can reject an interactive command whose quoted prompt contains a headless-mode
   exclusion token as a separate whitespace token.
-- Applying agmsg `turn` or `both` mode can write persistent repository-local hook configuration.
-  Panemux does not remove it when Agent Board is disabled.
+- Existing agmsg registrations and project-local hooks are left untouched. The retired
+  `board-bootstrap-state.json` is not read, written, or deleted.
 
 ### Status and usage
 
@@ -59,7 +55,7 @@ never receive a participation instruction. The UI lists only detected agents or 
 
 ### External dependency
 
-agmsg guarantees compatibility for its read API, not for every write and onboarding script Agent
+agmsg guarantees compatibility for its read API, not for every write script Agent
 Board uses. The pinned version and two-tier compatibility contract detect drift but cannot prevent a
 future operator-installed release from breaking integration. A detected version outside the covered
 range warns and continues.
@@ -84,7 +80,11 @@ non-waiting runner; all runners share the same connection pool.
 ### Detection cost
 
 With Agent Board enabled, every eligible configured pane is checked every five seconds, including
-already-instructed agents and plain shells. Local panes each request a process listing; tmux panes
+detected agents and plain shells. Local panes each request a process listing; tmux panes
 also query tmux, and SSH panes run a remote detection command. Process listings are currently not
 shared across panes. This steady-state work grows with the number of panes; detection does not
-stop after the participation instruction is sent because the API keeps the detected type current.
+stop after an initial detection because the API keeps the detected type current.
+
+Availability probes wait for two consecutive detections and stop after confirmation for that pane
+session. Failed checks retry on later polls; managed tool-update pauses are silent and retryable.
+Session replacement, host changes, and pane removal invalidate confirmation.

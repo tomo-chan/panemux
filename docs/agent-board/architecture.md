@@ -71,11 +71,10 @@ hosts.
 Panemux persists only operational metadata:
 
 - one relay cursor per host and team;
-- bootstrap state needed across panemux restarts;
 - the command-center session;
 - append-only command-center history.
 
-These files are local and private (`0600`). Cursor, bootstrap, and session state are atomically
+These files are local and private (`0600`). Cursor and session state are atomically
 replaced. Command history is append-only JSONL: a crash may leave one malformed line, which readers
 skip without hiding valid surrounding entries. See [Command center](command-center.md#api-and-streaming).
 None of these files is a second message store.
@@ -84,16 +83,15 @@ None of these files is a second message store.
 
 The package boundary enforces the ownership model. `MessageClient` supplies `HostID`, `Since`,
 and `Send`; `Participation` supplies adapter-owned diagnostic labels, availability, address
-validation, and an instruction from
-`agent.ID`, team, pane ID, and mode. Relay, status aggregation, sender validation, and the bootstrap
+validation. Relay, status aggregation, sender validation, and the bootstrap
 watcher depend on these ports. Root composition binds one adapter per host to the shared execution
 port; it does not resolve paths or construct participation text.
 
 
 | Area | Responsibility |
 |---|---|
-| `internal/board` | messaging and participation ports, relay, cache, cursors, bootstrap records, and own-send ledger |
-| `internal/agmsg` | agmsg adapter: script calls, paths, versions, parsing, participation instructions, and agent type mapping |
+| `internal/board` | messaging and participation ports, relay, cache, cursors, participation snapshots, and own-send ledger |
+| `internal/agmsg` | agmsg adapter: script calls, paths, versions, parsing, availability checks, and agent type mapping |
 | `internal/host` | I/O-free host identity and fixed-script execution port |
 | `internal/hostexec` | local execution and shared per-host SSH connections, retry and disposal |
 | `internal/session` | terminal sessions, agent detection, and the SSH command transport adapter |

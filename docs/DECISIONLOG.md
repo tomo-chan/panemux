@@ -2241,3 +2241,23 @@ without claiming a preemptive CPU deadline. Detection reuses the rendered Markdo
 replacement is atomic, and build notices fall back to declared package licenses or fail when
 neither source of license information exists. Mermaid 12.2.0 replaces the version whose KaTeX
 dependency was affected by GHSA-238p-pmpm-9mq7.
+
+### 2026-11-07: retire Agent Board PTY onboarding (#503, #495 S1)
+
+PTY onboarding can interleave synthesized text with user input. Remove instruction generation,
+terminal writes and retries, identity-claim text, and bootstrap persistence. Keep pane detection
+and the participation API shape while the later session model is developed; `instructed` remains
+false. Existing `board-bootstrap-state.json` files remain untouched. For one release, retain mode
+validation and serialization, warn once when loaded, and ignore it (Q7). Hook registration and
+message wrappers are separate changes. Review S1 first, but merge only when S6 and S7 are ready,
+to avoid a released interval without participation setup.
+
+S1 review follow-up: configuration saves omit deprecated mode instead of regenerating the warning
+on every restart; the API default remains in memory. Presence confirmation is per pane session,
+with two consecutive detections before probing and retries only until successful. Session/host
+changes and removal invalidate it. Managed tool pauses skip checks silently without reinstating
+a PTY lease. Remove the unused bootstrap-state reader/writer and its self-tests, leaving old files
+untouched. Defer the unreachable frontend `instruction sent` branch and its test to #510 (S8),
+where the participation API/UI changes together.
+
+2026-11-07 (#495 policy change): merge S1 independently; delegate participation, identity selection, and reception to agmsg's official workflow rather than adding panemux participation hooks.
