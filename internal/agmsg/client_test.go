@@ -33,18 +33,23 @@ func captureBoardLog(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
+func requireBoardCallScript(t *testing.T, script string, args []string) {
+	t.Helper()
+	if strings.Contains(strings.Join(args, " "), "board-send") || strings.HasSuffix(args[0], "/scripts/api.sh") {
+		require.Equal(t, `export AGMSG_SELF_NAME=off; exec "$@"`, script)
+	} else {
+		require.Equal(t, `exec "$@"`, script)
+	}
+}
+
 func TestHostAgmsgClientRetriesProbesAndSends(t *testing.T) {
 	for _, failure := range []string{"home", "presence", "version", "none", "absent"} {
 		t.Run(failure, func(t *testing.T) {
 			logs := captureBoardLog(t)
 			failed, sends := false, 0
 			runner := hostRunnerFunc(func(_ context.Context, script string, args ...string) ([]byte, error) {
+				requireBoardCallScript(t, script, args)
 				joined := strings.Join(args, " ")
-				if strings.Contains(joined, "board-send") || strings.Contains(joined, "--limit") {
-					require.Equal(t, `export AGMSG_SELF_NAME=off; exec "$@"`, script)
-				} else {
-					require.Equal(t, `exec "$@"`, script)
-				}
 				stage := "home"
 				switch {
 				case strings.Contains(joined, "board-agmsg-presence"):

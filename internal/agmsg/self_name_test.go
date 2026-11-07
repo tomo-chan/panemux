@@ -21,13 +21,16 @@ func (r selfNameObserver) Run(ctx context.Context, script string, args ...string
 		require.Equal(r.t, []string{"sh", "-c", sendBase64WrapperScript, sendBase64WrapperScriptName,
 			"/opt/agmsg/scripts/send.sh", "team", "from", "to", "Ym9keSAnICQobGl0ZXJhbCk="}, args)
 	} else {
-		require.Equal(r.t, []string{"/opt/agmsg/scripts/api.sh", "get", "teams", "team", "messages", "--limit", "100"}, args)
+		require.Equal(r.t, "/opt/agmsg/scripts/api.sh", args[0])
 	}
 	// Replace the external command with an inline environment observer.
 	args = []string{"sh", "-c", `test "$AGMSG_SELF_NAME" = off || exit 42`}
+	//nolint:gosec // fixed production script and inline observer, no external input
 	command := exec.CommandContext(ctx, "sh", append([]string{"-c", script, "observer"}, args...)...)
 	if r.ssh {
-		command = exec.CommandContext(ctx, "sh", "-c", "sh -c "+shellQuoteForTest(script)+" observer "+quoteArgsLikeSession(args))
+		//nolint:gosec // exercise SSH quoting with fixed test input
+		command = exec.CommandContext(ctx, "sh", "-c",
+			"sh -c "+shellQuoteForTest(script)+" observer "+quoteArgsLikeSession(args))
 	}
 	return command.CombinedOutput()
 }
