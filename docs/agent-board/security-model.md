@@ -27,6 +27,9 @@ remains available to the other board. Terminal pane connections are separate.
 - agmsg's own validation occurs after the remote shell has parsed the command and cannot replace
   panemux's quoting and validation.
 - `send.sh` owns SQL escaping; panemux must not build SQL or add a competing SQL-escape layer.
+- All agmsg script calls, including Install / Update, export the fixed
+  `AGMSG_SELF_NAME=off` on the execution host. agmsg's self-naming and `/rename`
+  side effects must not name or type into panemux's calling session on behalf of `from`.
 
 The encoded-body construction mirrors this repository's accepted allowlist-before-exec shape, but
 has not been verified by a real CodeQL run. Treat it as structural mitigation, not proof that the

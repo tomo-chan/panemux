@@ -14,6 +14,10 @@ import (
 // execArguments forwards arguments through fixed script text; values never become script text.
 const execArguments = `exec "$@"`
 
+// Board calls act for other agents, never as the calling session. Override any
+// inherited opt-in on the execution host with the public agmsg family opt-out.
+const agmsgExecArguments = `export AGMSG_SELF_NAME=off; exec "$@"`
+
 // validAgmsgIdentifier constrains team/from/to values (pane IDs, the
 // configured team name, or SystemID) to a safe, constrained alphabet before
 // they are ever placed in a Runner.Run argument list — the same
@@ -94,7 +98,7 @@ func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body strin
 		"sh", "-c", sendBase64WrapperScript, sendBase64WrapperScriptName,
 		c.sendScript(), team, from, to, encoded,
 	}
-	if _, err := c.executor.Run(ctx, execArguments, args...); err != nil {
+	if _, err := c.executor.Run(ctx, agmsgExecArguments, args...); err != nil {
 		return fmt.Errorf("agmsg send.sh (remote): %w", err)
 	}
 	return nil
@@ -106,7 +110,7 @@ func (c *RemoteAgmsgClient) Since(ctx context.Context, team, afterID string, lim
 	}
 
 	args := []string{c.apiScript(), "get", "teams", team, "messages", "--limit", strconv.Itoa(limit)}
-	out, err := c.executor.Run(ctx, execArguments, args...)
+	out, err := c.executor.Run(ctx, agmsgExecArguments, args...)
 	if err != nil {
 		return nil, fmt.Errorf("agmsg api.sh (remote): %w", err)
 	}

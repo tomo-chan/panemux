@@ -10,10 +10,18 @@ promise. The consumer contract must detect drift before users encounter silent d
 Compatibility tests also exercise agmsg's official participation workflow; panemux does not invoke
 its join or delivery setup scripts.
 
+Every panemux invocation of an agmsg script sets the fixed environment value
+`AGMSG_SELF_NAME=off` on the execution host, for local and SSH execution alike.
+This includes reads, sends, and managed Install / Update. Board sends act for the
+message's `from`, not the calling session: agmsg must not assign that name to the
+caller's pane or type `/rename` into it. The fixed value overrides inherited settings;
+`--force`, sender/recipient arguments, and message bodies retain their transport contract.
+
 The contract verifies observable behavior, not log wording or private storage:
 
 - joining assigns the requested pane identity;
 - sending with `--force` preserves sender, recipient, and arbitrary body text;
+- script execution disables the self-naming family even when inherited settings enable it;
 - reads return the required JSONL fields in source order with opaque IDs;
 - reads do not mark messages as consumed;
 - identity claims and pane-specific watchers isolate same-project Claude sessions;

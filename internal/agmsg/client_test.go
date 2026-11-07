@@ -39,8 +39,12 @@ func TestHostAgmsgClientRetriesProbesAndSends(t *testing.T) {
 			logs := captureBoardLog(t)
 			failed, sends := false, 0
 			runner := hostRunnerFunc(func(_ context.Context, script string, args ...string) ([]byte, error) {
-				require.Equal(t, `exec "$@"`, script)
 				joined := strings.Join(args, " ")
+				if strings.Contains(joined, "board-send") || strings.Contains(joined, "--limit") {
+					require.Equal(t, `export AGMSG_SELF_NAME=off; exec "$@"`, script)
+				} else {
+					require.Equal(t, `exec "$@"`, script)
+				}
 				stage := "home"
 				switch {
 				case strings.Contains(joined, "board-agmsg-presence"):

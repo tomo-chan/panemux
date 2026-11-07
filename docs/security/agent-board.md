@@ -19,6 +19,10 @@ Remote commands must satisfy all of these rules:
 - base64-encode arbitrary message bodies, validate the encoded alphabet, and decode through a fixed
   wrapper using positional parameters;
 - never interpolate caller-controlled data into wrapper or probe script text;
+- export the compile-time literal `AGMSG_SELF_NAME=off` before invoking agmsg scripts,
+  including the pinned installer, on both local and SSH hosts; never derive this value
+  from `os.Getenv`. This overrides inherited opt-ins and prevents agmsg from treating
+  panemux's calling session as the message sender for pane naming or `/rename` input;
 - leave SQL escaping to agmsg and never construct SQL in panemux;
 - expand `~/` in the fixed `~/.agents/skills/agmsg` location to an absolute local or remote-home path before shell quoting.
 
