@@ -91,6 +91,8 @@ func preservedAgmsgSettings(t *testing.T) {
 	path, err := filepath.Abs("testdata/self-name/preserved-settings.env")
 	require.NoError(t, err)
 	loadPreservedAgmsgSettings(t, path)
+	require.Equal(t, "/workspace/sample-windows", os.Getenv("SystemRoot"),
+		"the fixture must seed the case-sensitive Windows system-directory fallback")
 }
 
 func loadPreservedAgmsgSettings(t *testing.T, path string) {
@@ -104,7 +106,7 @@ func loadPreservedAgmsgSettings(t *testing.T, path string) {
 		}
 		name, value, found := strings.Cut(line, "=")
 		require.True(t, found)
-		require.True(t, strings.HasPrefix(name, "AGMSG_") || strings.HasPrefix(name, "AGMSGD_"))
+		require.True(t, strings.HasPrefix(name, "AGMSG_") || strings.HasPrefix(name, "AGMSGD_") || name == "SystemRoot")
 		t.Setenv(name, value)
 	}
 }

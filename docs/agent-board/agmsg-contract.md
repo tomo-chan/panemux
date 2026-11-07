@@ -56,11 +56,50 @@ The observer verifies the expected HOME, exact post-login PATH, and storage sett
 a unique inert PATH entry distinguishes preservation from a child shell's defaults.
 The data-only [preserved-settings.env](../../internal/agmsg/testdata/self-name/preserved-settings.env)
 fixture pins exact values for the 86 retained AGMSG/AGMSGD configuration inputs
-identified in the pinned public-source audit, including the age executable override.
-The commit introducing that audit records every named read candidate with its
-preserve/remove/out-of-scope classification and upstream file/line evidence;
-implementation locals and test/operation state are explicitly distinguished from
-configuration inputs. HOME/PATH retain their dedicated assertions.
+identified in the pinned public-source audit, including the age executable override,
+plus the case-sensitive platform input `SystemRoot` (87 fixture settings).
+HOME/PATH retain their dedicated assertions. The fixture loader also requires the
+`SystemRoot` sentinel independently of the observer's fixture-driven expectations.
+
+The source inventory is pinned to agmsg v1.7.1, commit
+`f5898f49eb3d3c079c446dab4bca715b832da313`. The configuration/startup/pane inventory
+contains 129 names: 118 preserved and 11 removed or overridden (the ten unset names
+above plus `AGMSG_SELF_NAME=off`). The 888-entry ledger recorded in panemux commit
+`07e0e32b` gains one configuration input, `SystemRoot`: 889 entries, comprising
+118 preserved, 11 removed/overridden, and the original 760 out-of-scope candidates.
+These ledger totals do not count every lowercase implementation local or lexical
+false positive from the broader extraction.
+
+| Name | Classification | Pinned upstream evidence | Reason |
+|---|---|---|---|
+| `SystemRoot` | Preserve | `scripts/daemon.sh:474`; `scripts/lib/windows-elevation.sh:29-30` | Windows system-directory fallback used to locate native system executables; distinct from `SYSTEMROOT`. |
+| `agmsgd_lock_sql_PID` | Out of scope; excluded from configuration counts | `scripts/daemon.sh:141-142` | Bash creates this PID for the named `coproc agmsgd_lock_sql`; it is operation state, not inherited configuration. |
+
+To repeat the case-complete audit, scan only the pinned public `scripts/` tree
+(including `scripts/lib/`; this release has no top-level `lib/`). Match shell names
+with `[A-Za-z_][A-Za-z0-9_]*`, including `$name`, `${name}`, `${!name}` and `${#name}`;
+scan Node `process.env`, environment-object property and literal bracket reads,
+Python `environ`/`getenv`, PowerShell `$env:`, and the driver manifest detect,
+detect-fallback, session and forwarded-environment keys as well. Compare exact,
+case-sensitive names with the prior ledger, then inspect definitions and call sites
+to separate inherited inputs from shell/JavaScript/jq locals, interpreter values,
+and generated operation state. Dynamic manifest reads retain the prior audit's
+classification. Verify public file bytes against the pinned Git blobs; no source
+execution or private store inspection is needed. This expanded audit finds one
+additional inherited configuration input, `SystemRoot`; lowercase and mixed-case
+locals and generated state do not add configuration inputs. Unlisted extension
+inputs remain inherited by default; this inventory is not an environment allowlist.
+
+The broad source search, run from that public source root, is:
+
+```sh
+rg -n -g '!*.md' \
+  -e '\$\{?[!#]?[A-Za-z_][A-Za-z0-9_]*' \
+  -e '(process\.env|environment|env)\.' \
+  -e 'environ|getenv|\$env:|process\.env\[' \
+  -e '^(detect|detect_fallback|session_env|spawn_forward_env|session_name_self_source)=' \
+  scripts
+```
 
 Fixtures are data only: split each non-comment line at its first `=`, preserve the
 literal remainder (including an empty value), and read a final line even without LF.
