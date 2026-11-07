@@ -1,7 +1,3 @@
-//go:build ignore
-
-// The OKF documentation gate. Run through make check-docs-okf; the explicit
-// file list keeps this standalone tool out of the product's package graph.
 package main
 
 import (
@@ -10,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -17,58 +14,78 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func main() {
+//coverage:exempt CLI process boundary; run is tested directly without terminating the test process
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+
+func run(args []string, stdout, stderr io.Writer) int {
 	root := "docs"
-	if len(os.Args) > 2 {
-		fmt.Fprintln(os.Stderr, "usage: docs_okf_check [bundle-directory]")
-		os.Exit(1)
+	if len(args) > 1 {
+		fmt.Fprintln(stderr, "usage: docsokf [bundle-directory]")
+		return 1
 	}
-	if len(os.Args) == 2 {
-		root = os.Args[1]
+	if len(args) == 1 {
+		root = args[0]
 	}
-	count, err := checkBundle(root)
+	count, err := checkBundle(root, stderr)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "docs-okf:", err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, "docs-okf:", err)
+		return 1
 	}
-	fmt.Printf("docs-okf: ok — %d markdown files checked\n", count)
+	fmt.Fprintf(stdout, "docs-okf: ok — %d markdown files checked\n", count)
+	return 0
 }
 
 // Check OKF's required concept metadata and §8 index structure, not a closed
 // type/schema vocabulary. Title/description are repository writing rules;
 // optional metadata is not a conformance requirement (OKF §11).
-func checkBundle(root string) (int, error) {
+func checkBundle(root string, warnings io.Writer) (int, error) {
+	if root == "" {
+		return 0, errors.New("empty bundle directory")
+	}
+	root = filepath.Clean(root)
 	info, err := os.Stat(root)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("stat bundle: %w", err)
 	}
 	if !info.IsDir() {
 		return 0, errors.New("bundle must be a directory")
 	}
+	return checkTree(os.DirFS(root), warnings)
+}
+
+const indexName = "index.md"
+
+func checkTree(tree fs.FS, warnings io.Writer) (int, error) {
 	count := 0
-	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err := fs.WalkDir(tree, ".", func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || filepath.Ext(path) != ".md" {
+		if entry.Type()&fs.ModeSymlink != 0 {
+			target, err := fs.Stat(tree, name)
+			if err != nil {
+				return fmt.Errorf("stat %s: %w", name, err)
+			}
+			if target.IsDir() {
+				fmt.Fprintf(warnings, "docs-okf: %s: symlink directory not inspected\n", name)
+				return nil
+			}
+		}
+		if entry.IsDir() || path.Ext(name) != ".md" {
 			return nil
 		}
 		count++
-		data, err := os.ReadFile(path)
+		data, err := fs.ReadFile(tree, name)
 		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
+			return fmt.Errorf("read %s: %w", name, err)
 		}
 		if entry.Name() == "log.md" {
-			return nil // Reserved history files are not concepts or indexes.
-		}
+			return nil
+		} // Reserved history is outside this metadata/index checker.
 		meta, body, err := frontmatter(string(data))
-		if err == nil && entry.Name() == "index.md" {
+		if err == nil && entry.Name() == indexName {
 			if meta != nil {
-				if filepath.Dir(rel) != "." {
+				if path.Dir(name) != "." {
 					err = errors.New("only bundle-root index may have frontmatter")
 				} else if len(meta) != 1 || meta["okf_version"] == nil {
 					err = errors.New("index frontmatter permits only okf_version")
@@ -86,7 +103,7 @@ func checkBundle(root string) (int, error) {
 			}
 		}
 		if err != nil {
-			return fmt.Errorf("%s: %w", filepath.ToSlash(rel), err)
+			return fmt.Errorf("%s: %w", name, err)
 		}
 		return nil
 	})

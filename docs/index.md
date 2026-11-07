@@ -114,7 +114,9 @@ log. Git history remains the authority for line-level change history.
   existing link checks. The OKF gate checks parseable YAML and a non-empty string `type` on
   concepts, and section headings with described link-list entries in indexes. It accepts optional
   metadata and unknown types; title/description completeness and matching index summaries are
-  writing/review responsibilities. It does not replace link/anchor checks or validate log history.
+  writing/review responsibilities. CI runs the checker and tests explicitly, and pre-push selects
+  them for bundle Markdown or checker changes. Symlink directories are not traversed; their paths
+  are reported as not inspected. It does not replace link/anchor checks or validate log history.
 - Put product purpose and broad boundaries in `overview.md`.
 - Keep each top-level topic guide short enough to scan. Put per-surface or per-component detail in a
   focused concept grouped by topic and link to it through a document map and directory index.

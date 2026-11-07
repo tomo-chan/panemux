@@ -132,7 +132,7 @@ Documentation is part of the product here: an operator cannot use Agent Board wi
 | F5 | Security claims are current | Every claim in [security.md](security.md) is either verified or explicitly marked unverified | `manual`: reread the sections touching whatever changed |
 | F6 | Current-state docs match shipped behavior | Topic guides state the present contract without rollout/status narration; historical rationale is in [DECISIONLOG.md](DECISIONLOG.md) | `manual`: check the topic guide and decision-log entry for any area changed |
 | F7 | A reader can choose the right level of detail | [docs/index.md](index.md) routes from overview to concise topic guides and then to focused deep dives | `manual`: follow each route in the documentation index |
-| F8 | Documentation follows the OKF bundle convention | Concepts have parseable YAML with a non-empty type, and directory indexes group described links under headings | `auto`: `scripts/docs_okf_check_test.sh`; `manual`: check titles, descriptions, type choices, and translation labels against [writing rules](index.md#writing-rules) |
+| F8 | Documentation follows the OKF bundle convention | Concepts have parseable YAML with a non-empty type, and directory indexes group described links under headings | `auto`: `scripts/docsokf/main_test.go`; `manual`: check titles, descriptions, type choices, and translation labels against [writing rules](index.md#writing-rules) |
 
 ## G. The agmsg compatibility contract
 

@@ -34,6 +34,11 @@ points and original gates aligned; their saved local base must never replace
 CI's pull-request base. User-managed approval setup and remaining capability
 limits are documented in [Codex verification](development/codex-verification.md).
 
+The OKF bundle checker and its Go tests run explicitly in `ci.yml` and the documentation job in
+`scenarios.yml`, since those workflows do not invoke `make check`. `scripts/docsokf` is a normal
+Go package included in coverage, red-check, and mutation. Keep its pre-push selection aligned
+with bundle Markdown and checker changes.
+
 ## GitHub Actions Pinning
 
 - Pin GitHub Actions to full commit SHAs, not floating tags such as `@v4` or `@v5`.

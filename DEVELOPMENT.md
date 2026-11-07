@@ -166,7 +166,8 @@ skip inside the Claude Code sandbox and fail in CI. Its tmux sockets sit deeper 
 - CI enforces it (`.github/workflows/screenshots.yml`): a pull request that changes
   `frontend/src/components/`, `frontend/src/App.tsx`, `frontend/src/styles/`, `frontend/index.html`
   or `frontend/screenshots/` (test files — `*.test.ts`, `*.test.tsx`, `*_test.sh` — aside; a file moved out of them counts under its old path)
-  without touching `docs/images/` fails. Apply the
+  without updating a direct `docs/images/*.png` capture output fails. Changes only to
+  `docs/images/index.md` or other non-image files do not count as retaken screenshots. Apply the
   `screenshots-exempt` label to a change that genuinely alters nothing the images show.
 - The rule does not stop at those paths: a change under `frontend/src/hooks/`, `schemas/` or `utils/`
   that changes what is on screen needs new images too, though CI does not ask for them.
@@ -365,6 +366,8 @@ A test that genuinely should not go red without its implementation is marked `//
   - A package holding a file built with or without the `panemux_fixture_agent` tag also gets `go vet` with that tag, and `make test-go-fixture-agent`, which tests the tagged internal packages listed by `FIXTURE_AGENT_PKGS`. The suite does not test the root package or need a frontend build.
   - `frontend/src` TypeScript: `tsc --noEmit` and `vitest related` on the changed modules. A file under `testdata/api-contract/` selects the frontend contract test.
   - Shell scripts: `scripts/<name>.sh` selects `scripts/<name>_test.sh`, and any `.sh` selects the `$TMPDIR` guard. `.claude/` selects the hook tests; `frontend/screenshots/` and `frontend/e2e/*.sh` select the screenshot fixtures' tests.
+  - Markdown under `docs/` and changes to `scripts/docsokf/` select both `make check-docs-okf`
+    and `make test-docs-okf`; checker Go edits also receive normal package vet/lint/tests.
   - Markdown selects `make check-docs-links`; `docs/scenarios.md` also selects `make check-scenarios`.
 - It falls back to `make check` when the change cannot be narrowed — `go.mod`/`go.sum`, the `Makefile`, `.golangci.yml`, `.node-version`, the frontend's package and build configuration, the runtime selection scripts, `.githooks/` — and when the range cannot be worked out: a remote commit this clone does not have, no `origin/main`, or an unreadable pre-push line.
 - `make test-pre-push` tests the selection, and CI runs it.

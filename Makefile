@@ -199,10 +199,10 @@ test-docs-links:
 # OKF metadata and index structure use the existing YAML parser; relative
 # links and anchors remain the responsibility of check-docs-links.
 check-docs-okf:
-	go run scripts/docs_okf_check.go
+	go run ./scripts/docsokf
 
 test-docs-okf:
-	sh scripts/docs_okf_check_test.sh
+	go test ./scripts/docsokf -v
 
 # ── Efficacy: red-check (gate G4(b)) ──────────────────────────────────────────
 #
@@ -454,7 +454,7 @@ test-model-check:
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/agent/...,./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/agmsg/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/host/...,./internal/hostexec/...,./internal/hosttools/...,./internal/codexhook/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,./internal/preview/...,./internal/testcap/...,.
+COVERAGE_PKGS := ./internal/agent/...,./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/agmsg/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/host/...,./internal/hostexec/...,./internal/hosttools/...,./internal/codexhook/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,./internal/preview/...,./internal/testcap/...,./scripts/docsokf/...,.
 
 coverage: coverage-go coverage-frontend
 
@@ -489,6 +489,7 @@ coverage-go: build-frontend
 	  ./internal/requestsecurity/... \
 	  ./internal/preview/... \
 	  ./internal/testcap/... \
+	  ./scripts/docsokf/... \
 	  . \
 	  -coverprofile=coverage.out \
 	  -coverpkg=$(COVERAGE_PKGS) \
