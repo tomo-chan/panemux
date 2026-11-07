@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Agent Board: architecture and ownership"
+description: "Agent Board component ownership and the separation of messaging and participation ports."
+---
+
 # Agent Board: architecture and ownership
 
 > Part of the current [Agent Board design](../agent-board.md).

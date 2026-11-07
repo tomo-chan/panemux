@@ -1,3 +1,9 @@
+---
+type: Security Requirement
+title: "Agent Board: security model"
+description: "Agent Board trust boundaries and security responsibilities across hosts and processes."
+---
+
 # Agent Board: security model
 
 > Part of the current [Agent Board design](../agent-board.md). Implementation rules live in

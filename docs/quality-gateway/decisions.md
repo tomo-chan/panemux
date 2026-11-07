@@ -1,3 +1,9 @@
+---
+type: Decision
+title: "Quality gateway: design decisions"
+description: "Rationale and tradeoffs behind the numbered quality gateway decisions."
+---
+
 # Quality gateway: design decisions
 
 > Part of the [quality gateway](../quality-gateway.md). That document defines the gates this one explains.

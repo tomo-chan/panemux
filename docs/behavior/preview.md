@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: the split preview"
+description: "Split preview rendering, local and remote files, and preview lifecycle."
+---
+
 # Behavior: the split preview
 
 > Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.

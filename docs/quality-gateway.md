@@ -1,3 +1,9 @@
+---
+type: Guide
+title: "Quality Gateway"
+description: "Product and test quality characteristics, verification gates, and enforcement responsibilities."
+---
+
 # Quality Gateway
 
 This guide defines the current quality model and the gates that enforce it. Use
@@ -43,7 +49,7 @@ The order is intentional: cheaper checks should reject a defect before expensive
 
 | # | Gate | Checks | Enforcement |
 |---|---|---|---|
-| **G0** | Spec | User-visible changes update `scenarios.md`; changes the documentation screenshots show retake them; documentation links and fragments resolve | Scenario and screenshots CI plus `make check-docs-links` |
+| **G0** | Spec | User-visible changes update `scenarios.md`; changes the documentation screenshots show retake them; documentation links and fragments resolve; OKF concept metadata and index structure are valid | Scenario and screenshots CI plus `make check-docs-links` and `make check-docs-okf` |
 | **G1** | Edit | `gofmt -s`, targeted `go vet`, or `tsc --noEmit` for an edited file | `.claude` post-edit hook |
 | **G2** | Unit | Go and frontend unit/integration suites | `make check` and CI; pre-push runs the changed packages and modules only (D14) |
 | **G3** | Contract | Real-router HTTP/WS tests, exhaustive route expectations, Go-produced Zod fixtures, agmsg contract, and model-to-code transition replay | Always-on tests in `make check`; real agmsg and TLC in dedicated CI/opt-in jobs |

@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Test granularity and testability seams"
+description: "Behavioral factor coverage, test granularity, and injectable side-effect boundaries."
+---
+
 # Test granularity and testability seams
 
 > Part of the [development guide](../../DEVELOPMENT.md). That document carries the summary of this one and the rules that always apply.

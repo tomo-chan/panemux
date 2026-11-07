@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: WebSocket protocols"
+description: "WebSocket connection policy, terminal frames, and board and task event protocols."
+---
+
 # Behavior: WebSocket protocols
 
 > Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.

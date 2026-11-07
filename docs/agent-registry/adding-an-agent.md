@@ -1,3 +1,9 @@
+---
+type: Runbook
+title: "Adding an agent"
+description: "Steps and verification requirements for registering and integrating a coding agent."
+---
+
 # Adding an agent
 
 > Part of the [agent registry](../agent-registry.md). That document carries the capabilities, the

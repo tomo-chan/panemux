@@ -3,7 +3,7 @@ override SHELL := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/scripts/runtime
 
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks test-install-hooks test-pre-push test-tmpdir-guard test-golangci-lint-cache test-require-pty \
         test-node-toolchain test-go-toolchain test test-go test-go-fixture-agent test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
-        test-scenarios-check check-scenarios check-docs-links test-docs-links screenshots test-screenshots-check \
+        test-scenarios-check check-scenarios check-docs-links test-docs-links check-docs-okf test-docs-okf screenshots test-screenshots-check \
         coverage-blocks test-coverage-blocks \
         mutation test-mutation bench \
         model-check model-check-write test-model-check \
@@ -43,7 +43,7 @@ install-hooks:
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 test: test-agmsg-automation test-verify test-node-toolchain test-go-toolchain test-go test-frontend test-hooks test-pre-push test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
-      test-coverage-blocks test-mutation test-model-check
+      test-coverage-blocks test-mutation test-model-check test-docs-okf
 
 .PHONY: test-agmsg-automation
 test-agmsg-automation:
@@ -195,6 +195,14 @@ check-docs-links:
 # reason it reads whole files rather than lines.
 test-docs-links:
 	sh scripts/docs_links_check_test.sh
+
+# OKF metadata and index structure use the existing YAML parser; relative
+# links and anchors remain the responsibility of check-docs-links.
+check-docs-okf:
+	go run scripts/docs_okf_check.go
+
+test-docs-okf:
+	sh scripts/docs_okf_check_test.sh
 
 # ── Efficacy: red-check (gate G4(b)) ──────────────────────────────────────────
 #
@@ -536,7 +544,7 @@ lint-frontend:
 
 # ── Quality gate (lint + test + coverage) ─────────────────────────────────────
 
-check: build-frontend lint test coverage check-scenarios check-docs-links
+check: build-frontend lint test coverage check-scenarios check-docs-links check-docs-okf
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 

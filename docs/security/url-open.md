@@ -1,3 +1,9 @@
+---
+type: Security Requirement
+title: "Security: opening URLs from a pane"
+description: "URL validation and execution boundaries for browser opening and loopback forwarding."
+---
+
 # Security: opening URLs from a pane
 
 > Part of the [security design](../security.md). That document carries the general rules, the `gosec` policy, and the map of these files.

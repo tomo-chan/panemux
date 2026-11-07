@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Agent Board: integration with agmsg"
+description: "Participation, identity selection, and messaging through the official agmsg workflow."
+---
+
 # Agent Board: integration with agmsg
 
 > Part of the current [Agent Board design](../agent-board.md).

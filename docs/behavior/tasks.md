@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: task dashboard"
+description: "Task collection, dashboard actions, launch, resume, summaries, and host tool behavior."
+---
+
 # Behavior: task dashboard
 
 > Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.

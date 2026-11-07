@@ -1,3 +1,9 @@
+---
+type: Security Requirement
+title: "Security: command execution sinks"
+description: "Validation and argument handling requirements at local and remote command execution sinks."
+---
+
 # Security: command execution sinks
 
 > Part of the [security design](../security.md). That document carries the general rules, the `gosec` policy, and the map of these files.

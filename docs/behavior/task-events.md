@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: task events"
+description: "Task event observation, WebSocket delivery, and receiver responsibilities."
+---
+
 # Behavior: task events
 
 A Japanese translation is in [task-events.ja.md](task-events.ja.md). This English document is the

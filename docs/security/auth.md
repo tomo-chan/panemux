@@ -1,3 +1,9 @@
+---
+type: Security Requirement
+title: "Security: auth token and transport encryption"
+description: "Browser request guards, bearer tokens, loopback bootstrap, and transport encryption requirements."
+---
+
 # Security: auth token and transport encryption
 
 > Part of the [security design](../security.md). That document carries the general rules, the `gosec` policy, and the map of these files.

@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Mutation testing (`make mutation`)"
+description: "Mutation gate outcomes, diff scope, and justified exemption requirements."
+---
+
 # Mutation testing (`make mutation`)
 
 > Part of the [development guide](../../DEVELOPMENT.md). That document carries the summary of this one and the rules that always apply.

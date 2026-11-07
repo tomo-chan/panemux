@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: Agent Board REST API"
+description: "Agent Board REST payloads, authorization, status codes, and operations."
+---
+
 # Behavior: Agent Board REST API
 
 > Part of the [behavior specification](../behavior.md).

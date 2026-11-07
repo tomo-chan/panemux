@@ -1,3 +1,9 @@
+---
+type: Decision
+title: "Decision Log"
+description: "Rationale, rejected alternatives, and chronology of consequential design decisions."
+---
+
 # Decision Log
 
 This log records *why* a consequential design or implementation choice was made, what it replaced,
@@ -150,7 +156,7 @@ current contract had to infer it from phrases such as "landed", "earlier revisio
 
 The documentation now has three reading levels: [overview](overview.md), concise topic guides, and
 same-topic deep dives. This log owns chronology, rejected alternatives, and migration reasoning.
-The structure and writing rules are indexed in the [documentation index](README.md).
+The structure and writing rules are indexed in the [documentation index](index.md).
 
 ## Architecture
 

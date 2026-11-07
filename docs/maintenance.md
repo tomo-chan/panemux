@@ -1,3 +1,9 @@
+---
+type: Runbook
+title: "Maintenance Guide"
+description: "Maintenance procedures for toolchains, dependencies, CI, releases, and Agent Board tools."
+---
+
 # Maintenance Guide
 
 This document captures repository maintenance rules that belong in durable project documentation rather than in the agent index.

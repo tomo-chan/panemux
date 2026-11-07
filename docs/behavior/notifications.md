@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: agent attention notifications"
+description: "Agent attention notifications and their relationship to task state and browser visibility."
+---
+
 # Behavior: agent attention notifications
 
 > Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.

@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: frontend runtime behavior"
+description: "Browser initialization, workspace interaction, and frontend runtime behavior."
+---
+
 # Behavior: frontend runtime behavior
 
 > Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.

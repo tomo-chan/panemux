@@ -20,7 +20,7 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
 1. Read [DEVELOPMENT.md](DEVELOPMENT.md) for build, test, branch, and PR workflow rules.
    This includes the path-sanitization rule for tests, fixtures, PR bodies, PR comments, review replies, and the mandatory `make check` completion rule.
    Its long-form testing references live in [docs/development/](docs/development/); DEVELOPMENT.md keeps the rule and links to the reasoning.
-2. Read [docs/README.md](docs/README.md) to choose the overview, topic guide, or deep dive appropriate
+2. Read [docs/index.md](docs/index.md) to choose the overview, topic guide, or deep dive appropriate
    to the change.
 3. Read [docs/overview.md](docs/overview.md) for the product purpose and current boundaries.
 4. Read [docs/architecture.md](docs/architecture.md) for current component ownership and trust boundaries.
@@ -80,7 +80,7 @@ same name beside it, and the index's own document map routes by section name.
 
 - Codex verification and approval setup: [docs/development/codex-verification.md](docs/development/codex-verification.md)
 - Development workflow: [DEVELOPMENT.md](DEVELOPMENT.md) → [docs/development/](docs/development/)
-- Documentation index and reader routes: [docs/README.md](docs/README.md)
+- Documentation index and reader routes: [docs/index.md](docs/index.md)
 - Product overview: [docs/overview.md](docs/overview.md)
 - Current architecture: [docs/architecture.md](docs/architecture.md)
 - Security requirements for implementation: [docs/security.md](docs/security.md) → [docs/security/](docs/security/)
@@ -105,7 +105,10 @@ same name beside it, and the index's own document map routes by section name.
 - Keep topic guides focused on the current state; put chronology and superseded approaches in
   `docs/DECISIONLOG.md`.
 - Put implementation-time security requirements in `docs/security.md` and treat it as required reading for security-sensitive changes.
-- When a document outgrows one file, split it into `docs/<name>/` and leave `docs/<name>.md` as the
-  entry point: orientation, the rules that always apply, and a document map keyed by the section
-  names the file used to carry, so existing references keep resolving in one hop.
+- Follow [the OKF writing rules](docs/index.md#writing-rules): `docs/` is one OKF v0.2 bundle,
+  concepts carry metadata, and each directory has an `index.md` listing its contents.
+- Split by responsibility, with one authoritative concept per contract and links from other
+  documents. The directory hierarchy is a tree; document links are graph edges. Keep
+  `docs/<name>.md` as the topic entrance and `docs/<name>/index.md` as its directory listing;
+  preserve routes from old section names when moving content.
 - When adding a new long-form document, add it to the index here so agents can discover it quickly.

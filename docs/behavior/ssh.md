@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: SSH connections"
+description: "SSH connection configuration, session behavior, and remote host assumptions."
+---
+
 # Behavior: SSH connections
 
 > Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.

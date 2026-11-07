@@ -1,3 +1,9 @@
+---
+type: Overview
+title: "Application Overview"
+description: "Product purpose, capabilities, operating model, and current boundaries."
+---
+
 # Application Overview
 
 PaneMux is a browser-based terminal workspace. One server process renders multiple local, SSH, and
@@ -5,7 +11,7 @@ tmux sessions in a resizable split layout and serves the browser UI that control
 
 Use this page for the product-level picture. Continue to [Architecture](architecture.md) for system
 structure, [Behavior specification](behavior.md) for runtime contracts, or the
-[documentation index](README.md) to choose another topic.
+[documentation index](index.md) to choose another topic.
 
 ## What it provides
 

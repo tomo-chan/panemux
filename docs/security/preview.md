@@ -1,3 +1,9 @@
+---
+type: Security Requirement
+title: "Security: the split preview"
+description: "Preview isolation, path validation, symbolic links, tokens, and remote content boundaries."
+---
+
 # Security: the split preview
 
 > Part of the [security design](../security.md). That document carries the general rules, the `gosec` policy, and the map of these files.

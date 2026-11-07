@@ -1,3 +1,9 @@
+---
+type: Security Requirement
+title: "Security Design"
+description: "Implementation security invariants, development trust boundaries, and routes to sink requirements."
+---
+
 # Security Design
 
 This document defines the implementation-time security requirements for panemux. Treat it as required reading before changing command execution, shell argument handling, SSH path handling, host key handling, or `gosec`-sensitive code.

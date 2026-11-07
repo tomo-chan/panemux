@@ -1,3 +1,9 @@
+---
+type: Reference
+title: "Quality gateway: first measurements"
+description: "Dated quality measurements, performance evidence, and accessibility ceilings."
+---
+
 # Quality gateway: first measurements
 
 > Part of the [quality gateway](../quality-gateway.md). That document defines the gates this one explains.

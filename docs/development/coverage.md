@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Coverage gates"
+description: "Coverage scope, thresholds, exclusions, and per-block verification requirements."
+---
+
 # Coverage gates
 
 > Part of the [development guide](../../DEVELOPMENT.md). That document carries the summary of this one and the rules that always apply.

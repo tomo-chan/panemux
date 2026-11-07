@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Red-check (`make efficacy`)"
+description: "Red-check requirements proving that changed tests detect the implementation change."
+---
+
 # Red-check (`make efficacy`)
 
 > Part of the [development guide](../../DEVELOPMENT.md). That document carries the summary of this one and the rules that always apply.

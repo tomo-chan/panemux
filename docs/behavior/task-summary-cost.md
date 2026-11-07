@@ -1,3 +1,9 @@
+---
+type: Reference
+title: "Task summaries: what they cost"
+description: "Dated measurements of task summary cost for synthetic conversations and selected models."
+---
+
 # Task summaries: what they cost
 
 > Measurements for [task summaries](tasks.md#summaries). These numbers are evidence, dated

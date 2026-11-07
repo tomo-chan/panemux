@@ -1,3 +1,9 @@
+---
+type: Guide
+title: "Agent Registry"
+description: "Agent registration, identities, capabilities, and routes to integration requirements."
+---
+
 # Agent Registry
 
 `internal/agent` is the one place panemux names a coding agent. Every agent panemux recognizes is

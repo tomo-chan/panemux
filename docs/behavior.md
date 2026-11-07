@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior Specification"
+description: "Startup, configuration, operational assumptions, and routes to runtime contracts."
+---
+
 # Behavior Specification
 
 ## Startup Sequence
