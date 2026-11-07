@@ -52,6 +52,8 @@ external state.
 
 `TestAgmsgBashStartupAndPaneIsolation` uses a Bash-shebang observer across sh, bash,
 and zsh login shells, local and simulated SSH execution, and send/read/install/update.
+The observer verifies the expected HOME, exact post-login PATH, and storage settings;
+a unique inert PATH entry distinguishes preservation from a child shell's defaults.
 
 ### Tier 2: real installation
 

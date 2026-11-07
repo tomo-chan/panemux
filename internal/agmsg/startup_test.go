@@ -25,7 +25,7 @@ type agmsgLoginConn struct {
 
 func (c agmsgLoginConn) Run(ctx context.Context, command string, stdin io.Reader) ([]byte, error) {
 	//nolint:gosec // shell resolved with LookPath, production command under test
-	cmd := exec.CommandContext(ctx, c.shell, "-l", "-c", command)
+	cmd := exec.CommandContext(ctx, c.shell, "-l", "-c", observeLoginEnvironment+command)
 	cmd.Env = append(os.Environ(), "HOME="+c.home, "ZDOTDIR="+c.home)
 	cmd.Stdin = stdin
 	return cmd.CombinedOutput()
@@ -40,7 +40,12 @@ type callerLogin struct {
 	shell string
 }
 
-const callerLoginScript = `script=$1; shift; exec sh -c "$script" board "$@"`
+// Login profiles may legitimately change PATH. Add a unique inert entry after
+// login and snapshot that value, so a child shell's default PATH cannot pass.
+const observeLoginEnvironment = `PATH="$PATH:$PANEMUX_TEST_PATH_SENTINEL"; ` +
+	`export PATH PANEMUX_TEST_EXPECT_PATH="$PATH"; `
+
+const callerLoginScript = observeLoginEnvironment + `script=$1; shift; exec sh -c "$script" board "$@"`
 
 func (e callerLogin) Run(ctx context.Context, target host.Host, script string, args ...string) ([]byte, error) {
 	if target == host.Local {
@@ -64,6 +69,8 @@ func startupEnvironment(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
+	t.Setenv("PANEMUX_TEST_EXPECT_HOME", home)
+	t.Setenv("PANEMUX_TEST_PATH_SENTINEL", filepath.Join(home, "path-sentinel"))
 	t.Setenv("ZDOTDIR", home)
 	startup := filepath.Join(home, "startup")
 	require.NoError(t, os.WriteFile(startup, []byte("export AGMSG_SELF_NAME=on\n"), 0600))
