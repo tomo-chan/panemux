@@ -90,6 +90,11 @@ func preservedAgmsgSettings(t *testing.T) {
 	t.Helper()
 	path, err := filepath.Abs("testdata/self-name/preserved-settings.env")
 	require.NoError(t, err)
+	loadPreservedAgmsgSettings(t, path)
+}
+
+func loadPreservedAgmsgSettings(t *testing.T, path string) {
+	t.Helper()
 	contents, err := os.ReadFile(path)
 	require.NoError(t, err)
 	t.Setenv("PANEMUX_TEST_EXPECT_SETTINGS", path)
@@ -99,7 +104,7 @@ func preservedAgmsgSettings(t *testing.T) {
 		}
 		name, value, found := strings.Cut(line, "=")
 		require.True(t, found)
-		require.True(t, strings.HasPrefix(name, "AGMSG_"))
+		require.True(t, strings.HasPrefix(name, "AGMSG_") || strings.HasPrefix(name, "AGMSGD_"))
 		t.Setenv(name, value)
 	}
 }

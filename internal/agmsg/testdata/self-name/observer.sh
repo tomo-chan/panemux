@@ -2,8 +2,11 @@
 set -eu
 test "${AGMSG_SELF_NAME:-}" = off
 test "${BASH_ENV:-}${ENV:-}" = ''
-while IFS='=' read -r variable expected; do
-  case "$variable" in ''|'#'*) continue ;; esac
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in ''|'#'*) continue ;; esac
+  variable=${line%%=*}
+  expected=${line#*=}
+  test "${!variable+x}" = x
   test "${!variable-}" = "$expected"
 done < "$PANEMUX_TEST_EXPECT_SETTINGS"
 test "${HOME:-}" = "$PANEMUX_TEST_EXPECT_HOME"

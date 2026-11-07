@@ -55,9 +55,18 @@ and zsh login shells, local and simulated SSH execution, and send/read/install/u
 The observer verifies the expected HOME, exact post-login PATH, and storage settings;
 a unique inert PATH entry distinguishes preservation from a child shell's defaults.
 The data-only [preserved-settings.env](../../internal/agmsg/testdata/self-name/preserved-settings.env)
-fixture pins exact values for public storage configuration, driver/plugin selection,
-SQLite/JSONL options, locking and sync helper settings. Each deletion mutant must fail
-the observer; operation state and test-only fault injection are outside this fixture.
+fixture pins exact values for the 86 retained AGMSG/AGMSGD configuration inputs
+identified in the pinned public-source audit, including the age executable override.
+The commit introducing that audit records every named read candidate with its
+preserve/remove/out-of-scope classification and upstream file/line evidence;
+implementation locals and test/operation state are explicitly distinguished from
+configuration inputs. HOME/PATH retain their dedicated assertions.
+
+Fixtures are data only: split each non-comment line at its first `=`, preserve the
+literal remainder (including an empty value), and read a final line even without LF.
+The observer also checks variable presence, so deleting an explicitly empty value
+must fail. `TestSettingsFixtureGoAndBashAgree` covers both line endings, empty and
+delimiter-only values, embedded equals and literal shell metacharacters.
 
 ### Tier 2: real installation
 
