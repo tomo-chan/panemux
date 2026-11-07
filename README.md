@@ -246,7 +246,9 @@ Start an interactive agent in a configured pane. Panemux polls every 5s and disp
 without sending terminal input. It checks agmsg availability after two consecutive detections, retrying until confirmed and then
 skipping further probes for that session. Host changes and session replacement reset confirmation.
 Detection is not proof of registration or reception. Use agmsg's official participation, identity,
-and delivery workflow; see [agmsg integration](docs/agent-board/agmsg-integration.md#integration-with-agmsg).
+and delivery workflow. To use Board relay and status, join the configured `agent_board.team` with
+your agmsg name exactly equal to the pane ID on that host; panemux does not set up this membership.
+See [agmsg integration](docs/agent-board/agmsg-integration.md#integration-with-agmsg).
 Existing registrations and delivery hooks are left untouched, as is `board-bootstrap-state.json`.
 
 `agent_board.mode` is deprecated for one release: values are still validated, but a configured key

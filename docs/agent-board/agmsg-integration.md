@@ -7,7 +7,9 @@
 Participation, identity selection, and reception belong to [agmsg's official workflow](https://github.com/fujibee/agmsg):
 its SessionStart/SessionEnd hooks, delivery settings, `/agmsg join` / `actas`, and `spawn.sh`.
 Follow agmsg's documentation for setup and lifecycle details; panemux does not duplicate those
-procedures or provide its own automatic participation hook.
+procedures or provide its own automatic participation hook. For Agent Board relay, status
+attribution, and broadcast addressing, join the configured `agent_board.team` with an agmsg name
+exactly equal to the configured pane ID on that host. Panemux does not set up this membership.
 
 `internal/agmsg` implements the board-owned message and participation ports. It owns all script
 contracts, path resolution, parsing, versions, and availability checks. Panemux uses agmsg's public scripts and never reads its database or team files. The required
@@ -45,9 +47,8 @@ for conversations unrelated to Agent Board.
 Because `--force` also makes `from` forgeable, the relay must validate senders. A `_system` row is
 trusted only when it matches panemux's own-send ledger; the string alone grants no authority.
 
-Panes join directly through `join.sh` with the pane ID as `agent_id`. Direct script calls avoid
-agmsg's agent-specific `/agmsg` versus `$agmsg` command prefixes and keep pane addressing stable
-across Agent Board.
+Use agmsg's official participation workflow to establish that pane-ID identity; panemux does not
+invoke `join.sh` or choose the agent name. Messages from other names are rejected by the relay.
 
 ### Discovery and paths
 

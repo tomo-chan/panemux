@@ -9,7 +9,8 @@ hosts resolve. The watcher never writes to a pane's PTY, including on recovery, 
 repeated failures. It does not join agents, claim identities, configure delivery, or send
 participation instructions. Participation, identity selection, and reception use
 [agmsg's official workflow](agmsg-integration.md#integration-with-agmsg). Panemux does not provide
-its own automatic participation hook.
+its own automatic participation hook. Board relay and status attribution require joining the configured
+team with an agmsg name equal to the pane ID on its owning host.
 
 Detection uses the registry's Board rules for `claude`, `codex`, `cursor`, `gemini`, `grok-build`,
 and `opencode`. Explicit-only and desktop agents are not guessed. Each poll refreshes the detected

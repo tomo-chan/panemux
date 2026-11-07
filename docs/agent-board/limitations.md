@@ -38,6 +38,7 @@ have no detected agent or self-report. The UI lists only detected agents or repo
 
 - Detection and display do not register participation or configure delivery. PTY onboarding is
   disabled. Participation, identity selection, and reception follow agmsg's official workflow.
+  Board relay and status require membership in the configured team under the pane ID on its owning host.
 - Detection alone provides no same-project identity isolation or proof of message reception.
 - Process detection can reject an interactive command whose quoted prompt contains a headless-mode
   exclusion token as a separate whitespace token.
