@@ -15,10 +15,10 @@ import (
 //
 // docs/agent-board/agmsg-integration.md's "Version coverage" section
 // requires a pinned tested version because agmsg's own compatibility promise
-// covers reading through scripts/api.sh only. Everything panemux's write and
-// bootstrap paths depend on — send.sh's argument order, join.sh, delivery.sh
-// set, and the per-type hooks_file layout — carries no such promise, so an
-// agmsg upgrade can change them without that being a bug on agmsg's side.
+// covers reading through scripts/api.sh only. The send.sh argument contract
+// and install.sh behavior used by managed Install / Update carry no such
+// promise, so an agmsg upgrade can change them without that being a bug
+// on agmsg's side.
 const TestedAgmsgVersion = "1.7.1"
 
 // agmsgVersionFile is agmsg's own version marker at its install root.

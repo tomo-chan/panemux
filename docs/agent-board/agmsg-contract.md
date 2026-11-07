@@ -4,9 +4,11 @@
 
 ## agmsg compatibility contract
 
-Agent Board depends on agmsg scripts whose write and onboarding behavior is not covered by agmsg's
-read-API compatibility promise. The consumer contract must detect drift before users encounter
-silent delivery failure.
+Agent Board reads through `api.sh`, sends through `send.sh`, and uses the pinned `install.sh` for
+managed Install / Update. Sending and installation are not covered by agmsg's read-API compatibility
+promise. The consumer contract must detect drift before users encounter silent delivery failure.
+Compatibility tests also exercise agmsg's official participation workflow; panemux does not invoke
+its join or delivery setup scripts.
 
 The contract verifies observable behavior, not log wording or private storage:
 
