@@ -149,7 +149,7 @@ var (
 )
 
 func checkIndex(body string) error {
-	hasHeading, entries := false, 0
+	hasHeading, hasEntry := false, false
 	marker := ""
 	for i, line := range strings.Split(body, "\n") {
 		if match := fence.FindStringSubmatch(line); match != nil {
@@ -175,12 +175,12 @@ func checkIndex(body string) error {
 		if !entryDescription.MatchString(line) {
 			return fmt.Errorf("line %d: index entry needs a description after the link", i+1)
 		}
-		entries++
+		hasEntry = true
 	}
 	if !hasHeading {
 		return errors.New("index needs a section heading")
 	}
-	if entries == 0 {
+	if !hasEntry {
 		return errors.New("index needs a described list entry")
 	}
 	return nil

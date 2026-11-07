@@ -154,6 +154,51 @@ func TestBundle(t *testing.T) {
 	}
 }
 
+func TestFrontmatterBodyBoundary(t *testing.T) {
+	const body = "# Topics\n\n* [One](one.md)\n"
+	_, got, err := frontmatter("---\nokf_version: \"0.2\"\n---\n" + body)
+	if err != nil || got != body {
+		t.Fatalf("body %q, error %v", got, err)
+	}
+	const want = "line 3: index entry needs a description after the link"
+	if err := checkIndex(got); err == nil || err.Error() != want {
+		t.Fatalf("want %q, got %v", want, err)
+	}
+}
+
+func TestIndexDiagnosticLineNumbers(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"before heading", "\n* [One](one.md) - Summary.\n# Topics\n", "line 2: index entry before a heading"},
+		{"missing description", "# Topics\n\n\n* [One](one.md)\n",
+			"line 4: index entry needs a description after the link"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := checkIndex(tc.body); err == nil || err.Error() != tc.want {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestIndexEntryPresence(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"none", "# Topics\n", "index needs a described list entry"},
+		{"one", "# Topics\n* [One](one.md) - Summary.\n", ""},
+		{"many", "# Topics\n* [One](one.md) - Summary.\n* [Two](two.md) - Other.\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkIndex(tc.body)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || err.Error() != tc.want {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
 type failingFS struct {
 	fs.FS
 	fail string
