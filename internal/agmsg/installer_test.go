@@ -29,11 +29,13 @@ func installerFixture(t *testing.T, script string) []byte {
 }
 
 func TestInstallerUsesArchiveAndIsolatedHome(t *testing.T) {
+	t.Setenv("AGMSG_SELF_NAME", "on")
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
 	execution := hostexec.New(hostexec.Options{})
 	t.Cleanup(execution.Close)
 	archive := installerFixture(t, `set -eu
+test "$AGMSG_SELF_NAME" = off
 test ! -t 0
 if [ -f "$HOME/.agents/skills/agmsg/scripts/api.sh" ]; then
   test "$#" = 1 && test "$1" = --update
