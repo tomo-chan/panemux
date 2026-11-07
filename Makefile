@@ -199,7 +199,7 @@ test-docs-links:
 # OKF metadata and index structure use the existing YAML parser; relative
 # links and anchors remain the responsibility of check-docs-links.
 check-docs-okf:
-	go run ./scripts/docsokf
+	go run ./scripts/docsokf/cmd
 
 test-docs-okf:
 	go test ./scripts/docsokf -v

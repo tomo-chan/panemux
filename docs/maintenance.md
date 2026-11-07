@@ -38,6 +38,8 @@ The OKF bundle checker and its Go tests run explicitly in `ci.yml` and the docum
 `scenarios.yml`, since those workflows do not invoke `make check`. `scripts/docsokf` is a normal
 Go package included in coverage, red-check, and mutation. Keep its pre-push selection aligned
 with bundle Markdown and checker changes.
+Its package name matches its directory because gremlins v0.6.0 resolves per-mutant test
+packages through that match; the thin CLI entrypoint lives in `scripts/docsokf/cmd`.
 
 ## GitHub Actions Pinning
 

@@ -1,4 +1,4 @@
-package main
+package docsokf
 
 import (
 	"bytes"
@@ -259,7 +259,7 @@ func TestCommand(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, stderr bytes.Buffer
-			got := run(tc.args, &out, &stderr)
+			got := Run(tc.args, &out, &stderr)
 			if got != tc.status || !strings.Contains(out.String()+stderr.String(), tc.needle) {
 				t.Fatalf("status %d, out %s, stderr %s", got, &out, &stderr)
 			}

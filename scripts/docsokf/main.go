@@ -1,4 +1,7 @@
-package main
+// Package docsokf checks documentation bundle metadata and index structure.
+// Keep the package name aligned with its directory: gremlins v0.6.0 uses that
+// match to select per-mutant package tests. The process entrypoint is in cmd.
+package docsokf
 
 import (
 	"errors"
@@ -14,10 +17,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//coverage:exempt CLI process boundary; run is tested directly without terminating the test process
-func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
-
-func run(args []string, stdout, stderr io.Writer) int {
+// Run checks the requested bundle and writes diagnostics, returning a CLI exit status.
+func Run(args []string, stdout, stderr io.Writer) int {
 	root := "docs"
 	if len(args) > 1 {
 		fmt.Fprintln(stderr, "usage: docsokf [bundle-directory]")
