@@ -4,6 +4,11 @@
 
 ## Integration with agmsg
 
+Participation, identity selection, and reception belong to [agmsg's official workflow](https://github.com/fujibee/agmsg):
+its SessionStart/SessionEnd hooks, delivery settings, `/agmsg join` / `actas`, and `spawn.sh`.
+Follow agmsg's documentation for setup and lifecycle details; panemux does not duplicate those
+procedures or provide its own automatic participation hook.
+
 `internal/agmsg` implements the board-owned message and participation ports. It owns all script
 contracts, path resolution, parsing, versions, and availability checks. Panemux uses agmsg's public scripts and never reads its database or team files. The required
 contract is:
@@ -147,8 +152,8 @@ messages.
 The adapter retains registry ID to transport type mappings for registration work. The mappings
 cover exactly the agents declaring `board`, with valid, unique transport type names.
 Panemux does not currently join or claim identities, replace watchers, or issue participation
-instructions. Same-project subscriptions remain the operator's responsibility until hook-based
-participation is implemented; detection alone does not establish identity isolation.
+instructions. Use agmsg's official identity and delivery workflow for same-project subscriptions;
+detection alone does not establish identity isolation.
 
 ## Agent type mapping
 

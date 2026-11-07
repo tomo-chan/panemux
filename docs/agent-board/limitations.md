@@ -37,7 +37,7 @@ have no detected agent or self-report. The UI lists only detected agents or repo
 ### Bootstrap
 
 - Detection and display do not register participation or configure delivery. PTY onboarding is
-  disabled; hook-based participation is follow-up work under #495.
+  disabled. Participation, identity selection, and reception follow agmsg's official workflow.
 - Detection alone provides no same-project identity isolation or proof of message reception.
 - Process detection can reject an interactive command whose quoted prompt contains a headless-mode
   exclusion token as a separate whitespace token.

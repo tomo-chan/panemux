@@ -2259,3 +2259,5 @@ changes and removal invalidate it. Managed tool pauses skip checks silently with
 a PTY lease. Remove the unused bootstrap-state reader/writer and its self-tests, leaving old files
 untouched. Defer the unreachable frontend `instruction sent` branch and its test to #510 (S8),
 where the participation API/UI changes together.
+
+2026-11-07 (#495 policy change): merge S1 independently; delegate participation, identity selection, and reception to agmsg's official workflow rather than adding panemux participation hooks.

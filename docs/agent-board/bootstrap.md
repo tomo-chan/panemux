@@ -7,8 +7,9 @@
 Top-level `agent_board.enabled: true` enables detection and display for configured panes whose
 hosts resolve. The watcher never writes to a pane's PTY, including on recovery, restart, or
 repeated failures. It does not join agents, claim identities, configure delivery, or send
-participation instructions. Participation through hooks belongs to the follow-up work in
-[#495](https://github.com/tomo-chan/panemux/issues/495), starting with S4.
+participation instructions. Participation, identity selection, and reception use
+[agmsg's official workflow](agmsg-integration.md#integration-with-agmsg). Panemux does not provide
+its own automatic participation hook.
 
 Detection uses the registry's Board rules for `claude`, `codex`, `cursor`, `gemini`, `grok-build`,
 and `opencode`. Explicit-only and desktop agents are not guessed. Each poll refreshes the detected
