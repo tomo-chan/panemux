@@ -17,11 +17,23 @@ message's `from`, not the calling session: agmsg must not assign that name to th
 caller's pane or type `/rename` into it. The fixed value overrides inherited settings;
 `--force`, sender/recipient arguments, and message bodies retain their transport contract.
 
+The fixed execution wrapper also removes `BASH_ENV` and `ENV`, so child Bash startup
+files cannot turn naming back on. It removes the pinned built-in drivers' pane markers
+(`TMUX`, `TMUX_PANE`, `HERDR_ENV`, `HERDR_SOCKET_PATH`, `HERDR_PANE_ID`,
+`ORCA_TERMINAL_HANDLE`, `CLAUDE_CODE_ENTRYPOINT`) and `CODEX_THREAD_ID`, which can
+recover a Codex pane. Without a caller pane, upstream self-rename returns before
+reading or writing a rename mark: `off` alone would leave a durable skip mark that
+could suppress the sender's next enabled action. HOME, PATH and agmsg storage settings
+remain available. A new terminal driver's identity mechanism must be reviewed when
+changing the supported agmsg version.
+
 The contract verifies observable behavior, not log wording or private storage:
 
 - joining assigns the requested pane identity;
 - sending with `--force` preserves sender, recipient, and arbitrary body text;
 - script execution disables the self-naming family even when inherited settings enable it;
+- child Bash startup cannot restore naming, and Board sends leave the sender's next
+  enabled rename action available without deleting or changing existing agent marks;
 - reads return the required JSONL fields in source order with opaque IDs;
 - reads do not mark messages as consumed;
 - identity claims and pane-specific watchers isolate same-project Claude sessions;
@@ -37,6 +49,9 @@ Parser, cursor, command-wrapper, availability, and real-install contract tests l
 `internal/agmsg`; the relay and own-send transition tests remain in `internal/board`. Fixtures are regenerated from a verified release commit SHA, never
 hand-authored. This tier catches regressions in panemux without requiring agmsg, a network, or
 external state.
+
+`TestAgmsgBashStartupAndPaneIsolation` uses a Bash-shebang observer across sh, bash,
+and zsh login shells, local and simulated SSH execution, and send/read/install/update.
 
 ### Tier 2: real installation
 
@@ -56,6 +71,11 @@ runs skip when no explicit agmsg path is supplied.
 
 Assertions must describe facts Agent Board depends on. Exact diagnostic sentences, timing based on
 fixed sleeps, and incidental process ancestry are not contract behavior.
+
+`TestAgmsgContract_BoardSendDoesNotSuppressLaterRename` reads only the public upstream
+self-rename function, with fake driver and mark dependencies. It verifies that a Board
+send leaves no mark or keystroke, followed by a successful enabled sender action.
+It does not copy or read the installed instance's private store.
 
 The workflow reads the version from `internal/agmsg/agmsg_version.go` and commit from
 `internal/agmsg/tool.go`, and selects pull requests touching `internal/agmsg/`,

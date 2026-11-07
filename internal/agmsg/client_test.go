@@ -36,7 +36,8 @@ func captureBoardLog(t *testing.T) *bytes.Buffer {
 func requireBoardCallScript(t *testing.T, script string, args []string) {
 	t.Helper()
 	if strings.Contains(strings.Join(args, " "), "board-send") || strings.HasSuffix(args[0], "/scripts/api.sh") {
-		require.Equal(t, `export AGMSG_SELF_NAME=off; exec "$@"`, script)
+		require.Contains(t, script, "export AGMSG_SELF_NAME=off\n")
+		require.True(t, strings.HasSuffix(script, `exec "$@"`))
 	} else {
 		require.Equal(t, `exec "$@"`, script)
 	}
