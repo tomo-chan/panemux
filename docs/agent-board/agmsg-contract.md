@@ -54,6 +54,10 @@ external state.
 and zsh login shells, local and simulated SSH execution, and send/read/install/update.
 The observer verifies the expected HOME, exact post-login PATH, and storage settings;
 a unique inert PATH entry distinguishes preservation from a child shell's defaults.
+The data-only [preserved-settings.env](../../internal/agmsg/testdata/self-name/preserved-settings.env)
+fixture pins exact values for public storage configuration, driver/plugin selection,
+SQLite/JSONL options, locking and sync helper settings. Each deletion mutant must fail
+the observer; operation state and test-only fault injection are outside this fixture.
 
 ### Tier 2: real installation
 

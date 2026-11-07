@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -81,8 +82,26 @@ func startupEnvironment(t *testing.T) string {
 		"ORCA_TERMINAL_HANDLE", "CLAUDE_CODE_ENTRYPOINT", "CODEX_THREAD_ID"} {
 		t.Setenv(name, "inherited-pane")
 	}
-	t.Setenv("AGMSG_STORAGE_PATH", "/workspace/sample-store")
+	preservedAgmsgSettings(t)
 	return home
+}
+
+func preservedAgmsgSettings(t *testing.T) {
+	t.Helper()
+	path, err := filepath.Abs("testdata/self-name/preserved-settings.env")
+	require.NoError(t, err)
+	contents, err := os.ReadFile(path)
+	require.NoError(t, err)
+	t.Setenv("PANEMUX_TEST_EXPECT_SETTINGS", path)
+	for _, line := range strings.Split(string(contents), "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, value, found := strings.Cut(line, "=")
+		require.True(t, found)
+		require.True(t, strings.HasPrefix(name, "AGMSG_"))
+		t.Setenv(name, value)
+	}
 }
 
 func TestAgmsgBashStartupAndPaneIsolation(t *testing.T) {

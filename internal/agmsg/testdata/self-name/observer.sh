@@ -2,7 +2,10 @@
 set -eu
 test "${AGMSG_SELF_NAME:-}" = off
 test "${BASH_ENV:-}${ENV:-}" = ''
-test "${AGMSG_STORAGE_PATH:-}" = /workspace/sample-store
+while IFS='=' read -r variable expected; do
+  case "$variable" in ''|'#'*) continue ;; esac
+  test "${!variable-}" = "$expected"
+done < "$PANEMUX_TEST_EXPECT_SETTINGS"
 test "${HOME:-}" = "$PANEMUX_TEST_EXPECT_HOME"
 test "${PATH:-}" = "$PANEMUX_TEST_EXPECT_PATH"
 for variable in TMUX TMUX_PANE HERDR_ENV HERDR_SOCKET_PATH HERDR_PANE_ID \
