@@ -75,8 +75,11 @@ false positive from the broader extraction.
 | `SystemRoot` | Preserve | `scripts/daemon.sh:474`; `scripts/lib/windows-elevation.sh:29-30` | Windows system-directory fallback used to locate native system executables; distinct from `SYSTEMROOT`. |
 | `agmsgd_lock_sql_PID` | Out of scope; excluded from configuration counts | `scripts/daemon.sh:141-142` | Bash creates this PID for the named `coproc agmsgd_lock_sql`; it is operation state, not inherited configuration. |
 
-To repeat the case-complete audit, scan only the pinned public `scripts/` tree
-(including `scripts/lib/`; this release has no top-level `lib/`). Match shell names
+To repeat the case-complete audit, scan the pinned public `scripts/` tree
+(including `scripts/lib/`; this release has no top-level `lib/`) and `install.sh`.
+Install-time inputs are in scope: `AGMSG_FORCE_WINDOWS` is preserved and read only
+at `install.sh:750`, so scanning `scripts/` alone finds 117 of the 118 preserved
+inputs. Match shell names
 with `[A-Za-z_][A-Za-z0-9_]*`, including `$name`, `${name}`, `${!name}` and `${#name}`;
 scan Node `process.env`, environment-object property and literal bracket reads,
 Python `environ`/`getenv`, PowerShell `$env:`, and the driver manifest detect,
@@ -98,7 +101,7 @@ rg -n -g '!*.md' \
   -e '(process\.env|environment|env)\.' \
   -e 'environ|getenv|\$env:|process\.env\[' \
   -e '^(detect|detect_fallback|session_env|spawn_forward_env|session_name_self_source)=' \
-  scripts
+  scripts install.sh
 ```
 
 Fixtures are data only: split each non-comment line at its first `=`, preserve the
