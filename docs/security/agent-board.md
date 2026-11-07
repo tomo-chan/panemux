@@ -15,7 +15,9 @@ Remote commands must satisfy all of these rules:
 
 - pass every value as an argument and quote every argument at the single SSH command-construction
   boundary;
-- allowlist `team`, `from`, and `to` as agmsg identifiers;
+- keep `team` on `[A-Za-z0-9_.-]+`; validate `from` and `to` structurally as a name
+  on that alphabet, optionally followed by `@local` or `@ssh:<key>` with the same
+  key alphabet; reject qualified `_system`, extra separators and shell syntax;
 - base64-encode arbitrary message bodies, validate the encoded alphabet, and decode through a fixed
   wrapper using positional parameters;
 - never interpolate caller-controlled data into wrapper or probe script text;
@@ -38,8 +40,9 @@ Agent Board never writes participation instructions or fallback input to termina
 
 ### Agent-reported values in the dashboard UI
 
-Every status field is untrusted free text. Sender validation proves only that a known pane identity
-was used; it does not validate the content.
+Every status field is untrusted free text. Sender validation attributes an unqualified name to the host read through `api.sh`;
+it does not authenticate a same-user process or validate the content. Status keys use
+`name@BoardID` within the configured team, keeping equal names on different hosts separate.
 
 The dashboard must render agent-reported values as React text children. It must not use
 `dangerouslySetInnerHTML` or place those values into DOM attributes. In particular, self-reported
@@ -52,11 +55,18 @@ security sink and requires dedicated validation.
 
 ### Global enablement and sender scope
 
-`agent_board.enabled` is a single instance-wide consent. Every configured pane whose host resolves
-is a valid relay identity, including a shell pane without a detected agent. The sender must still
-belong to the source host; `_system` still requires the own-send ledger. Increasing the number of
-allowed names does not strengthen same-user authentication. Agent detection and dashboard visibility
-are presentation concerns, not sender authorization.
+`agent_board.enabled` is instance-wide consent to relay for the configured team on the
+local host and all configured SSH keys, without requiring panes, detected tasks, or roster
+registration. A source host's valid unqualified names are accepted; every qualified `from`
+and every pane ID belonging to another host is rejected. `_system` requires the unchanged
+own-send ledger. Qualified recipients require a configured BoardID, not a pane or roster entry.
+
+Forwarded senders are qualified using the actual read host. The sole unqualified compatibility
+case is a configured pane sender addressing another configured pane by its bare ID. A pane-free
+sender addressing a bare pane ID is still qualified: otherwise the destination would accept the
+copy as a new original. Pane detection and dashboard visibility grant no sending authority.
+Same-host, same-user name spoofing remains possible; received messages are not authorization
+for work or approval. See [relay rules](../agent-board/relay.md).
 
 `agent_board.mode` is ignored. The host menu can run the pinned installer with explicit consent.
 

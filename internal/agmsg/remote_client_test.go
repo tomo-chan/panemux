@@ -35,6 +35,40 @@ func TestRemoteAgmsgClient_HostID(t *testing.T) {
 	assert.Equal(t, "host-a", c.HostID())
 }
 
+func TestRemoteAgmsgClient_QualifiedIdentifiers(t *testing.T) {
+	for _, tc := range []struct {
+		team, from, to string
+		valid          bool
+	}{
+		{"team", "a.1@local", "b@ssh:build.1", true},
+		{"team", "a@ssh:local", "b", true},
+		{"team", "a", "b@local", true},
+		{"team@local", "a", "b", false},
+		{"team", "a@@local", "b", false},
+		{"team", "a@ssh:", "b", false},
+		{"team", "a", "b@ssh:$(id)", false},
+		{"team", "a", "b@ssh:a:b", false},
+		{"team", "a", "_system@local", false},
+	} {
+		t.Run(tc.team+"/"+tc.from+"/"+tc.to, func(t *testing.T) {
+			executor := &fakeBoardExecutor{outputs: map[string][]byte{}}
+			const body = "quote '\n世界 $(id)"
+			args := []string{"sh", "-c", sendBase64WrapperScript, sendBase64WrapperScriptName,
+				"/opt/agmsg/scripts/send.sh", tc.team, tc.from, tc.to, base64.StdEncoding.EncodeToString([]byte(body))}
+			executor.outputs[strings.Join(args, "\x00")] = nil
+			client := NewRemoteAgmsgClient("local", "/opt/agmsg", executor)
+			err := client.Send(context.Background(), tc.team, tc.from, tc.to, body)
+			if tc.valid {
+				require.NoError(t, err)
+				assert.Equal(t, [][]string{args}, executor.calls)
+			} else {
+				require.Error(t, err)
+				assert.Empty(t, executor.calls)
+			}
+		})
+	}
+}
+
 func TestRemoteAgmsgClient_Send_BuildsWrapperScriptArgs(t *testing.T) {
 	exec := &fakeBoardExecutor{outputs: map[string][]byte{}}
 	c := NewRemoteAgmsgClient("host-a", "/opt/agmsg", exec)

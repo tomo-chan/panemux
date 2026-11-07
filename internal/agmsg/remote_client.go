@@ -18,8 +18,8 @@ const execArguments = `exec "$@"`
 // inherited opt-in on the execution host with the public agmsg family opt-out.
 const agmsgExecArguments = `export AGMSG_SELF_NAME=off; exec "$@"`
 
-// validAgmsgIdentifier constrains team/from/to values (pane IDs, the
-// configured team name, or SystemID) to a safe, constrained alphabet before
+// validAgmsgIdentifier constrains team values to the existing safe alphabet.
+// From/to use board.ParseIdentity's structured name and BoardID validation before
 // they are ever placed in a Runner.Run argument list — the same
 // regex-allowlist-then-quote shape internal/session/ssh.go's
 // validRemotePath already applies to cwd.
@@ -121,11 +121,11 @@ func validateIdentifiers(team, from, to string) error {
 	if err := validateAgmsgIdentifier("team", team); err != nil {
 		return err
 	}
-	if err := validateAgmsgIdentifier("from", from); err != nil {
-		return err
+	if _, err := board.ParseIdentity(from); err != nil {
+		return fmt.Errorf("agmsg: invalid from: %w", err)
 	}
-	if err := validateAgmsgIdentifier("to", to); err != nil {
-		return err
+	if _, err := board.ParseIdentity(to); err != nil {
+		return fmt.Errorf("agmsg: invalid to: %w", err)
 	}
 	return nil
 }

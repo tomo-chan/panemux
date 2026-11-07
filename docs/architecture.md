@@ -253,8 +253,9 @@ frames a localhost page. Behavior is in [the split preview](behavior/preview.md)
 - [Quality gateway](quality-gateway.md) — how architectural contracts are verified.
 - [Decision log](DECISIONLOG.md) — tradeoffs and superseded approaches removed from this guide.
 
-Agent Board enablement is instance-wide; delivery mode is deprecated and ignored. Its relay accepts all configured
-pane identities on their owning hosts; bootstrap supplies a synchronized participation snapshot
+Agent Board enablement is instance-wide; delivery mode is deprecated and ignored. Its relay accepts valid unqualified
+agmsg names on their source hosts without pane or roster prerequisites, rejects qualified senders
+and wrong-host configured pane IDs, and routes qualified recipients by BoardID; bootstrap supplies a synchronized participation snapshot
 for the authenticated status API. Dashboard membership is based on detected agents or reports.
 The agmsg installation location is fixed per host. Host tool management coordinates manual
 Install / Update and instance-wide automatic updates with board call leases and discovery revisions.

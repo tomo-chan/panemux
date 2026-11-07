@@ -1,0 +1,2 @@
+{"type":"message_sent","id":"01a1b449-9a88-7d6c-8c93-8e3d9d8e6414","team":"relay-contract","from":"orch.1@local","to":"worker.2@ssh:build.1","body":"'quoted' $(id) `whoami`\n世界","at":"2026-11-07T04:34:45Z"}
+{"type":"message_sent","id":"01a1b449-9a88-7e9c-8045-7be5a5469bdd","team":"relay-contract","from":"worker.2@ssh:build.1","to":"orch.1@local","body":"'quoted' $(id) `whoami`\n世界","at":"2026-11-07T04:34:45Z"}

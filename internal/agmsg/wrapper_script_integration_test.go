@@ -2,7 +2,6 @@ package agmsg
 
 import (
 	"context"
-	"encoding/base64"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +24,25 @@ func quoteArgsLikeSession(args []string) string {
 		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
 	}
 	return strings.Join(quoted, " ")
+}
+
+// shellMessageRunner exercises the actual adapter and the local/SSH shell boundary.
+type shellMessageRunner struct {
+	stub string
+	ssh  bool
+}
+
+func (r shellMessageRunner) Run(ctx context.Context, script string, args ...string) ([]byte, error) {
+	args = append([]string(nil), args...)
+	args[4] = r.stub
+	//nolint:gosec // fixed production script, validated arguments and a test-owned executable
+	command := exec.CommandContext(ctx, "sh", append([]string{"-c", script, "observer"}, args...)...)
+	if r.ssh {
+		cmd := "sh -c " + shellQuoteForTest(script) + " observer " + quoteArgsLikeSession(args)
+		//nolint:gosec // exercise SSH quoting with validated arguments
+		command = exec.CommandContext(ctx, "sh", "-c", cmd)
+	}
+	return command.CombinedOutput()
 }
 
 // TestSendBase64WrapperScript_RealShell_DecodesMetacharacterBody proves the
@@ -52,23 +70,17 @@ func TestSendBase64WrapperScript_RealShell_DecodesMetacharacterBody(t *testing.T
 	//nolint:gosec // G306: test fixture needs the exec bit
 	require.NoError(t, os.WriteFile(sendStub, []byte(stubScript), 0700))
 
-	body := `it's; $(evil) && ` + "`echo hi`" + ` | rm -rf / ; "double" 'single'`
-	encoded := base64.StdEncoding.EncodeToString([]byte(body))
+	body := `it's; $(evil) && ` + "`echo hi`" + ` | rm -rf / ; "double" 'single'` + "\n世界"
+	for _, ssh := range []bool{false, true} {
+		client := NewRemoteAgmsgClient("local", "/opt/agmsg", shellMessageRunner{stub: sendStub, ssh: ssh})
+		require.NoError(t, client.Send(context.Background(), "team-a", "from.1@ssh:build.1", "to.2@local", body))
 
-	args := []string{
-		"sh", "-c", sendBase64WrapperScript, sendBase64WrapperScriptName,
-		sendStub, "team-a", "from-a", "to-a", encoded,
+		captured, err := os.ReadFile(capturePath)
+		require.NoError(t, err)
+		fields := strings.Split(strings.TrimSuffix(string(captured), "\x00"), "\x00")
+
+		require.Equal(t, []string{"team-a", "from.1@ssh:build.1", "to.2@local", body, "--force"}, fields)
 	}
-	cmd := quoteArgsLikeSession(args)
-
-	out, err := exec.CommandContext(context.Background(), "sh", "-c", cmd).CombinedOutput()
-	require.NoError(t, err, "shell command failed: %s", string(out))
-
-	captured, err := os.ReadFile(capturePath)
-	require.NoError(t, err)
-	fields := strings.Split(strings.TrimSuffix(string(captured), "\x00"), "\x00")
-
-	require.Equal(t, []string{"team-a", "from-a", "to-a", body, "--force"}, fields)
 }
 
 func shellQuoteForTest(path string) string {

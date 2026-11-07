@@ -20,8 +20,11 @@
 - Broadcast delivery is immediate, but dashboard history is updated only when the relay polls the
   row back. The visible lag is at most one poll interval under normal operation.
 
-Configured shell panes are valid senders and recipients on their owning hosts even when they
-have no detected agent or self-report. The UI lists only detected agents or reporting panes.
+Relay accepts host-local agmsg names without panes or roster lookups. Qualified recipients
+select a configured BoardID, including hosts without panes. Unqualified names stay local except
+for the legacy configured pane-ID route. Bare sender compatibility is limited to configured pane
+senders; pane-free senders are qualified even on that route. The current UI still lists only
+detected agents or reporting configured panes; pane-free identity presentation is separate.
 
 ### Delivery guarantees
 
@@ -31,14 +34,17 @@ have no detected agent or self-report. The UI lists only detected agents or repo
 - Delivery is not guaranteed complete. Because agmsg has no forward cursor, a burst larger than the
   poll window can drop its oldest overflow rows.
 - There are no message claim or lease semantics.
-- agmsg identities are not cryptographically authenticated. The relay rejects unknown and
-  cross-host senders, but a local same-user process can impersonate another valid pane on that host.
+- agmsg names are not cryptographically authenticated. Qualified senders and pane IDs belonging
+  to another host are rejected; a same-user process can impersonate any name on its own host.
+  Receiving a message is not authorization. Cross-host plugins must send/reply with `--force`
+  to the received qualified sender; panemux provides no proxy registration or send wrapper.
 
 ### Bootstrap
 
 - Detection and display do not register participation or configure delivery. PTY onboarding is
   disabled. Participation, identity selection, and reception follow agmsg's official workflow.
-  Board relay and status require membership in the configured team under the pane ID on its owning host.
+  Relay and status accept valid unqualified names read from the configured team on that host;
+  no pane or session mapping is required.
 - Detection alone provides no same-project identity isolation or proof of message reception.
 - Process detection can reject an interactive command whose quoted prompt contains a headless-mode
   exclusion token as a separate whitespace token.
@@ -55,6 +61,13 @@ have no detected agent or self-report. The UI lists only detected agents or repo
 
 ### External dependency
 
+Pinned agmsg v1.7.1 (`f5898f49eb3d3c079c446dab4bca715b832da313`) normalizes trailing
+body newlines. This was observed through its real `send.sh` / public `api.sh` path and is
+reproduced by `TestAgmsgContract_TrailingNewlinesAreNormalized`; panemux's fixed shell
+wrapper also uses command substitution, which removes trailing newlines. The qualified-ID
+contract protects shell syntax, Unicode and embedded newlines as data, not byte-for-byte
+preservation of trailing newlines. No panemux-specific body encoding is added to agmsg messages.
+
 agmsg guarantees compatibility for its read API, not for every write script Agent
 Board uses. The pinned version and two-tier compatibility contract detect drift but cannot prevent a
 future operator-installed release from breaking integration. A detected version outside the covered
@@ -70,8 +83,7 @@ SSH connection establishment starts in the background: polling and bootstrap ret
 without waiting for the dial. Later polls retry, so a pane-less unreachable host cannot consume a
 relay pass's timeout before healthy hosts are polled. Repeated identical poll errors are logged only
 when the failure state changes; a successful pass resets that suppression. All configured keys
-remain available to board execution, including hosts without a board pane. Rows still require a
-known pane sender on the source host.
+remain available to board execution, including hosts without a board pane. Rows use source-host attribution independently of pane presence.
 
 Operator sends wait for a missing SSH connection within the send context, including before the
 first poll and after reconnect or transport loss. Polling and bootstrap continue to use the
