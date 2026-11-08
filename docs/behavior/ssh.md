@@ -114,7 +114,7 @@ Host-key verification uses `known_hosts_file` if configured, or `~/.ssh/known_ho
 
 `tmux_session` must match `^[a-zA-Z0-9_.-]+$`.
 
-`cwd` is validated against `validRemotePath` before use: absolute paths only, no shell metacharacters (`;|&$` + "`" + `'"<>(){}[]!`), no control characters. See *Security Design* in `architecture.md`.
+`cwd` is validated against `validRemotePath` before use: absolute paths only, no shell metacharacters (`;|&$` + "`" + `'"<>(){}[]!`), no control characters. See [Remote path arguments](../security/ssh-execution.md#remote-path-arguments-ssh-working-directory).
 
 Pane settings in the frontend expose a directory browser for `cwd`. Local and local tmux panes browse the local filesystem; `ssh` and `ssh_tmux` panes browse the selected SSH connection's remote filesystem. The browser lists directories only and hides dot-directories by default unless the user enables the hidden-directory toggle.
 
@@ -124,9 +124,7 @@ New sessions created by `ssh_tmux` panes on tmux 3.3 or newer receive the browse
 environment when enabled. Existing sessions and the task dashboard's attach are left as they are;
 see [New remote tmux sessions](url-open.md#new-remote-tmux-sessions).
 
-Persistence behavior:
+### Persistence behavior
 
-- layout and workspace changes are persisted immediately when a save path is available
-- pane resize, split, close, quick-add create, move, workspace add/delete/rename, active-workspace changes, `tab_position` changes, and vertical workspace-bar width changes all follow the same immediate-save path
-- when no `--config` is given, the default save path is `~/.config/panemux/config.yaml`; the directory is created automatically on first save
-- pane maximize state is frontend-local, tracked per workspace, and restored when the user switches away from a workspace and then returns
+Layout/workspace persistence and per-workspace maximize state are specified in
+[Frontend persistence behavior](frontend.md#persistence-behavior).

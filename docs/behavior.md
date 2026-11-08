@@ -97,8 +97,10 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 | Agent Attention Notifications | [notifications.md](behavior/notifications.md) |
 | REST API | [rest-api.md](behavior/rest-api.md) |
 | Agent Board REST API; `GET /api/session-token` | [board-api.md](behavior/board-api.md) |
-| WebSocket Protocol; Command Center WebSocket Protocol | [websocket.md](behavior/websocket.md) |
-| Frontend Runtime Behavior; Pane Git and PR metadata | [frontend.md](behavior/frontend.md) |
+| WebSocket Protocol | [websocket.md](behavior/websocket.md) |
+| Command Center WebSocket Protocol | [command-websocket.md](behavior/command-websocket.md) |
+| Frontend Runtime Behavior | [frontend.md](behavior/frontend.md) |
+| Pane Git and PR metadata | [pane-metadata.md](behavior/pane-metadata.md) |
 | Opening URLs from a Pane | [url-open.md](behavior/url-open.md) |
 | Split Preview; Panes on an SSH host; Localhost URLs of an SSH host; `POST /api/sessions/{id}/preview` | [preview.md](behavior/preview.md) |
 | Task dashboard model and document map | [tasks.md](behavior/tasks.md) |
@@ -123,24 +125,20 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 
 ## Distribution and Installation
 
-- Releases are distributed as versioned `.tar.gz` archives through GitHub Releases.
-- The release archives contain the embedded-frontend CLI binary plus reference files such as `config.example.yaml`.
-- macOS installation is expected through `install.sh`, which downloads the correct archive from GitHub Releases and installs the binary into a user-local bin directory by default.
-- Windows installation is supported through WSL2 by using the Linux release archive and the same shell-based installer flow.
-- The release pipeline builds the frontend first, then cross-compiles the Go binary so the shipped executable already contains `frontend/dist`.
-- Repository automation is Makefile-first: CI and release workflows call `make` targets instead of duplicating raw `npm` and `go` command sequences in workflow steps.
+GitHub Releases provides versioned `.tar.gz` archives containing the embedded-frontend CLI and
+reference files such as `config.example.yaml`. macOS uses `install.sh` to install into a user-local
+bin directory by default; Windows uses the same flow with the Linux archive through WSL2.
+See [Installation](../README.md#installation) for commands and options.
 
-Example installation flow:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh | bash -s -- --repo OWNER/REPO
-```
-
-Example version-pinned installation:
+The installer also accepts repository/version environment variables:
 
 ```sh
 MST_REPO=OWNER/REPO MST_VERSION=v1.2.3 ./install.sh
 ```
+
+The release pipeline builds the frontend before cross-compiling Go. CI and release workflows call
+Make targets rather than duplicating raw npm/Go commands; [Maintenance](maintenance.md) owns those
+procedures.
 
 ## Related Documents
 

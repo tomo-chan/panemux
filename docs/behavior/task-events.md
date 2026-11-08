@@ -246,13 +246,15 @@ it from that store.
 - A matched pane has attention while its task is in `wait` on a host that is `ok`, unless that
   `wait_id` was cleared in this tab. Attention is read from the store as it stands after each frame,
   not kept from one frame to the next, so a reload shows a wait that is still current again.
+- The workspace tab containing a pane with attention flashes only while that workspace is inactive.
+  It clears when the workspace is selected or when the pane no longer has attention.
 - **A wait on a host that is not `ok` gives no attention.** Such a host's tasks are as last observed
   ([Hosts](#hosts)), and while observation was stopped they are what was kept from before
   ([Lifecycle](#lifecycle)): a snapshot after a reload has every host `pending`, and a wait in it
   may already have been answered. It shows once the host answers with the task still in `wait`. The
   host's `ok` frame comes before the difference it found, so a wait that had ended shows for no longer
   than the frames between the two.
-- Attention clears as described in [Agent attention notifications](notifications.md#agent-attention-notifications):
+- Attention clears on user interaction:
   the pane on focus or click, the workspace tab on selecting the workspace — and, in addition, whenever
   the task is no longer in `wait` on an `ok` host, wherever it was answered: a `changed` frame to
   `busy`, `idle`, `run` or `unknown`, `removed`, or its host turning `pending`, `connecting` or
@@ -280,8 +282,7 @@ offers `Review in Tasks` instead, which opens the dashboard on the first of them
 
 #### Browser notifications
 
-- A wait the user cannot currently see is notified once per `wait_id`, under the conditions in
-  [Agent attention notifications](notifications.md#agent-attention-notifications). A wait is visible
+- A wait the user cannot currently see is notified once per `wait_id`. A wait is visible
   when the browser is active and either its pane is on screen, or the task dashboard is on screen and
   lists the task. A task that matches no pane is therefore visible only on the dashboard.
 - A wait is notified only when it starts while its host is `ok`: a frame that starts it, or a
@@ -330,6 +331,6 @@ not known, so the dashboard shows none rather than the collected time of an earl
 ## Related Documents
 
 - Task dashboard collection and states: [task-collection.md](task-collection.md)
-- Notification conditions and attention indicators: [notifications.md](notifications.md)
+- Notification overview and permission prompt timing: [notifications.md](notifications.md)
 - Collection command safety: [Task dashboard collection](../security/task-collection.md)
 - Architecture: [architecture.md](../architecture.md)

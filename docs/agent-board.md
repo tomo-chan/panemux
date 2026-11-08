@@ -68,7 +68,7 @@ agmsg's scripts; it never reads agmsg's database or team files directly.
 | `/api/session-token` | loopback-only browser bootstrap for authentication and feature flags |
 
 Exact request/response behavior lives in [Agent Board REST API](behavior/board-api.md) and
-[Command Center WebSocket Protocol](behavior/websocket.md#command-center-websocket-protocol).
+[Command Center WebSocket Protocol](behavior/command-websocket.md#command-center-websocket-protocol).
 
 ## Document map
 
