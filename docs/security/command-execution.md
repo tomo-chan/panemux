@@ -15,9 +15,10 @@ validation, trust assumptions and failure contract.
 - Keep executable selection rooted in hardcoded literals or trusted system sources without a
   data-flow path from user input, as the general rules require. Sanitizing a caller-derived string
   does not by itself make it a trusted executable.
-- Keep variable operands separate from shell program text. Use discrete argv where possible;
-  where a remote shell parses a command, apply that boundary's allowlist before its quoting or
-  fixed transport encoding. Quoting alone is not the accepted remote-path guard.
+- Keep variable operands separate from shell program text. Use discrete argv where possible.
+  Follow each boundary's data transport: quoted heredocs for launch prompts and hook content,
+  fixed encoding for arbitrary host-execution operands, and validation before quoting where
+  required for paths, tmux names and IDs. Quoting alone is not the accepted remote-path guard.
 - A value reported by a host is untrusted too. Validate it before reuse at an execution sink;
   render display-only values as text, with the boundary's bounds and character checks.
 - Preserve each boundary's refusal, cancellation, output and privacy contracts. A lookup failure

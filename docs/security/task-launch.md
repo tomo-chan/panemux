@@ -26,7 +26,7 @@ literal `sh -s`, with the script on stdin; the remote login shell parses only th
 |---|---|
 | agent | Request-selected registry ID with the requested launch/resume adapter (`checkLaunchSessionID`); registry IDs exclude quotes. |
 | mode | Go constant `new` or `resume`. |
-| session ID | crypto/rand UUID for new Claude; empty for new Codex, which chooses its own; request UUID (`validUUID`) for either resume. |
+| session ID | Source: crypto/rand UUID for new Claude; empty for new Codex, which chooses its own; request value for either resume. Check: the agent's adapter must accept it (`validNewSessionID` for new tasks): `validUUID` for new Claude and either resume, empty for new Codex. |
 | tmux name | `task-` plus Claude ID's first eight characters, Codex resume ID's last eight, or eight crypto/rand hex digits for new Codex; must pass `validTmuxSessionName`. |
 | heredoc tag | 32 crypto/rand hex characters, matching `^[0-9a-f]{32}$`. |
 | working directory | Request or resumed conversation log; must pass `session.ValidateRemotePath`, the [SSH path guard](ssh-execution.md#remote-path-arguments-ssh-working-directory). |

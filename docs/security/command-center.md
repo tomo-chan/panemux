@@ -11,8 +11,8 @@ description: "Command center subprocess execution, token handling, and working d
 ### Command center subprocess execution
 
 `internal/commandcenter/runner.go`'s `Runner` is the other place in this repository, besides
-`internal/session` and `openChrome` (see
-[command-execution.md](command-execution.md#security-command-execution-sinks)), that calls
+`internal/session` (see [shell paths](shell-path.md), [tmux](tmux.md) and
+[SSH execution](ssh-execution.md)) and `openChrome` (see [browser launch](browser-open.md)), that calls
 `exec.Command`/`exec.CommandContext` on a value not fully known at compile time. Per the security
 design's [General Rules](../security.md#general-rules): the command name (`r.claudeBin`) is a
 hardcoded literal (`"claude"`) unless an operator explicitly overrides it via

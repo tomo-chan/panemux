@@ -35,9 +35,9 @@ in the repository or in the diff itself.
    `docs/development/` that carries the long form of whichever of its rules the
    diff engages. `docs/security.md` is whenever the diff touches command
    execution, shell arguments, SSH paths, host keys, or `gosec` posture — and
-   it is an index: read the file under `docs/security/` that owns the sink the
-   diff touches (`command-execution.md`, `agent-board.md`, `command-center.md`,
-   `auth.md`, `url-open.md`), not the index alone.
+   it carries the boundary map: read the per-boundary files listed there that
+   own the sinks the diff touches. `command-execution.md` carries common rules
+   and routes; follow those routes to the sink requirements, not the entrance alone.
 4. The surrounding code the diff does not touch, wherever a finding depends on
    how the change fits what is already there.
 
@@ -51,8 +51,8 @@ Only two things:
 - **A stated requirement it violates.** A rule written in this repository that
   the diff breaks. Quote the rule and cite the file. `DEVELOPMENT.md`'s TDD
   rule, its test-granularity rules and its path-sanitization rule, and the
-  command-execution rules in `docs/security.md` and
-  `docs/security/command-execution.md` are the ones that bite most often.
+  command-execution rules in `docs/security.md`, `docs/security/command-execution.md`
+  and the per-boundary security files they link are the ones that bite most often.
 
 Two shapes deserve particular attention, because they are the ones this
 repository's own gates cannot see (`docs/quality-gateway.md`, "The specific
