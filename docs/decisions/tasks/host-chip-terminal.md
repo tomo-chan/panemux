@@ -11,4 +11,4 @@ pane/session. A popover chooses ssh/ssh_tmux and destination without crowding th
 Server-owned name generation avoids duplicating validation in the browser. Popup lifetime reuses
 task attaches with separate host/task deletion routes. Session selection for an existing remote
 tmux session and a special ssh-only gesture were rejected.
-See [task behavior](../../behavior/tasks.md) for the current interaction.
+See [Opening a host](../../behavior/task-navigation.md#opening-a-host) for the current interaction.

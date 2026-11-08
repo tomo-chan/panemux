@@ -15,4 +15,4 @@ review found editors/tail misrecognized. Liveness also prevents reboot pid reuse
 A fixed stdin script gives one round trip per host and identical parsing locally/remotely. Local
 cancellation kills its process group so child stdout cannot outlive the timeout. Stopped tasks
 cannot claim today's branch/PR. Browser-owned pane matching avoids duplicating layout state.
-See [task behavior](../../behavior/tasks.md) for listing bounds and current interaction rules.
+See [Task collection](../../behavior/task-collection.md) for listing bounds and [navigation](../../behavior/task-navigation.md) for current interaction rules.

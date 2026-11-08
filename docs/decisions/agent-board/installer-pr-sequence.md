@@ -2,7 +2,6 @@
 type: Decision
 title: "Split installer work into three PRs (2026-10-30, #435 / #438)"
 description: "Split execution infrastructure, manual installation and automatic updates into sequential reviewable slices."
-status: deprecated
 ---
 
 # Split installer work into three PRs (2026-10-30, #435 / #438)

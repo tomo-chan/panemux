@@ -32,4 +32,4 @@ dashboard rather than as a pane added to a workspace; #283 is its backend. Decid
   With tmux's default `latest`, the window follows the client used last and returns to the other
   client's size when the attach ends, which was checked on a private tmux server.
 
-Current contracts: [tasks guide](../../behavior/tasks.md).
+Current contracts: [Task navigation and terminals](../../behavior/task-navigation.md#opening-a-task).

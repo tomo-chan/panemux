@@ -12,4 +12,4 @@ Configured prefix/template pairs replace a Jira-shaped regex that misread UTF-8,
 References are links, never queried, so panemux needs no tracker credentials. HTTPS templates keep
 identifiers after the authority. Go URL parsing accepts authorities browsers reject; conservative
 validation and a shared Go/TS corpus protect the task list from one malformed link.
-See [task behavior](../../behavior/tasks.md) for current matching and URL contracts.
+See [Repository and issue metadata](../../behavior/task-records.md#repository-branch-pull-request-issues-and-references) for current matching and URL contracts.

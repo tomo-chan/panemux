@@ -30,4 +30,4 @@ seeing other tasks while answering. #284 builds it on #283's attach. Decided:
   dashboard's UI is English throughout, so the popup's are `Type in pane`, `Close`, `Connecting…`,
   `Typing` and so on.
 
-Current contracts: [tasks guide](../../behavior/tasks.md).
+Current contracts: [Task navigation and terminals](../../behavior/task-navigation.md#opening-a-task).

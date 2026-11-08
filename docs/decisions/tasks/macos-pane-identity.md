@@ -13,4 +13,4 @@ observed argv and require exactly one marker: flattened argv/environment cannot 
 A single occurrence inside another variable can still claim a pane. This was explicitly accepted:
 the same user can set the marker directly and the effect only focuses an existing same-host pane.
 Rejecting multiline environments loses legitimate agents without fixing the space form.
-See [task behavior](../../behavior/tasks.md) and [command security](../../security/command-execution.md).
+See [Pane environment identity](../../behavior/task-navigation.md#the-pane-of-an-agent-outside-tmux) and [command security](../../security/command-execution.md).

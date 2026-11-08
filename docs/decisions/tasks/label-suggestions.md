@@ -11,4 +11,4 @@ already reads them, so a separate labels endpoint adds a request/failure state w
 Tags fit comma-separated input better than a whole-field dropdown. Review caught clicks discarding
 completed labels and UTF-16 sorting disagreeing with Go on non-BMP characters; preserve complete
 values and use the same code-point ordering on both sides.
-See [task behavior](../../behavior/tasks.md) for current UI limits and behavior.
+See [Task labels](../../behavior/task-records.md#done-and-labels) for current UI limits and behavior.

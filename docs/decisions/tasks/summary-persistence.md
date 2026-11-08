@@ -13,4 +13,4 @@ Restore does not immediately ask again; retention lets temporarily absent tasks 
 Busy logs are not read on every change just to optimize cache reuse.
 Unusable files move aside unchanged before saving resumes: refusing unknown versions indefinitely
 would leave answers unsaved until someone noticed. Disabling summaries leaves the file untouched.
-See [task behavior](../../behavior/tasks.md) for current persistence and retention rules.
+See [Saved summaries](../../behavior/task-summaries.md#saved-summaries) for current persistence and retention rules.

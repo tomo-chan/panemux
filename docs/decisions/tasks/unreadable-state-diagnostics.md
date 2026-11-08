@@ -11,4 +11,4 @@ The live process is now the task and its unreadable file a diagnostic; omitting 
 list its newest log again as a stopped task. Only invalid pid/sessionId make the file unreadable;
 malformed optional fields are absent. Warnings aggregate across hosts and log on change rather
 than each poll. Dead-process leftovers remain ignored.
-See [task behavior](../../behavior/tasks.md) for the authoritative diagnostic contract.
+See [Unreadable state files](../../behavior/task-collection.md#unreadable-state-files) for the authoritative diagnostic contract.

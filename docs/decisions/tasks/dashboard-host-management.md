@@ -15,4 +15,4 @@ ProxyJump dependencies, not names alone. Edits invalidate in-flight dials as wel
 Review found a map-only lock let layout saves persist rolled-back host changes. One configuration
 lock covers snapshots through writes and readers. Existing hand-written names stay editable;
 invalid saved ports must not make the list unreadable.
-See [task behavior](../../behavior/tasks.md) and [SSH security](../../security/command-execution.md).
+See [SSH connection management API](../../behavior/rest-api.md#apiconfigssh-connections) and [SSH security](../../security/command-execution.md).

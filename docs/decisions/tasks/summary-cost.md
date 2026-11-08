@@ -14,4 +14,4 @@ empty directory is not invented as remaining work. Organization policy may subst
 model; retain the already-paid answer, show its bounded model ID and log a warning once per model.
 Incremental summaries were rejected for drift and extra saved state; debounce saved nothing in the
 measured sequence, and smaller budgets lost context for fractions of a cent.
-See [task behavior](../../behavior/tasks.md).
+See [Task summaries](../../behavior/task-summaries.md).

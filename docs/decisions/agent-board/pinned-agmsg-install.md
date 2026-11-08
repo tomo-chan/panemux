@@ -2,7 +2,6 @@
 type: Decision
 title: "Manual pinned agmsg installation (2026-10-30, #435 B2)"
 description: "Verify pinned source for offline reuse and warn on differing releases, including newer patches."
-status: deprecated
 ---
 
 # Manual pinned agmsg installation (2026-10-30, #435 B2)

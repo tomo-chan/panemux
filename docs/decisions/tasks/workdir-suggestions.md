@@ -11,4 +11,4 @@ would drift; a remove button would be misleading because the next collection res
 A combobox fits whole paths better than tags. Launch path validation applies, but probing existence
 on every collection was rejected; start handles deleted directories. Suggestions intentionally
 vanish when their last task leaves the bounded listing.
-See [task behavior](../../behavior/tasks.md).
+See [Working-directory discovery](../../behavior/task-launch.md#dashboard-discovery).

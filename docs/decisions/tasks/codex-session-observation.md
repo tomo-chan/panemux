@@ -17,4 +17,4 @@ The CLI directory is appended to PATH: prepending it could replace arbitrary com
 node remains accepted rather than depending on npm/native package layout.
 Original no-summary/approval-busy limits were replaced by [Codex summaries](codex-summary-runner.md)
 and [permission observation](../maintenance/codex-permission-observation.md).
-See [task behavior](../../behavior/tasks.md) for the current collection/launch contract.
+See [Codex collection](../../behavior/task-collection.md#codex-sessions) and [Codex launch](../../behavior/task-launch.md#codex-launch) for the current contracts.

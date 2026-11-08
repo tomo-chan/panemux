@@ -2,7 +2,6 @@
 type: Decision
 title: "Global board participation and installer split (2026-10-29, #435 / #438)"
 description: "Replace pane switches with instance-wide opt-in while preserving the existing same-user trust boundary."
-status: deprecated
 ---
 
 # Global board participation and installer split (2026-10-29, #435 / #438)

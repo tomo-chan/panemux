@@ -14,4 +14,4 @@ Unknown states are not summarized automatically because a new status might trigg
 poll. Failures use fixed messages and do not retry unchanged input. Selection must match collection:
 mtime-only selection once chose the wrong copy when two logs changed in the same second.
 Memory-only caching and the original tool policy were replaced by [persistence](summary-persistence.md)
-and [cost reduction](summary-cost.md). See [task behavior](../../behavior/tasks.md) for current limits.
+and [cost reduction](summary-cost.md). See [Summary input and privacy](../../behavior/task-summaries.md#reading-and-privacy) for current limits.
