@@ -61,7 +61,7 @@ The pane that belongs to a task is found in the browser from the current workspa
   [collection security](../security/command-execution.md#task-dashboard-collection).
 - Apple's own binaries (`/bin/sleep`, `/bin/zsh`) and other users' processes expose no environment
   on macOS. Claude, Codex's node wrapper/native binary and node do expose it. See the
-  [macOS decision](../DECISIONLOG.md#reading-panemux_pane_id-on-macos-through-ps--e-2026-09-27-issue-263).
+  [macOS decision](../decisions/tasks/macos-pane-identity.md).
 - The environment is the one the process was started with: changing the variable afterwards inside
   a running agent has no effect.
 - The value is untrusted, since any process of the user can set it. Collection keeps only a value

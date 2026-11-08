@@ -388,7 +388,7 @@ exactly one ` PANEMUX_PANE_ID=<id>` inside another variable's value — preceded
 value, as in `AAA='x PANEMUX_PANE_ID=<id>'`, including a space that follows a newline — reports
 `<id>`, because `ps -E` prints it and the real entry alike. Directly after a newline, with no
 space, it is not read. Linux, reading NUL-separated entries, reports nothing for either. This is accepted
-([decision log](../DECISIONLOG.md#reading-panemux_pane_id-on-macos-through-ps--e-2026-09-27-issue-263)):
+([decision log](../decisions/tasks/macos-pane-identity.md)):
 only someone who can already start an agent as the same user outside a pane can plant such a value,
 and a process of that user can set `PANEMUX_PANE_ID` itself anyway; the result is at most a
 `Go to pane` that focuses another existing pane, and no command runs.

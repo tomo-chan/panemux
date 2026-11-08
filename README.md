@@ -374,7 +374,7 @@ Authentication is attempted in order: the key file (`key_file`, or the `Host` bl
 
 Start with the [documentation index](docs/index.md). It separates a short product
 [overview](docs/overview.md), concise current-state topic guides, focused deep dives, and the
-[decision log](docs/DECISIONLOG.md) that preserves design history and rejected alternatives.
+[decision log](docs/decisions/index.md) that preserves design history and rejected alternatives.
 
 ---
 

@@ -1,0 +1,16 @@
+---
+type: Decision
+title: "Summaries kept across restarts and reused by their input (2026-10-10, issue #352)"
+description: "Persist excerpt-keyed answers to avoid paying again after restarts or tool-output-only log updates."
+---
+
+# Summaries kept across restarts and reused by their input (2026-10-10, issue #352)
+
+Memory-only, mtime/size-keyed caching paid again after restart or tool-output-only log changes.
+Persist answers and hash the actual excerpt with agent/summarizer version to avoid those costs
+without storing excerpts. A separate file isolates regenerable cache from human records.
+Restore does not immediately ask again; retention lets temporarily absent tasks reuse answers.
+Busy logs are not read on every change just to optimize cache reuse.
+Unusable files move aside unchanged before saving resumes: refusing unknown versions indefinitely
+would leave answers unsaved until someone noticed. Disabling summaries leaves the file untouched.
+See [Saved summaries](../../behavior/task-summaries.md#saved-summaries) for current persistence and retention rules.

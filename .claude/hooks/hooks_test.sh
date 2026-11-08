@@ -643,7 +643,8 @@ fi
 # --- D6: the stop gate is not make check -------------------------------------
 #
 # Putting all of make check in the Stop hook would run the frontend build and
-# the whole -race suite on every turn. Decision D6 says explicitly not to, and
+# the whole -race suite on every turn. Decision D6
+# (docs/decisions/quality-gateway/fast-stop-hook.md) says explicitly not to, and
 # a gate that sacrifices fast feedback gets bypassed — so the absence is
 # asserted rather than left to reviewer memory.
 # Comment lines are stripped first: the script's own header explains why it is

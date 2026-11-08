@@ -207,4 +207,4 @@ Command Center for another agent would be its own extension.
 - [Adding an agent](agent-registry/adding-an-agent.md) — the steps, the capability table and the fixture agent.
 - [Task dashboard behavior](behavior/tasks.md) — what the task board does with the Task rules.
 - [Agent Board bootstrap](agent-board/bootstrap.md) — what Agent Board does with the Board rules.
-- [Decision log](DECISIONLOG.md#agent-registry) — why the registry has this shape.
+- [Decision log](decisions/agent-registry/index.md) — why the registry has this shape.

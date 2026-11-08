@@ -35,7 +35,7 @@ committed dot fixtures, with no JDK and no jar; see
 
 Full rationale, including why `ownSendLedger` was the pilot and what the bound
 in each `.cfg` costs: [docs/agent-board/model-checking.md](../../docs/agent-board/model-checking.md#state-machine-model-checking)
-and decision D12 in [docs/quality-gateway/decisions.md](../../docs/quality-gateway/decisions.md).
+and decision D12 in [Decision rationale](../../docs/decisions/quality-gateway/exported-model-conformance.md).
 
 Alloy models live elsewhere, under `docs/models/`; both are checked by
 `.github/workflows/model-check.yml`.

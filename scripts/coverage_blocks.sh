@@ -38,13 +38,13 @@
 # measurement rather than from taste. At the commit this was written on, the
 # repository has ~275 unexecuted blocks out of 1801 (~375 statements of 2772);
 # the figure moves by three between runs of the identical command, which is a
-# finding in its own right — see decision D8.
+# finding in its own right — see decision D8 (docs/decisions/quality-gateway/diff-block-coverage.md).
 # A gate that failed on all of them would start red, and docs/quality-gateway.md
 # principle 4 says what happens to a gate that starts red: it gets routed
 # around, taking the gates that do work with it. So the gate only speaks about
 # blocks covering a line THIS BRANCH changed. It starts green, it never argues
 # about code nobody touched, and it needs no second exclusion list to drift out
-# of date. Decision D2 scopes mutation testing to the diff for the same reason.
+# of date. Decision D2 (docs/decisions/quality-gateway/mutation-diff-scope.md) scopes mutation testing to the diff for the same reason.
 #
 # COVERAGE_PKGS excludes whole packages by design, so a changed file can be
 # absent from the profile entirely. The gate says so rather than reporting it as

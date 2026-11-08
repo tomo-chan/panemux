@@ -60,7 +60,7 @@ mount, so the probe still gets its `401` from the middleware and the auth test p
 that case is the table test, which lists a route the router can never actually reach. The two tests
 are complementary, not redundant.
 The route-wiring incident and resulting single-source decision are recorded in the
-[quality-gateway design decisions](../quality-gateway/decisions.md).
+[route-gate decision](../decisions/quality-gateway/consolidated-gates.md).
 
 **`WS /ws/board/command` cannot use the `Authorization` header at all** — browsers do not allow a
 WebSocket upgrade request to carry arbitrary headers. `internal/ws/board_command.go`'s
@@ -155,7 +155,7 @@ regression test against the real `server.New()`-constructed router specifically 
 handler-level test would not have caught this class of bug.
 
 The endpoint's design history is recorded in
-[DECISIONLOG.md](../DECISIONLOG.md#browser-clients-obtain-the-board-token-from-a-dedicated-bootstrap-endpoint-2026-08-14-pr-170).
+[Decision rationale](../decisions/agent-board/board-token-bootstrap.md).
 
 **The command center's own MCP config file is the one place this feature writes the bearer token to
 disk, deliberately temporarily.** `internal/commandcenter.BuildMCPConfig` writes a JSON file (mode

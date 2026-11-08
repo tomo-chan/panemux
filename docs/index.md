@@ -44,22 +44,22 @@ Topic guides link to focused deep dives when the summary is not enough:
 - [Security details](security/) - requirements grouped by command or trust boundary.
 - [Agent Board details](agent-board/) - architecture, relay, bootstrap, command center, integration,
   limitations, and tests.
-- [Quality-gateway details](quality-gateway/) - numbered decisions, measurements, and mutation
-  findings.
+- [Quality-gateway details](quality-gateway/) - measurements and mutation findings.
+- [Decisions](decisions/index.md) - historical decisions grouped by topic.
 - [Development details](development/) - runtime and sandbox setup, screenshots, browser fixtures,
   pre-push selection, and focused testing contracts.
 
 ## Decision history
 
-[DECISIONLOG.md](DECISIONLOG.md) records why consequential choices were made, what they replaced,
-and the order in which the design changed. Topic guides describe only the current state. Deep dives
-focus on current contracts but may retain dated evidence or incident detail that is necessary to
-justify a local requirement; cross-cutting chronology and superseded designs belong in the decision
-log. Git history remains the authority for line-level change history.
+[Decisions](decisions/index.md) records why consequential choices were made and what they replaced.
+Each decision is one concept under `decisions/<topic>/<slug>.md`; topic indexes provide discovery.
+[DECISIONLOG.md](DECISIONLOG.md) preserves routes from historical headings. Current-state contracts
+stay in guides and deep dives; decisions link to those authorities rather than repeat them.
+Git history remains the authority for line-level chronology.
 
 ## Bundle contents
 
-* [Decision Log](DECISIONLOG.md) - Rationale, rejected alternatives, and chronology of consequential design decisions.
+* [Decision Log](DECISIONLOG.md) - Compatibility routes from historical decision headings.
 * [Documentation](README.md) - GitHub landing page linking to the canonical documentation index.
 * [Agent Board](agent-board.md) - Agent Board capabilities, design principles, and routes to focused contracts.
 * [Agent Registry](agent-registry.md) - Agent registration, identities, capabilities, and routes to integration requirements.
@@ -75,6 +75,7 @@ log. Git history remains the authority for line-level change history.
 * [agent-registry/](agent-registry/) - Agent integration procedures and capability requirements.
 * [ui-design/](ui-design/) - Screen and interaction contracts linked from the shared UI principles.
 * [behavior/](behavior/) - Runtime behavior, API contracts, task events, and task dashboard details.
+* [decisions/](decisions/) - Individual design decisions and topic indexes.
 * [development/](development/) - Development and verification contracts, fixtures, and operational procedures.
 * [images/](images/) - Documentation screenshots captured from the product with placeholder content.
 * [models/](models/) - Formal models of terminal replay behavior.
@@ -99,7 +100,7 @@ log. Git history remains the authority for line-level change history.
   such as `* [Application Overview](overview.md) - Product purpose, capabilities, operating model, and current boundaries.` Include a description
   for resource files and subdirectories too. Indexes have no frontmatter except this bundle-root
   index, whose frontmatter contains only `okf_version: "0.2"`. Reserve `log.md` for OKF §9 update
-  history, not a concept; `DECISIONLOG.md` remains a concept with `type: Decision`.
+  history, not a concept. Decision concepts use `type: Decision`; `DECISIONLOG.md` preserves old routes.
 - The directory hierarchy is a tree; Markdown links between concepts are graph edges. Explain the
   relationship in surrounding prose and use relative paths, never `/`-prefixed bundle paths,
   because GitHub resolves the latter from the repository root.
@@ -129,8 +130,12 @@ log. Git history remains the authority for line-level change history.
 - Document intent, invariants, external contracts, and failure semantics. Do not inventory types,
   functions, tests, or control flow that a code reader can discover directly; name implementation
   locations only when they identify where a rule is enforced.
-- Add a dated entry to `DECISIONLOG.md` when the reason, rejected alternative, migration sequence,
-  or incident matters to future maintainers. Update the current-state document in the same change.
+- Add one `type: Decision` concept under `decisions/<topic>/<slug>.md` when a reason, rejected
+  alternative, migration sequence, or incident matters to future maintainers. Use a meaning-based
+  lowercase kebab-case slug; keep dates, issue/PR references and existing D1–D14 identifiers in the
+  text/title and index rather than the filename. Update the topic index and current-state authority
+  in the same change. Mark replaced decisions `status: deprecated` and link their successors;
+  preserve old heading routes when moving records.
 - Put measurements beside the topic they measure and identify their commit/date. Measurements are
   evidence, not timeless specification.
 - Put user-visible acceptance coverage in `scenarios.md`; do not duplicate it as prose test status.
