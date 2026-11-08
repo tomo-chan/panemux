@@ -16,7 +16,7 @@ interface CommandHistoryPanelProps {
 // Agent Board command center — the same captured turn-by-turn record the
 // palette shows inline, but reachable outside the quick-palette flow for
 // scrolling back further. See docs/agent-board.md's Command center section
-// and docs/ui-design.md's Agent Board UI section (existing overlay-panel
+// and docs/ui-design/agent-board.md's Agent Board UI section (existing overlay-panel
 // pattern reused here, not a new visual language).
 export const CommandHistoryPanel: React.FC<CommandHistoryPanelProps> = ({ isOpen, token, onClose }) => {
   const [lines, setLines] = useState<StreamSummaryLine[]>([])

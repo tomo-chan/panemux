@@ -1,13 +1,15 @@
 ---
-type: Specification
+type: Guide
 title: "UI Design"
-description: "Interface principles and interaction contracts for workspaces, panes, dialogs, and tasks."
+description: "Shared interface principles and routes to screen and interaction contracts."
 ---
 
 # UI Design
 
-This document describes the visual design decisions for the PaneMux frontend, covering always-available layout editing, drag-and-drop, the workspace bar, modal dialogs, and the task dashboard.
-
+Split, close, maximize, settings, new panes, workspace add/rename/delete and pane moves are
+available during terminal work, without an edit mode. Screen and interaction
+contracts live in [ui-design/](ui-design/index.md); runtime and persistence contracts live in
+[frontend behavior](behavior/frontend.md).
 ## Design Principles
 
 Three core principles guide the interactive UI:
@@ -19,7 +21,6 @@ Three core principles guide the interactive UI:
 **Feedback** — transitions between states are animated (0.15–0.2 s) to prevent abrupt jumps and to make cause-and-effect legible. A ghosted drag source, grabbing cursors, and visible alerts on failed persistence keep the UI honest when optimistic updates are used.
 
 ---
-
 ## Color Palette
 
 | Role | Value | Usage |
@@ -36,718 +37,70 @@ Three core principles guide the interactive UI:
 | Error banner background | `#2f1313` | move-persistence failure alert |
 | Error banner border | `#7f1d1d` | move-persistence failure alert border |
 | Error banner text | `#fca5a5` | move-persistence failure alert text |
+## Document map
 
----
-
+Task list presentation is in [Task Dashboard](ui-design/task-dashboard.md),
+creation and terminal popups in [Task Actions](ui-design/task-actions.md), and host controls in
+[Dashboard Hosts](ui-design/dashboard-hosts.md). Old section headings below retain their routes.
 ## Workspace Bar
-
-The workspace bar is always available, even when there is only one workspace. This avoids hiding structure-management actions behind a special mode and keeps workspace-level actions in one place.
-
-The workspace bar now also carries compact operational summaries for each workspace. Detailed pane status is integrated with the workspace tabs themselves instead of living in a separate persistent rail.
-
+See [Workspace Bar](ui-design/workspaces.md).
 ### Contents
-
-The bar can contain:
-
-- the `← Tasks` button to the task dashboard, always first (see [Task Dashboard](#task-dashboard))
-- workspace tabs
-- per-workspace summary text
-- `+`
-- workspace tab-position controls
-- inline rename and delete controls on each tab
-
+See [Workspace Bar](ui-design/workspaces.md).
 ### Why keep the bar visible with one workspace
-
-Workspace management still lives in the bar even when pane creation moved to the pane header. Keeping the bar visible preserves a stable location for workspace add and bar-position controls, and it avoids layout shifts when more workspaces are added later.
-
+See [Workspace Bar](ui-design/workspaces.md).
 ### Tab position controls
-
-The top/bottom/left/right controls use compact directional buttons with `aria-pressed` on the active position. They are deliberately terse because they are structural controls, not primary content.
-
-The four direction buttons are grouped inside a single tab-like cluster rather than being split across separate segments. In practice this is rendered as one tab surface containing a horizontal row of four compact buttons, so even on left/right bars it reads as one control group instead of four separate tabs. This keeps the workspace-position control readable as one concept instead of four unrelated actions.
-
-The position cluster sits on the opposite end of the workspace tabs:
-
-- top/bottom bars: tabs stay at the leading side, position controls stay at the far trailing side
-- left/right bars: tabs stay near the top, position controls stay at the bottom
-
-This separation keeps workspace navigation and workspace-bar relocation visually distinct.
-
-For left/right bars, the bar width is user-resizable by dragging its inner edge. The chosen width is shared across workspaces and restored on reload, while the pane layout inside the remaining work area continues to use its own saved percentage splits.
-
-Workspace creation uses a single `+` control because it is now the only creation action in the bar and does not need extra wording to distinguish it from terminal creation.
-
+See [Workspace Bar](ui-design/workspaces.md#tab-position-controls).
 ### Integrated workspace summaries
-
-Each workspace tab can show a compact one-line summary of that workspace:
-
-- pane count
-- connected pane count
-- disconnected pane count
-- exited pane count
-- pending pane count when session data has not arrived yet
-
-Each summarized workspace tab also shows a compact pane-name strip so users can see what lives in that workspace without opening the full detail view.
-
+See [Workspace Bar](ui-design/workspaces.md#integrated-workspace-summaries).
 ### Workspace pane groups
-
-Each workspace renders as a grouped strip anchored to its tab surface. The pane cards are not an independent dashboard panel; they are visually and interactively subordinate to the workspace tab they belong to.
-
-Presentation depends on bar position:
-
-- top/bottom bars: pane cards appear as a hover/focus overlay attached to the tab
-- left/right bars: pane cards stay expanded inline under the tab
-
-When the bar is on the left or right, the tab list and inline pane groups live in a dedicated scroll region. The fixed footer below them keeps the `+` action and all four tab-position buttons visible even when the workspace list is taller than the viewport.
-
-Each pane group shows:
-
-- workspace title and aggregate counts
-- one card per pane
-- pane type
-- pane connection state
-- repository, branch, and PR number when available
-- attention badges for panes that need input
-- a stronger selection treatment for the currently focused pane
-
-Clicking a pane card switches to that workspace if needed, focuses the corresponding pane, and clears pane/workspace attention. This makes the summary surface a status-driven navigator rather than a passive label.
-
-Pane cards are also drag sources for cross-workspace moves. The drag gesture starts from the overview card itself, not from the pane body, so terminal interaction and layout interaction remain separate.
-
----
-
+See [Workspace Bar](ui-design/workspaces.md#workspace-pane-groups).
 ## Pane Header
-
-The pane header remains the compact command strip for each pane.
-
+See [Pane Header](ui-design/panes.md).
 ### Layout
-
-From left to right, the header contains:
-
-- drag handle `⠿`
-- connection status dot
-- pane type label
-- optional pane title
-- optional git information and linked PR shortcut when the current branch has a GitHub pull request
-- reconnecting status text
-- action buttons aligned to the right
-
-The header background stays `#252526` with a `#333` bottom border so the new controls inherit the established terminal chrome instead of introducing a second visual language.
-
-When panemux can derive a repository page URL from the pane's Git origin, the repository name is rendered as an inline text link using the same visual treatment as the PR shortcut.
-
-The PR shortcut is rendered as an inline text link labeled `#<number>`. It does not use a pill, badge, or outlined capsule treatment. On hover, the link shifts to a slightly stronger blue and shows an underline so it reads like the rest of the header chrome instead of a separate button system.
-
+See [Pane Header](ui-design/panes.md#layout).
 ### Multiple worktrees
-
-When the pane's active agent has diverged into exactly one sibling worktree, the header shows that worktree's repo, branch, and PR shortcut inline, exactly as described above.
-
-When two or more distinct worktrees are active at once (for example, several Claude Task subagents each working in a different sibling worktree), the header does not try to fit every branch and PR shortcut inline — the compact header would not have room and would become unreadable. Instead the header shows a single inline text trigger labeled `<N> worktrees` (e.g. `2 worktrees`), styled like the other inline text links rather than as a pill or badge. Clicking the trigger opens a small popover menu anchored below the header, listing every active worktree as its own `repo ⎇ branch #<number>` line using the same inline-link treatment as the single-worktree case. The menu closes on Escape or on clicking outside it.
-
+See [Pane Header](ui-design/panes.md#multiple-worktrees).
 ### Split vs quick-add
-
-The header now carries two distinct expansion actions:
-
-- split buttons, which inherit the current pane configuration and divide the current work context
-- quick-add buttons, which create a default `local` pane immediately to the right or below
-
-The quick-add buttons are intentionally colocated with split because they act on the current pane boundary, but they must remain visually distinct so users can tell apart "duplicate/split this context" from "add a fresh default pane here".
-
-The action buttons use a small monochrome SVG icon set rather than relying on mixed Unicode glyphs. Split and quick-add both use a pane-outline motif so they read as related actions, while quick-add uses a plus marker to distinguish "new default pane" from "split current pane".
-
+See [Pane Header](ui-design/panes.md#split-vs-quick-add).
 ### Drag handle
-
-Pane movement starts only from the `⠿` handle in the header. This preserves uninterrupted terminal interaction inside the pane body while still making re-layout possible.
-
-The handle uses `#4a7ea5` and a `grab` cursor. While dragging it switches to `grabbing`, matching editor chrome that treats pane movement as a direct manipulation gesture. It is small enough not to crowd the header but distinct enough from the status dot and type badge to read as an affordance instead of decoration.
-
+See [Pane Header](ui-design/panes.md#drag-handle).
 ### Why header-only drag
-
-The terminal body must stay available for text selection, focus, mouse reporting, and shell input. Restricting drag initiation to the header avoids gesture conflicts that would otherwise make terminal interaction unreliable.
-
----
-
+See [Pane Header](ui-design/panes.md).
 ## Drag and Drop
-
-Drag-and-drop is always available from the pane header handle. There is no separate edit mode.
-
+See [Layout Editing](ui-design/layout.md#drag-and-drop).
 ### States
-
-**Normal**
-
-- pane opacity is `1`
-- no move target highlight is visible
-
-**Drag source**
-
-- the source pane fades and slightly scales down, approximating a light drag ghost without detaching the live terminal canvas
-- the global cursor switches to `grabbing`
-- the 0.15 s transition confirms the drag immediately
-
-**Pane-edge drop target**
-
-- the hovered half of the target pane becomes the drop region
-- a translucent blue half-pane preview appears on the chosen side
-- edge selection is resolved from pointer proximity to the nearest pane edge, so users do not have to hit a thin strip precisely
-
-**Divider drop target**
-
-- the divider keeps its resize role normally
-- during drag, a blue overlay appears on the divider drop zone to show that insertion is possible there
-
-**Workspace-edge drop target**
-
-- the workspace edges become drop zones during drag
-- dropping there creates a new outer split around the current layout
-
+See [Layout Editing](ui-design/layout.md#states).
 ### Interaction model
-
-- dropping on a workspace edge creates a new outer layout and moves the pane there
-- dropping on a pane edge inserts the dragged pane beside the target pane
-- dropping on a divider inserts relative to the adjacent subtree boundary
-
-This model deliberately favors spatial predictability over hidden container selection widgets.
-
----
-
+See [Layout Editing](ui-design/layout.md#interaction-model).
 ## Modal Dialogs
-
-The frontend now uses modal dialogs for higher-friction configuration tasks, rather than trying to compress all editing into inline chrome.
-
-![The Pane Settings modal centred over a dimmed workspace, with type, shell, working directory and title fields, and Cancel and Save buttons.](images/pane-settings.png)
-
+See [Modal Dialogs](ui-design/dialogs.md).
 ### Keyboard behaviour, shared by every modal
-
-`aria-modal="true"` promises that the rest of the page is inert, and nothing in the DOM makes that
-true on its own. `useModalKeyboard` supplies the two behaviours that attribute implies, and every
-surface that declares it uses the hook: `WorkspacePickerDialog`, `ConfirmDialog`, `AddSSHHostDialog`, `HostConnectDialog`, `PaneSettingsDialog`,
-`CommandPalette`, `CommandHistoryPanel` and `BoardDashboardPanel`.
-
-- **Focus stays inside.** Tab and Shift+Tab cycle within the dialog, and a Tab arriving from outside
-  is pulled back in — forwards to the first focusable element, backwards to the last, the order a
-  browser would have used had the background been inert. Without it, a dialog that moves focus once
-  on open lets the next Tab reach the very controls it is asking about.
-- **Escape is heard.** The listener is on the capture phase, because a focused xterm terminal stops
-  keydown propagation and a bubble-phase window listener never sees the key. That is not an edge
-  case: it is the state a dialog opened by a keyboard shortcut starts in, and the state the focus
-  trap above exists to prevent the operator from reaching later.
-- A dialog that must not be dismissed — one with a save in flight — passes no Escape handler. The
-  focus trap still applies, so "you cannot leave yet" does not become "you cannot see where you are".
-- A nested modal wins: while `PaneSettingsDialog`'s directory browser is open, the trap follows it
-  and the form behind stays out of reach.
-
+See [Modal Dialogs](ui-design/dialogs.md#keyboard-behaviour-shared-by-every-modal).
 ### Open in workspace
-
-A task's Open (card, details or Type in pane popup) and a host menu's Open use
-`WorkspacePickerDialog`, centred on a dimmed backdrop with the shared dialog surface and keyboard
-trap. It lists workspace names as radios, focuses and selects the active workspace on opening,
-and always appears even with one workspace. The last option, **+ New workspace**, reveals and
-focuses **Workspace name**; **Open here** becomes **Create and open**. Names are trimmed; blank
-or duplicate names show an inline error. Cancel, Escape and × dismiss it without adding a pane,
-returning focus to the opener when still present. During confirmation controls are disabled and
-Escape does not dismiss it. Request failures stay in the dialog; a workspace created before its
-name fails to save remains selected under its default title; retrying **Open here** reuses it.
-A newly created workspace includes its default local **Terminal** shell, with the requested pane
-added at the right edge. Retrying after a session or layout was created resumes those completed
-steps without duplicating them. Successful confirmation activates the chosen workspace and
-focuses and outlines the new pane. **Go to pane** navigates immediately without this dialog.
-
+See [Modal Dialogs](ui-design/dialogs.md#open-in-workspace).
 ### Confirmation dialog
-
-Destructive actions ask in `ConfirmDialog`, the app's own dialog, rather than in `window.confirm`
-(issue [#70](https://github.com/tomo-chan/panemux/issues/70)). The native dialog blocks the main
-thread — every terminal in the page stops rendering while it is up — and cannot carry the rest of
-the UI's styling. `ConfirmDialog` follows the same surface as the other dialogs here: `#252526`
-panel, `#444` border, backdrop click and `Escape` to dismiss.
-
-Cancelling is the easy path by design: the cancel button, the backdrop and `Escape` all cancel, and
-only the confirm button confirms. The confirm button takes focus when the dialog opens, so both
-answers are one keystroke away. A destructive confirm button uses the same subdued red as the error
-banner below (`#5a1d1d`, `#7f1d1d`, `#fca5a5`).
-
-Its keyboard behaviour is the shared one above: focus is trapped between its two buttons, and
-`Escape` reaches it from the capture phase.
-
-Its first user is workspace deletion, which is still offered only in edit mode; the delete request
-is sent when the dialog is confirmed and never before.
-
+See [Modal Dialogs](ui-design/dialogs.md#confirmation-dialog).
 ## Transient Error Banner
-
-Pane creation and moves are optimistic in the UI and then persisted. If persistence fails, the user needs immediate feedback because the visible layout can temporarily diverge from saved config.
-
-The create/move error banner pattern:
-
-- appears in the top-right of the workspace content area
-- uses a destructive but subdued palette (`#2f1313`, `#7f1d1d`, `#fca5a5`)
-- includes an explicit dismiss button
-- remains separate from modal dialog errors because it belongs to an in-place interaction, not a form
-- stacks vertically when both a create failure and a move failure are present at the same time
-
+See [Layout Editing](ui-design/layout.md#transient-error-banner).
 ### Error state lifecycle
-
-The banner state is:
-
-- hidden by default
-- visible when a pane-create or pane-move persistence request rejects
-- hidden again when dismissed or when the next create/move attempt starts
-
-This keeps the error noticeable without forcing it into a blocking dialog.
-
----
-
+See [Layout Editing](ui-design/layout.md).
 ## Pane URL Strip
-
-Opening a URL out of a pane can need the operator's attention twice: before anything opens, when a
-program inside the pane asked for it, and after, when the port forward it needed could not be
-established.
-
-Both use one strip pinned to the top of the pane's terminal area, inside that pane rather than at
-the workspace level, because both belong to one pane's activity:
-
-- the request state names the URL and offers `Open` and `Ignore`; it never opens anything on its own
-- the failure state reuses the transient-error palette (`#f4a9a9` on the pane's own surface with a
-  `#7f1d1d` edge) and offers `Dismiss`
-- a pending request takes precedence over an older failure, so the operator is never asked to read
-  two things before deciding one
-- the URL is truncated with an ellipsis and carries the full value as a tooltip, so a long
-  authorization URL cannot push the buttons out of a narrow pane
-
-The request state is deliberately not a modal: it belongs to one pane, and the operator should be
-able to keep working in other panes — or read the surrounding terminal output that explains what
-asked for it — before deciding.
-
----
-
+See [Pane URLs and Split Preview](ui-design/preview.md#pane-url-strip).
 ## Split Preview
-
-A clicked HTML or Markdown path opens beside the terminal rather than over it (issue #385), in a
-workspace pane and in the task dashboard's Type in pane popup alike: the point is to check a mock
-while still instructing the agent in the same terminal. [Behavior](behavior/preview.md) has the full
-rules.
-
-- The terminal keeps the left side and the preview takes the right, starting at 50:50. The pane
-  header, status bar and every pane operation stay as they are; the split lives in the pane's body.
-- The preview header follows the mock in #359: the host (`local`, or the SSH host's connection
-  name) in the accent blue, then the absolute path — or, for a relayed localhost URL of an SSH host,
-  the URL as clicked, not the relay's address — truncated with the full value as a tooltip; below it Reload, an outlined
-  `Open in new tab`, and Close. Opening larger is a new tab — the preview has no full screen of its
-  own, so the terminal is never hidden behind it.
-- While the previewed page has focus, a one-line note under the header says that keys go to the
-  page and the terminal takes them back: the page is sandboxed in another origin, so panemux's
-  shortcuts cannot hear keys typed in it, and the note keeps them from failing silently. It is a
-  status, not an alert, and goes as soon as focus leaves the page.
-- The divider is a 6 px bar with a centered grip. It highlights in the accent blue on hover, focus
-  and while dragged; it is a focusable `separator` that the arrow keys move and a double-click
-  returns to 50:50. Neither side gets narrower than 160 px; in a narrow pane its range narrows to
-  match, so its announced value, its key steps and the drawn split agree.
-- Loading, the reason a path cannot be opened, and the choice between files a relative path names
-  are shown in the preview's own area, so the terminal is never covered and keeps taking keys.
-- The preview's page is white like a browser page, framed by the dark panemux chrome.
-- Mermaid diagrams in Markdown retain a **Show source** disclosure below each drawing. A failed
-  diagram opens its source and shows its error within that block; the rest of the document stays
-  readable. SVG diagrams fit the preview width and scroll when necessary.
-- A localhost URL (issue #386) opens in the same split. Above its page, a one-line note in the same
-  style as the keys note says that a page refusing to be framed stays blank and that hot reload,
-  sign-in or storage can differ in a frame, pointing at `Open in new tab`: a frame cannot report
-  either, so the note is always shown for a localhost page rather than guessed at.
-- The pane's URL strip adds `Preview` before `Open` and `Ignore` when the URL is a localhost page on
-  the panemux host, and says `This link goes to` instead of `This pane wants to open` for a clicked
-  OSC 8 link. The strip covers the terminal side only — the whole body when no preview is open — so
-an open preview's header stays visible while another URL is asked about. The Type in pane popup
-draws the same strip over its terminal.
-
----
-
-![A Mermaid diagram beside the terminal, with a Show source disclosure.](images/mermaid-preview.png)
-
+See [Pane URLs and Split Preview](ui-design/preview.md#split-preview).
 ## Attention Indicators
-
-Agent-attention highlighting remains visually distinct from layout-editing affordances.
-
-- pane attention uses an animated gold frame
-- workspace attention uses an animated gold tab background
-- move targets use blue overlays instead of gold
-
-Using separate colors avoids mixing "this needs your attention" with "you can drop here".
-
-Attention marks an agent that is waiting for the operator, never terminal activity as such. It comes
-from the [task event stream](behavior/task-events.md#pane-and-workspace-attention): a pane flashes when
-a task it shows starts a wait, and a workspace tab when such a pane is in an inactive workspace. The
-operator clears a pane's attention by focusing or clicking it and a tab's by selecting its workspace;
-both also clear by themselves once the task's wait ends, so a wait answered from the task dashboard's
-popup or another terminal leaves nothing flashing. A browser notification leads to the same place the flash does: its
-pane, focused and briefly outlined, or — for a task no pane shows — the task selected and highlighted
-on the task dashboard.
-
-A codex permission request is answered in the codex pane itself, so a pane whose task waits on one
-also carries a thin gold strip between its header and its terminal — `Waiting for input: a permission
-request from codex`, the Tasks detail's own words, and the detail's `Input given` — so the wait can
-be marked answered without opening the dashboard. The Type in pane popup shows the same strip between
-its header and its terminal. A pane running several such tasks says how many and offers
-`Review in Tasks` instead. The strip is buttons only: it takes no key, so Tab, Escape and everything
-else typed in the pane stay the terminal's, and it is not the attention: focusing or clicking the pane
-or closing the popup does not take it away, and only `Input given` or the end of the wait removes it;
-after `Input given` the terminal has the focus again, so typing goes on where it was, unless the focus
-moved to another pane while the request was answered
-([behavior](behavior/task-events.md#codex-permission-requests-in-a-pane)).
-
----
-
+See [Attention Indicators](ui-design/attention.md).
 ## Task Dashboard
-
-![The task dashboard layer: the top bar with host chips and its buttons, the filter row, one column per state with session cards, and the detail panel of the selected waiting session on the right.](images/task-dashboard.png)
-
-The task dashboard ([behavior](behavior/tasks.md)) is a second layer over the workspaces rather than
-an overlay panel: it covers the whole window, and the workspaces stay mounted beneath it so every
-terminal keeps its connection and scrollback. While it is shown the workspace layer is `inert`, so a
-terminal that had focus cannot receive what is typed into the dashboard.
-
-- **Switching layers.** The workspace bar starts with a `← Tasks` button, which carries the number
-  of tasks waiting for input from the last collection in a gold badge; its accessible name says the
-  count is "when last checked", since nothing collects while the workspaces are shown. The dashboard's top bar has a
-  `Workspaces` button back, which shows the shortcut beside its label. `Cmd/Ctrl+Shift+S` switches
-  either way; the letter is `display.task_dashboard_shortcut`. Like the palette's and the board's
-  shortcuts it is registered on the keydown capture phase, so it fires while a terminal pane has
-  focus. panemux opens on the workspaces. While the dashboard is shown, `Cmd/Ctrl+Shift+K` and
-  `Cmd/Ctrl+Shift+B` do nothing, and the palette, history panel and Agent Board close when it
-  appears: they belong to the workspace layer, which is inert then.
-- **Top bar.** The title, one chip per host (`Local` for the panemux host) with its running count, a
-  red chip with the error and a `Reconnect` button for a host that failed, and `connecting…` for a
-  host whose connection is still coming up; then, at the right, the actions as one group: a warning
-  `⚠ <n> unreadable` while any host has a state file it could not read, when the board was last
-  updated, `Refresh`, `Hosts…`, `New task` (in the interactive blue), and `Workspaces`. A long host
-  error is truncated in the chip and shown in full as its tooltip. With more hosts than fit on one
-  line, the actions wrap to the next line as a whole, flush right, rather than one by one; only a
-  screen too narrow for the group on a line of its own wraps it inside, so no action is cut off.
-- **Host connection menu.** The chip of a remote host whose collection succeeded is a button
-  (`aria-haspopup="dialog"`, `aria-expanded`) with a small terminal icon; the panemux host's chip
-  opens its tool items (Codex input notifications, plus agmsg when Agent Board is enabled),
-  and a `connecting`, failed or not-yet-collected
-  chip is plain text
-  ([behavior](behavior/tasks.md#opening-a-host)). Pressing it opens a small popover dialog anchored
-  under the chip, titled after the host: a `Connection` group of `ssh` / `ssh_tmux` radios (`ssh`
-  checked), the tmux session name the server generated in the monospace face once `ssh_tmux` is
-  chosen (or "Could not name the tmux session: …" in red), and `Cancel`, `Open` and `Type in pane`
-  in the interactive blue, labelled `Open: <host>` and `Type in pane: <host>` like a task's
-  buttons. A press outside it closes it; focus returns to the chip. A host that stops being
-  reachable takes its menu with it, and focus goes to its `Reconnect`.
-- **Codex input notifications.** Below the menu's actions, separated by a rule, a row reads
-  `Codex input notifications` with a small `Install` or `Update` button at its end, or `Installed`
-  in the Working green, and a muted line under it (`Not installed`, `Not checked: …`); a
-  `hooks.json` panemux will not rewrite reads `Cannot install: …` in red, with no button. After an
-  install, a muted line says to trust the hook in codex's `/hooks`. A host without codex shows no row.
-  Under the status, an `Update automatically` checkbox, off until turned on; a muted line says the
-  hook was updated automatically and to trust it, and a red one why that failed, the setting could
-  not be read (the checkbox is then disabled), or it was not saved. The checkbox and the
-  `Install`/`Update` button are each disabled while the other's request runs.
-  The panemux host's chip is a button too, with no terminal icon: its menu holds this row and
-  `Close` alone ([behavior](behavior/tasks.md#codex-permission-requests)).
-- **Unreadable state.** The warning is amber, one for every host together, and never beside a host
-  chip, where it would crowd them as hosts are added. It opens a modal anchored below the top bar at
-  the right and kept within the screen's height, titled "Unreadable session state · <n> files on <m> hosts": a table with one row per
-  file — host, file name, reason with what was found beneath it, and the process (`claude · pid
-  <pid>` with where it runs, or `unknown` when the file name carries no pid) — and a footer naming
-  the fields panemux reads, a link to the steps to fix it in `docs/behavior/tasks.md`, and *Copy
-  details*, disabled where the clipboard is not available. The files are not cards on the board
-  ([Unreadable state files](behavior/tasks.md#unreadable-state-files)).
-- **Hosts….** A modal over the dashboard titled "Dashboard hosts", with `ssh_connections in
-  config.yaml` beside the title and a note that a host only in `~/.ssh/config` works in panes but is
-  not collected from until its name is added here. A table lists each entry — name, where it
-  connects (`user@host:port`, or "from ~/.ssh/config" for a name-only entry), and small tags for
-  `~/.ssh/config`, `key file`, `password set` and `used by N panes` — with `Edit` and `Delete` per
-  row, and `Add host` and `Close` below it. `Add host` and `Edit` open a form under the table, and
-  while the form or a delete confirmation is open, `Add host` and `Close` are hidden so only that
-  step's own buttons show; its `Cancel` returns to the list, and `Escape` or a click outside still
-  closes the dialog. The form has Name (offering the `~/.ssh/config` host
-  names; read-only when editing, since a name cannot change), Host (marked optional, with a note
-  that empty fields use the block's values, when `~/.ssh/config` has a block of that name), User,
-  Port, Key file, Known hosts file and Password. The password field is always empty; for an entry
-  with one its placeholder says to leave it empty to keep it, and a `Remove saved password` checkbox
-  disables it. What the form can tell without the server — a missing or malformed name, a name
-  already listed, a port outside 1–65535, no host and no block to take it from — is refused under the
-  form; the server's refusals appear there as "Could not save: …", keeping what was typed. `Delete`
-  asks in an inline red confirmation; a host panes use by name with no `~/.ssh/config` block to fall
-  back to is refused before asking, naming the panes, and a refusal only the server can tell — a
-  pane or host whose `ProxyJump` goes through it — appears as "Could not delete …". A green notice says what was added, saved or deleted, and the board collects again.
-- **New task.** A modal form over the dashboard: Host (every host on the board, an unreachable one
-  marked "(unreachable)"), Working directory, Agent (the registered agents that declare `launch`,
-  by ID: `claude`, `codex`), Labels (comma-separated, optional) and First instruction. Under Agent
-  goes the chosen agent's launch note from the server — with `codex`, that the labels are recorded
-  once codex has started its session, and to open the task's pane if codex stops at a start-up
-  screen — and, when the chosen host's probe found the agent's CLI missing, "<agent> cannot be
-  started on <host>: <why>." with `Start` disabled. Under Labels, `Used before:` offers the labels used before
-  ([Labels used before](#labels-used-before)) as toggle tags: one in the field shows solid with `✓`
-  (`aria-pressed` true), one not dashed with `+`. A click adds the label at the end of the field,
-  replacing what is typed after the last comma unless that is a label used before in full (shown
-  `✓`, so kept), and ending with `, `; on a `✓` tag it takes the label out and keeps every other. The text after
-  the last comma filters the `+` tags; the `✓` tags always show, filtered or folded. The working directory takes focus when it
-  opens, without opening its list ([Working directory suggestions](#working-directory-suggestions)),
-  so `Escape` still closes the form at once; changing Host empties it. An empty directory, a relative one, or an empty instruction is refused in the form, with
-  the reason under the fields; anything the server or the host refuses is shown there as
-  "Could not start: …", and the form keeps what was typed. While the task starts, `Start` reads
-  `Starting…`, and neither it, `Cancel`, `Escape` nor a click outside dismisses the form. Once it has
-  started the form closes, a blue notice says which tmux session was started on which host and that
-  the task is selected once the agent has started (for codex with labels, also that they are
-  recorded once codex has started its session), and the task is selected when a collection lists
-  it — unless another task was selected meanwhile. A codex task is found in its tmux session: it is
-  selected as its process while it has no session, the notice staying up, and selected again as its
-  session once one is listed, which ends the notice. No pane is opened. Labels that could not be
-  recorded for a task that did start are reported in a red alert.
-- **Filter bar.** Text filter over the card title, directory, branch, PR number, reference (such as `JIRA-123`), session ID,
-  tmux session name and summary text, matching any part of one ignoring case. The summary text matches whether the card
-  shows it or, for a task waiting for input, only the details do; it stays searchable while a newer summary is pending
-  or it is outdated, and a summary that arrives re-filters the board at once. Every session the dashboard starts is
-  named `task-<8 hex>`, so `task` matches all of them, and a short number can match the hex of one. Group splits by none,
-  host, label, or repository; a host filter; a label filter listing every label on the board; and a `Show done`
-  checkbox, off by default. Search text, host, label, Group and Show done settings stay in effect
-  when switching to any workspace and back, for the lifetime of the page in that browser tab.
-  Group, Cards/Table and table sorting are restored after reload from versioned, Zod-validated
-  browser storage; without valid storage they start at Cards / None / State ascending. Reloading starts with empty search, All hosts and labels and Show done off.
-  A selected host or label missing from the current list displays and filters as All without
-  discarding the choice; it takes effect again when that host or label returns, including after
-  loading or collection failures. Opening a task from a notification clears hiding filters, and
-  the cleared settings carry over to the next round trip. Task selection, the detail panel,
-  popups and scroll position are reset when leaving the dashboard.
-- **Cards / Table.** Native pressed-state buttons change only the list. Selection, details and the
-  Type in pane popup keep their lifecycle; each list retains an independent scroll position.
-  Table uses a single semantic table with Session (title and short summary or wait reason), State,
-  Elapsed, Host, Agent display name, Repository and PR link, Branch, Labels and Actions. A Session
-  button selects details; links and action buttons do not select the row. Done and label editing
-  remain in details. Shared action capability checks and running indicators apply to both views.
-  Group headings span all nine columns in separate row groups, retaining the existing group order.
-  Each sortable column has a native button; only the selected heading has `aria-sort` and an arrow,
-  with the direction in its accessible name. New keys start ascending, except Elapsed (longest first);
-  repeated presses reverse direction. Sorting stays within groups and does not reorder cards.
-  One focusable horizontal scroll region holds the entire table, with sticky column headers.
-  Narrow screens retain the existing responsive details panel and scroll the table horizontally.
-  Collection updates retain keyed task focus; each notification jump focuses and scrolls the active
-  list once. A view change during the highlight keeps focus on the view switch and does not restart it.
-
-  ![Task table with independent sortable columns and the shared details panel.](images/task-dashboard-table.png)
-- **Kanban.** Columns in the order a person should look at them: Waiting for input (highlighted in
-  gold, "Needs you"), Working, Idle, Running / unknown, Stopped, and Done when the checkbox asks for
-  it. A task marked done sits in Done only while it is stopped, so with the column hidden a finished
-  task leaves the board rather than crowding Stopped; one that runs again stays in its state's
-  column. Column headers stay visible while the board scrolls; the board is a tab stop of its own
-  ("Task board") so the keyboard can scroll it sideways even with no card in it. Host, Label and
-  Repository create full-width group rows: one group heading and count, followed by all state
-  headings with group-local counts and equal-height column bodies. Empty columns retain `None`;
-  the tallest card stack sets each row's height, without clipping or individual scroll areas.
-  State titles align along the top. The group name and state headings form one sticky band,
-  replaced by the next group's band. Notification jumps reveal their card below the active band.
-  All rows share column widths and one horizontal scroll position, including below 560 px and
-  beside details; None retains the single board and its narrow-screen vertical columns.
-  Groups are derived after filtering and Done exclusion; empty groups disappear, and an empty
-  grouped board says `No tasks`. The catch-all row ("Not in a Git repository", "No label") is last. Split by label, a
-  task with two labels appears in both rows. A catch-all row is keyed apart from every name, so a
-  label or repository that happens to be called "No label" gets a row of its own. Local and an SSH
-  connection named Local remain separate, with the latter headed `Local (SSH)`.
-- **Cards.** A left border in the state's color; host, agent and how long the task has been in its
-  state; the working directory's last segment as the title with the full directory under it; for a
-  waiting task its reason and "open the pane to respond", and for any other task its summary, two
-  lines at most, dimmed while outdated; `Next: <first remaining item> · <n> left` when the summary
-  lists work remaining; repository, branch, and the PR, issue and reference links (`PR #87`,
-  `Issue #252`, `JIRA-123`; each opens a new tab; an issue in another repository than the PR's is
-  `owner/name#9`); its labels as colored tags, each label always the same color; a green `Done` tag
-  in the meta line for a task marked done that is running again, or a dashed green `Done?` tag for a
-  done candidate — a task not marked done whose summary finds no work left; and at the bottom where
-  the task runs with its `Open` / `Go to pane` button, or `Resume` for a stopped task whose agent
-  resumes (disabled when the server says it cannot be resumed). The meta line names the agent, as
-  "<agent> (unknown agent)" when the registry does not know it. A waiting or idle task in an attachable tmux session also has `Type in pane` before it, and
-  a blue `Typing` tag in the meta line while its popup is open. A task that cannot be opened shows why instead of a button: for an agent outside tmux, "not
-  in a panemux pane" or, when the pane it names is in no workspace, "its pane is in no workspace".
-  The card is a pointer target for selection, and its title is a button, so the card never nests its
-  links and buttons inside another interactive element.
-- **Detail panel.** Fixed to the window height at the right. Its head — state, host, agent, start,
-  title, waiting reason, `Type in pane` (in the interactive blue) or, for a waiting or idle task
-  that cannot take it, "Type in pane is not available: <reason>.", the open action or the reason
-  there is none (a stopped task whose agent resumes offers `Resume` instead, and says why when it is
-  disabled; a task of an unknown agent says it offers only the pane: its pane actions stay, while
-  `Resume`, `Summarize`, `Mark done` and labels are not shown), `Input given` for a codex
-  task waiting on a permission request its hook recorded, `Mark done` or `Mark not done`, and for a done candidate the line "The summary
-  finds no work left: a candidate for Mark done." — stays in place, and only the body below scrolls:
-  state notes, which come from the server's `state_note` (for codex: a task with no session of its own is waiting for its first instruction,
-  held at a start-up screen, or running its session in codex's shared daemon, to be seen in the pane;
-  a session the daemon runs shows "codex's shared daemon · cannot open in a pane" where a card says
-  where it runs, and says why; a working one may be waiting for approval, which codex does not
-  record unless its permission hook is registered on that host; an unknown one has no turn its history or log end reports); **Work**, the summary and the
-  remaining work as a numbered list ("No remaining work found." when there is none); links
-  (repository, branch, pull request, then issues noted "closed by the pull request" and References
-  noted "from the branch name or pull request title", each row only when there is something to
-  show), labels, the chain from task to agent to tmux session to pane to
-  workspace, and the directory and session ID. Work also says when a summary is running
-  ("Summarizing…"), failed (with the reason), outdated, unreadable, not made while the task works,
-  or off (naming `task_dashboard.summary.enabled`), and offers `Summarize` / `Summarize again` when
-  there is no current summary or it failed; a refused request is shown under it. For a log it
-  cannot read, the button stays but is disabled, its tooltip saying the log cannot be read, since
-  asking again reads nothing until the log changes; once it has changed, Work says so ("The
-  conversation has changed since it could not be read.") and the button is enabled. Selecting a
-  stopped task, or one in an unknown state, asks for its summary when it has no current one —
-  including a log it could not read that has changed since; a waiting or idle task's comes with the
-  poll.
-  `Mark done` asks first, inside the panel, and says where the task will be afterwards: a running
-  task stays in its column until it stops; a stopped one moves to Done, and the question adds that
-  the column is hidden until `Show done` is checked when it is. `Mark not done` does not ask.
-  `Input given` does not ask either: the task shows as its turn reads (usually Working) at once, also
-  while the task event stream still has the wait, and a failure is shown under the actions as
-  "Could not mark the input given: <reason>" ([behavior](behavior/tasks.md#codex-permission-requests)). Labels
-  are removed with the `×` on each and added with a text box and `Add`. Under the box, `Used before:`
-  offers the labels used before that the task does not have
-  ([Labels used before](#labels-used-before)); a click adds one at once, as `Add` does, and what is
-  typed in the box filters them. When the task has all of them it says "Every label used before is on
-  this task." A save that fails shows its
-  reason in the head and keeps what was typed. A save belongs to the task it was made for: selecting
-  another task while it runs leaves that task's controls enabled, and the result is not shown there.
-  A task without a session ID offers neither, and says so. At 1000px and narrower it slides over the board
-  with a close button.
-- **Summary agent.** A task whose agent declares `summary` (Claude and Codex) offers the same summary
-  controls. Each uses its own agent account on the panemux host. Where the server says the summary is
-  unavailable (no session ID yet, no conversation log found), `Summarize` is disabled and Work says
-  why; an agent that does not summarize shows no control at all.
-- **Resume.** `Resume` reads `Resuming…` and is disabled while its request runs; a refusal is shown in
-  a red alert naming the task, and a resumed task is selected. Nothing else on the board waits for it.
-- **Type in pane.** A popup over the board ([behavior](behavior/tasks.md#opening-a-task)), centered,
-  up to 1100×760 with a 24px margin, over a dark backdrop; a click on the backdrop does not close it,
-  since a drag selecting terminal text can end there. Everything behind it — the top bar, filters,
-  board, detail panel — is `inert`. The header has the task's state pill and title, a connection
-  chip (`Connecting` grey, `Connected` green, `Disconnected` gold, `Failed` red), then `Go to pane`
-  (or `Open`), the maximize toggle and `Close`; under them host · agent · `tmux: <session>` in the
-  monospace face. Notes sit between the header and the terminal: the task having moved on the board
-  or no longer being listed, a workspace pane showing the same session (and which client sizes the
-  window), and a red "… Input is not being sent." with `Retry` or `Reconnect`. The terminal is
-  dimmed while it takes no input; before the attach answers its place says which tmux session it is
-  connecting to and that keys are not sent yet. A footer repeats the keys and that closing leaves
-  the agent and its tmux session running.
-  - **Keys.** While the terminal has focus every key is the terminal's, `Escape` and `Tab` included
-    (`Escape` is claude's interrupt and codex's cancel). `Cmd/Ctrl+Shift+Esc` closes and
-    `Cmd/Ctrl+Shift+Enter` maximizes from anywhere in the popup; both are captured before the
-    terminal sees them. With focus in the header, `Escape` closes and `Tab` / `Shift+Tab` cycle
-    within the popup. Focus starts on the popup and moves into the terminal each time it connects;
-    when the terminal stops taking input, focus stays in the popup.
-  - **Maximize.** The toggle, a double-click on the header (not on its buttons) or
-    `Cmd/Ctrl+Shift+Enter` makes the popup cover everything below the top bar, which stays in view
-    and inert. Only the terminal's size changes — its connection, input target and focus do not —
-    and restoring brings back the board exactly as it was. The choice is remembered in the browser
-    (`localStorage`) and the next popup opens the same way.
-  - **Narrow screens** (720px and narrower). The popup is a full-window sheet from the start, with no
-    maximize toggle, and its header and `Close` stay in view.
-- **Host terminal.** `Type in pane` from the host connection menu opens the same popup on a host
-  terminal: the header has the connection type as its pill and the host as its title, the
-  connection chip, the maximize toggle and `Close`, and `tmux: <session>` under them for
-  `ssh_tmux`. It has no `Go to pane` / `Open`, and its keys and focus are the task popup's
-  (`useTerminalPopupKeyboard`).
-- **After opening.** The dashboard closes, the pane takes focus, and it is outlined in the
-  interactive blue for about two seconds (a steady outline with reduced motion).
-
-State colors:
-
-| State | Color |
-|---|---|
-| Waiting for input | `#e2b86b` |
-| Working | `#4ec9b0` |
-| Idle, Running | `#8fa6c4` |
-| Unknown | `#c586c0` |
-| Stopped | `#80858d` |
-| Done | `#7fae6a` |
-
-Label colors come from the mock's palette (`#569cd6`, `#4ec9b0`, `#9cdcfe`, `#d7a26b`, `#b48ead`,
-`#c678dd`, `#8a9199`, `#e06c6c`), picked by a hash of the label so a label keeps its color.
-
+See [Task Dashboard](ui-design/task-dashboard.md).
 ### Labels used before
-
-The labels the record file holds (`known_labels`,
-[Done and labels](behavior/tasks.md#done-and-labels)) are offered as tags in a `Used before:` row
-under both label inputs — New task's Labels field and the detail panel's `Add a label` box — rather
-than as a dropdown, so they can be seen and picked without typing. The label filter does not offer
-them.
-
-- They are in case-insensitive alphabetical order, each in its label's color.
-- What is typed filters them by a case-insensitive part of the label; an empty field shows them all.
-  When no label used before matches, entered or not, the row says so ("No label used before contains “…”.") and what was typed is
-  still added as a new label.
-- More than eight after filtering are folded: the first eight show with `+<rest> more`, which shows
-  them all and becomes `Show less` (`aria-expanded`, `aria-controls` the row). Eight or fewer offer
-  no button. Eight keeps the detail panel's row to about two lines at its 360px width.
-- Every tag and the fold button are buttons, reached with Tab and pressed with Enter or Space.
-- None are offered when there are none, or while the record file cannot be read; the inputs work as
-  before.
-
+See [Task Actions](ui-design/task-actions.md#labels-used-before).
 ### Working directory suggestions
-
-New task's Working directory is a combobox: under the field, a list headed `Recent on <host>`
-offers the directories the chosen host's tasks on the board ran in
-([Starting a task](behavior/tasks.md#starting-a-task)), one per row — the path in monospace, then
-the agent and when it was last used (`claude · 2h ago`, `codex · now` for a running task). Running
-tasks' directories come first, then the rest, most recently used first.
-
-- A click in the field, the `▾` button beside it, `↓`/`↑`, or typing opens the list; the focus the
-  form gives the field on opening does not. Typing filters the rows by a case-insensitive part of the
-  path and marks the matching part in the accent color.
-- `↓`/`↑` move the highlighted row (wrapping), `Enter` puts its path in the field and closes the
-  list — with no row highlighted `Enter` submits the form as before — and `Escape` closes only the
-  list; a second `Escape` closes the form. A click on a row does what `Enter` does. Leaving the
-  field closes the list; `▾` moves the focus into the field, so this holds for a list it opened
-  from another field too. Keys that belong to an IME composition (`Enter` confirming a conversion)
-  are left to the IME. The highlighted row follows its directory when a board update reorders the
-  rows.
-- The input has `role="combobox"`, `aria-autocomplete="list"`, `aria-expanded`, `aria-controls` and
-  `aria-activedescendant`; `aria-expanded` is true whenever the list is shown, and `aria-controls`
-  names the `listbox` — named by its heading, each row an `option` with `aria-selected` — or, when it
-  has no row, the message below. The `▾` button is skipped by Tab.
-- When nothing matches what is typed the list says "No recent directory matches. Starting will use
-  the path as typed."; when the host has no task with a directory, "No directory used on this host
-  yet. Type an absolute path."
-- Nothing is stored, so there is no way to remove a row, and no limit beyond the tasks on the board;
-  the list scrolls past about seven rows.
-
----
-
+See [Task Actions](ui-design/task-actions.md#working-directory-suggestions).
 ## Agent Board UI
-
-Agent Board reuses the existing modal, panel, color, status, and focus-restoration patterns.
-
+See [Agent Board UI](ui-design/agent-board.md).
 ### Dashboard
-
-![The Agent Board dashboard as a right-side overlay on a workspace, listing two panes' status cards and their latest messages.](images/agent-board.png)
-
-- Opens from the Agent Board button or `Cmd/Ctrl+Shift+B`; both are absent when the capability is
-  disabled.
-- Appears as a right-side overlay and closes by button, backdrop, or `Escape`.
-- Lists panes with a detected agent or a status report. Idle shells remain hidden until reporting.
-  A detected pane without a report shows `agent detected`, which does not claim a successful join.
-  Pane Settings has no board controls; global enablement lives in YAML and mode is ignored.
-- Shows pane ID, title, state, summary, last tool, and report age. It does not show self-reported
-  repository, branch, or PR values because the pane header already provides panemux-derived values.
-- Treats state as free text and maps known states to the existing status palette: `working` green,
-  `idle` blue, `waiting` attention gold, and everything else neutral.
-- Keeps identity and metadata on one line; summaries may wrap to four lines.
-- Marks reports older than five minutes as `stale` and dims rather than hides them.
-
+See [Agent Board UI](ui-design/agent-board.md#dashboard).
 ### Command center
-
-- `Cmd/Ctrl+Shift+K` opens a focused command palette. Plain `Cmd/Ctrl+K` remains available to common
-  shell/readline bindings.
-- Each prompt creates one turn containing the prompt, streamed output, progress state, and any
-  inline error. A failed turn does not close or disable the palette.
-- Command history uses a right-side panel for longer reading alongside terminal work.
-- Command-center entry points are absent when the capability is disabled.
-
-Global shortcuts use capture phase so terminal focus does not swallow them. Closing any Agent Board
-surface restores the previously focused element. Full data-flow rules are in
-[Command center](agent-board/command-center.md#command-center).
-
+See [Agent Board UI](ui-design/agent-board.md#command-center).
 ### agmsg in the host menu
-
-When Agent Board is globally enabled, HostTools lists agmsg using HostToolItem beneath the host
-menu actions. It shows Not installed / Install, older release / Update, Installed with version,
-newer release warning (kept unchanged), Cannot install with setup reasons, or Not checked.
-Install / Update explains that the tested installer can write outside the skill directory and
-that existing agent scripts keep running. Errors preserve installer exit/output details; success
-asks agents to restart and explains that panemux participates from its next poll.
-**Update automatically (all hosts)** is the same global preference in every host menu, including
-hosts with newer or unconfirmed copies. Consent remains visible beside it even when no manual
-action is offered, explaining unattended execution and writes outside the skill directory.
-During automatic work the menu asks to reopen for the result; automatic failures remain visible
-with manual Update available for retry, and success reports Updated automatically with restart guidance.
-
-![agmsg manual Update in the host menu](images/agmsg-host-tool.png)
+See [Agent Board UI](ui-design/agent-board.md#agmsg-in-the-host-menu).
