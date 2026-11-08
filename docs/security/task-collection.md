@@ -20,8 +20,9 @@ every `ssh_connections` host. Request, config and remote-host values must not be
   concurrently and no more often than every 5 seconds per host, regardless of tab count
   ([event lifecycle](../behavior/task-events.md#lifecycle)).
 - Locally the command is `exec.CommandContext(ctx, "sh", "-s")`, remotely the literal `sh -s`,
-  with the script on stdin. A remote login shell parses only `sh -s`. Local HOME comes only from
-  `internal/homedir` and selects files, not commands. Local collection has its own process group,
+  with the script on stdin. A remote login shell parses only `sh -s`. HOME is the only environment
+  value the local run sets, obtained from `internal/homedir`; it selects files, not commands.
+  Local collection has its own process group,
   killed as a group on context end so no child probe outlives it.
 - Hosts are connection data passed to the pane dialer, never commands. The guarded
   [SSH connection API](../behavior/rest-api.md#apiconfigssh-connections) refuses cross-site
