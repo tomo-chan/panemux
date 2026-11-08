@@ -19,7 +19,7 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
 
 1. Read [DEVELOPMENT.md](DEVELOPMENT.md) for build, test, branch, and PR workflow rules.
    This includes the path-sanitization rule for tests, fixtures, PR bodies, PR comments, review replies, and the mandatory `make check` completion rule.
-   Its long-form testing references live in [docs/development/](docs/development/); DEVELOPMENT.md keeps the rule and links to the reasoning.
+   Its runtime, sandbox, fixture, pre-push, and testing references live in [docs/development/](docs/development/); DEVELOPMENT.md keeps the rule and links to the reasoning.
 2. Read [docs/index.md](docs/index.md) to choose the overview, topic guide, or deep dive appropriate
    to the change.
 3. Read [docs/overview.md](docs/overview.md) for the product purpose and current boundaries.
@@ -46,7 +46,7 @@ Some of the rules in the documents above are checked automatically rather than
 being left to memory. `.claude/` holds the agent-side half:
 
 - `.claude/settings.json` enables local port binding and localhost connections in the macOS
-  Claude Code sandbox. See [Claude Code sandbox](DEVELOPMENT.md#claude-code-sandbox) for its
+  Claude Code sandbox. See [Claude Code sandbox](docs/development/claude-sandbox.md) for its
   security scope, Linux/WSL2 behavior, and managed-setting limitations. It also wires two hooks.
   A `PostToolUse` hook checks the file
   you just edited (`gofmt -s`, and `go vet` on its package, or `tsc --noEmit`
@@ -78,6 +78,7 @@ These are the checks; they do not replace reading the documents above.
 Each entry below is an index. Where a topic outgrew one file, the detail sits in a directory of the
 same name beside it, and the index's own document map routes by section name.
 
+- Runtime selection, sandbox, screenshots, browser fixtures, and pre-push details: [docs/development/index.md](docs/development/index.md)
 - Codex verification and approval setup: [docs/development/codex-verification.md](docs/development/codex-verification.md)
 - Development workflow: [DEVELOPMENT.md](DEVELOPMENT.md) → [docs/development/](docs/development/)
 - Documentation index and reader routes: [docs/index.md](docs/index.md)
