@@ -258,4 +258,3 @@ WebSocket closed (or after creation if none connected), and held in memory only.
 `DELETE /api/tasks/attach/{id}` and `DELETE /api/hosts/terminal/{id}` each end only their own kind,
 and `POST /api/tasks/attach` never returns or removes a host terminal. At most 4 are open on one
 connection at a time.
-

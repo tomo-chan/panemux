@@ -89,4 +89,3 @@ set.
   not JSON, another format version, an invalid entry (an agent that is not an ID shape among them) — is reported by `GET /api/tasks` as
   `records_error`, the tasks are listed without records, and every write fails until the file is
   fixed, so a file panemux does not understand is never replaced. A deleted file is no records.
-

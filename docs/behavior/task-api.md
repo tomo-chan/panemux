@@ -284,4 +284,3 @@ Opens a new host terminal ([Opening a host](task-navigation.md#opening-a-host)):
 `DELETE /api/hosts/terminal/{session_id}` ends it at once and answers `204`; `404` for an ID that is
 not a host terminal (a task's board attach and a pane's session included), and `403` for a
 cross-site request.
-

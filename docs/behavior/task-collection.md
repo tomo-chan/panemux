@@ -366,4 +366,3 @@ Codex sessions are identified through their open rollouts and newest turn record
   filter, so a host where `codex exec` writes many rollouts does not push the TUI's out. Its working
   directory is that line's `cwd`, and the time it stopped is the rollout's modification time.
 - Codex tasks with a collected rollout can be summarized by Codex ([Summaries](task-summaries.md#summaries)).
-
