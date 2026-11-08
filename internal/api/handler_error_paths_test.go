@@ -801,6 +801,7 @@ func TestListLocalDirectories_UnresolvablePath_Errors(t *testing.T) {
 // an unencrypted default SSH key the call gets that far, into a DNS lookup and a
 // TCP connect to a host that is not this test's business. The validation message
 // is what distinguishes "rejected up front" from "failed out on the network".
+//
 //efficacy:exempt Documentation reference update only; test assertions and API behavior are unchanged.
 func TestListRemoteDirectories_WrapsLookupFailure(t *testing.T) {
 	resp, err := listRemoteDirectories(session.SSHConfig{Host: "remote.example.com"}, "/srv; rm -rf /", false)
