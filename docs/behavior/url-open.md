@@ -82,7 +82,7 @@ Two limitations are inherent to the mechanism:
   command instead, so it execs the login shell explicitly (`$SHELL -l` for `bash`, `zsh`, and
   `fish`; a plain `exec "$SHELL"` for anything else). Panes that set `cwd` or `shell` keep their
   `cd` and `exec`, after the shim's setup. A pane whose ID is exported as `PANEMUX_PANE_ID`
-  ([task dashboard](tasks.md#the-pane-of-an-agent-outside-tmux)) runs such a command whether or not
+  ([task dashboard](task-navigation.md#the-pane-of-an-agent-outside-tmux)) runs such a command whether or not
   the shim is enabled; `url_open.browser_shim: false` only drops the shim from it. A pane with
   neither keeps the SSH shell request, or its plain `cd` / `exec` command.
 

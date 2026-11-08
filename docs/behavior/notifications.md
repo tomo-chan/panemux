@@ -16,7 +16,7 @@ and every `ssh_connections` host and publishes each change, and the browser deci
 Terminal output is not searched for prompts, so an agent waiting in a pane no browser has open is
 noticed as well. Codex records nothing when it asks to approve a command; that wait is noticed on
 each host where its permission hook is registered
-([Codex permission requests](tasks.md#codex-permission-requests)), and not at all elsewhere.
+([Codex permission requests](task-codex-permissions.md#codex-permission-requests)), and not at all elsewhere.
 
 When a task starts a wait ([Pane and workspace attention](task-events.md#pane-and-workspace-attention)):
 

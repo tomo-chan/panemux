@@ -11,7 +11,7 @@ description: "Task creation, details, labels, directory suggestions, and termina
 
 ## Starting and selecting
 
-[Starting a task](../behavior/tasks.md#starting-a-task) owns launch fields, eligibility, validation,
+[Starting a task](../behavior/task-launch.md#starting-a-task) owns launch fields, eligibility, validation,
 label persistence and execution. The modal shows Host (unreachable hosts marked "(unreachable)"), Working directory,
 Agent, optional comma-separated Labels and First instruction. Show the server's launch note and
 unavailable-CLI reason below Agent; disable Start when unavailable. Focus Working directory without
@@ -31,8 +31,8 @@ The right panel fills the window height; at 1000px and narrower it slides over t
 Its fixed head holds state, host, agent, start, title, wait reason and actions; only the body scrolls.
 Use the server's capabilities/reasons for Type in pane, Open / Go to pane, Resume, Input given,
 Mark done / Mark not done, summaries and labels. Unknown agents retain pane actions only.
-[Task behavior](../behavior/tasks.md#opening-a-task), [resuming](../behavior/tasks.md#resuming-a-task),
-[permission input](../behavior/tasks.md#codex-permission-requests), and [Done and labels](../behavior/tasks.md#done-and-labels)
+[Task behavior](../behavior/task-navigation.md#opening-a-task), [resuming](../behavior/task-launch.md#resuming-a-task),
+[permission input](../behavior/task-codex-permissions.md#codex-permission-requests), and [Done and labels](../behavior/task-records.md#done-and-labels)
 own availability, effects and record identity.
 
 - Type in pane is interactive blue; an unavailable waiting/idle task says "Type in pane is not
@@ -47,8 +47,8 @@ own availability, effects and record identity.
   keep a disabled button with a tooltip saying the log cannot be read; after a change, enable it
   and say "The conversation has changed since it could not be read." Missing session/log disables
   summaries with a reason; agents without summary capability show no control.
-  [Summaries](../behavior/tasks.md#summaries) owns scheduling, accounts and retries;
-  [Codex sessions](../behavior/tasks.md#codex-sessions) owns state-note meanings.
+  [Summaries](../behavior/task-summaries.md#summaries) owns scheduling, accounts and retries;
+  [Codex sessions](../behavior/task-collection.md#codex-sessions) owns state-note meanings.
 - Mark done asks inline, explaining the destination column and whether Show done hides it.
   Mark not done and Input given do not ask. Failed input confirmation appears under the actions
   as "Could not mark the input given: <reason>".
@@ -61,8 +61,8 @@ own availability, effects and record identity.
 
 ## Terminal popups
 
-[Opening a task](../behavior/tasks.md#opening-a-task) owns Type in pane eligibility, attach/input
-states, status notes, closing and focus restoration. [Opening a host](../behavior/tasks.md#opening-a-host)
+[Opening a task](../behavior/task-navigation.md#opening-a-task) owns Type in pane eligibility, attach/input
+states, status notes, closing and focus restoration. [Opening a host](../behavior/task-navigation.md#opening-a-host)
 owns the host-terminal variant. Both use this presentation:
 
 - Centered dark backdrop; at most 1100×760 with 24px margins. Backdrop clicks do not close the
@@ -89,7 +89,7 @@ owns the host-terminal variant. Both use this presentation:
 ## Labels used before
 
 The labels the record file holds (`known_labels`,
-[Done and labels](../behavior/tasks.md#done-and-labels)) are offered as tags in a `Used before:` row
+[Done and labels](../behavior/task-records.md#done-and-labels)) are offered as tags in a `Used before:` row
 under both label inputs — New task's Labels field and the detail panel's `Add a label` box — rather
 than as a dropdown, so they can be seen and picked without typing. The label filter does not offer
 them.
@@ -113,7 +113,7 @@ remain visible even when filtered or folded.
 ## Working directory suggestions
 
 The Working directory combobox lists `Recent on <host>`: monospace path, agent and last-used time
-(`claude · 2h ago`, `codex · now`). [Starting a task](../behavior/tasks.md#starting-a-task) owns the
+(`claude · 2h ago`, `codex · now`). [Starting a task](../behavior/task-launch.md#starting-a-task) owns the
 source, ordering and lifetime of suggestions.
 
 - A click in the field, the `▾` button beside it, `↓`/`↑`, or typing opens the list; the focus the

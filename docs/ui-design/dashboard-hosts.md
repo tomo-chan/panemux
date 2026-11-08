@@ -11,7 +11,7 @@ Runtime contracts are in [task behavior](../behavior/tasks.md).
 
 ## Connection menu
 
-[Opening a host](../behavior/tasks.md#opening-a-host) owns chip availability, session naming,
+[Opening a host](../behavior/task-navigation.md#opening-a-host) owns chip availability, session naming,
 Open / Type in pane effects, dismissal and focus restoration, including a host losing connectivity.
 The remote chip has a terminal icon and `aria-haspopup="dialog"` / `aria-expanded`; the local
 chip has no terminal icon and opens tool items, including agmsg when Agent Board is enabled.
@@ -31,16 +31,16 @@ and `Type in pane: <host>`.
   hook was updated automatically and to trust it, and a red one why that failed, the setting could
   not be read (the checkbox is then disabled), or it was not saved. The checkbox and the
   `Install`/`Update` button are each disabled while the other's request runs.
-  The local menu has tool items and `Close`; [permission behavior](../behavior/tasks.md#codex-permission-requests)
+  The local menu has tool items and `Close`; [permission behavior](../behavior/task-codex-permissions.md#codex-permission-requests)
   owns hook installation and automatic-update contracts.
 - **Unreadable state.** The warning is amber, one for every host together, and never beside a host
   chip, where it would crowd them as hosts are added. It opens a modal anchored below the top bar at
   the right and kept within the screen's height, titled "Unreadable session state · <n> files on <m> hosts": a table with one row per
   file — host, file name, reason with what was found beneath it, and the process (`claude · pid
   <pid>` with where it runs, or `unknown` when the file name carries no pid) — and a footer naming
-  the fields panemux reads, a link to the steps to fix it in `docs/behavior/tasks.md`, and *Copy
+  the fields panemux reads, a link to the steps to fix it in `docs/behavior/task-collection.md`, and *Copy
   details*, disabled where the clipboard is not available. The files are not cards on the board
-  ([Unreadable state files](../behavior/tasks.md#unreadable-state-files)).
+  ([Unreadable state files](../behavior/task-collection.md#unreadable-state-files)).
 ## Editing hosts
 
 The "Dashboard hosts" modal labels its source `ssh_connections in config.yaml` and explains that
