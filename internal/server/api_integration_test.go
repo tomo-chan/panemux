@@ -50,8 +50,8 @@ import (
 // The table below is exhaustive *by construction*: the test walks the real
 // router and fails when a registered /api route has no case here, so adding a
 // route forces an integration case for it rather than relying on anyone
-// remembering to add one. That is decision D3 (docs/decisions/quality-gateway/consolidated-gates.md; consolidate gates rather than
-// adding them) applied to this half of the gate — the same shape as the route
+// remembering to add one. Decision D3 (docs/decisions/quality-gateway/consolidated-gates.md)
+// consolidates gates rather than adding them — the same shape as the route
 // table's own exhaustiveness check, which is why no new *_routes_test.go file
 // is needed for the next feature either.
 
