@@ -10,7 +10,7 @@ Modal dialogs hold higher-friction configuration tasks.
 
 ![The Pane Settings modal centred over a dimmed workspace, with type, shell, working directory and title fields, and Cancel and Save buttons.](../images/pane-settings.png)
 
-### Keyboard behaviour, shared by every modal
+## Keyboard behaviour, shared by every modal
 
 Every surface declaring `aria-modal="true"` uses `useModalKeyboard`:
 
@@ -20,7 +20,7 @@ Every surface declaring `aria-modal="true"` uses `useModalKeyboard`:
 - A dialog saving changes omits its Escape handler but retains the focus trap.
 - A nested modal takes over the trap; the form behind it stays out of reach.
 
-### Open in workspace
+## Open in workspace
 
 A task's Open (card, details or Type in pane popup) and a host menu's Open use
 `WorkspacePickerDialog`, centred on a dimmed backdrop with the shared dialog surface and keyboard
@@ -36,7 +36,7 @@ added at the right edge. Retrying after a session or layout was created resumes 
 steps without duplicating them. Successful confirmation activates the chosen workspace and
 focuses and outlines the new pane. **Go to pane** navigates immediately without this dialog.
 
-### Confirmation dialog
+## Confirmation dialog
 
 Destructive actions use `ConfirmDialog`, so terminals keep rendering while confirmation is open.
 It uses the shared dialog surface (`#252526`, `#444` border). Cancel, backdrop and Escape cancel;

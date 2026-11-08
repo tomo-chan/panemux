@@ -67,7 +67,7 @@ See [Pane Header](ui-design/panes.md#drag-handle).
 ### Why header-only drag
 See [Pane Header](ui-design/panes.md).
 ## Drag and Drop
-See [Layout Editing](ui-design/layout.md).
+See [Layout Editing](ui-design/layout.md#drag-and-drop).
 ### States
 See [Layout Editing](ui-design/layout.md#states).
 ### Interaction model
@@ -81,13 +81,13 @@ See [Modal Dialogs](ui-design/dialogs.md#open-in-workspace).
 ### Confirmation dialog
 See [Modal Dialogs](ui-design/dialogs.md#confirmation-dialog).
 ## Transient Error Banner
-See [Layout Editing](ui-design/layout.md).
+See [Layout Editing](ui-design/layout.md#transient-error-banner).
 ### Error state lifecycle
 See [Layout Editing](ui-design/layout.md).
 ## Pane URL Strip
-See [Pane URLs and Split Preview](ui-design/preview.md).
+See [Pane URLs and Split Preview](ui-design/preview.md#pane-url-strip).
 ## Split Preview
-See [Pane URLs and Split Preview](ui-design/preview.md).
+See [Pane URLs and Split Preview](ui-design/preview.md#split-preview).
 ## Attention Indicators
 See [Attention Indicators](ui-design/attention.md).
 ## Task Dashboard

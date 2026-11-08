@@ -4,6 +4,8 @@ title: "Layout Editing"
 description: "Pane drag targets and feedback for optimistic layout persistence."
 ---
 
+# Layout Editing
+
 ## Drag and Drop
 
 Drag-and-drop is always available from the pane header handle. There is no separate edit mode.

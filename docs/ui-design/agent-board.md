@@ -4,6 +4,8 @@ title: "Agent Board UI"
 description: "Agent Board dashboard, command center, and agmsg host-menu presentation."
 ---
 
+# Agent Board UI
+
 ## Agent Board UI
 
 Agent Board reuses the existing modal, panel, color, status, and focus-restoration patterns.

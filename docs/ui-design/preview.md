@@ -4,6 +4,8 @@ title: "Pane URLs and Split Preview"
 description: "Pane URL request strips and previews alongside an interactive terminal."
 ---
 
+# Pane URLs and Split Preview
+
 ## Pane URL Strip
 
 Opening a URL out of a pane can need the operator's attention twice: before anything opens, when a

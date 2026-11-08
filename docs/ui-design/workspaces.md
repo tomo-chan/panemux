@@ -10,7 +10,7 @@ The workspace bar is always visible, including with one workspace. It contains `
 ([Task Dashboard](task-dashboard.md)), workspace tabs with summaries and inline rename/delete,
 `+` to create a workspace, and bar-position controls.
 
-### Tab position controls
+## Tab position controls
 
 Top/bottom/left/right buttons use `aria-pressed` on the active position.
 
@@ -23,11 +23,11 @@ The position cluster sits on the opposite end of the workspace tabs:
 
 For left/right bars, the bar width is user-resizable by dragging its inner edge. The chosen width is shared across workspaces and restored on reload, while the pane layout inside the remaining work area continues to use its own saved percentage splits.
 
-### Integrated workspace summaries
+## Integrated workspace summaries
 Each tab shows a one-line count of panes, connected, disconnected, exited, and pending sessions,
 plus a compact pane-name strip. Pending means session data has not arrived yet.
 
-### Workspace pane groups
+## Workspace pane groups
 
 Each workspace renders as a grouped strip anchored to its tab surface. The pane cards are not an independent dashboard panel; they are visually and interactively subordinate to the workspace tab they belong to.
 

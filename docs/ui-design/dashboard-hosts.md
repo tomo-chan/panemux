@@ -9,18 +9,19 @@ description: "Host chips, connection menus, tool controls, unreadable state, and
 These controls belong to the [task dashboard](task-dashboard.md).
 Runtime contracts are in [task behavior](../behavior/tasks.md).
 
-- **Host connection menu.** The chip of a remote host whose collection succeeded is a button
-  (`aria-haspopup="dialog"`, `aria-expanded`) with a small terminal icon; the panemux host's chip
-  opens its tool items (Codex input notifications, plus agmsg when Agent Board is enabled),
-  and a `connecting`, failed or not-yet-collected
-  chip is plain text
-  ([behavior](../behavior/tasks.md#opening-a-host)). Pressing it opens a small popover dialog anchored
-  under the chip, titled after the host: a `Connection` group of `ssh` / `ssh_tmux` radios (`ssh`
-  checked), the tmux session name the server generated in the monospace face once `ssh_tmux` is
-  chosen (or "Could not name the tmux session: …" in red), and `Cancel`, `Open` and `Type in pane`
-  in the interactive blue, labelled `Open: <host>` and `Type in pane: <host>` like a task's
-  buttons. A press outside it closes it; focus returns to the chip. A host that stops being
-  reachable takes its menu with it, and focus goes to its `Reconnect`.
+## Connection menu
+
+[Opening a host](../behavior/tasks.md#opening-a-host) owns chip availability, session naming,
+Open / Type in pane effects, dismissal and focus restoration, including a host losing connectivity.
+The remote chip has a terminal icon and `aria-haspopup="dialog"` / `aria-expanded`; the local
+chip has no terminal icon and opens tool items, including agmsg when Agent Board is enabled.
+The popover sits under the chip with the host as title, `Connection` radios (`ssh`, `ssh_tmux`),
+a monospace generated tmux name or red "Could not name the tmux session: …", and `Cancel`,
+`Open`, `Type in pane`. The last two are interactive blue with accessible names `Open: <host>`
+and `Type in pane: <host>`.
+
+## Host tools and diagnostics
+
 - **Codex input notifications.** Below the menu's actions, separated by a rule, a row reads
   `Codex input notifications` with a small `Install` or `Update` button at its end, or `Installed`
   in the Working green, and a muted line under it (`Not installed`, `Not checked: …`); a
@@ -30,8 +31,8 @@ Runtime contracts are in [task behavior](../behavior/tasks.md).
   hook was updated automatically and to trust it, and a red one why that failed, the setting could
   not be read (the checkbox is then disabled), or it was not saved. The checkbox and the
   `Install`/`Update` button are each disabled while the other's request runs.
-  The panemux host's chip is a button too, with no terminal icon: its menu holds this row and
-  `Close` alone ([behavior](../behavior/tasks.md#codex-permission-requests)).
+  The local menu has tool items and `Close`; [permission behavior](../behavior/tasks.md#codex-permission-requests)
+  owns hook installation and automatic-update contracts.
 - **Unreadable state.** The warning is amber, one for every host together, and never beside a host
   chip, where it would crowd them as hosts are added. It opens a modal anchored below the top bar at
   the right and kept within the screen's height, titled "Unreadable session state · <n> files on <m> hosts": a table with one row per
@@ -40,22 +41,20 @@ Runtime contracts are in [task behavior](../behavior/tasks.md).
   the fields panemux reads, a link to the steps to fix it in `docs/behavior/tasks.md`, and *Copy
   details*, disabled where the clipboard is not available. The files are not cards on the board
   ([Unreadable state files](../behavior/tasks.md#unreadable-state-files)).
-- **Hosts….** A modal over the dashboard titled "Dashboard hosts", with `ssh_connections in
-  config.yaml` beside the title and a note that a host only in `~/.ssh/config` works in panes but is
-  not collected from until its name is added here. A table lists each entry — name, where it
-  connects (`user@host:port`, or "from ~/.ssh/config" for a name-only entry), and small tags for
-  `~/.ssh/config`, `key file`, `password set` and `used by N panes` — with `Edit` and `Delete` per
-  row, and `Add host` and `Close` below it. `Add host` and `Edit` open a form under the table, and
-  while the form or a delete confirmation is open, `Add host` and `Close` are hidden so only that
-  step's own buttons show; its `Cancel` returns to the list, and `Escape` or a click outside still
-  closes the dialog. The form has Name (offering the `~/.ssh/config` host
-  names; read-only when editing, since a name cannot change), Host (marked optional, with a note
-  that empty fields use the block's values, when `~/.ssh/config` has a block of that name), User,
-  Port, Key file, Known hosts file and Password. The password field is always empty; for an entry
-  with one its placeholder says to leave it empty to keep it, and a `Remove saved password` checkbox
-  disables it. What the form can tell without the server — a missing or malformed name, a name
-  already listed, a port outside 1–65535, no host and no block to take it from — is refused under the
-  form; the server's refusals appear there as "Could not save: …", keeping what was typed. `Delete`
-  asks in an inline red confirmation; a host panes use by name with no `~/.ssh/config` block to fall
-  back to is refused before asking, naming the panes, and a refusal only the server can tell — a
-  pane or host whose `ProxyJump` goes through it — appears as "Could not delete …". A green notice says what was added, saved or deleted, and the board collects again.
+## Editing hosts
+
+The "Dashboard hosts" modal labels its source `ssh_connections in config.yaml` and explains that
+hosts only in `~/.ssh/config` are usable in panes but not collected. Rows show name, destination
+(`user@host:port` or "from ~/.ssh/config"), tags for SSH config/key/password/pane usage, Edit and
+Delete. Below: Add host and Close. The inline add/edit form or delete confirmation hides those
+buttons; Cancel returns to the list, Escape/outside click closes the dialog.
+
+Fields: Name (SSH-config suggestions, read-only on edit), optional Host (empty fields use its SSH
+block), User, Port, Key file, Known hosts file, Password. Password is empty; existing entries say
+leave empty to keep, with Remove saved password disabling the field. Show client validation
+beneath the form (missing/malformed/duplicate name, port outside 1–65535, or neither Host nor an
+SSH block), and "Could not save: …" for server failures, preserving input.
+Deletion asks inline in red; an in-use host without an SSH block is refused before asking, naming
+panes; server-only dependency refusals say "Could not delete …". A green notice names successful
+add/save/delete; the board collects again. [SSH behavior](../behavior/ssh.md) owns host configuration
+and deletion constraints.
