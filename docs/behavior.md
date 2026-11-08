@@ -35,7 +35,7 @@ The YAML config defines:
 - optional `task_dashboard` settings: `task_dashboard.autolinks`
 - optional `agent_board` and `command_center` settings
 - optional `task_dashboard.summary.enabled` (default `false`), which turns on the task dashboard's
-  summaries ([Summaries](behavior/tasks.md#summaries)); it is written back only when set
+  summaries ([Summaries](behavior/task-summaries.md#summaries)); it is written back only when set
 
 Legacy top-level `layout` is accepted at load time and normalized to one `default` workspace. The
 next save writes the current `workspaces` shape.
@@ -69,7 +69,7 @@ Layout rules:
 - a list of autolink references shaped like a GitHub repository's: `key_prefix`, `url_template`
   and `is_alphanumeric`. A reference in a task's branch name or PR title links to `url_template`
   with `<num>` replaced by its identifier (see
-  [task dashboard behavior](behavior/tasks.md#repository-branch-pull-request-issues-and-references))
+  [task dashboard behavior](behavior/task-records.md#repository-branch-pull-request-issues-and-references))
 - `key_prefix` is required, without whitespace, and may not overlap another entry's: as on GitHub,
   `TICKET` and `TICK` cannot both be set, since both would match `TICKET123`
 - `url_template` is an absolute `https` URL with a host, containing `<num>` after the host; a
@@ -101,7 +101,15 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 | Frontend Runtime Behavior; Pane Git and PR metadata | [frontend.md](behavior/frontend.md) |
 | Opening URLs from a Pane | [url-open.md](behavior/url-open.md) |
 | Split Preview; Panes on an SSH host; Localhost URLs of an SSH host; `POST /api/sessions/{id}/preview` | [preview.md](behavior/preview.md) |
-| Task Dashboard; Wait signature; `GET /api/tasks`; `POST /api/tasks/hosts/{name}/reconnect`; `PUT /api/tasks/records`; `POST /api/tasks`; `POST /api/tasks/resume`; `POST /api/tasks/summary`; `POST /api/tasks/input-given`; `GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`; agmsg host tool (`GET` and `POST /api/hosts/agmsg`, `POST /api/hosts/agmsg/auto-update`) | [tasks.md](behavior/tasks.md) |
+| Task dashboard model and document map | [tasks.md](behavior/tasks.md) |
+| Collection, state, availability and wait signatures | [task-collection.md](behavior/task-collection.md) |
+| Repository metadata, done and labels | [task-records.md](behavior/task-records.md) |
+| Launch and resume | [task-launch.md](behavior/task-launch.md) |
+| Task summaries and persistence | [task-summaries.md](behavior/task-summaries.md) |
+| Task locations, navigation and temporary terminals | [task-navigation.md](behavior/task-navigation.md) |
+| Task and host terminal REST contracts | [task-api.md](behavior/task-api.md) |
+| Codex permission hook | [task-codex-permissions.md](behavior/task-codex-permissions.md) |
+| Shared host tool coordination and agmsg management | [host-tools.md](behavior/host-tools.md) |
 | Task summaries: what they cost (measurements) | [task-summary-cost.md](behavior/task-summary-cost.md) |
 | Task Events; `GET /ws/tasks/events` | [task-events.md](behavior/task-events.md) (Japanese: [task-events.ja.md](behavior/task-events.ja.md)) |
 

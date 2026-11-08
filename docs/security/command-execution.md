@@ -31,7 +31,7 @@ setup and quoted operands are passed as one line to `/bin/sh`, just as for an or
 See [new remote tmux interception](url-open.md#new-ssh_tmux-sessions) for its session-local
 environment and pane-local passthrough scope.
 
-**The task dashboard's attach** (`POST /api/tasks/attach`, [behavior](../behavior/tasks.md#post-apitasksattach))
+**The task dashboard's attach** (`POST /api/tasks/attach`, [behavior](../behavior/task-api.md#post-apitasksattach))
 passes a tmux session name that a host's collection reported, not one a person configured. It reaches
 the sink only through `NewTmuxLocalAttach` / `NewTmuxSSHAttach` in `internal/session`, and:
 
@@ -51,7 +51,7 @@ the sink only through `NewTmuxLocalAttach` / `NewTmuxSSHAttach` in `internal/ses
   under the task's name.
 
 **A host opened from the dashboard** (`POST /api/hosts/session-name`, `POST /api/hosts/terminal`,
-[behavior](../behavior/tasks.md#opening-a-host)) starts an `ssh` or `ssh_tmux` session on a
+[behavior](../behavior/task-navigation.md#opening-a-host)) starts an `ssh` or `ssh_tmux` session on a
 connection a browser names:
 
 - `connection` must be a key of `ssh_connections`; an empty name (the panemux host) and any other
@@ -298,7 +298,7 @@ config, or a remote host into a command string:
   argv elements. The `--json` field list is a constant (`prTaskFields`), not a value from anywhere.
 
 The codex permission hook (`internal/codexhook/codex_permission_hook.sh`,
-[behavior](../behavior/tasks.md#codex-permission-requests)) is a constant script panemux embeds;
+[behavior](../behavior/task-codex-permissions.md#codex-permission-requests)) is a constant script panemux embeds;
 panemux never runs it. It takes from codex's stdin only `session_id` and
 `turn_id`, and only when they are hex digits and dashes, so neither can name a path outside
 `~/.local/state/panemux/codex-permission/` or carry the command codex asked about. It writes the
@@ -419,7 +419,7 @@ host and port the browser's URL parser also accepts, with `<num>` after the host
 every link in the response again (`HttpUrlSchema`). The identifier put in place of `<num>` is only
 ever digits, or letters, digits and `-` (`isAutolinkIDByte`).
 
-**Unreadable state files** ([behavior](../behavior/tasks.md#unreadable-state-files)) carry two values
+**Unreadable state files** ([behavior](../behavior/task-collection.md#unreadable-state-files)) carry two values
 from the host to the API, the browser and the server log: the file name and a detail that may quote
 what the file holds. Neither reaches a command. Both are made valid UTF-8 with every control and
 invisible format character replaced by U+FFFD and cut to 128 and 120 characters
@@ -429,7 +429,7 @@ link. The details never carry a file's whole content.
 
 ### Task agent probe
 
-The agent probe ([behavior](../behavior/tasks.md#agent-availability)) runs one more fixed script per
+The agent probe ([behavior](../behavior/task-collection.md#agent-availability)) runs one more fixed script per
 host, `probeScript` in `internal/tasks/availability.go`, apart from the collection script. It is
 composed once at startup from Go constants alone: a fixed `probe_cli` function and one
 `probe_cli <id>` line for each registry ID that declares `launch` or `resume`. Composition accepts an
@@ -461,7 +461,7 @@ characters by `boundedText`, at most 3 of each, and never reach a command.
 
 ### Task launch and resume
 
-`POST /api/tasks` and `POST /api/tasks/resume` ([behavior](../behavior/tasks.md#starting-a-task))
+`POST /api/tasks` and `POST /api/tasks/resume` ([behavior](../behavior/task-launch.md#starting-a-task))
 start an agent's process — claude or codex, the agents with a launch or resume adapter — on the panemux host or an `ssh_connections` host, from values a
 request supplies: a host, an agent, a working directory, a first instruction and a session ID. Unlike the command
 center, which hands `exec.CommandContext` an argv, a remote start has to cross the remote login
@@ -661,7 +661,7 @@ directory last on `PATH`). `TestBuildLaunchScript_RefusesInputBeforeAnythingRuns
 ### Task summaries
 
 When `task_dashboard.summary.enabled` is set, the dashboard summarizes each Claude or Codex task
-([behavior](../behavior/tasks.md#summaries)). That adds two sinks: a script that reads a conversation
+([behavior](../behavior/task-summaries.md#summaries)). That adds two sinks: a script that reads a conversation
 log on a host, and the matching agent CLI process on the panemux host whose input is text from that log —
 text written by whoever and whatever took part in the conversation, which panemux does not control.
 

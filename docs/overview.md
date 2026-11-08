@@ -85,13 +85,13 @@ backend and UI are released together.
   published format, and finds a running codex's session through the rollout file it holds open. It
   cannot tell a codex waiting for command approval from one at work, so that wait is not notified,
   unless a hand-registered codex hook records the request
-  ([Codex permission requests](behavior/tasks.md#codex-permission-requests)). It
+  ([Codex permission requests](behavior/task-codex-permissions.md#codex-permission-requests)). It
   collects only while it is on screen, or while a browser tab subscribes to the task event stream,
   which observes the running tasks only. A waiting task's `wait_signature` exists only when the
   agent recorded when the wait began. It finds the pane of an agent outside tmux only on Linux and macOS hosts, where it can read
   the agent's environment, and on macOS not for an agent that is one of Apple's own binaries. The
   macOS reading has not yet been run on a macOS host
-  ([details](behavior/tasks.md#the-pane-of-an-agent-outside-tmux)). Whether a task is done is only
+  ([details](behavior/task-navigation.md#the-pane-of-an-agent-outside-tmux)). Whether a task is done is only
   what a person marked; only tasks with a session ID can be marked done or labeled.
 - The task dashboard starts and resumes claude and codex tasks, each as one agent process in a
   detached tmux session of its own on the host; it opens no pane for them, and a codex held at a

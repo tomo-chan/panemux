@@ -67,7 +67,7 @@ ssh_connections:
     known_hosts_file: ~/.ssh/known_hosts
 ```
 
-`ssh_connections` is also the list of hosts the [task dashboard](tasks.md#hosts-and-connections)
+`ssh_connections` is also the list of hosts the [task dashboard](task-collection.md#hosts-and-connections)
 collects agent sessions from. A host that only has a `~/.ssh/config` `Host` block — including one
 added with **Add SSH Host**, which writes `~/.ssh/config` — can be a pane's `connection` but is not
 collected from until its name is listed under `ssh_connections`.

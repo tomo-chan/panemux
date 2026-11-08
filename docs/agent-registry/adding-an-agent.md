@@ -38,7 +38,7 @@ end to end; it is the example below.
    ID, so an agent whose CLI is named otherwise cannot be launched or probed yet
    ([#428](https://github.com/tomo-chan/panemux/issues/428)).
 7. Add its rows to [docs/scenarios.md](../scenarios.md) and its behavior to
-   [docs/behavior/tasks.md](../behavior/tasks.md). Nothing in the API schema or the dashboard
+   [docs/behavior/task-collection.md](../behavior/task-collection.md). Nothing in the API schema or the dashboard
    changes: `agents`, each host's `availability` and each task's `actions` already carry what it
    declares.
 
@@ -56,7 +56,7 @@ end to end; it is the example below.
 | `usage` | — (declared by no agent yet, [#345](https://github.com/tomo-chan/panemux/issues/345)) | — | — | — |
 
 An absent capability is absent everywhere: no availability row, no action on its tasks, no button,
-and the route refuses it ([a task's actions](../behavior/tasks.md#agent-availability)).
+and the route refuses it ([a task's actions](../behavior/task-collection.md#agent-availability)).
 
 ## The fixture agent: a minimal adapter set
 

@@ -28,9 +28,9 @@ flush right, and wrap internally only when too narrow for the group itself.
 
 ## Lists and filters
 
-[Opening a task](../behavior/tasks.md#opening-a-task) owns view-state lifetime and browser storage,
+[Opening a task](../behavior/task-navigation.md#opening-a-task) owns view-state lifetime and browser storage,
 filter restoration, grouping, sorting, notification focus and scroll, and selection across list changes.
-[Done and labels](../behavior/tasks.md#done-and-labels) owns Done placement and label identity.
+[Done and labels](../behavior/task-records.md#done-and-labels) owns Done placement and label identity.
 
 - The filter row offers text search (title, directory, branch, PR/reference, session/tmux name and
   summary), Group (None / Host / Label / Repository), host, label and `Show done` (initially off).
