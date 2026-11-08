@@ -80,16 +80,25 @@ The pane that belongs to a task is found in the browser from the current workspa
 | Stopped | Not opened; a stopped task whose agent resumes offers `Resume` ([Resuming a task](task-launch.md#resuming-a-task)) |
 | Unknown | Not opened |
 
-New panes from cards, details or the popup always ask **Open in workspace**, even with only one
-workspace, defaulting to active. Open here confirms; + New workspace asks a trimmed nonblank,
-unique title and changes confirmation to Create and open. POST workspace then PUT title precede
-pane creation, adding right of the default Terminal pane. Retain the created workspace selection
-for retries. Naming failure leaves its default title and creates no requested pane; Open here can
-retry there. Session creation and saved pane insertion are not repeated on retry. A pane already
-saved elsewhere requires selecting that workspace. Missing destinations/errors never fall back.
-Cancel/Escape/× create no pane; confirmation disables controls until completion. Success activates
-the destination, closes Tasks, focuses/outlines the pane. Go to pane bypasses the picker. Concurrent
-opens of the same tmux session create only one pane.
+Cards, details and the popup always open **Open in workspace** before creating a pane, even when
+only one workspace exists. The active workspace is selected initially, and **Open here** confirms
+the destination. **+ New workspace** reveals a title field and changes confirmation to
+**Create and open**. A title that is blank after trimming or matches an existing title produces
+an input error without creating anything.
+
+The browser creates a workspace with `POST /api/workspaces`, then names it with
+`PUT /api/workspaces/{id}`, before creating the requested pane to the right of its default
+Terminal pane. Once created, the workspace remains selected so a retry does not create another.
+If naming fails, the workspace keeps its default title, the error is shown and no requested pane
+is created; **Open here** can then retry in that retained workspace. A retry after session creation
+does not create another session, and retrying activation does not insert an already saved pane
+again. If the pane was saved in another workspace, the error asks the user to select that workspace.
+A missing destination or failed request shows an error without falling back to another workspace.
+
+Cancel, Escape and × close the picker without creating a pane. Confirmation disables the controls
+until the request completes. A successful Open activates the destination workspace, closes Tasks,
+and focuses and briefly outlines the pane. Go to pane bypasses the picker. Opening the same tmux
+session concurrently creates only one pane.
 
 **Type in pane.** A task waiting for input or idle can also be answered without leaving the
 dashboard: `Type in pane` opens a popup over the board holding a real terminal on the task's tmux
@@ -104,20 +113,30 @@ switch workspaces or add a pane, and it neither starts nor resumes the agent.
 | Waiting for input or idle, run by codex's shared daemon | Not offered; the detail panel says why |
 | Any other state | Not offered, and no reason is shown |
 
-The button is disabled/Connecting until its popup closes. Late attaches after close or another
-task's popup are deleted, except same-task reopening which reuses that attach. Header state is
-Connecting/Connected/Disconnected/Failed; input works only when Connected. Failures, disconnects,
-given-up WebSockets and exited clients dim the terminal and say "Input is not being sent."
-Retry/Reconnect repeat POST attach with a fresh WebSocket, never restart a pane.
-The popup remains bound to its task ID through column movement or delisting, explaining either
-without changing terminal, connection or focus; its card shows Typing. A workspace pane is a
-second client, with input shared and tmux's latest-used-client size explained.
+When Type in pane is pressed, the popup opens immediately in `Connecting`. The button reads
+`Connecting…` and stays disabled until the popup closes. An attach arriving after the popup closes
+or after another task's popup opens is ended immediately. If the same task's popup has reopened,
+the server returns the same attach and leaves the late result for that popup.
 
-Close, Cmd/Ctrl+Shift+Esc or Escape in the header sends DELETE attach, ending only that client.
-Leaving Tasks does likewise; pagehide on reload/tab close uses keepalive DELETE. A lost DELETE
-still expires after the last socket's grace period. Back/forward-cache restoration requests the
-attach again. Closing preserves board selection, filters and scroll, focusing the task's surviving
-button or dashboard. Popup Go to pane/Open closes it and navigates as above.
+The header shows `Connecting`, `Connected`, `Disconnected` or `Failed`. The terminal accepts keys
+only while Connected. A failed request, disconnect, WebSocket that gave up, or exited tmux client
+dims the terminal and displays `Input is not being sent.` Retry and Reconnect repeat
+`POST /api/tasks/attach` with a fresh WebSocket; they never restart a pane.
+
+The popup remains bound to its original task ID when collection moves or delists the task.
+It displays `Moved to <column> on the board. This terminal stays on <task>.` after a column move,
+or `The board no longer lists this task. This terminal stays on <task>.` after delisting.
+Neither event changes the terminal, its connection or focus. The card shows Typing while its popup
+is open. When a workspace pane shows the same session, both clients send input to it, and the popup
+explains that the tmux window takes the size of the client used last.
+
+Close, Cmd/Ctrl+Shift+Esc, or Escape while focus is in the header sends
+`DELETE /api/tasks/attach/{session_id}`, ending only that client. Leaving Tasks does the same.
+On reload or tab close, pagehide sends the DELETE as a keepalive request; if it is lost, the server
+still expires the attach after its last socket's grace period. A page restored from the
+back/forward cache requests the attach again. Closing the popup preserves board selection, filters
+and scroll, and returns focus to the task's surviving button or to the dashboard when none remains.
+The popup's Go to pane or Open closes it and navigates as described above.
 
 **The board's temporary attach.** What Type in pane uses: a terminal on a task's tmux session that
 is not a pane. [`POST /api/tasks/attach`](task-api.md#post-apitasksattach) opens a tmux client on the running

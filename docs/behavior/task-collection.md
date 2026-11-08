@@ -122,8 +122,9 @@ normal exit removes the file. Duplicate live state files keep the newest update.
 
 An unreadable file is a diagnostic, never a task. A live process without readable state is
 `unknown` with its process cwd, taking that directory's newest log as its own so the log is not
-listed again as stopped. No observed state means done; only [records](task-records.md#done-and-labels)
-say that. `stop` cannot distinguish normal exit, crash and restart.
+listed again as stopped. No `state` value indicates that the work is done. Done is only what a
+person [records](task-records.md#done-and-labels), and recording it never changes `state`.
+The `stop` state cannot distinguish a normal exit from a crash or a host restart.
 Stopped tasks are the newest 50 logs per host across both agents, changed within 7 days, excluding
 subagent logs (`<session>/subagents/*.jsonl`). State time is `statusUpdatedAt`, then `updatedAt`,
 then `startedAt`; stopped tasks use log modification time. Host times are converted by age against
@@ -184,19 +185,27 @@ probe: undeclared/unknown agents offer no actions, and non-stopped tasks never o
 | `summary` | `unavailable` / `session_info_missing` | The task has no session ID a summary can name (a codex one is a UUID), or its conversation log has not been found, which `POST /api/tasks/summary` refuses with `404` |
 | `summary` | `available` | Otherwise. Whether summaries are on is `summaries_enabled`, not the action |
 
-Resume/summary requests for undeclared capabilities or unknown agents return `400` regardless of
-client input. The dashboard omits absent actions (Work explains that the agent does not summarize),
-disables unavailable ones with the action detail, else a known cli_missing/session_info_missing
-sentence, else raw reason; available/degraded/unknown remain offered and are checked again on use.
-Unknown agents display `<agent> (unknown agent)` with only pane actions, no resume, summary, done or
-labels, and an explanatory detail note. State notes come from `state_note`; stopped notes always
-say no running process handles the session.
+Resume and summary requests for undeclared capabilities or unknown agents return `400`, regardless
+of client input. The dashboard shows the actions the server decides; it holds no rule of its own
+per agent name. It omits absent actions: Resume is hidden, and Work says
+`<agent> does not summarize its tasks.` when summary is absent. An unavailable action remains
+visible but disabled. The detail panel says `Resume is not available: <why>.` or
+`Summarize is not available: <why>.` The explanation uses the action's detail when present,
+otherwise a sentence for a known `cli_missing` or `session_info_missing` reason, otherwise the
+reason as sent. Available, degraded and unknown actions remain offered; the server checks them
+again when used.
 
-A current-connection `unavailable/cli_missing` launch/resume fails `409` before executing (resume
-before recollection), with the launch script's fixed CLI-missing message, and immediately reprobes
-so a later-installed CLI can be found on retry. Not-probed/probe-failed and degraded collection do
-not block launch; the script checks the CLI. Unknown state never becomes stopped for resume,
-and the agent's accepted session-ID rule still applies.
+A task whose agent is unknown displays `<agent> (unknown agent)` and offers only pane actions.
+It offers no resume, summary, done or label controls, and the detail panel explains why.
+The state note comes from `state_note`; a stopped task's note says that no running process handles
+its session.
+
+A launch or resume whose current-connection capability is `unavailable` with `cli_missing`
+returns `409` before anything runs; a resume is refused before recollection. The response uses
+the launch script's fixed CLI-missing message, and the host is probed immediately so that a CLI
+installed since the previous probe can be found on the next attempt. A not-probed or failed probe,
+or degraded collection, does not block launch: the script checks for the CLI itself. An unknown
+state never becomes stopped for resume, and the agent's accepted session-ID rule still applies.
 
 **The probe** runs asynchronously after a successful full dashboard collection, not an event,
 resume or lookup collection. Only one runs per host; `GET /api/tasks` does not wait for it.
