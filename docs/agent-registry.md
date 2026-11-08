@@ -59,8 +59,8 @@ Where a session is found is not part of what it is:
 An agent declares any subset of these. A capability is a declaration of what panemux supports for
 the agent, not a statement that it works on a given host right now. Whether `collect`, `launch` and
 `resume` work on a host is found out per host and kept inside `internal/tasks` as
-[agent availability](behavior/tasks.md#agent-availability): a probe for the agent's CLI, and what the
-collection could not read. [`GET /api/tasks`](behavior/tasks.md#get-apitasks) carries the registered
+[agent availability](behavior/task-collection.md#agent-availability): a probe for the agent's CLI, and what the
+collection could not read. [`GET /api/tasks`](behavior/task-api.md#get-apitasks) carries the registered
 agents with their declarations (`agents`), each host's availability, and each task's actions with why
 one cannot be taken, so the dashboard offers what the registry and the host allow rather than what an
 agent's name suggests.
@@ -96,8 +96,8 @@ request. Each supplies a fixed shell fragment that the one launch script
 composes under the case of its agent and mode; a fragment takes no request value, and refuses only
 with codes the script or its adapter declares. A launch that names no session ID has its labels held
 until a collection finds exactly one session of that agent in its tmux session
-([Starting a task](behavior/tasks.md#starting-a-task)). An agent that declares neither is refused,
-and so is one whose CLI the host's probe found missing ([agent availability](behavior/tasks.md#agent-availability)).
+([Starting a task](behavior/task-launch.md#starting-a-task)). An agent that declares neither is refused,
+and so is one whose CLI the host's probe found missing ([agent availability](behavior/task-collection.md#agent-availability)).
 `workdir` is implemented by a workdir adapter per agent, which `internal/session` defines in its own
 types and lists explicitly by ID in `workdirAdapters` (`internal/session/workdir.go`); a test checks
 the list against the registry's `workdir` declarations. It works per session, not per pane: `locate`
@@ -130,7 +130,7 @@ the transport is installed on a host; detection checks availability without writ
 
 Which agents can be given a done or label record (`internal/tasks`'s `recordable`) is read from the
 `collect` declarations; a stored record of any other agent is kept and written back unchanged
-([Done and labels](behavior/tasks.md#done-and-labels)).
+([Done and labels](behavior/task-records.md#done-and-labels)).
 
 A running task carries what a later capability needs to find its working directories without
 collecting again: its session key (`Task.Key`), its pid, its working directory and, for codex, the
@@ -155,7 +155,7 @@ The Claude Code state file's `version` and codex's `session_meta` `cli_version` 
 never compared. What the collection cannot read — structure it cannot parse, a status or turn event
 outside the set it knows — is listed with its state `unknown` rather than guessed, notifies nothing,
 and makes that agent's `collect` `degraded` / `unknown_format` on that host
-([Agent availability](behavior/tasks.md#agent-availability)). An unknown argument stays `accept`.
+([Agent availability](behavior/task-collection.md#agent-availability)). An unknown argument stays `accept`.
 
 ## Detection rules
 

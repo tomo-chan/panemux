@@ -3,7 +3,7 @@ import { hostLabel } from './taskBoard'
 
 /** Where the steps to take when a state file cannot be read are written. */
 export const UNREADABLE_DOC_URL =
-  'https://github.com/tomo-chan/panemux/blob/main/docs/behavior/tasks.md#unreadable-state-files'
+  'https://github.com/tomo-chan/panemux/blob/main/docs/behavior/task-collection.md#unreadable-state-files'
 
 /** The state file fields panemux reads, as the details footer lists them. */
 export const READ_STATE_FIELDS = ['sessionId', 'pid', 'cwd', 'status'] as const

@@ -119,8 +119,8 @@ Accepts `{ "vertical_bar_width": <int> }`, validates the shared vertical workspa
 ### `GET /api/sessions`
 
 Returns a list of active sessions with `id`, `type`, `title`, and `state`. The task dashboard's
-temporary attaches ([`POST /api/tasks/attach`](tasks.md#post-apitasksattach)) and host terminals
-([`POST /api/hosts/terminal`](tasks.md#post-apihoststerminal)) are not listed.
+temporary attaches ([`POST /api/tasks/attach`](task-api.md#post-apitasksattach)) and host terminals
+([`POST /api/hosts/terminal`](task-api.md#post-apihoststerminal)) are not listed.
 
 ### `POST /api/sessions`
 
@@ -267,30 +267,19 @@ symbolic links leading outside the root answer `404`; an HTML or Markdown file o
 
 ### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume`, `POST /api/tasks/summary`, `POST /api/tasks/input-given`, `GET`/`POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update` and `POST`/`DELETE /api/tasks/attach`
 
-The task dashboard's collection, its per-host reconnect, the done and label records (and the labels
-used before, `known_labels` on `GET /api/tasks`), starting
-and resuming tasks, and asking for a task's summary. Their responses and the collection rules are in
-[task dashboard behavior](tasks.md#get-apitasks); the records are in
-[Done and labels](tasks.md#done-and-labels) and [`PUT /api/tasks/records`](tasks.md#put-apitasksrecords);
-starting and resuming are in [Starting a task](tasks.md#starting-a-task),
-[Resuming a task](tasks.md#resuming-a-task), [`POST /api/tasks`](tasks.md#post-apitasks) and
-[`POST /api/tasks/resume`](tasks.md#post-apitasksresume); summaries are in [Summaries](tasks.md#summaries)
-and [`POST /api/tasks/summary`](tasks.md#post-apitaskssummary); marking a codex permission request
-answered is in [`POST /api/tasks/input-given`](tasks.md#post-apitasksinput-given); a host's codex permission hook
-and updating it by itself are in [`GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`](tasks.md#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update); the board's temporary tmux attach is in
-[`POST /api/tasks/attach`](tasks.md#post-apitasksattach).
+Task payloads, response fields, status codes and failure semantics are authoritative in the
+[task REST API](task-api.md). Runtime rules are linked from the [task dashboard guide](tasks.md).
 
 ### `GET` and `POST /api/hosts/agmsg`
 
 Manual pinned agmsg state and installation/update for the panemux host or a configured SSH host,
-available only with Agent Board enabled. See [Manual agmsg host tool](tasks.md#manual-agmsg-host-tool).
+available only with Agent Board enabled. See [Manual agmsg host tool](host-tools.md#manual-agmsg-host-tool).
 
 ### `POST /api/hosts/session-name` and `POST`/`DELETE /api/hosts/terminal`
 
-Opening a host from its chip on the task dashboard: a generated tmux session name for an
-`ssh_tmux` terminal, and the host terminal Type in pane shows. They are in
-[Opening a host](tasks.md#opening-a-host), [`POST /api/hosts/session-name`](tasks.md#post-apihostssession-name)
-and [`POST /api/hosts/terminal`](tasks.md#post-apihoststerminal).
+Generated session names and temporary host terminals: see the
+[host terminal API](task-api.md#post-apihostssession-name) and
+[host navigation](task-navigation.md#opening-a-host).
 
 ### `GET /api/ssh-connections`
 
@@ -342,7 +331,7 @@ Request body:
 ### `/api/config/ssh-connections`
 
 Lists and edits `ssh_connections` in `config.yaml`: the hosts the
-[task dashboard](tasks.md#hosts-and-connections) collects from, which panes can also use
+[task dashboard](task-collection.md#hosts-and-connections) collects from, which panes can also use
 ([SSH](ssh.md#defining-connections-in-ssh_connections)). This is not `~/.ssh/config`, which
 `POST /api/ssh-config/hosts` writes. All four routes refuse a request another site's page made with
 `403`, as the task routes do, and every change is written to `config.yaml` through the same
@@ -398,4 +387,4 @@ effective task dashboard shortcut letter, upper-cased, `S` when the config does 
 
 The global agmsg preference uses `POST /api/hosts/agmsg/auto-update` with only an enabled boolean,
 not a host selector. Tool responses include its global value and retained automatic results; see
-[global agmsg automatic updates](tasks.md#global-agmsg-automatic-updates).
+[global agmsg automatic updates](host-tools.md#global-agmsg-automatic-updates).
