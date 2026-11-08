@@ -80,24 +80,10 @@ attempt itself fails, the pane shows the manual "Reconnect Session" action inste
 
 ### Layout editing and pane movement
 
-There is no separate edit mode. Layout editing is part of the normal interface.
-
-- Pane split, close, maximize, settings, new terminal creation, workspace add/rename/delete, and pane move are all available from the standard UI.
-- Terminal keyboard input remains active during normal use because drag initiation is restricted to the pane header handle.
-- Layout and workspace mutations are persisted immediately to the affected workspace config.
-  Task and host Open select a destination before creating a pane ([Opening a task](tasks.md#opening-a-task)).
-- The workspace bar is always visible, even when only one workspace exists, so workspace actions remain discoverable.
-
-Drag-and-drop pane movement works like this:
-
-1. User presses or drags the `⠿` handle in the pane header.
-2. The source pane enters a drag state: it fades, scales down slightly, and the cursor switches to `grabbing`.
-3. Workspace edges, pane targets, and divider targets become active drop targets.
-4. If the pointer is over another pane, the nearest pane edge is resolved from pointer position and the corresponding half-pane preview is shown.
-5. Releasing on a workspace edge moves the pane there and creates a new outer split.
-6. Releasing on a pane edge inserts the dragged pane beside that target pane.
-7. Releasing on a divider inserts the dragged pane relative to the adjacent subtree boundary.
-8. `dragSourcePaneId` is cleared and the updated layout is persisted.
+Layout controls are always available. [Layout UI](../ui-design/layout.md) owns drag gestures,
+drop targets, and persistence feedback; [workspace UI](../ui-design/workspaces.md) owns workspace
+navigation and pane cards. Layout and workspace mutations persist immediately to affected configs.
+Task and host Open select a destination before creating a pane ([Opening a task](tasks.md#opening-a-task)).
 
 Pane movement is a re-layout operation, not a session recreation:
 
@@ -167,5 +153,5 @@ When a pane moves to a different parent node, the component may be remounted by 
 - If the resolved repository origin can be converted into a browser URL, the header shows the repository name as a link to that repository page.
 - For SCP-style SSH origins such as `git@alias:owner/repo.git`, panemux uses `~/.ssh/config` `Host` aliases to resolve both the browser link hostname and GitHub PR lookup repo host when a matching alias exists; otherwise it treats the SSH host token as the hostname directly.
 - If the resolved branch has a GitHub pull request, the header shows a PR link labeled `#<number>`.
-- When the active agent (including its subagents) has diverged into more than one distinct sibling worktree of the same repository, panemux shows all of them instead of just one, deduplicated by the worktree's repository root; the pane's own base directory is shown only when nothing has diverged from it. Each distinct worktree gets its own independent GitHub PR lookup, so more than one PR link can be shown at once. See [ui-design.md](../ui-design.md) for how the header presents more than one worktree.
+- When the active agent (including its subagents) has diverged into more than one distinct sibling worktree of the same repository, panemux shows all of them instead of just one, deduplicated by the worktree's repository root; the pane's own base directory is shown only when nothing has diverged from it. Each distinct worktree gets its own independent GitHub PR lookup, so more than one PR link can be shown at once. See [Pane Header](../ui-design/panes.md#multiple-worktrees) for its presentation.
 - The "last known worktree" sticky behavior applies per distinct worktree: if the active-workdir lookup transiently fails or returns nothing, panemux keeps showing the previously resolved set of worktrees until a subsequent lookup confirms they are no longer valid (e.g. the branch changed or the worktree was removed).

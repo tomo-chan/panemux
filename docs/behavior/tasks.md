@@ -21,7 +21,7 @@ the done and label records of [#256](https://github.com/tomo-chan/panemux/issues
 and resuming tasks of [#257](https://github.com/tomo-chan/panemux/issues/257), the summaries of
 [#258](https://github.com/tomo-chan/panemux/issues/258), and codex sessions of
 [#264](https://github.com/tomo-chan/panemux/issues/264)).
-The UI is described in [UI design's Task Dashboard](../ui-design.md#task-dashboard).
+The UI is described in [UI design's Task Dashboard](../ui-design/task-dashboard.md#task-dashboard).
 
 ### What a task is
 
@@ -1192,7 +1192,7 @@ Under its actions, the connection menu carries the host's
 [`Codex input notifications`](#codex-permission-requests) item. The panemux host's menu has the item
 and `Close` only.
 
-The connection menu is a dialog under the chip ([UI](../ui-design.md#task-dashboard)). It offers
+The connection menu is a dialog under the chip ([UI](../ui-design/dashboard-hosts.md)). It offers
 `ssh` (the default) or `ssh_tmux`, and three actions:
 
 - **`ssh_tmux` session name.** Choosing `ssh_tmux` asks the server for a new tmux session name

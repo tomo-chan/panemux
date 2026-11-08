@@ -428,7 +428,7 @@ export const App: React.FC = () => {
 
   // Global command center palette shortcut: Cmd/Ctrl+Shift+K, deliberately
   // not plain Cmd/Ctrl+K (already bound in many shells/readline setups and
-  // would collide with pane-local terminal input) — see docs/ui-design.md's
+  // would collide with pane-local terminal input) — see docs/ui-design/agent-board.md's
   // Agent Board UI section. Registered on the capture phase so it reaches
   // this handler even when a terminal pane (which owns its own keydown
   // handling) currently has focus.
@@ -452,7 +452,7 @@ export const App: React.FC = () => {
   // Global agent board dashboard shortcut: Cmd/Ctrl+Shift+B, on the capture
   // phase for the same reason as the command palette's own Cmd/Ctrl+Shift+K
   // above — it must reach this handler even when a terminal pane currently
-  // has focus. See docs/ui-design.md's Agent Board UI section.
+  // has focus. See docs/ui-design/agent-board.md's Agent Board UI section.
   useEffect(() => {
     if (!boardDashboardAvailable || layer === 'tasks') return
     const handleKeyDown = (event: KeyboardEvent) => {

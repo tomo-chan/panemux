@@ -93,5 +93,5 @@ Exact request/response behavior lives in [Agent Board REST API](behavior/board-a
 - [Architecture](architecture.md) — whole-system component ownership.
 - [Behavior specification](behavior.md) — runtime and protocol contracts.
 - [Security design](security.md) — implementation requirements.
-- [UI design](ui-design.md#agent-board-ui) — dashboard, palette, and history interactions.
+- [UI design](ui-design/agent-board.md#agent-board-ui) — dashboard, palette, and history interactions.
 - [Decision log](DECISIONLOG.md#agent-board) — chronological reasoning and superseded designs.
