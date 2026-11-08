@@ -12,5 +12,5 @@ Development and verification contracts, fixtures, and operational procedures.
 * [Development runtime contract](runtime.md) - Exact Go and Node selection, bootstrap prerequisites, supported platforms, and failure behavior.
 * [Claude Code sandbox](claude-sandbox.md) - Shared local-network permissions, platform limits, capability probes, and sandbox verification.
 * [Documentation screenshots](screenshots.md) - Capturing placeholder-only documentation images, safe staging recovery, and private tmux cleanup.
-* [Browser fixture isolation](browser-fixtures.md) - Private E2E processes, stand-in commands, cleanup, and temporary-file safety requirements.
+* [Browser fixture isolation](browser-fixtures.md) - Private E2E processes, stand-in commands, and cleanup requirements.
 * [Pre-push check selection](push-protection.md) - Diff bases, changed-file check selection, fallback behavior, and hook isolation.

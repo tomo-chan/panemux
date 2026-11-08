@@ -146,7 +146,7 @@ are unnecessary. `make` may translate a failing recipe's exit code to its own
 nonzero status, but the wrapper preserves the status of its child `make`.
 
 The tracked Makefile and launch scripts do not prepend `TMPDIR=/tmp` to ordinary
-verification. The existing recommendation in DEVELOPMENT.md is conditional
+verification. The recommendation in [documentation screenshots](screenshots.md#socket-and-process-isolation) is conditional
 on the screenshot tmux path being too long. The generic Playwright launcher
 uses TMPDIR for its build cache, config staging and build lock without forcing
 `/tmp`; these are separate from the socket length calculation.

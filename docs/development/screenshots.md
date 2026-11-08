@@ -6,19 +6,22 @@ description: "Capturing placeholder-only documentation images, safe staging reco
 
 # Documentation screenshots
 
-Run `make screenshots` to regenerate `docs/images/*.png`, then inspect every rewritten image
-and commit it. The [development guide](../../DEVELOPMENT.md#documentation-screenshots) owns the
-mandatory retake rule. Capture uses Playwright and a real panemux run with placeholder content.
-It needs tmux and a pseudo-terminal; run it outside the Claude Code sandbox. It is outside
-`make check`. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` as for `make test-e2e` when necessary.
+The [development guide](../../DEVELOPMENT.md#documentation-screenshots) owns the retake rule.
+Capture uses Playwright and a real panemux run; it requires tmux and a PTY outside the Claude
+sandbox and is outside `make check`. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` as for E2E if necessary.
 
-## Placeholder environment
+## CI scope
+
+CI checks `frontend/src/components/`, `frontend/src/App.tsx`, `frontend/src/styles/`,
+`frontend/index.html`, and `frontend/screenshots/` (excluding `*.test.ts`, `*.test.tsx`,
+`*_test.sh`; moved files count under their old paths). It requires a direct `docs/images/*.png`
+output change; non-image files do not count. Use `screenshots-exempt` only when a change
+alters nothing shown.
 
 The capture clears `XDG_*` and git configuration variables and uses a fake HOME, a throwaway
 repository at `/tmp/sample-project`, a private tmux socket, and a stub agmsg store. A fixed task
 list replaces real task collection so images cannot expose the developer's agent sessions.
 The panes inherit the logical `/tmp/sample-project` PWD, so prompts show the placeholder path.
-On macOS `BASH_SILENCE_DEPRECATION_WARNING=1` suppresses the bash-to-zsh notice.
 
 ## Staging and recovery
 
@@ -31,9 +34,8 @@ The root is `$TMPDIR/panemux-screenshots`. A run empties it only if it carries t
 - A legacy directory is removed only if marked or containing nothing but empty directories;
   the latter is removed with `rmdir`, which cannot remove other content.
 - Any other file, link, or directory stops the run untouched. Move it away before retrying.
-- Links and the staging root remain after capture for reuse. macOS temporary-file cleanup can
-  remove unused markers while leaving recently accessed fixture content; the allowlist and
-  empty-directory checks handle those remnants without trusting arbitrary content.
+- Links and staging remain for reuse. Marker loss during macOS temporary cleanup is handled by
+  the allowlist and empty-directory checks without trusting arbitrary content.
 - `/tmp/panemux-screenshots.lock` refuses concurrent capture. A lock with a dead process or no
   `pid` file can be taken over.
 

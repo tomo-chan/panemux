@@ -43,13 +43,9 @@ retake them in the same change: inspect every rewritten image and commit it. Thi
 UI components, layout, styles, text, and the capture itself; the rule also covers hooks,
 schemas, or utilities that change the screen.
 
-CI checks `frontend/src/components/`, `frontend/src/App.tsx`, `frontend/src/styles/`,
-`frontend/index.html`, and `frontend/screenshots/` (excluding `*.test.ts`, `*.test.tsx`,
-`*_test.sh`; moved files count under their old paths). It requires a direct `docs/images/*.png`
-output change; non-image files do not count. Use `screenshots-exempt` only when a change
-alters nothing shown. See [Documentation screenshots](docs/development/screenshots.md) for
-placeholder capture, staging recovery, prerequisites, and cleanup, and
-[Browser fixture isolation](docs/development/browser-fixtures.md) for E2E isolation.
+See [Documentation screenshots](docs/development/screenshots.md) for CI scope, placeholder
+capture, staging recovery, and cleanup; [Browser fixture isolation](docs/development/browser-fixtures.md)
+covers E2E isolation.
 
 ### Format and checks
 
@@ -109,34 +105,24 @@ never hand-edit `testdata/api-contract/`. See [Contract fixtures](docs/developme
 
 ### Coverage
 
-`make coverage-go` and `make coverage-frontend` enforce 80%; strengthen scope rather than
-raising the threshold. New Go packages must be gated or excluded with a reason in the Makefile.
-`COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks` gates unentered changed blocks;
-unreachable blocks require `//coverage:exempt <reason>`. See [Coverage gates](docs/development/coverage.md).
+Run `make coverage-go` and `make coverage-frontend` (80%), and the PR-only
+`COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`. Follow [Coverage gates](docs/development/coverage.md)
+for scope, justified exclusions, and required exemption reasons.
 
 ### Mutation (`make mutation`)
 
-`MUTATION_BASE=origin/main make mutation` fails on surviving or undecided mutants on changed
-lines, or inability to run. A waiver needs `//mutation:exempt[<TYPE>] <reason>` on the line or
-above it, using the finding's type; distinguish equivalent from unreachable survivors. Prefer
-that marker to the branch-wide `mutation-exempt` label. Install gremlins separately:
-`go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0`.
-See [Mutation testing](docs/development/mutation.md) for status handling and pinned flags.
+Run `MUTATION_BASE=origin/main make mutation` for PRs. Follow [Mutation testing](docs/development/mutation.md)
+for gremlins setup, failing outcomes, and typed, justified exemptions.
 
 ### Model checking (`make model-check`, issue #168)
 
-Transition conformance runs in `make check`; TLC itself runs separately with `make model-check`
-and needs a JDK and `tla2tools.jar`. Never hand-edit `internal/board/testdata/*-transitions.json`:
-change `.tla`/`.cfg`, run `make model-check-write`, and commit the table diff. See
-[Model checking](docs/development/model-checking.md).
+Never hand-edit transition JSON: update .tla/.cfg, run `make model-check-write`, and commit the diff.
+[Model checking](docs/development/model-checking.md) separates always-on conformance from optional TLC.
 
 ### Red-check (`make efficacy`)
 
-A test you change must **fail** when your implementation diff is reverted — the machine-checkable half of the TDD rule above. CI runs it on every pull request; run it yourself with `make efficacy`. It is deliberately not part of `make check`.
-
-A test that genuinely should not go red without its implementation is marked `//efficacy:exempt <reason>` in the comment directly above it. The reason is required; the `efficacy-exempt` label takes the whole branch out of scope.
-
-[docs/development/red-check.md](docs/development/red-check.md) has what is skipped, and what neither marker is for.
+Changed tests must fail without their implementation diff. Run the PR-only `make efficacy`;
+follow [Red-check](docs/development/red-check.md) for justified exemptions and scope.
 
 ### Quality gate
 
@@ -147,21 +133,15 @@ A test that genuinely should not go red without its implementation is marked `//
 - Ledger command: `make check-scenarios`
 - Documentation commands: `make check-docs-links`, `make test-docs-links`, `make check-docs-okf`, `make test-docs-okf`
 - Pull-request-only gates: `make efficacy`, `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`, and `MUTATION_BASE=origin/main make mutation` (all three fail the build)
-- `make test-model-check` uses `python3` to run the transition exporter it tests. `python3` is **optional** for the same reason `jq` is below: without it those checks report themselves as skipped, so `make check` still works.
-- `make test-agmsg-automation` uses Python 3 for offline release/SHA, capture-update and PR-delivery tests. It skips locally without Python and fails if Python is missing in CI. Real upstream installation stays in the separate contract workflow.
-- `make test-hooks` uses `jq` where it parses `settings.json` or a hook payload. `jq` is **optional**: without it those checks report themselves as skipped rather than passing or failing, so `make check` still works. Install it to actually run them.
-- Measurement (not a gate): `make bench` for terminal throughput, replay-buffer cost and relay polling. It asserts no threshold — see [docs/quality-gateway/measurements.md](docs/quality-gateway/measurements.md).
-- Accessibility ceiling: `make test-e2e` scans the dashboard and the pane settings dialog with axe-core and **fails when a violation count rises** above the value frozen in `CEILINGS` in `frontend/e2e/a11y-ceiling.ts`. A count may fall; a rule not listed has a ceiling of zero. After fixing a violation, lower the ceiling in that map and in the "Accessibility" table in [docs/quality-gateway/measurements.md](docs/quality-gateway/measurements.md) in the same change — the run prints the exact replacement line.
-- Lint commands: `make lint-go`, `make lint-frontend`, `make lint`
-- Go lint includes `gofmt`, `go vet`, and `golangci-lint run ./...` using `.golangci.yml`.
-- The fixture agent's files build only with the `panemux_fixture_agent` tag (issue #377). `make test-go`
-  also runs `make test-go-fixture-agent`, which tests that build; `make lint-go` vets both builds, and
-  `.golangci.yml`'s `build-tags` makes golangci-lint read the tagged files. The coverage, red-check and
-  mutation gates and the Claude Code `PostToolUse` hook see the untagged build only
-  ([the fixture agent's tagged build](docs/quality-gateway.md#the-fixture-agents-tagged-build)).
-- `.golangci.yml`'s `forbidigo` rule is where a repository convention is enforced rather than remembered: it fails the build on any `os.UserHomeDir()` call outside `internal/homedir`.
-- `make lint-go` hands golangci-lint `.cache/golangci-lint/` inside the checkout it runs from as its cache (`scripts/golangci_lint_cache.sh`, Git-ignored). The main checkout and every worktree each keep their own, whatever the working directory, and an inherited `GOLANGCI_LINT_CACHE` is overridden — it may have been exported for another checkout. Existing caches in the user cache directory are left in place, unused; remove them yourself if you want the space back.
-- `lint-go-deps` refreshes the pinned `golangci-lint` binary when the local version does not match `GOLANGCI_LINT_VERSION`, so local lint matches CI.
+- Optional test tools: `python3` for model-check exporter and agmsg automation tests, `jq` for
+  hook tests. Missing tools skip those checks locally; missing Python fails agmsg automation in CI.
+- `make bench` measures without thresholds; see [measurements](docs/quality-gateway/measurements.md).
+- Follow the [accessibility ceiling procedure](docs/quality-gateway/measurements.md#accessibility)
+  after fixes; counts must not rise.
+- `make lint-go`, `make lint-frontend`, and `make lint` run lint checks. Go lint includes
+  gofmt, vet, and the pinned golangci-lint; its cache is checkout-local `.cache/golangci-lint/`
+  (inherited cache settings are overridden; user caches are left untouched).
+- Tagged fixture-agent verification follows [the build contract](docs/quality-gateway.md#the-fixture-agents-tagged-build).
 - Run `make lint-go` or `make lint` after every Go code change before committing.
 - [docs/quality-gateway.md](docs/quality-gateway.md) explains what these gates are responsible for and which further gates are designed but not yet built. Read it before changing the gate set itself.
 
@@ -174,42 +154,38 @@ A test that genuinely should not go red without its implementation is marked `//
 
 ### Documentation updates
 
-- Use [docs/index.md](docs/index.md) as the information-architecture guide: product overview,
-  concise current-state topic guides, and focused deep dives serve different reader needs.
-- Every code change must update all related documentation in the same change. Inspect the
-  [AGENTS.md document map](AGENTS.md#document-map), including current-state specifications,
-  guides, deep dives, operational guidance, and developer rules. Do not report completion while
-  a related document describes old behavior. If no documented contract changes, inspect without
-  making a synthetic edit.
-- Update confirmed behavior, operational assumptions, browser requirements, rendering constraints,
-  and user-visible rules in `docs/` immediately; do not defer settled documentation to a later task.
-- Keep specifications and topic guides current-state only. Move chronology, rejected alternatives,
-  rollout phases, incidents, and reasons for replacing an approach to
-  [docs/DECISIONLOG.md](docs/DECISIONLOG.md); update both places in the same change when a decision
-  changes the current contract.
-- When a change adds or alters a user-facing use case, add or update its row in [docs/scenarios.md](docs/scenarios.md) in the same change, including the column naming where it is verified. `manual` is an acceptable answer there; an absent row is not.
-- Run `make check-scenarios` to validate paths and Go test names in `auto` rows.
-  CI requires scenario edits for changes to `frontend/src`, `internal/api`, or `internal/config`;
-  use `scenarios-exempt` only if no use case changes.
-- Run `make check-docs-links` for relative paths, heading anchors, and filename labels;
-  update targets and filename labels together when moving content.
-- Follow [the OKF writing rules](docs/index.md#writing-rules). Treat `docs/` as one OKF v0.2
-  bundle, with `type`, `title`, and `description` frontmatter on concepts and a described
-  `index.md` listing in each directory. Only the bundle-root index carries `okf_version: "0.2"`.
-  Root workflow documents stay outside the bundle. `make check-docs-okf` and `make test-docs-okf`
-  run through `make check` without replacing or weakening the existing link checks.
-- Split by one responsibility per concept and keep each contract authoritative in one concept;
-  link from other documents. The directory hierarchy is a tree and document links are graph
-  edges. Keep `docs/<name>.md` as the topic entrance and `docs/<name>/index.md` as its directory
-  listing. Preserve routes from old section names, and update references and expected paths
-  that actually name moved documents, including comments and tests; leave unrelated fixtures alone.
-- Put dated evidence such as coverage counts or benchmark results in a topic-specific measurements
-  document, with its commit/date, rather than presenting the number as timeless specification.
+- Inspect the [AGENTS.md document map](AGENTS.md#document-map) for every code change and update
+  all affected specifications, guides, operations, and developer rules in the same change.
+  Do not report completion with stale related docs or defer settled behavior to a follow-up.
+  If no documented contract changes, inspect without making a synthetic edit.
+- Record confirmed behavior, operational assumptions, browser/rendering requirements, and
+  user-visible rules in docs/. Keep current-state docs free of chronology; put consequential
+  history, rejected alternatives, incidents, and dated decisions in [DECISIONLOG.md](docs/DECISIONLOG.md).
+- Add or update [scenario rows](docs/scenarios.md) for changed use cases, naming verification;
+  manual verification is valid, an absent row is not. Run `make check-scenarios`.
+  CI requires scenario edits for frontend/src, internal/api, and internal/config changes;
+  use `scenarios-exempt` only when no use case changes.
+- Follow [the OKF writing rules](docs/index.md#writing-rules): docs/ is the bundle; concepts have
+  type/title/description and directory indexes have described entries. Root workflow files stay
+  outside it. Keep one authority per contract and one responsibility per concept, with relative
+  links and routes from old sections. Update actual references, filename labels, comments, and
+  expected paths when moving content; leave unrelated fixtures alone.
+- Run `make check-docs-links`, `make check-docs-okf`, and their test targets; these remain in
+  `make check`. Keep topic entrances distinct from directory listings, and dated measurements
+  beside their topic with commit/date, as specified by the writing rules.
 
 ### Security-sensitive implementation
 
 - When code changes affect command execution, shell argument handling, SSH path handling, host key handling, or `gosec` posture, read [docs/security.md](docs/security.md) before implementation and follow it during the change.
 - Prefer structural fixes over `//nolint:gosec` in shipped code.
+
+### Temporary-file discipline
+
+Every script must use an explicit `mktemp` template under TMPDIR and stop on allocation failure;
+handle `x=$(mktemp ...)` failure on the same line. Bare macOS `mktemp -d` ignores TMPDIR.
+`make test-tmpdir-guard` checks the first call, and the second where multiple call sites exist
+(including a fixture helper's first call), leave the caller repository untouched; it also rejects
+missing templates and missing assignment failure handling.
 
 ### Ignore generated resources
 

@@ -11,8 +11,6 @@ Ordinary `make` commands select both SDKs before initialization and child proces
 `GOTOOLCHAIN`, using SDK `go`/`gofmt` and bundled `npm`/`npx`, and preserving `NODE_OPTIONS`.
 Newer SDKs do not change selection; interactive bare `go` and `node` follow the caller's shell.
 
-## Prerequisites and acquisition
-
 Install a Go launcher with toolchain selection (Go 1.21+); Go uses its normal module cache.
 Node reuses a matching SDK on PATH or in nvm, otherwise normal commands (including
 `make install-deps`) fetch it into ignored checkout-local `.cache/runtimes/`.
@@ -27,8 +25,6 @@ The Node lock needs exclusive non-recursive `mkdir`. Ubuntu 26.04 uutils 0.10.0 
 concurrent creators: use GNU coreutils or corrected uutils before concurrent first acquisition.
 CI/release uses Ubuntu 24.04 GNU coreutils; portable locking is tracked in [#480](https://github.com/tomo-chan/panemux/issues/480).
 
-## Direct commands
-
 Hooks, efficacy/mutation scripts, browser fixtures, and frontend npm scripts select the same
 checkout contract. Ad hoc commands use `scripts/runtime-shell.sh -c 'node --version; go version'`.
 From `frontend`, use `../scripts/npm.sh install` or `../scripts/npm.sh ci`. Bare npm rejects a
@@ -39,6 +35,7 @@ retries before selection; its initial invocation validates both SDKs.
 
 Change the single-source pins to update versions; a Go `toolchain` directive alone cannot force
 a newer launcher to downgrade. `make test-go-toolchain` and `make test-node-toolchain` cover
-selection/bootstrap failures. Diff bases follow [Codex verification](codex-verification.md).
-Node/npm metadata: [official release index](https://nodejs.org/dist/index.json);
-support dates: [official release schedule](https://github.com/nodejs/Release/blob/main/schedule.json).
+selection/bootstrap failures. Diff-gate bases are separate: see [red-check](red-check.md),
+[mutation](mutation.md), [coverage](coverage.md), and [pre-push selection](push-protection.md).
+Node/npm metadata and support dates: [release index](https://nodejs.org/dist/index.json),
+[release schedule](https://github.com/nodejs/Release/blob/main/schedule.json).

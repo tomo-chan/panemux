@@ -1,7 +1,7 @@
 ---
 type: Specification
 title: "Browser fixture isolation"
-description: "Private E2E processes, stand-in commands, cleanup, and temporary-file safety requirements."
+description: "Private E2E processes, stand-in commands, and cleanup requirements."
 ---
 
 # Browser fixture isolation
@@ -17,13 +17,10 @@ latter two have a five-second grace period. Owning shells stop and reap children
 per-run fake HOME directories. SIGKILL cannot run cleanup. Fixture tests retain a negative
 control and verify the SIGTERM path; process-group checks skip without optional `python3`.
 
-The task-dashboard runs real collection against stand-in `ps` and `lsof` commands
-(`frontend/e2e/fixtures/process-isolation/`). They answer only for descendants of the fixture
-startup script or private tmux server and only for panemux's argument shapes; other shapes
-produce no output and are refused. A detached `claude` stand-in with a state file verifies that
-outside sessions are absent. The `claude` and `codex` stand-ins execute nothing.
-`frontend/e2e/stand-ins.sh` puts stand-ins first on PATH immediately before panemux starts and
-refuses the run if any resolves elsewhere.
+The [fixture-agent build contract](../quality-gateway.md#the-fixture-agents-tagged-build)
+defines stand-in process filtering and protection of real developer sessions.
+`frontend/e2e/stand-ins.sh` puts the CLI stand-ins first on PATH immediately before panemux
+starts and refuses the run if any resolves elsewhere.
 
 ## Isolation checks
 
@@ -34,11 +31,6 @@ The process checks require `ps`: they skip in the Claude Code sandbox and fail i
 Test sockets use `tmux_short_dir` under TMPDIR when it fits, otherwise `/tmp`; failure to fit
 either location reports the path rather than tmux's generic socket error.
 
-## Temporary-file discipline
-
-Every script creates temporary files under TMPDIR using an explicit `mktemp` template and stops
-on failure. Bare macOS `mktemp -d` ignores TMPDIR. `make test-tmpdir-guard` checks first and later
-allocation failures, including fixture helpers, leave the caller repository untouched; it
-rejects missing templates and assignments without same-line failure handling.
+Temporary files follow the repository-wide [temporary-file rule](../../DEVELOPMENT.md#temporary-file-discipline).
 
 For screenshot-specific staging and cleanup, see [Documentation screenshots](screenshots.md).

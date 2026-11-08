@@ -24,23 +24,17 @@ Configure it through user, CLI, or managed settings as permitted by the organiza
 managed settings may still prevent it from taking effect. See the official
 [Claude Code sandboxing documentation](https://code.claude.com/docs/en/sandboxing#a-command-fails-to-reach-a-server-on-localhost).
 
-No other permissions are granted. The [security rules](../security.md#development-sandbox-permissions)
-prohibit adding PTY, Unix-socket, or Git-config access. macOS still denies PTYs, tmux servers,
-`ps`, `dscl`, and writes to `.git/config` and user caches:
+The [security rules](../security.md#development-sandbox-permissions) own the permission limits:
+macOS still denies PTYs, tmux servers, `ps`, `dscl`, and writes to Git config and user caches.
+Tests requiring those capabilities must probe through `internal/testcap` (or the fixture's
+matching probe): unavailable capabilities skip locally and fail with CI set.
 
-| Command | Inside the macOS sandbox |
-|---|---|
-| `make install-deps` | Passes once the hooks are installed: `install-hooks` writes `.git/config` only when `core.hooksPath` does not already lead to an identical, executable `pre-push` (git silently skips one without the executable bit). In a fresh clone run `make install-hooks` once outside the sandbox. `npm install` may warn `EPERM` on `.idea/` files inside packages; those warnings are harmless. |
-| `make check` | Passes. A Go test that needs a pty, tmux, `ps` or `dscl` calls `internal/testcap`'s `RequirePTY`/`RequireTmux`/`RequirePS`/`RequireDscl`, and the screenshot fixtures' tmux checks probe the same way: each reports itself **skipped** where the probe fails. `golangci-lint` caches in the checkout's own `.cache/golangci-lint/`, never in the user cache directory (`scripts/golangci_lint_cache.sh`). |
-| `make test-e2e` | Reports itself skipped: every pane needs a pty (`scripts/require_pty.sh`). |
-| `make screenshots` | Fails, saying to run it outside the sandbox. It writes tracked images, so it is never skipped. |
-| `git push -u` | Pushes the branch, then cannot record its upstream in `.git/config`. Name the remote and branch on every push instead: `git push origin <branch>`. |
-
-With `CI` set, every one of those probes that fails **fails** instead of skipping, so CI is where the
-skipped tests are verified. Write a new test that needs one of these capabilities the same way: call
-the `testcap` helper first, never let it fail on the sandbox's error.
-
-Temporary-file safety follows [Browser fixture isolation](browser-fixtures.md#temporary-file-discipline).
+- Fresh clones need `make install-hooks` once outside the sandbox. Setup writes Git config only
+  if the configured hook is not identical and executable; npm `.idea/` EPERM warnings are harmless.
+- E2E skips without a PTY; screenshots fail and require execution outside the sandbox.
+- Use explicit `git push origin <branch>`: `-u` cannot record upstream in Git config here.
+- Lint cache handling follows the [quality-gate commands](../../DEVELOPMENT.md#quality-gate).
+- Temporary files follow the [repository rule](../../DEVELOPMENT.md#temporary-file-discipline).
 
 After changing sandbox settings, verify `make check`, `make test-e2e`, and `make test-hooks`
 from Claude Code with sandboxing active. Runs from another agent or outside the sandbox verify
