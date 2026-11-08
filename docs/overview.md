@@ -88,7 +88,8 @@ backend and UI are released together.
   [task navigation](behavior/task-navigation.md#the-pane-of-an-agent-outside-tmux), including the
   unverified macOS environment-reading support.
 - [Task launch and resume](behavior/task-launch.md) starts Claude Code and Codex in detached tmux
-  sessions without creating a pane or pane config; startup screens require operator input.
+  sessions without creating a pane or pane config; a Codex task held at a startup screen waits
+  for operator input in its tmux pane.
 
 ## Where to continue
 

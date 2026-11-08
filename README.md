@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/tomo-chan/panemux/actions/workflows/ci.yml/badge.svg)](https://github.com/tomo-chan/panemux/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go 1.24](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://golang.org)
+[![Go](https://img.shields.io/badge/Go-00ADD8?logo=go)](https://golang.org)
 [![Releases](https://img.shields.io/github/v/release/tomo-chan/panemux)](https://github.com/tomo-chan/panemux/releases)
 
 ![panemux in the browser: on the left, the workspace bar lists the "Development", "Review" and "Ops" workspaces with a card per pane showing its repository and branch. The "Development" workspace is split into a local shell showing git log, and on the right a tmux pane running a dev server above a local shell that ran the tests. Each pane header shows its type, title, repository and branch.](docs/images/workspace.png)
@@ -45,7 +45,7 @@ Or with options:
 
 ### Build from source
 
-Requirements: **Go 1.24+**, **Node.js 20+**
+Requirements: use the exact Go and Node versions in the [runtime version contract](DEVELOPMENT.md#runtime-version-contract).
 
 ```sh
 git clone https://github.com/tomo-chan/panemux.git
@@ -344,7 +344,7 @@ workspaces:
 
 Older config files with a top-level `layout:` are still accepted. When the config is next saved, panemux migrates that layout into a `default` workspace and writes the `workspaces:` format.
 
-The workspace bar is always available for workspace actions. Newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. The same bar also exposes inline workspace rename, workspace delete with confirmation, a `+` workspace action, and tab-position controls. When the bar is vertical, its width is shared across all workspaces and is also persisted. It also acts as a cross-workspace operational overview: pane detail cards can be selected to focus that pane, and those same cards can be dragged onto another workspace to move the pane there. Switching the active workspace, changing `tab_position`, and resizing the vertical workspace bar are persisted so the same navigation chrome is restored after restart. Agent confirmation prompts, including Codex MCP allow menus, can mark inactive workspace tabs and trigger browser notifications after notification permission has been granted. Clicking the notification switches to the relevant workspace.
+The workspace bar is always available for workspace actions. Newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. The same bar also exposes inline workspace rename, workspace delete with confirmation, a `+` workspace action, and tab-position controls. When the bar is vertical, its width is shared across all workspaces and is also persisted. It also acts as a cross-workspace operational overview: pane detail cards can be selected to focus that pane, and those same cards can be dragged onto another workspace to move the pane there. Switching the active workspace, changing `tab_position`, and resizing the vertical workspace bar are persisted so the same navigation chrome is restored after restart. For task-state attention, the Codex permission hook requirement, and notification navigation to a pane or the task dashboard, see [Notifications and attention prompts](#notifications-and-attention-prompts).
 
 ### Pane types
 

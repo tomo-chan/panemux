@@ -246,6 +246,8 @@ it from that store.
 - A matched pane has attention while its task is in `wait` on a host that is `ok`, unless that
   `wait_id` was cleared in this tab. Attention is read from the store as it stands after each frame,
   not kept from one frame to the next, so a reload shows a wait that is still current again.
+- The workspace tab containing a pane with attention flashes only while that workspace is inactive.
+  It clears when the workspace is selected or when the pane no longer has attention.
 - **A wait on a host that is not `ok` gives no attention.** Such a host's tasks are as last observed
   ([Hosts](#hosts)), and while observation was stopped they are what was kept from before
   ([Lifecycle](#lifecycle)): a snapshot after a reload has every host `pending`, and a wait in it
@@ -329,6 +331,6 @@ not known, so the dashboard shows none rather than the collected time of an earl
 ## Related Documents
 
 - Task dashboard collection and states: [task-collection.md](task-collection.md)
-- Notification conditions and attention indicators: [notifications.md](notifications.md)
+- Notification overview and permission prompt timing: [notifications.md](notifications.md)
 - Collection command safety: [Task dashboard collection](../security/task-collection.md)
 - Architecture: [architecture.md](../architecture.md)

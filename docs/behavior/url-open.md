@@ -132,8 +132,9 @@ A printed link opens when clicked. In workspace panes and task popups, a connect
 localhost link opens in the [split preview](preview.md#opening-a-localhost-url), through the
 [remote relay](preview.md#localhost-urls-of-an-ssh-host) for SSH hosts, and prepares no callback
 forward. Without a connected terminal it opens a tab: a workspace pane prepares its callback
-forward, but a task popup never does. The strip's **Open** likewise prepares a forward only for a
-workspace pane; use it for OAuth callbacks that must arrive at the original port number.
+forward, but a task popup never does. For these two surfaces, the strip's **Open** prepares a
+callback forward in a workspace pane and opens the tab without a forward in a task popup. Use a
+workspace pane's **Open** for OAuth callbacks that must arrive at the original port number.
 An OSC 8 hyperlink's target is chosen by the program's output and need not match its text, so a
 click on one shows the approval strip above, saying `This link goes to` and naming the target, with
 `Open` and `Ignore`, plus `Preview` in workspace panes and task popups. OSC 8 links are `http` and

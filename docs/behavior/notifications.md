@@ -14,7 +14,7 @@ The [task event stream](task-events.md#task-events) observes agent state, rather
 terminal output for prompts. Codex command approval waits require the host's
 [permission hook](task-codex-permissions.md#codex-permission-requests).
 
-The receiver contract owns all conditions:
+The receiver contract owns attention and notification eligibility:
 
 - [Pane and workspace attention](task-events.md#pane-and-workspace-attention): task matching,
   host health, focus/click clearing and per-tab persistence of cleared waits.

@@ -175,6 +175,7 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 
 - タスクと pane の対応は [Where a task runs](task-navigation.md#where-a-task-runs) に従う。同じ tmux セッションのタスクは同じ pane に対応し、daemon のタスクと対応する workspace pane のないタスクはどこにも対応しない。
 - 対応した pane は、そのタスクが `ok` のホストで `wait` にある間、attention を持つ。ただし、このタブで解除した `wait_id` は除く。attention はフレームごとに、その時点のストアから読み取る。フレームからフレームへ持ち越さないので、まだ続いている待ちは再読込でもう一度表示される。
+- attention のある pane を含む workspace のタブは、その workspace が非アクティブの間だけ点滅する。その workspace を選択するか、pane の attention がなくなると消える。
 - **`ok` でないホストの待ちは attention を与えない。** そのホストのタスクは最後に観測したときのままで（「ホスト」の節）、観測が止まっていた間は、前に保持していたものになる（「ライフサイクル」の節）。再読込後のスナップショットでは全ホストが `pending` で、そこにある待ちはもう答え済みかもしれない。ホストが答えて、タスクがまだ `wait` にあれば表示する。ホストの `ok` のフレームは、そのホストで見つかった差分より前に届くので、終わっていた待ちが表示されるのは、その間のフレームの分だけ。
 - attention はユーザーの操作で解除する。pane は focus か click で、workspace の tab はその workspace の選択で解除する。加えて、タスクが `ok` のホストで `wait` でなくなったときも、どこで答えたかにかかわらず解除する。`busy`・`idle`・`run`・`unknown` への `changed` フレーム、`removed`、またはホストが `pending`・`connecting`・`error` になったとき。ほかにまだ待っているタスクを表示している pane は attention を保つ。`unknown` やホストの失敗で消えた attention は、タスクが同じ `wait_id` でまた `wait` に見えたときに戻る。その間にこのタブで解除していれば戻らない。
 - 人が attention を解除した `wait_id` は、下の通知済みの記録と同じ規則でタブの session storage に記録する。これにより、再読込で再び表示されない。
@@ -198,6 +199,6 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 ## Related Documents
 
 - タスクダッシュボードの収集と状態：[task-collection.md](task-collection.md)
-- 通知の条件と attention の表示：[notifications.md](notifications.md)
+- 通知の概要と permission を求めるタイミング：[notifications.md](notifications.md)
 - 収集のコマンドの安全性：[Task dashboard collection](../security/task-collection.md)
 - アーキテクチャ：[architecture.md](../architecture.md)
