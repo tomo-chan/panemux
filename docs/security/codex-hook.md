@@ -6,7 +6,7 @@ description: "Data-only permission records and guarded fixed-script hook install
 
 # Security: Codex permission hook
 
-See the [shared rules and boundary map](command-execution.md).
+See the [General Rules](../security.md#general-rules) and [boundary map](command-execution.md).
 
 The embedded constant `internal/codexhook/codex_permission_hook.sh` runs under Codex, never
 panemux ([behavior](../behavior/task-codex-permissions.md#codex-permission-requests)). From Codex

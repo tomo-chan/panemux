@@ -6,7 +6,7 @@ description: "Pinned upstream source verification and fixed-script agmsg install
 
 # Security: agmsg acquisition and installation
 
-See the [shared rules and boundary map](command-execution.md).
+See the [General Rules](../security.md#general-rules) and [boundary map](command-execution.md).
 
 `internal/agmsg.Source` executes the literal `git` through the local input execution port with
 separate argv: SHA-scoped cache path, fixed repository URL, fixed full commit and fixed git

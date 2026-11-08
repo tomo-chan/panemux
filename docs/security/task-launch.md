@@ -6,7 +6,7 @@ description: "Validated launch operands, shell boundaries and fixed agent argume
 
 # Security: task launch and resume
 
-See the [shared rules and boundary map](command-execution.md).
+See the [General Rules](../security.md#general-rules) and [boundary map](command-execution.md).
 
 `POST /api/tasks` and `POST /api/tasks/resume` ([behavior](../behavior/task-launch.md)) start
 claude or codex on the panemux host or an `ssh_connections` host. Every request value stays out

@@ -1,5 +1,5 @@
 ---
-type: Security Requirement
+type: Guide
 title: "Security: command execution sinks"
 description: "Routes to shared security rules and execution-boundary requirements."
 ---
@@ -8,7 +8,7 @@ description: "Routes to shared security rules and execution-boundary requirement
 
 Part of the [security design](../security.md).
 
-## Common requirements
+## Shared rules
 
 The shared rules are defined in the security design's [General Rules](../security.md#general-rules)
 and [`gosec` policy](../security.md#gosec-policy).

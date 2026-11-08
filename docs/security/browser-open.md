@@ -6,7 +6,7 @@ description: "Fixed platform browser programs and discrete URL arguments for --o
 
 # Security: operator browser launch
 
-See the [shared rules and boundary map](command-execution.md).
+See the [General Rules](../security.md#general-rules) and [boundary map](command-execution.md).
 
 `openChrome` in `main.go` opens panemux's own listen address for `--open`.
 `browserOpenArgv(goos, url)` is the only source of its program and argv: it returns only the

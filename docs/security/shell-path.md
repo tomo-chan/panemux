@@ -6,7 +6,7 @@ description: "Trusted shell selection and validation before local process execut
 
 # Security: shell paths
 
-See the [shared rules and boundary map](command-execution.md).
+See the [General Rules](../security.md#general-rules) and [boundary map](command-execution.md).
 
 `validateShell` in `internal/session/local.go` applies three layers:
 
