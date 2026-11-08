@@ -44,8 +44,8 @@ Topic guides link to focused deep dives when the summary is not enough:
   limitations, and tests.
 - [Quality-gateway details](quality-gateway/) - numbered decisions, measurements, and mutation
   findings.
-- [Development details](development/) - test granularity, fixtures, coverage, mutation, red-check,
-  and model checking.
+- [Development details](development/) - runtime and sandbox setup, screenshots, browser fixtures,
+  pre-push selection, and focused testing contracts.
 
 ## Decision history
 

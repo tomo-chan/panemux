@@ -46,7 +46,7 @@ all localhost services, including services outside the sandbox. Treat unauthenti
 services as a potential route to actions outside the sandbox, and non-loopback listeners as
 reachable from other machines. This is a development-tool permission; it does not authenticate
 panemux routes or change their runtime trust boundaries. Platform differences and managed-policy
-limits are documented in [Claude Code sandbox](../DEVELOPMENT.md#claude-code-sandbox).
+limits are documented in [Claude Code sandbox](development/claude-sandbox.md).
 
 That is the only permission they grant. Do not add `sandbox.allowPty`,
 `sandbox.network.allowUnixSockets`, `sandbox.network.allowAllUnixSockets` or
@@ -76,7 +76,7 @@ and provide npm/npx. A bad published cache is an error, not a reason to silently
 runtime. This is development tooling, with no product/user-input route into its commands.
 Exclusive locking assumes a conforming `mkdir`; affected uutils 0.10.0 is unsuitable
 for concurrent acquisition. The platform limitation and follow-up are in the runtime contract.
-See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
+See [the runtime contract](development/runtime.md).
 
 ## agmsg release proposal CI
 

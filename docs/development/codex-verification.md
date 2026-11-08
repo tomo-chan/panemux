@@ -170,7 +170,7 @@ before launching that fixture. Its path check happens before staging.
 Fixed screenshot paths `/tmp/sample-project` and `/tmp/panemux-screenshots-agmsg`
 are links into the capture's own root; the screenshot lock is separate. Their
 ownership checks and cleanup rules live in
-[documentation screenshots](../../DEVELOPMENT.md#build-and-run). Verification
+[documentation screenshots](screenshots.md). Verification
 introduces no shared socket root, permission fallback, or duplicate capture
 staging implementation.
 

@@ -66,7 +66,7 @@ use the same selector. Required SDK acquisition and startup failures stop the ch
 verified cache install is locked and published atomically; damaged SDKs fail closed.
 `make test-go-toolchain` and `make test-node-toolchain`, included in `make check` and run
 explicitly in CI, protect selection, inheritance, and bootstrap failure behavior.
-See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
+See [the runtime contract](development/runtime.md).
 
 ### The fixture agent's tagged build
 

@@ -6,7 +6,7 @@
 // environment variable is set, as GitHub Actions sets it) the same probe
 // failing fails the test: CI is where these tests are verified, so a runner
 // that cannot open a pty must not quietly report every pane test as skipped.
-// See issue #315 and DEVELOPMENT.md's "Claude Code sandbox".
+// See issue #315 and docs/development/claude-sandbox.md.
 package testcap
 
 import (

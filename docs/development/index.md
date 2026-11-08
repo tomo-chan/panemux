@@ -9,3 +9,8 @@ Development and verification contracts, fixtures, and operational procedures.
 * [Mutation testing (`make mutation`)](mutation.md) - Mutation gate outcomes, diff scope, and justified exemption requirements.
 * [Red-check (`make efficacy`)](red-check.md) - Red-check requirements proving that changed tests detect the implementation change.
 * [Test granularity and testability seams](test-granularity.md) - Behavioral factor coverage, test granularity, and injectable side-effect boundaries.
+* [Development runtime contract](runtime.md) - Exact Go and Node selection, bootstrap prerequisites, supported platforms, and failure behavior.
+* [Claude Code sandbox](claude-sandbox.md) - Shared local-network permissions, platform limits, capability probes, and sandbox verification.
+* [Documentation screenshots](screenshots.md) - Capturing placeholder-only documentation images, safe staging recovery, and private tmux cleanup.
+* [Browser fixture isolation](browser-fixtures.md) - Private E2E processes, stand-in commands, cleanup, and temporary-file safety requirements.
+* [Pre-push check selection](push-protection.md) - Diff bases, changed-file check selection, fallback behavior, and hook isolation.

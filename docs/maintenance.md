@@ -23,7 +23,7 @@ Do not add parallel version pins or require per-command environment overrides. T
 selector uses existing exact SDKs or bootstraps a verified official archive; its local cache
 is excluded from source control. CI runs both runtime regression suites explicitly because
 its unit suites do not use `make test`. Verify those suites and `make check` when changing
-pins. See [the development contract](../DEVELOPMENT.md#runtime-version-contract) for supported
+pins. See [the development contract](development/runtime.md) for supported
 platforms, installation, direct npm behavior, and failure semantics.
 
 ## Local verification scripts
