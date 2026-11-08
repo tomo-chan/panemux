@@ -259,7 +259,7 @@ Opens a new host terminal ([Opening a host](task-navigation.md#opening-a-host)):
 ```
 
 - `type` is `ssh` or `ssh_tmux`. `tmux_session` is for `ssh_tmux` only and must pass the tmux
-  session name rule ([security](../security/command-execution.md#tmux-session-name-tmux-ssh_tmux-sessions)); without one
+  session name rule ([security](../security/tmux.md)); without one
   the server generates it as `POST /api/hosts/session-name` does.
 - Answers `201` with `{ "session_id": "board-…", "tmux_session": "gpu-box-1a2b3c4d" }`
   (`tmux_session` is `""` for `ssh`). The terminal is `/ws/{session_id}`.

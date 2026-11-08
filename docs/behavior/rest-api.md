@@ -326,7 +326,7 @@ Request body:
 - `500`: unable to read or write `~/.ssh/config`
 - `201`: host appended
 
-`name` must match `^[a-zA-Z0-9_.\-]+$`. `hostname`, `user`, and `identity_file` must not contain a control character: each is written as the rest of one line, and a line break would add a directive of its own ([security](../security/command-execution.md#ssh-proxycommand)). `port` defaults to 0 (omitted from the written block) when not specified. `identity_file` is optional.
+`name` must match `^[a-zA-Z0-9_.\-]+$`. `hostname`, `user`, and `identity_file` must not contain a control character: each is written as the rest of one line, and a line break would add a directive of its own ([security](../security/ssh-execution.md#ssh-proxycommand)). `port` defaults to 0 (omitted from the written block) when not specified. `identity_file` is optional.
 
 ### `/api/config/ssh-connections`
 

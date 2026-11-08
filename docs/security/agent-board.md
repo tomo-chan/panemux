@@ -78,7 +78,7 @@ Only the agmsg adapter chooses the fixed upstream repository, version and full c
 The panemux host fetches and verifies the exact commit, revalidates cached commit identity and uses
 `git archive` to produce the transferred tar. Source/cache ownership is trusted like other local
 application state. No request chooses repository, ref, archive bytes, command or installer arguments.
-See [the command boundary](command-execution.md#agmsg-source-and-installer).
+See [the command boundary](agmsg-install.md).
 
 Install / Update authorizes execution as the target user of the pinned upstream code verified by
 contract tests and human release review. The installer writes outside `~/.agents/skills` (Claude

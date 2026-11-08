@@ -199,5 +199,5 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 
 - タスクダッシュボードの収集と状態：[task-collection.md](task-collection.md)
 - 通知の条件と attention の表示：[notifications.md](notifications.md)
-- 収集のコマンドの安全性：[Task dashboard collection](../security/command-execution.md#task-dashboard-collection)
+- 収集のコマンドの安全性：[Task dashboard collection](../security/task-collection.md)
 - アーキテクチャ：[architecture.md](../architecture.md)

@@ -16,7 +16,7 @@ on the panemux host or an `ssh_connections` host. It creates no pane or pane con
 | Field | Rule |
 |---|---|
 | Host | Panemux host or an `ssh_connections` key |
-| Working directory | Existing absolute path passing the pane's [remote path rule](../security/command-execution.md#remote-path-arguments-ssh-working-directory) |
+| Working directory | Existing absolute path passing the pane's [remote path rule](../security/ssh-execution.md#remote-path-arguments-ssh-working-directory) |
 | Agent | Declares `launch`, in registry order; show `notes.launch`. An `unavailable` host capability disables Start with its reason; `unknown` is left to the server |
 | Labels | Optional comma-separated values following [record rules](task-records.md#done-and-labels) |
 | First instruction | Required; trim surrounding whitespace, normalize line endings to LF, at most 32 KiB, no NUL |
@@ -42,7 +42,7 @@ not the request, and rc that exits or execs another shell can leave success with
 The first instruction travels through a mode-0600 host temporary file (`$TMPDIR`, else `/tmp`,
 `panemux-task.XXXXXXXX`), read and deleted before rc runs, also deleted if tmux fails to start.
 It never enters the SSH command or tmux arguments; it is readable in the agent's own process
-arguments. [Launch security](../security/command-execution.md#task-launch-and-resume) owns shell,
+arguments. [Launch security](../security/task-launch.md) owns shell,
 tmux and option-boundary requirements.
 
 ### Codex launch
@@ -105,4 +105,4 @@ Claude/Codex tasks with UUIDs, disabled with the reason when `unavailable`.
   stopping. A host restart also ends tmux, so resume creates it or adds to a pane-recreated session.
   The dashboard selects the task and shows it running after collection finds it.
 
-Argument forms and validation are authoritative in [launch security](../security/command-execution.md#task-launch-and-resume).
+Argument forms and validation are authoritative in [launch security](../security/task-launch.md).

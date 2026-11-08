@@ -17,7 +17,18 @@ reading before touching the code it covers.
 
 | Sections | Document |
 |---|---|
-| Shell path; Tmux session name; Remote path arguments; SSH private key paths and an unresolvable home directory; SSH `ProxyCommand`; Launching the operator's browser (`--open`); Host execution with separate standard input; Task dashboard collection; Task agent probe; Task launch and resume; Task summaries | [command-execution.md](security/command-execution.md) |
+| Command execution sinks | [command-execution.md](security/command-execution.md) |
+| Shell paths | [shell-path.md](security/shell-path.md) |
+| Tmux sessions | [tmux.md](security/tmux.md) |
+| SSH execution | [ssh-execution.md](security/ssh-execution.md) |
+| Operator browser launch | [browser-open.md](security/browser-open.md) |
+| Host execution | [host-execution.md](security/host-execution.md) |
+| Agmsg acquisition and installation | [agmsg-install.md](security/agmsg-install.md) |
+| Task collection | [task-collection.md](security/task-collection.md) |
+| Codex permission hook | [codex-hook.md](security/codex-hook.md) |
+| Task agent probe | [task-probe.md](security/task-probe.md) |
+| Task launch and resume | [task-launch.md](security/task-launch.md) |
+| Task summaries | [task-summaries.md](security/task-summaries.md) |
 | Agent board remote writes; Agent-reported values in the dashboard UI | [agent-board.md](security/agent-board.md) |
 | Command center subprocess execution | [command-center.md](security/command-center.md) |
 | Auth token and transport encryption | [auth.md](security/auth.md) |
@@ -26,7 +37,7 @@ reading before touching the code it covers.
 
 ## Session Command Execution
 
-All session types that execute a local process use `exec.Command` with user-configurable values such as shell paths and tmux session names. These values must be sanitized before reaching the exec sink. See [command-execution.md](security/command-execution.md) for each sink's guard, [agent-board.md](security/agent-board.md) and [command-center.md](security/command-center.md) for the board and command-center paths, and [url-open.md](security/url-open.md) for the two mechanisms behind opening a URL from a pane.
+All session types that execute a local process use `exec.Command` with user-configurable values such as shell paths and tmux session names. These values must be sanitized before reaching the exec sink. See [command-execution.md](security/command-execution.md) for shared requirements and the boundary map, [agent-board.md](security/agent-board.md) and [command-center.md](security/command-center.md) for the board and command-center paths, and [url-open.md](security/url-open.md) for the two mechanisms behind opening a URL from a pane.
 
 ## General Rules
 

@@ -14,7 +14,7 @@ state never says whether its work is done: done and labels are records a person 
 
 Use the focused contracts below. [Task events](task-events.md) owns live state delivery and
 receiver behavior; [UI design](../ui-design/task-dashboard.md) owns presentation. Command safety
-is authoritative in [security requirements](../security/command-execution.md#task-dashboard-collection).
+is authoritative in [security requirements](../security/task-collection.md).
 
 ## Document map
 

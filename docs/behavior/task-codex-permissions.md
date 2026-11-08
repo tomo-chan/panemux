@@ -46,7 +46,7 @@ review there.
   `~/.codex`. A hook file over 1 MiB shows `Update` without being read; unreadable/invalid
   hooks.json prevents writing either file. The menu reads back status and asks the operator to
   trust `/hooks`; panemux neither trusts nor checks trust. Different hook content stays `Update`
-  until updated manually or automatically. See [hook safety](../security/command-execution.md#task-dashboard-collection).
+  until updated manually or automatically. See [hook safety](../security/codex-hook.md).
 - **`Update automatically`.** A checkbox under the status, offered on a host showing `Not
   installed`, `Update` or `Installed`, and off on every host until turned on there. The hosts it is
   on for are kept in `~/.config/panemux/codex-hook.json` (`{"version":1,"auto_update":["","gpu-box"]}`,

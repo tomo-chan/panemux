@@ -58,7 +58,7 @@ The pane that belongs to a task is found in the browser from the current workspa
   Linux does not accept that. A space in the value truncates it on macOS and is rejected on Linux.
   Panemux-generated values contain no spaces. These limits are accepted because IDs are only
   claims checked against a workspace pane's kind and host, under
-  [collection security](../security/command-execution.md#task-dashboard-collection).
+  [collection security](../security/task-collection.md).
 - Apple's own binaries (`/bin/sleep`, `/bin/zsh`) and other users' processes expose no environment
   on macOS. Claude, Codex's node wrapper/native binary and node do expose it. See the
   [macOS decision](../DECISIONLOG.md#reading-panemux_pane_id-on-macos-through-ps--e-2026-09-27-issue-263).

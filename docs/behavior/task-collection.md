@@ -72,7 +72,7 @@ The [event receiver](task-events.md#task-dashboard) owns precedence between live
 and dashboard collection state.
 
 Each collection runs one fixed script per host (`sh -s`, with the script on stdin; see
-[Task dashboard collection](../security/command-execution.md#task-dashboard-collection)). The script
+[Task dashboard collection](../security/task-collection.md)). The script
 reads only what the agents write themselves and what the host reports about its processes:
 
 | Read | Used for |
@@ -213,7 +213,7 @@ Until it answers, launch/resume retain the result for the current connection, or
 Results, including failures, last 5 minutes; the next full collection probes again after expiry,
 and the first full collection on a new/reconnected connection probes immediately. Each probe has
 5 seconds; timeout details say so. It looks up launch/resume CLIs on exec then login-shell `PATH`,
-accepting absolute executable paths only ([probe security](../security/command-execution.md#task-agent-probe)).
+accepting absolute executable paths only ([probe security](../security/task-probe.md)).
 Failure affects no collection, task or connection, and never checks or drops the connection.
 Results arriving after shutdown, connection replacement or host removal are discarded. The server
 logs failure/error changes and recovery, rather than every probe.
