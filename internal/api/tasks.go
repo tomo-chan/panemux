@@ -407,7 +407,7 @@ func taskGitFor(task tasks.Task, info *taskGitInfo) *taskGitInfo {
 // others GET /api/tasks has a heavy side effect — every host is dialed and
 // runs the collection script, and `gh pr view` runs per directory — which an
 // <img> on any page the operator has open could otherwise trigger. See
-// docs/security/command-execution.md, "Task dashboard collection".
+// docs/security/task-collection.md.
 func refuseCrossSite(w http.ResponseWriter, r *http.Request) bool {
 	return RefuseCrossSite(w, r)
 }

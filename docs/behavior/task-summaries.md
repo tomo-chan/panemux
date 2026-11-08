@@ -25,7 +25,7 @@ or `text` blocks, excluding `isSidechain` subagent lines. Only conversation text
 sidechains and cut lines: first user message up to 4 KiB, newest messages up to 24 KiB total and
 2 KiB each. Typed or quoted secrets are not masked. Remote excerpts go to the panemux host account,
 never the remote account; only answers are saved, never logs/excerpts.
-[Summary security](../security/command-execution.md#task-summaries) owns extraction limits,
+[Summary security](../security/task-summaries.md) owns extraction limits,
 CLI isolation and exact argument rules.
 
 No supported conversation lines means `unreadable`: no raw-log fallback, no CLI request and no
@@ -99,10 +99,10 @@ an ephemeral session. No profile, permission bypass or configuration suppression
 Inherited settings can affect input, cost and permitted actions: a summary-only prompt does not
 make this a tool-free runtime. A run needing intervention or unsupported flags fails with a fixed
 error, without CLI text or fallback to another model or agent. The
-[Codex security contract](../security/command-execution.md#codex-summary-runner-and-rollout-reader)
+[Codex security contract](../security/task-summaries.md#codex-summary-runner-and-rollout-reader)
 owns exact argv, answer-file validation and deadline enforcement (including after CLI exit).
 
-The [Codex rollout reader](../security/command-execution.md#codex-summary-runner-and-rollout-reader)
+The [Codex rollout reader](../security/task-summaries.md#codex-summary-runner-and-rollout-reader)
 owns canonical message extraction, injected-wrapper removal, ID deduplication and pinned-log
 validation; empty or fully stripped messages do not consume an ID, so a later message with that
 ID can supply conversation text. It uses the same first/recent budgets as Claude. Collection chooses modification time,

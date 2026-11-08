@@ -15,4 +15,4 @@ open panes under a different session name. Per-host/session serialization preven
 within one panemux process; separate instances are not coordinated.
 The original Claude-only limitation was replaced by [Codex support](codex-session-observation.md)
 and [adapters](../agent-registry/launch-resume-adapters.md).
-See [launch security](../../security/command-execution.md) and [Task launch and resume](../../behavior/task-launch.md).
+See [launch security](../../security/task-launch.md) and [Task launch and resume](../../behavior/task-launch.md).

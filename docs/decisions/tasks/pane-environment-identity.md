@@ -13,4 +13,4 @@ expanded exclamation marks even in quoted script text. Exporting only when the b
 would leave ordinary SSH agents unreachable.
 The browser matches existing local/ssh panes on the same host; the marker grants no command execution.
 Linux-only reading was extended by [macOS observation](macos-pane-identity.md).
-See [command security](../../security/command-execution.md).
+See [command security](../../security/ssh-execution.md#pane-identity-and-remote-shell-setup).

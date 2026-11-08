@@ -28,7 +28,7 @@ same setting, and a field left out keeps the block's value:
 | `host` | `HostName` | Hostname or IP address |
 | `user` | `User` | Remote username |
 | `port` | `Port` | SSH port (22 when neither sets one) |
-| `key_file` | `IdentityFile` | Absolute path to a private key, or `~/…`, which is expanded at load time. A path that is still relative when the key is read is refused — see [security/command-execution.md](../security/command-execution.md#ssh-private-key-paths-and-an-unresolvable-home-directory) |
+| `key_file` | `IdentityFile` | Absolute path to a private key, or `~/…`, which is expanded at load time. A path that is still relative when the key is read is refused — see [security/ssh-execution.md](../security/ssh-execution.md#ssh-private-key-paths-and-an-unresolvable-home-directory) |
 | `password` | — | Password for password-based authentication |
 | `known_hosts_file` | — | Path to known\_hosts file for host-key verification (default `~/.ssh/known_hosts`). Absolute or `~/…`, refused when still relative at the read, for the same reason as `key_file` |
 
@@ -36,7 +36,7 @@ same setting, and a field left out keeps the block's value:
 a name-only entry included — takes both from the `Host` block. An entry that sets its own `host` takes
 neither: the route belongs to the host the block names, and the entry has replaced that host. Its
 `ProxyJump` is then not resolved at all, so one panemux cannot follow does not stop the entry from
-connecting ([security](../security/command-execution.md#ssh-proxycommand)).
+connecting ([security](../security/ssh-execution.md#ssh-proxycommand)).
 
 An entry needs a host from one of the two: an entry with no `host` and no `Host` block of its name
 fails when it is connected — the pane does not start, and the task dashboard reports the error on

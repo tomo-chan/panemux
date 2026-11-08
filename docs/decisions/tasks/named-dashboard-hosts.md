@@ -13,4 +13,4 @@ Merging name-only entries exposed ProxyJump cycles and unchecked Add SSH Host va
 tracking prevents recursive resolution; rejecting control characters in API values and AppendHost
 prevents injected directives, including ProxyCommand. This existing flaw was fixed with the feature
 rather than left behind a security claim that no API writes ProxyCommand.
-See [Hosts and connections](../../behavior/task-collection.md#hosts-and-connections) and [SSH security](../../security/command-execution.md).
+See [Hosts and connections](../../behavior/task-collection.md#hosts-and-connections) and [SSH security](../../security/ssh-execution.md#ssh-proxycommand).
