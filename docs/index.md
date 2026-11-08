@@ -37,6 +37,8 @@ it is also the day-to-day command reference.
 
 Topic guides link to focused deep dives when the summary is not enough:
 
+- [UI details](ui-design/) - Workspace and pane chrome, layout editing, dialogs, previews, attention,
+  task dashboard surfaces, and Agent Board presentation.
 - [Behavior details](behavior/) - REST, WebSocket, frontend, SSH, notifications, URL opening, and the
   task dashboard.
 - [Security details](security/) - requirements grouped by command or trust boundary.
@@ -68,9 +70,10 @@ Git history remains the authority for line-level chronology.
 * [Quality Gateway](quality-gateway.md) - Product and test quality characteristics, verification gates, and enforcement responsibilities.
 * [Scenario Coverage](scenarios.md) - User-facing acceptance scenarios and the automated or manual verification for each.
 * [Security Design](security.md) - Implementation security invariants, development trust boundaries, and routes to sink requirements.
-* [UI Design](ui-design.md) - Interface principles and interaction contracts for workspaces, panes, dialogs, and tasks.
+* [UI Design](ui-design.md) - Shared interface principles and routes to screen and interaction contracts.
 * [agent-board/](agent-board/) - Agent Board architecture, messaging, integration, security, and verification contracts.
 * [agent-registry/](agent-registry/) - Agent integration procedures and capability requirements.
+* [ui-design/](ui-design/) - Screen and interaction contracts linked from the shared UI principles.
 * [behavior/](behavior/) - Runtime behavior, API contracts, task events, and task dashboard details.
 * [decisions/](decisions/) - Individual design decisions and topic indexes.
 * [development/](development/) - Development and verification contracts, fixtures, and operational procedures.

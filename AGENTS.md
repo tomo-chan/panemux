@@ -86,7 +86,7 @@ same name beside it, and the index's own document map routes by section name.
 - Current architecture: [docs/architecture.md](docs/architecture.md)
 - Security requirements for implementation: [docs/security.md](docs/security.md) → [docs/security/](docs/security/)
 - Behavior and API specification: [docs/behavior.md](docs/behavior.md) → [docs/behavior/](docs/behavior/)
-- UI intent and interaction design: [docs/ui-design.md](docs/ui-design.md)
+- UI intent and interaction design: [docs/ui-design.md](docs/ui-design.md) → [docs/ui-design/](docs/ui-design/)
 - CI and release maintenance: [docs/maintenance.md](docs/maintenance.md)
 - Agent registry, capabilities and session keys: [docs/agent-registry.md](docs/agent-registry.md) → [docs/agent-registry/](docs/agent-registry/)
 - Cross-pane Claude messaging design: [docs/agent-board.md](docs/agent-board.md) → [docs/agent-board/](docs/agent-board/)
