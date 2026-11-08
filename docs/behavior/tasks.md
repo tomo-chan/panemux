@@ -571,7 +571,7 @@ The pane that belongs to a task is found in the browser from the current workspa
 - The macOS reading has been tested only by replaying `ps -E` output recorded on macOS 26.3.1
   through a fake `ps`. It has not yet been run on a macOS host, over SSH to one, or on a macOS
   release before 26 (see the
-  [decision log](../DECISIONLOG.md#reading-panemux_pane_id-on-macos-through-ps--e-2026-09-27-issue-263)).
+  [decision log](../decisions/tasks/macos-pane-identity.md)).
 - On macOS, `ps -E -p <pid> -o command=` prints the process's arguments, a space, and its
   environment's `NAME=value` entries joined by spaces. Collection removes the arguments
   `ps -p <pid> -o command=` prints from the front of that output, and reads the rest only when it
@@ -588,7 +588,7 @@ The pane that belongs to a task is found in the browser from the current workspa
 - macOS shows no environment for Apple's own binaries (`/bin/sleep`, `/bin/zsh`) or for another
   user's processes. An agent that is such a process reports no pane ID. claude, codex (its `node`
   wrapper and its native binary) and `node` show theirs (see the
-  [decision log](../DECISIONLOG.md#reading-panemux_pane_id-on-macos-through-ps--e-2026-09-27-issue-263)).
+  [decision log](../decisions/tasks/macos-pane-identity.md)).
 - The environment is the one the process was started with: changing the variable afterwards inside
   a running agent has no effect.
 - The value is untrusted, since any process of the user can set it. Collection keeps only a value

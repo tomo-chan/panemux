@@ -98,6 +98,6 @@ func writeTaskEventFrame(conn *websocket.Conn, frame taskevents.Frame) bool {
 	// machine, whose closed tab closes the socket at once. A connection that
 	// stops reading only falls behind, and the publisher closes its
 	// subscription; only this handler waits on the blocked write
-	// (docs/DECISIONLOG.md, issue #277).
+	// (docs/decisions/tasks/server-task-events.md, issue #277).
 	return conn.WriteMessage(websocket.TextMessage, data) == nil
 }

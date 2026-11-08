@@ -37,7 +37,7 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
     coverage gates, or CI checks are responsible for. It defines the quality characteristics tests
     must protect and the current layered gates. The numbered design decisions and measurements are
     in [docs/quality-gateway/](docs/quality-gateway/).
-12. Read [docs/DECISIONLOG.md](docs/DECISIONLOG.md) when the reason, sequence, or rejected alternative
+12. Read [decision index](docs/decisions/index.md) when the reason, sequence, or rejected alternative
     behind the current specification matters.
 
 ## Enforcement
@@ -60,9 +60,9 @@ being left to memory. `.claude/` holds the agent-side half:
   of it fails.
 - Neither hook runs `make check`, and neither does `.githooks/pre-push`, which runs only the checks
   the pushed change touches. The whole suite is CI's, and `make check` run by hand.
-  See decision D6 in [docs/quality-gateway/decisions.md](docs/quality-gateway/decisions.md).
+  See [decision D6](docs/decisions/quality-gateway/fast-stop-hook.md).
 - `.claude/agents/diff-reviewer.md` reviews a branch's diff in a fresh context.
-  It does not block, and it is not meant to: see decision D5.
+  It does not block, and it is not meant to: see [decision D5](docs/decisions/quality-gateway/independent-review.md).
 - `make test-hooks` tests the hooks themselves. It runs as part of `make test`
   and as its own CI step, since `ci.yml` invokes the suites directly rather
   than through `make test`.
@@ -92,7 +92,7 @@ same name beside it, and the index's own document map routes by section name.
 - Cross-pane Claude messaging design: [docs/agent-board.md](docs/agent-board.md) → [docs/agent-board/](docs/agent-board/)
 - Use-case scenario coverage map: [docs/scenarios.md](docs/scenarios.md)
 - Test quality characteristics and the gate design: [docs/quality-gateway.md](docs/quality-gateway.md) → [docs/quality-gateway/](docs/quality-gateway/)
-- Design history and rejected alternatives: [docs/DECISIONLOG.md](docs/DECISIONLOG.md)
+- Design history and rejected alternatives: [decision index](docs/decisions/index.md)
 - TLA+ specifications for `internal/board`'s state machines: [spec/agentboard/README.md](spec/agentboard/README.md)
 
 ## Editing Rules
@@ -104,7 +104,7 @@ same name beside it, and the index's own document map routes by section name.
   [DEVELOPMENT.md's documentation rules](DEVELOPMENT.md#documentation-updates) for scope.
 - Put enduring product, architecture, behavior, UI, and maintenance guidance under `docs/`.
 - Keep topic guides focused on the current state; put chronology and superseded approaches in
-  `docs/DECISIONLOG.md`.
+  `docs/decisions/`.
 - Put implementation-time security requirements in `docs/security.md` and treat it as required reading for security-sensitive changes.
 - Follow [the OKF writing rules](docs/index.md#writing-rules): `docs/` is one OKF v0.2 bundle,
   concepts carry metadata, and each directory has an `index.md` listing its contents.

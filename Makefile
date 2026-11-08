@@ -206,7 +206,7 @@ test-docs-okf:
 
 # ── Efficacy: red-check (gate G4(b)) ──────────────────────────────────────────
 #
-# Asserts decision D4: a test this branch changed must FAIL when this branch's
+# Asserts decision D4 (docs/decisions/quality-gateway/red-check.md): a test this branch changed must FAIL when this branch's
 # implementation diff is reverted. That is the strongest possible mutation —
 # remove the implementation entirely — and it catches the two shapes the other
 # gates are blind to: a tautological test, and a test written after the fact.
@@ -249,7 +249,7 @@ test-efficacy:
 # repository has ~275 unexecuted blocks today, so a gate over all of them would
 # start red — and docs/quality-gateway.md principle 4 is that a gate which
 # starts red gets routed around, taking the working gates with it. Diff-scoped,
-# it starts green and stays cheap. Same reasoning as decision D2.
+# it starts green and stays cheap. Same reasoning as decision D2 (docs/decisions/quality-gateway/mutation-diff-scope.md).
 #
 # Outside `make check` for the reason `make efficacy` is: it needs the base
 # branch. It runs as its own pull-request CI job.
@@ -280,7 +280,7 @@ test-coverage-blocks:
 # What changed is that those survivors now have a per-type waiver to go to
 # (#236), a mutant with no verdict can no longer be dropped silently (#235),
 # and the size of a red run is known — about 5 mutants per 317 changed lines
-# (#237). Decision D9 in docs/quality-gateway/decisions.md carries the
+# (#237). Decision D9 in docs/decisions/quality-gateway/mutation-verdicts.md carries the
 # measurements.
 #
 # SKIPPED is the exception and does not fail on its own: gremlins sets it from
@@ -415,7 +415,7 @@ test-model-check:
 # ── Coverage (≥ 80 %) ─────────────────────────────────────────────────────────
 #
 # The threshold is deliberately NOT raised above 80 %: see decision D1 in
-# docs/quality-gateway/decisions.md. Coverage is only meaningful as a lower bound, and
+# docs/decisions/quality-gateway/coverage-scope.md. Coverage is only meaningful as a lower bound, and
 # the cheapest way to satisfy a higher one is to generate tautological tests,
 # which lowers protection against regressions and resistance to refactoring at
 # the same time. What gets strengthened is the SCOPE below, never the number.

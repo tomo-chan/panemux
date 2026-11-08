@@ -8,7 +8,7 @@ description: "Agent Board capabilities, design principles, and routes to focused
 
 Agent Board adds self-reported agent status, cross-pane messaging, a read-only dashboard, and an
 optional conversational command center. This guide summarizes the current design; the
-[Decision log](DECISIONLOG.md#agent-board) records its history.
+[Decision log](decisions/agent-board/index.md) records its history.
 
 ## What it does
 
@@ -86,7 +86,7 @@ Exact request/response behavior lives in [Agent Board REST API](behavior/board-a
 | How is compatibility with agmsg verified? | [agmsg contract](agent-board/agmsg-contract.md) |
 | Which state-machine property is modeled? | [Model checking](agent-board/model-checking.md) |
 | How is the subsystem tested? | [Testing plan](agent-board/testing-plan.md) |
-| Why were alternatives rejected? | [Decision log](DECISIONLOG.md#agent-board) |
+| Why were alternatives rejected? | [Decision log](decisions/agent-board/index.md) |
 
 ## Related documents
 
@@ -94,4 +94,4 @@ Exact request/response behavior lives in [Agent Board REST API](behavior/board-a
 - [Behavior specification](behavior.md) — runtime and protocol contracts.
 - [Security design](security.md) — implementation requirements.
 - [UI design](ui-design.md#agent-board-ui) — dashboard, palette, and history interactions.
-- [Decision log](DECISIONLOG.md#agent-board) — chronological reasoning and superseded designs.
+- [Decision log](decisions/agent-board/index.md) — chronological reasoning and superseded designs.

@@ -104,4 +104,4 @@ backend and UI are released together.
 - [Behavior specification](behavior.md) — startup, configuration, APIs, and browser behavior.
 - [Security design](security.md) — implementation requirements by sensitive sink.
 - [UI design](ui-design.md) — interaction and presentation rules.
-- [Decision log](DECISIONLOG.md) — why the present design replaced earlier approaches.
+- [Decision log](decisions/index.md) — why the present design replaced earlier approaches.

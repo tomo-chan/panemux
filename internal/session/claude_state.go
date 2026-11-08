@@ -7,7 +7,7 @@ import (
 
 // ClaudeSessionState is the part of ~/.claude/sessions/<pid>.json panemux
 // reads. Claude Code writes this file itself; it is not a published format
-// (see docs/DECISIONLOG.md), so every field but pid and sessionId is optional.
+// (see docs/decisions/tasks/unreadable-state-diagnostics.md), so every field but pid and sessionId is optional.
 type ClaudeSessionState struct {
 	SessionID  string
 	CWD        string

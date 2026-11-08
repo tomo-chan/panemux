@@ -8,8 +8,8 @@ description: "Product and test quality characteristics, verification gates, and 
 
 This guide defines the current quality model and the gates that enforce it. Use
 [DEVELOPMENT.md](../DEVELOPMENT.md) for commands and workflow, [Scenario coverage](scenarios.md) for
-the user-facing acceptance ledger, and [quality-gateway/decisions.md](quality-gateway/decisions.md)
-for the rollout history and rationale behind decisions D1–D14.
+the user-facing acceptance ledger, and [Quality decision index](decisions/quality-gateway/index.md)
+for the history and rationale behind decisions D1–D14.
 
 ## What the tests protect
 
@@ -147,17 +147,16 @@ or a JDK use explicit opt-in commands or dedicated CI jobs.
 Inside the Claude Code sandbox, the tests and gates that need a pseudo-terminal, a tmux server, `ps`
 or `dscl` probe for it and report themselves skipped; with `CI` set the same probe failing fails them,
 so CI (L4) is where they are verified. See D13 in
-[quality-gateway/decisions.md](quality-gateway/decisions.md).
+[Decision rationale](decisions/quality-gateway/capability-probes.md).
 
 ## Deep dives
 
 | Topic | Document |
 |---|---|
-| Why the gates have this shape; decisions D1–D14 | [Design decisions](quality-gateway/decisions.md) |
+| Why the gates have this shape; decisions D1–D14 | [Design decisions](decisions/quality-gateway/index.md) |
 | First mutation findings and their classification | [Mutation findings](quality-gateway/mutants.md) |
 | Versioned benchmark and accessibility evidence | [Measurements](quality-gateway/measurements.md) |
 | Commands and exemptions for each mechanism | [Development deep dives](development/) |
-| Chronological cross-topic milestones | [Decision log](DECISIONLOG.md#quality-gateway) |
 
 ## Sources
 

@@ -9,7 +9,7 @@ description: "Dated measurements of task summary cost for synthetic conversation
 > Measurements for [task summaries](tasks.md#summaries). These numbers are evidence, dated
 > 2026-10-10, not a specification: they come from one synthetic conversation and the CLI and models
 > of that day. Why the summarizer runs as it does is in
-> [DECISIONLOG.md](../DECISIONLOG.md#summaries-cost-less-a-fixed-system-prompt-no-tools-and-haiku-2026-10-10-issue-353).
+> [Decision rationale](../decisions/tasks/summary-cost.md).
 
 ## How it was measured
 

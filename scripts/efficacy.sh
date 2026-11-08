@@ -2,7 +2,7 @@
 #
 # red-check: gate G4(b) in docs/quality-gateway.md.
 #
-# The rule this enforces is decision D4. DEVELOPMENT.md requires tests to be
+# The rule this enforces is decision D4 (docs/decisions/quality-gateway/red-check.md). DEVELOPMENT.md requires tests to be
 # written first and confirmed failing, and that rule is stuck at rung L0 of the
 # enforcement ladder because it cannot be checked after the fact — nothing in a
 # merged branch records the order its lines were written in. The *result* can be
@@ -747,7 +747,7 @@ while IFS="$tab" read -r pkg fn; do
 		echo "SURVIVOR: $pkg $fn still passes with this branch's implementation reverted."
 		echo "      A test that passes without the code it covers protects nothing."
 		echo "      Either it asserts something the old implementation already did,"
-		echo "      or it asserts nothing at all. See decision D4 in docs/quality-gateway/decisions.md."
+		echo "      or it asserts nothing at all. See decision D4 in docs/decisions/quality-gateway/red-check.md."
 		echo
 		echo "      If instead this test's implementation is simply not part of this"
 		echo "      branch — an assertion tightened beside the change, a flake fixed"

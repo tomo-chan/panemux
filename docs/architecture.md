@@ -9,7 +9,7 @@ description: "System structure, component ownership, data flow, and trust bounda
 This guide is the concise map of the current system. It identifies component ownership and the
 boundaries a change must preserve. Runtime contracts live in [Behavior specification](behavior.md),
 security requirements in [Security design](security.md), and historical rationale in the
-[Decision log](DECISIONLOG.md).
+[Decision log](decisions/index.md).
 
 ## System structure
 
@@ -257,7 +257,7 @@ frames a localhost page. Behavior is in [the split preview](behavior/preview.md)
 - [Agent Board details](agent-board/) — messaging, relay, bootstrap, command center, and limitations.
 - [UI design](ui-design.md) — workspace, pane, modal, attention, and Agent Board interactions.
 - [Quality gateway](quality-gateway.md) — how architectural contracts are verified.
-- [Decision log](DECISIONLOG.md) — tradeoffs and superseded approaches removed from this guide.
+- [Decision log](decisions/index.md) — tradeoffs and superseded approaches removed from this guide.
 
 Agent Board enablement is instance-wide; delivery mode is deprecated and ignored. Its relay accepts all configured
 pane identities on their owning hosts; bootstrap supplies a synchronized participation snapshot

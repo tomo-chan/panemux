@@ -160,7 +160,7 @@ follow [Red-check](docs/development/red-check.md) for justified exemptions and s
   If no documented contract changes, inspect without making a synthetic edit.
 - Record confirmed behavior, operational assumptions, browser/rendering requirements, and
   user-visible rules in docs/. Keep current-state docs free of chronology; put consequential
-  history, rejected alternatives, incidents, and dated decisions in [DECISIONLOG.md](docs/DECISIONLOG.md).
+  history, rejected alternatives, incidents, and dated decisions in [decision concepts](docs/decisions/index.md).
 - Add or update [scenario rows](docs/scenarios.md) for changed use cases, naming verification;
   manual verification is valid, an absent row is not. Run `make check-scenarios`.
   CI requires scenario edits for frontend/src, internal/api, and internal/config changes;
