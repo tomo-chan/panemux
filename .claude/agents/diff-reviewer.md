@@ -36,8 +36,8 @@ in the repository or in the diff itself.
    diff engages. `docs/security.md` is whenever the diff touches command
    execution, shell arguments, SSH paths, host keys, or `gosec` posture — and
    it carries the boundary map: read the per-boundary files listed there that
-   own the sinks the diff touches. `command-execution.md` carries common rules
-   and routes; follow those routes to the sink requirements, not the entrance alone.
+   own the sinks the diff touches. `command-execution.md` links to shared rules
+   and boundary contracts; follow those links, not the entrance alone.
 4. The surrounding code the diff does not touch, wherever a finding depends on
    how the change fits what is already there.
 

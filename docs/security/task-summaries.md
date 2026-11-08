@@ -6,7 +6,7 @@ description: "Conversation extraction, agent runner restrictions and private sum
 
 # Security: task summaries
 
-[Common execution requirements](command-execution.md) apply at this boundary.
+See the [shared rules and boundary map](command-execution.md).
 
 When `task_dashboard.summary.enabled` is set, two sinks summarize a task: a host log reader and
 that task's own agent CLI on the panemux host ([behavior](../behavior/task-summaries.md#summaries)).

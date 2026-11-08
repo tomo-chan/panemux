@@ -6,7 +6,7 @@ description: "Fixed CLI availability probes and bounded host diagnostics."
 
 # Security: task agent probe
 
-[Common execution requirements](command-execution.md) apply at this boundary.
+See the [shared rules and boundary map](command-execution.md).
 
 The agent probe ([behavior](../behavior/task-collection.md#agent-availability)) runs one more fixed script per
 host, `probeScript` in `internal/tasks/availability.go`, apart from the collection script. It is

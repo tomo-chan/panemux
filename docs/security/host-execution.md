@@ -6,7 +6,7 @@ description: "Trusted scripts, separate stdin and output capture contracts for h
 
 # Security: host execution
 
-[Common execution requirements](command-execution.md) apply at this boundary.
+See the [shared rules and boundary map](command-execution.md).
 
 `host.InputExecutor`, implemented by `hostexec.Pool.RunInput`, accepts trusted application script
 text, positional operands and an arbitrary input stream separately. It is an internal port, with

@@ -6,7 +6,7 @@ description: "Remote path guards, credential path resolution and SSH proxy comma
 
 # Security: SSH execution
 
-[Common execution requirements](command-execution.md) apply at this boundary.
+See the [shared rules and boundary map](command-execution.md).
 
 ## Remote path arguments (SSH working directory)
 

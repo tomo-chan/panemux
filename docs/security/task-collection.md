@@ -6,7 +6,7 @@ description: "Fixed task collection scripts and untrusted host output guards."
 
 # Security: task collection
 
-[Common execution requirements](command-execution.md) apply at this boundary.
+See the [shared rules and boundary map](command-execution.md).
 
 The task dashboard ([behavior](../behavior/task-collection.md)) collects on the panemux host and
 every `ssh_connections` host. Request, config and remote-host values must not become command text.

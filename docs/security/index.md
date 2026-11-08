@@ -5,7 +5,7 @@ Security requirements grouped by execution sink and trust boundary.
 * [Security: Agent Board](agent-board.md) - Agent Board remote-write constraints and treatment of agent-reported values.
 * [Security: auth token and transport encryption](auth.md) - Browser request guards, bearer tokens, loopback bootstrap, and transport encryption requirements.
 * [Security: command center subprocess execution](command-center.md) - Command center subprocess execution, token handling, and working directory constraints.
-* [Security: command execution sinks](command-execution.md) - Common command execution requirements and routes to each execution boundary.
+* [Security: command execution sinks](command-execution.md) - Routes to shared security rules and execution-boundary requirements.
 * [Security: shell paths](shell-path.md) - Trusted shell selection and validation before local process execution.
 * [Security: tmux sessions](tmux.md) - Validated exact tmux targets and guarded task and host terminal attachment.
 * [Security: SSH execution](ssh-execution.md) - Remote path guards, credential path resolution and SSH proxy command trust boundaries.

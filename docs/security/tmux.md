@@ -6,7 +6,7 @@ description: "Validated exact tmux targets and guarded task and host terminal at
 
 # Security: tmux sessions
 
-[Common execution requirements](command-execution.md) apply at this boundary.
+See the [shared rules and boundary map](command-execution.md).
 
 `validTmuxSessionName` in `internal/session/tmux_ssh.go` uses a strict regex (`^[a-zA-Z0-9_.-]+$`)
 validated at construction time. Local tmux arguments are discrete `exec.Command` args. Remote tmux

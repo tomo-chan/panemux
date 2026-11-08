@@ -37,7 +37,7 @@ reading before touching the code it covers.
 
 ## Session Command Execution
 
-All session types that execute a local process use `exec.Command` with user-configurable values such as shell paths and tmux session names. These values must be sanitized before reaching the exec sink. See [command-execution.md](security/command-execution.md) for shared requirements and the boundary map, [agent-board.md](security/agent-board.md) and [command-center.md](security/command-center.md) for the board and command-center paths, and [url-open.md](security/url-open.md) for the two mechanisms behind opening a URL from a pane.
+All session types that execute a local process use `exec.Command` with user-configurable values such as shell paths and tmux session names. These values must be sanitized before reaching the exec sink. See [command-execution.md](security/command-execution.md) for shared-rule references and the boundary map, [agent-board.md](security/agent-board.md) and [command-center.md](security/command-center.md) for the board and command-center paths, and [url-open.md](security/url-open.md) for the two mechanisms behind opening a URL from a pane.
 
 ## General Rules
 
