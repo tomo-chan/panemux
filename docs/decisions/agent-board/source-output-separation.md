@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Keep source data separate from diagnostics (2026-10-31, #435 review round 2)"
-description: "Rationale for Keep source data separate from diagnostics."
+description: "Separate source stdout from diagnostics so Git warnings cannot corrupt revisions or archive bytes."
 ---
 
 # Keep source data separate from diagnostics (2026-10-31, #435 review round 2)

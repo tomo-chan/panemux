@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "The own-send ledger authenticates sentinel-attributed rows (2026-08, PR #162)"
-description: "Rationale for The own-send ledger authenticates sentinel-attributed rows."
+description: "Authenticate system-attributed rows against recent panemux sends instead of trusting free-text sender names."
 ---
 
 # The own-send ledger authenticates sentinel-attributed rows (2026-08, PR #162)

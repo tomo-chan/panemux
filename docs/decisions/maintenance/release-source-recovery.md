@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Release recovery uses the original source with GNU coreutils (2026-11-02, PR #479)"
-description: "Rationale for Release recovery uses the original source with GNU coreutils."
+description: "Recover drafts from their original source using GNU coreutils instead of overlaying newer code or ignoring lock errors."
 ---
 
 # Release recovery uses the original source with GNU coreutils (2026-11-02, PR #479)

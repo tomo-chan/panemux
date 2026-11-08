@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Isolate the board message transport (2026-10-26, #438 / #441)"
-description: "Rationale for Isolate the board message transport."
+description: "Keep relay orchestration independent of agmsg scripts, parsing and provider-specific participation steps."
 ---
 
 # Isolate the board message transport (2026-10-26, #438 / #441)

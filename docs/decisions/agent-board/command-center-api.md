@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Command center uses panemux's API, not agmsg scripts (2026-08, PR #162)"
-description: "Rationale for Command center uses panemux's API, not agmsg scripts."
+description: "Expose narrow authenticated board operations instead of making the model compose shell-safe script calls."
 ---
 
 # Command center uses panemux's API, not agmsg scripts (2026-08, PR #162)

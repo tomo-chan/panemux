@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Input-wait notifications come from server-published task events (2026-10-02, issue #277)"
-description: "Rationale for Input-wait notifications come from server-published task events."
+description: "Publish per-host changes, close slow subscribers and derive attention from healthy-host state instead of regex timing."
 ---
 
 # Input-wait notifications come from server-published task events (2026-10-02, issue #277)

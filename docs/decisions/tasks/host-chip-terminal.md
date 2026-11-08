@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Opening a host from its chip on the dashboard (2026-10-09, issue #314)"
-description: "Rationale for Opening a host from its chip on the dashboard."
+description: "Create a fresh host terminal through a destination menu instead of guessing which task session to attach."
 ---
 
 # Opening a host from its chip on the dashboard (2026-10-09, issue #314)

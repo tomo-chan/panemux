@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Capabilities in the task snapshot (2026-10-23, issue #376)"
-description: "Rationale for Capabilities in the task snapshot."
+description: "Return registry, availability and actions together instead of reconciling a separate agent endpoint."
 ---
 
 # Capabilities in the task snapshot (2026-10-23, issue #376)

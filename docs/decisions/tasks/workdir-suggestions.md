@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Working directory suggestions come from the board's tasks, stored nowhere (2026-10-09, issue #311)"
-description: "Rationale for Working directory suggestions come from the board's tasks, stored nowhere."
+description: "Derive directory suggestions from collected host tasks instead of storing a second list or probing every path."
 ---
 
 # Working directory suggestions come from the board's tasks, stored nowhere (2026-10-09, issue #311)

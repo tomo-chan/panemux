@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Pane workdirs per session, on the Task rule (2026-10-18, issue #375)"
-description: "Rationale for Pane workdirs per session, on the Task rule."
+description: "Share task process rules and parsers with pane lookup without coupling observations or failure handling."
 ---
 
 # Pane workdirs per session, on the Task rule (2026-10-18, issue #375)

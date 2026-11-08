@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Host tool management and the Codex hook adapter (2026-10-26, #438 / #440)"
-description: "Rationale for Host tool management and the Codex hook adapter."
+description: "Move checks and installation to host management while preserving Codex settings and API behavior."
 ---
 
 # Host tool management and the Codex hook adapter (2026-10-26, #438 / #440)

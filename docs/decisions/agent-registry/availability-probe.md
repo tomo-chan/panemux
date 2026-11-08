@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Agent availability: a separate probe and an anti-corruption layer for formats (2026-10-16, issue #373)"
-description: "Rationale for Agent availability: a separate probe and an anti-corruption layer for formats."
+description: "Probe CLI availability separately in the background and degrade unknown formats instead of guessing state."
 ---
 
 # Agent availability: a separate probe and an anti-corruption layer for formats (2026-10-16, issue #373)

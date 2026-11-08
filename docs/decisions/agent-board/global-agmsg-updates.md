@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Global agmsg automatic updates (2026-10-31, #435 B3)"
-description: "Rationale for Global agmsg automatic updates."
+description: "Update only older installed releases on global opt-in events without periodic monitoring or automatic retry."
 ---
 
 # Global agmsg automatic updates (2026-10-31, #435 B3)

@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Filesystem globals use named seams (2026-09-10 through 2026-09-13, PRs #224, #231, #234)"
-description: "Rationale for Filesystem globals use named seams."
+description: "Provide named home, cache and persistent-write seams instead of unrelated process-global test overrides."
 ---
 
 # Filesystem globals use named seams (2026-09-10 through 2026-09-13, PRs #224, #231, #234)

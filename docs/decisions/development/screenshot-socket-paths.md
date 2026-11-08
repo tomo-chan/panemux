@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "The screenshot-helper tests choose where tmux's sockets go (2026-10-10, issue #343)"
-description: "Rationale for The screenshot-helper tests choose where tmux's sockets go."
+description: "Choose screenshot-test socket roots by resolved path length to respect macOS limits across sandbox environments."
 ---
 
 # The screenshot-helper tests choose where tmux's sockets go (2026-10-10, issue #343)

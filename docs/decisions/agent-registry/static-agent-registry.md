@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "One registry declares agents; capabilities are ports in their consumers (2026-10-12, issue #372)"
-description: "Rationale for One registry declares agents; capabilities are ports in their consumers."
+description: "Use explicit static declarations and consumer-owned ports instead of configuration or implicit linking order."
 ---
 
 # One registry declares agents; capabilities are ports in their consumers (2026-10-12, issue #372)

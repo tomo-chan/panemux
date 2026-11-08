@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Layout responses are normalized before frontend parsing (2026-09-03, PR #198)"
-description: "Rationale for Layout responses are normalized before frontend parsing."
+description: "Normalize hand-written layouts at the API boundary before strict parsing without forcing an immediate configuration save."
 ---
 
 # Layout responses are normalized before frontend parsing (2026-09-03, PR #198)

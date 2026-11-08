@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Dashboard hosts are listed by name; details come from `~/.ssh/config` (2026-09-29, issue #272)"
-description: "Rationale for Dashboard hosts are listed by name; details come from `~/.ssh/config`."
+description: "Resolve configured host names through OpenSSH without collecting every host or accepting injected directives."
 ---
 
 # Dashboard hosts are listed by name; details come from `~/.ssh/config` (2026-09-29, issue #272)

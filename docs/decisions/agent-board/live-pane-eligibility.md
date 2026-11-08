@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Live pane eligibility after configuration edits (2026-10-29, #435 / PR #447 review)"
-description: "Rationale for Live pane eligibility after configuration edits."
+description: "Refresh routing authority after configuration edits instead of pinning pane membership to startup state."
 status: deprecated
 ---
 

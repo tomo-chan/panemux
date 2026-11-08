@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Summaries cost less: a fixed system prompt, no tools and Haiku (2026-10-10, issue #353)"
-description: "Rationale for Summaries cost less: a fixed system prompt, no tools and Haiku."
+description: "Use fixed prompts, no offered tools and Haiku while exposing the cost of unexpected model fallback."
 ---
 
 # Summaries cost less: a fixed system prompt, no tools and Haiku (2026-10-10, issue #353)

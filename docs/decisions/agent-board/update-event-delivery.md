@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Automatic-update event delivery (2026-10-31, #435 B3 review)"
-description: "Rationale for Automatic-update event delivery."
+description: "Coalesce confirmation events during active checks and schedule new hosts without adding a periodic watcher."
 ---
 
 # Automatic-update event delivery (2026-10-31, #435 B3 review)

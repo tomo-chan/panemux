@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "golangci-lint caches inside each checkout (2026-10-09, issue #325)"
-description: "Rationale for golangci-lint caches inside each checkout."
+description: "Keep lint caches inside each checkout to prevent shared findings and unpredictable sandbox fallback."
 ---
 
 # golangci-lint caches inside each checkout (2026-10-09, issue #325)

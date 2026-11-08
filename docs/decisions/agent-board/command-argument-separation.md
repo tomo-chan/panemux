@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Command-center subprocess arguments are structurally separated (2026-08-14, PR #170)"
-description: "Rationale for Command-center subprocess arguments are structurally separated."
+description: "Separate CLI options from prompt operands after real-CLI probes exposed flag parsing defects."
 ---
 
 # Command-center subprocess arguments are structurally separated (2026-08-14, PR #170)

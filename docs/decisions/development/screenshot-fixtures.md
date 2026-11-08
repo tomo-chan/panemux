@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Screenshots are generated, and the task dashboard's tasks are a fixture (2026-10-03, issue #285)"
-description: "Rationale for Screenshots are generated, and the task dashboard's tasks are a fixture."
+description: "Capture placeholder state and stub dashboard collection instead of exposing the developer's sessions."
 ---
 
 # Screenshots are generated, and the task dashboard's tasks are a fixture (2026-10-03, issue #285)

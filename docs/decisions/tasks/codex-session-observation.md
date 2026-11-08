@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Codex sessions: state, starting and resuming (2026-09-27, issue #264)"
-description: "Rationale for Codex sessions: state, starting and resuming."
+description: "Identify Codex sessions through open rollouts and turn records instead of guessing TUI ownership from directories."
 ---
 
 # Codex sessions: state, starting and resuming (2026-09-27, issue #264)

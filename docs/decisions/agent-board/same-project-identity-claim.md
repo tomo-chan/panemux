@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Same-project panes claim an agmsg actas lock (2026-08-22, PR #171)"
-description: "Rationale for Same-project panes claim an agmsg actas lock."
+description: "Historically narrow same-project watchers with identity claims so panes do not subscribe to each other."
 status: deprecated
 ---
 

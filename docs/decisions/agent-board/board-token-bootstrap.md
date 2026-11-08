@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Browser clients obtain the board token from a dedicated bootstrap endpoint (2026-08-14, PR #170)"
-description: "Rationale for Browser clients obtain the board token from a dedicated bootstrap endpoint."
+description: "Bootstrap browser tokens through a dedicated local endpoint outside the authenticated board subtree."
 ---
 
 # Browser clients obtain the board token from a dedicated bootstrap endpoint (2026-08-14, PR #170)

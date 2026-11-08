@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "2026-10-16: Previewing an SSH host's files and localhost URLs (#387)"
-description: "Rationale for 2026-10-16: Previewing an SSH host's files and localhost URLs."
+description: "Read files through SFTP and stable separate relays while preserving pane host identity and tab lifetime."
 ---
 
 # 2026-10-16: Previewing an SSH host's files and localhost URLs (#387)

@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Summaries kept across restarts and reused by their input (2026-10-10, issue #352)"
-description: "Rationale for Summaries kept across restarts and reused by their input."
+description: "Persist excerpt-keyed answers to avoid paying again after restarts or tool-output-only log updates."
 ---
 
 # Summaries kept across restarts and reused by their input (2026-10-10, issue #352)

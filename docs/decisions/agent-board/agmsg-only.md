@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Agent Board uses agmsg only (2026-08-08, PR #162)"
-description: "Rationale for Agent Board uses agmsg only."
+description: "Use agmsg alone instead of maintaining a second panemux-owned messaging database protocol."
 ---
 
 # Agent Board uses agmsg only (2026-08-08, PR #162)

@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Issue links and autolinked references (2026-09-26, issue #255)"
-description: "Rationale for Issue links and autolinked references."
+description: "Use configured HTTPS templates and existing closing-issue lookups without tracker queries or stored credentials."
 ---
 
 # Issue links and autolinked references (2026-09-26, issue #255)

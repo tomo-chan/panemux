@@ -1,8 +1,7 @@
 ---
 type: Decision
 title: "A lightweight collection and a stable wait signature for input-wait notifications (2026-10-02, issue #278)"
-description: "Rationale for A lightweight collection and a stable wait signature for input-wait notifications."
-status: deprecated
+description: "Share live-only collection and stable wait signatures so notification observation avoids full-dashboard work."
 ---
 
 # A lightweight collection and a stable wait signature for input-wait notifications (2026-10-02, issue #278)

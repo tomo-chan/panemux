@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Compatibility is checked against a real agmsg release (2026-08-23, PR #176)"
-description: "Rationale for Compatibility is checked against a real agmsg release."
+description: "Check captured CLI assumptions against a real pinned installation and daily latest-release canary."
 ---
 
 # Compatibility is checked against a real agmsg release (2026-08-23, PR #176)

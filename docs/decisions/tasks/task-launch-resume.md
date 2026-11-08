@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Stage 2: starting and resuming claude tasks from the dashboard (2026-09-26, issue #257)"
-description: "Rationale for Stage 2: starting and resuming claude tasks from the dashboard."
+description: "Launch via fixed stdin scripts and prompt files, and serialize resumes without destroying existing shell sessions."
 ---
 
 # Stage 2: starting and resuming claude tasks from the dashboard (2026-09-26, issue #257)

@@ -1,10 +1,12 @@
 ---
 type: Decision
 title: "D12 \u2014 A model checker's output is checked in; the model checker itself is not in `make check`"
-description: "Rationale for D12 \u2014 A model checker's output is checked in; the model checker itself is not in `make check`."
+description: "Replay Go against exported transitions so hermetic checks verify implementation conformance without requiring TLC."
 ---
 
 # D12 — A model checker's output is checked in; the model checker itself is not in `make check`
+
+Recorded 2026-09-21 in the original quality-gateway milestone log.
 
 TLC proves the model, not Go code. Checking in its full transition table permits hermetic Go
 conformance replay without a JDK/jar in make check. A handwritten Go reference was rejected as a

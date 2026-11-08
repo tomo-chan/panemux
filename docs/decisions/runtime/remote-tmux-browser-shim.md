@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Browser interception in new remote tmux sessions (2026-10-09, issue #339)"
-description: "Rationale for Browser interception in new remote tmux sessions."
+description: "Bootstrap interception in new remote tmux sessions without changing global environment or existing shells."
 ---
 
 # Browser interception in new remote tmux sessions (2026-10-09, issue #339)

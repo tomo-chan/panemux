@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Board participation steps belong to agent adapters"
-description: "Why per-agent board participation steps were moved behind adapters."
+description: "Historically place per-agent identity steps behind checked adapters before participation moved outside panemux."
 status: deprecated
 ---
 

@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Command center pins its own execution context (2026-08-22, PR #171)"
-description: "Rationale for Command center pins its own execution context."
+description: "Isolate command-center sessions, settings, directories and permissions from the ambient interactive CLI."
 ---
 
 # Command center pins its own execution context (2026-08-22, PR #171)

@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "agmsg pin bump proposals (2026-10-31, issue #437)"
-description: "Rationale for agmsg pin bump proposals."
+description: "Use deduplicated GitHub App proposals for verified pins while withholding publishing secrets from upstream capture code."
 ---
 
 # agmsg pin bump proposals (2026-10-31, issue #437)

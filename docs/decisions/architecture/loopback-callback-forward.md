@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Loopback callbacks use a panemux-host forward (2026-08-23, PR #177)"
-description: "Rationale for Loopback callbacks use a panemux-host forward."
+description: "Forward remote loopback login callbacks on demand without exposing a general proxy or requiring manual SSH tunnels."
 ---
 
 # Loopback callbacks use a panemux-host forward (2026-08-23, PR #177)

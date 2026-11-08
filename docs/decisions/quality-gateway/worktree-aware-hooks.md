@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Agent hooks check the checkout that holds the change (2026-10-11, issue #350)"
-description: "Rationale for Agent hooks check the checkout that holds the change."
+description: "Resolve the edited checkout so main-hosted hooks neither vet the wrong module nor execute unrelated dependencies."
 ---
 
 # Agent hooks check the checkout that holds the change (2026-10-11, issue #350)

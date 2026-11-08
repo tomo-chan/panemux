@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "The board's temporary tmux attach (2026-10-02, issue #283)"
-description: "Rationale for The board's temporary tmux attach."
+description: "Use exact attach-only sessions with disconnect grace so reopen works without creating shells or leaking clients."
 ---
 
 # The board's temporary tmux attach (2026-10-02, issue #283)

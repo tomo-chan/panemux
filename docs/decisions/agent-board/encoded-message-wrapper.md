@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Remote message bodies use an encoded wrapper argument (2026-08, PR #162)"
-description: "Rationale for Remote message bodies use an encoded wrapper argument."
+description: "Encode remote message bodies across the shell boundary because agmsg only accepts positional body arguments."
 ---
 
 # Remote message bodies use an encoded wrapper argument (2026-08, PR #162)

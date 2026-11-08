@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Command-center terminal frames carry non-fatal warnings (2026-09-11 through 2026-09-13, PRs #228 and #234)"
-description: "Rationale for Command-center terminal frames carry non-fatal warnings."
+description: "Attach history warnings to the single terminal frame instead of violating stream completion semantics."
 ---
 
 # Command-center terminal frames carry non-fatal warnings (2026-09-11 through 2026-09-13, PRs #228 and #234)

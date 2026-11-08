@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Domain config and file context use separate types (2026-09-20, issue #66, PR #240)"
-description: "Rationale for Domain config and file context use separate types."
+description: "Separate serializable configuration from load context to prevent duplicated serialization fields dropping sections."
 ---
 
 # Domain config and file context use separate types (2026-09-20, issue #66, PR #240)

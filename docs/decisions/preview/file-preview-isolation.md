@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "2026-10-15: The split preview's isolation and bounds (#385)"
-description: "Rationale for 2026-10-15: The split preview's isolation and bounds."
+description: "Use opaque-origin isolation and root-based lookup instead of arbitrary absolute host-file previews."
 ---
 
 # 2026-10-15: The split preview's isolation and bounds (#385)

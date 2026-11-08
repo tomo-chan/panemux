@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "D14 \u2014 Selective pre-push checks and full CI"
-description: "Rationale for D14 \u2014 Selective pre-push checks and full CI."
+description: "Check pushed changes locally and full suites in CI, falling back to full checks when scope is unknown."
 ---
 
 # D14 — Selective pre-push checks and full CI

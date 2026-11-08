@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Labels used before come from the record file, as tags on `GET /api/tasks` (2026-10-07, issue #310)"
-description: "Rationale for Labels used before come from the record file, as tags on `GET /api/tasks`."
+description: "Derive used-label tags from records instead of maintaining another list or endpoint that can drift."
 ---
 
 # Labels used before come from the record file, as tags on `GET /api/tasks` (2026-10-07, issue #310)

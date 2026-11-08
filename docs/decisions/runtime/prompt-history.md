@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Command-center prompts use a panemux-owned history entry (2026-08-17)"
-description: "Rationale for Command-center prompts use a panemux-owned history entry."
+description: "Write prompts explicitly because the CLI stream does not repeat the instruction that began each turn."
 ---
 
 # Command-center prompts use a panemux-owned history entry (2026-08-17)

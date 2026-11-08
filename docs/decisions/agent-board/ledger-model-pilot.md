@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "The own-send ledger is the model-checking pilot (2026-09, PR #243, issue #168)"
-description: "Rationale for The own-send ledger is the model-checking pilot."
+description: "Pilot model checking on the smallest ledger state machine after a multiset-versus-set incident."
 ---
 
 # The own-send ledger is the model-checking pilot (2026-09, PR #243, issue #168)

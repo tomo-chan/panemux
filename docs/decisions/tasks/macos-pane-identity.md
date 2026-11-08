@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Reading `PANEMUX_PANE_ID` on macOS through `ps -E` (2026-09-27, issue #263)"
-description: "Rationale for Reading `PANEMUX_PANE_ID` on macOS through `ps -E`."
+description: "Read constrained ps output with explicit ambiguity limits instead of adding a platform-specific environment helper."
 ---
 
 # Reading `PANEMUX_PANE_ID` on macOS through `ps -E` (2026-09-27, issue #263)

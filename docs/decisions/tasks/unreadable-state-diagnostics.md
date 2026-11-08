@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Unreadable state files are diagnostics, not tasks (2026-10-09, issue #313)"
-description: "Rationale for Unreadable state files are diagnostics, not tasks."
+description: "Report unreadable files as diagnostics and their live processes as tasks instead of unusable sessionless cards."
 ---
 
 # Unreadable state files are diagnostics, not tasks (2026-10-09, issue #313)

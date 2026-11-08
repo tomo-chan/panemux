@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Dashboard capability is independent from command-center capability (2026-08-22, PR #171)"
-description: "Rationale for Dashboard capability is independent from command-center capability."
+description: "Represent dashboard enablement separately so it can run independently of the command center."
 ---
 
 # Dashboard capability is independent from command-center capability (2026-08-22, PR #171)

@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Version coverage normalizes install provenance (2026-08, PR #176)"
-description: "Rationale for Version coverage normalizes install provenance."
+description: "Historically normalize provenance and tolerate later patches before stricter pin checks replaced that warning policy."
 status: deprecated
 ---
 
@@ -14,5 +14,7 @@ policy, not a semver promise; the real-install contract remains authoritative. P
 avoids forcing pin churn at agmsg's observed multi-day release cadence.
 
 The patch-tolerance warning policy was replaced by [pin-normalized version checks](pinned-agmsg-install.md).
+[Installer diagnostics](installer-diagnostics.md) also replaced describe-provenance normalization:
+describe builds, dirty trees and prereleases are unknown, warn, and are not installed over.
 
 Current contracts: [agent board guide](../../agent-board.md).

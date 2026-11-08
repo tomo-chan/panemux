@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "A started agent runs through the user's login and interactive shell (2026-10-29, issue #445)"
-description: "Rationale for A started agent runs through the user's login and interactive shell."
+description: "Read login and interactive startup settings while keeping prompts out of argv and preserving arguments across rc changes."
 ---
 
 # A started agent runs through the user's login and interactive shell (2026-10-29, issue #445)

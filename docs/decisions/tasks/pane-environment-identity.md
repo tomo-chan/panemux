@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Opening an agent outside tmux through `PANEMUX_PANE_ID` (2026-09-26, issue #254)"
-description: "Rationale for Opening an agent outside tmux through `PANEMUX_PANE_ID`."
+description: "Locate detached and remote agents with a constrained environment marker instead of unavailable process ancestry."
 ---
 
 # Opening an agent outside tmux through `PANEMUX_PANE_ID` (2026-09-26, issue #254)

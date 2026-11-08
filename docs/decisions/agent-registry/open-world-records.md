@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Preserve records for agents this build does not list"
-description: "Why unknown-agent records survive writes without becoming visible tasks."
+description: "Preserve unknown-agent records as original JSON without displaying them or blocking known-agent writes."
 ---
 
 # Preserve records for agents this build does not list

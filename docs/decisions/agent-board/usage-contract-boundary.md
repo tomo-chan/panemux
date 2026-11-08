@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Usage remains outside the Agent Board status contract (2026-08)"
-description: "Rationale for Usage remains outside the Agent Board status contract."
+description: "Keep provider account usage outside cooperative status while leaving direct transcript usage reading separate."
 ---
 
 # Usage remains outside the Agent Board status contract (2026-08)

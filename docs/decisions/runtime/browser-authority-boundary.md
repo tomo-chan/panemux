@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "2026-10-11: One browser authority boundary for APIs and WebSockets (#360)"
-description: "Rationale for 2026-10-11: One browser authority boundary for APIs and WebSockets."
+description: "Guard APIs before routing and preflight so other loopback origins cannot trigger side effects with simple requests."
 ---
 
 # 2026-10-11: One browser authority boundary for APIs and WebSockets (#360)

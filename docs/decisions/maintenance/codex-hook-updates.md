@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "2026-10-17: Updating the codex permission hook by itself (#294, #402)"
-description: "Rationale for 2026-10-17: Updating the codex permission hook by itself."
+description: "Offer per-host opt-in update-only checks instead of redundant binaries or automatic retries."
 ---
 
 # 2026-10-17: Updating the codex permission hook by itself (#294, #402)

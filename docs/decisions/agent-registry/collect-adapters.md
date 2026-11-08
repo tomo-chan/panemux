@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Collection is composed from per-agent collect adapters (2026-10-16, issue #373)"
-description: "Rationale for Collection is composed from per-agent collect adapters."
+description: "Compose constant per-agent collection fragments and reject missing sections instead of silently losing sessions."
 ---
 
 # Collection is composed from per-agent collect adapters (2026-10-16, issue #373)

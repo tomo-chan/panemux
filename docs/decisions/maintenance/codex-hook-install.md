@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "2026-10-16: Installing the codex permission hook from the host menu (#294, #396)"
-description: "Rationale for 2026-10-16: Installing the codex permission hook from the host menu."
+description: "Merge embedded hook configuration conservatively and leave Codex trust decisions with the operator."
 ---
 
 # 2026-10-16: Installing the codex permission hook from the host menu (#294, #396)

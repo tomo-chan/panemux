@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "WebSocket route separation and browser authority guard (#297, #298)"
-description: "Rationale for WebSocket route separation and browser authority guard."
+description: "Separate fixed streams from pane IDs and validate browser authority without trusting forwarded headers."
 ---
 
 # WebSocket route separation and browser authority guard (#297, #298)

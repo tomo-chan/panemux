@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Codex task summaries (#312)"
-description: "Rationale for Codex task summaries."
+description: "Use Codex's authenticated configuration while requesting no tools without promising a tool-free runtime."
 ---
 
 # Codex task summaries (#312)

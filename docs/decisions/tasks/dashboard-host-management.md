@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Dashboard hosts are managed from the dashboard (2026-10-01, issue #272)"
-description: "Rationale for Dashboard hosts are managed from the dashboard."
+description: "Manage collection hosts separately from OpenSSH entries while protecting passwords, dependencies and atomic saves."
 ---
 
 # Dashboard hosts are managed from the dashboard (2026-10-01, issue #272)

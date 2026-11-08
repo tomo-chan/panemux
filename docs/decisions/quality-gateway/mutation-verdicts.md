@@ -1,10 +1,12 @@
 ---
 type: Decision
 title: "D9 \u2014 Mutation findings require complete, actionable verdicts"
-description: "Rationale for D9 \u2014 Mutation findings require complete, actionable verdicts."
+description: "Block actionable findings with complete verdict reporting, typed waivers and an explicit measured denominator."
 ---
 
 # D9 — Mutation findings require complete, actionable verdicts
+
+Recorded 2026-09-15 in the original quality-gateway milestone log.
 
 Mutation became blocking after three warning stages established reviewable typed waivers,
 complete verdict reporting and an actionable denominator. At d42e406, 37 of 108 survivors (34%)

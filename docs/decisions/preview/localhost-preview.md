@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "2026-10-16: Localhost pages in the split preview, and one URL opener (#386)"
-description: "Rationale for 2026-10-16: Localhost pages in the split preview, and one URL opener."
+description: "Frame local development servers directly with constrained destinations and approval for output-selected links."
 ---
 
 # 2026-10-16: Localhost pages in the split preview, and one URL opener (#386)

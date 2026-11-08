@@ -1,10 +1,12 @@
 ---
 type: Decision
 title: "D4 \u2014 Verify \"the test came first\" after the fact (red-check)"
-description: "Rationale for D4 \u2014 Verify \"the test came first\" after the fact."
+description: "Require each changed test to pass at HEAD and fail under revert so honest siblings cannot mask tautologies."
 ---
 
 # D4 — Verify "the test came first" after the fact (red-check)
+
+Recorded 2026-08-28 in the original quality-gateway milestone log.
 
 TDD chronology cannot be reconstructed reliably, but changed tests can be checked against removing
 the implementation. Each case first passes at HEAD, then fails under its stack's revert.

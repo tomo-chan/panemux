@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "2026-11-02: Mermaid measurement and final-output sanitization (#477 review)"
-description: "Rationale for 2026-11-02: Mermaid measurement and final-output sanitization."
+description: "Apply image policy during diagram measurement because final SVG sanitization cannot retract earlier requests."
 ---
 
 # 2026-11-02: Mermaid measurement and final-output sanitization (#477 review)

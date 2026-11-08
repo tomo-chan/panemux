@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Contract incidents favor behavior over environment and wording (2026-08-23 onward, PR #176)"
-description: "Rationale for Contract incidents favor behavior over environment and wording."
+description: "Test message delivery and lock behavior rather than process ancestry or diagnostic wording."
 ---
 
 # Contract incidents favor behavior over environment and wording (2026-08-23 onward, PR #176)

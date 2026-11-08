@@ -1,8 +1,7 @@
 ---
 type: Decision
 title: "Stage 3: summaries of a task's work and what is left (2026-09-26, issue #258)"
-description: "Rationale for Stage 3: summaries of a task's work and what is left."
-status: deprecated
+description: "Send bounded recognized conversation text instead of raw tool output or unknown-format fallbacks."
 ---
 
 # Stage 3: summaries of a task's work and what is left (2026-09-26, issue #258)

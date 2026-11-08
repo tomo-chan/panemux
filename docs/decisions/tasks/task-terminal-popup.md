@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Type in pane: the popup over the board (2026-10-02, issue #284)"
-description: "Rationale for Type in pane: the popup over the board."
+description: "Reuse terminal behavior in a focused popup while leaving Escape and Tab with the active agent terminal."
 ---
 
 # Type in pane: the popup over the board (2026-10-02, issue #284)

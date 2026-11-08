@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Launch and resume through per-agent adapters (2026-10-18, issue #374)"
-description: "Rationale for Launch and resume through per-agent adapters."
+description: "Separate launch and resume capabilities while sharing fixed-script prompt and directory handling across agents."
 ---
 
 # Launch and resume through per-agent adapters (2026-10-18, issue #374)

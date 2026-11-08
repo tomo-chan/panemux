@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "2026-11-07: retire Agent Board PTY onboarding (#503, #495 S1)"
-description: "Rationale for 2026-11-07: retire Agent Board PTY onboarding."
+description: "Remove generated participation text from terminal input and delegate identity and reception setup to agmsg."
 ---
 
 # 2026-11-07: retire Agent Board PTY onboarding (#503, #495 S1)

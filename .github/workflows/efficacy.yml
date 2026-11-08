@@ -5,11 +5,13 @@ name: efficacy
 # Runs `make efficacy`, which reverts this branch's implementation diff in a
 # scratch worktree and requires each test this branch changed to pass at HEAD
 # and then FAIL against the revert, one test at a time. A test that still
-# passes without the code it covers protects nothing — see decision D4.
+# passes without the code it covers protects nothing — see decision D4:
+# docs/decisions/quality-gateway/red-check.md.
 #
 # Pull requests only, and deliberately not part of `make check`: it needs the
 # base branch and a second test run, which is a per-pull-request cost, not a
-# per-turn one. The same reasoning keeps mutation testing (D2) and the agmsg
+# per-turn one. The same reasoning keeps mutation testing (D2 in
+# docs/decisions/quality-gateway/mutation-diff-scope.md) and the agmsg
 # contract out of the local gate.
 #
 # No `paths:` filter, for the reason agmsg-contract.yml records: a

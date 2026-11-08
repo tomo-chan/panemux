@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "A third agent behind a build tag (2026-10-24, issue #377)"
-description: "Rationale for A third agent behind a build tag."
+description: "Verify extensibility with a tagged third agent and isolated processes instead of production collection switches."
 ---
 
 # A third agent behind a build tag (2026-10-24, issue #377)

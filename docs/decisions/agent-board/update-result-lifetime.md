@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Scope automatic-update success to its host run (2026-10-31, #435 B3 review)"
-description: "Rationale for Scope automatic-update success to its host run."
+description: "Scope installer outcomes to their worker run and host identity to prevent stale success claims."
 ---
 
 # Scope automatic-update success to its host run (2026-10-31, #435 B3 review)

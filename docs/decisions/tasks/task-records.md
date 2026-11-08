@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Stage 2: done and labels are recorded on the panemux host (2026-09-26, issue #256)"
-description: "Rationale for Stage 2: done and labels are recorded on the panemux host."
+description: "Separate records from configuration and observed state while protecting unreadable files and dotfile symlinks."
 ---
 
 # Stage 2: done and labels are recorded on the panemux host (2026-09-26, issue #256)

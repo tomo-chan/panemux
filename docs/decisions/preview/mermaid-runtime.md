@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "2026-11-01: Mermaid inside isolated Markdown previews (#471)"
-description: "Rationale for 2026-11-01: Mermaid inside isolated Markdown previews."
+description: "Bundle a nonce-authorized classic script for isolated Markdown diagrams instead of adding a runtime browser."
 ---
 
 # 2026-11-01: Mermaid inside isolated Markdown previews (#471)

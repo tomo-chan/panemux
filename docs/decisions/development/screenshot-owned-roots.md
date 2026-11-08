@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "The screenshots' fixed paths are links into the run's own root (2026-10-10, issue #328)"
-description: "Rationale for The screenshots' fixed paths are links into the run's own root."
+description: "Keep screenshot markers under the run root and use fixed symlinks that tolerate temporary-file cleanup safely."
 ---
 
 # The screenshots' fixed paths are links into the run's own root (2026-10-10, issue #328)

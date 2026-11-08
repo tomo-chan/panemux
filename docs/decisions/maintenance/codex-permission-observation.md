@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "2026-10-15: Codex approval waits from a PermissionRequest hook (#294, #384)"
-description: "Rationale for 2026-10-15: Codex approval waits from a PermissionRequest hook."
+description: "Approximate approval waits from permission-hook records instead of detecting prompts in terminal output."
 ---
 
 # 2026-10-15: Codex approval waits from a PermissionRequest hook (#294, #384)

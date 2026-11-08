@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "D13 \u2014 Capability probes skip locally and fail in CI"
-description: "Rationale for D13 \u2014 Capability probes skip locally and fail in CI."
+description: "Probe PTY, socket and process capabilities locally while making the same missing capability fail in CI."
 ---
 
 # D13 — Capability probes skip locally and fail in CI

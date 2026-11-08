@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Summary adapters (2026-10-24, issue #347)"
-description: "Rationale for Summary adapters."
+description: "Separate transcript sources from summary runners while preserving cache versions and unknown-agent answers."
 ---
 
 # Summary adapters (2026-10-24, issue #347)

@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "One host identity and shared execution (2026-10-25, #438 / #439)"
-description: "Rationale for One host identity and shared execution."
+description: "Share execution by configured host identity while isolating cancellation and rejecting removed memberships."
 ---
 
 # One host identity and shared execution (2026-10-25, #438 / #439)

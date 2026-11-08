@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "The dashboard on the agent capabilities (2026-10-23, issue #376)"
-description: "Rationale for The dashboard on the agent capabilities."
+description: "Drive dashboard actions from server capabilities while preserving pane operations for unknown agents."
 ---
 
 # The dashboard on the agent capabilities (2026-10-23, issue #376)

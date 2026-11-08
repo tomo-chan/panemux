@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Manual installer diagnostics and non-release versions (2026-10-31, #435 review)"
-description: "Rationale for Manual installer diagnostics and non-release versions."
+description: "Preserve failure output and treat describe, dirty and prerelease versions as unknown rather than installable releases."
 ---
 
 # Manual installer diagnostics and non-release versions (2026-10-31, #435 review)

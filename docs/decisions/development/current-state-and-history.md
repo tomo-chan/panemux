@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Current-state guides and historical decisions are separate (2026-09-23)"
-description: "Rationale for Current-state guides and historical decisions are separate."
+description: "Separate current contracts, focused detail and history so readers need not infer behavior from rollout narration."
 ---
 
 # Current-state guides and historical decisions are separate (2026-09-23)

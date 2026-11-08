@@ -1,8 +1,7 @@
 ---
 type: Decision
 title: "Stage 1: a dashboard of agent sessions, independent of panes (2026-09-25, issue #252)"
-description: "Rationale for Stage 1: a dashboard of agent sessions, independent of panes."
-status: deprecated
+description: "Observe sessions independently of panes with bounded agent-owned data, explicit liveness and visible format failures."
 ---
 
 # Stage 1: a dashboard of agent sessions, independent of panes (2026-09-25, issue #252)

@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Retaking the screenshots is checked by diff, not by pixels (2026-10-03, issue #285)"
-description: "Rationale for Retaking the screenshots is checked by diff, not by pixels."
+description: "Require screenshot diffs instead of brittle pixel comparisons across timestamps and font rendering environments."
 ---
 
 # Retaking the screenshots is checked by diff, not by pixels (2026-10-03, issue #285)
