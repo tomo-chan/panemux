@@ -47,6 +47,8 @@ filter restoration, grouping, sorting, notification focus and scroll, and select
   Stopped, and optionally Done. The board is a keyboard tab stop named "Task board".
   Groups span all state columns: group heading/count, local state counts and equal-height bodies
   set by the tallest stack. Empty columns say `None`; empty grouped boards say `No tasks`.
+  Catch-all groups (`Not in a Git repository`, `No label`) sort after named groups.
+  Ungrouped column headers stay visible while the board scrolls.
   One sticky group/state band gives way to the next. Rows share column widths and a horizontal
   scroll position, including below 560px and beside details; ungrouped narrow boards stack vertically.
 

@@ -82,7 +82,8 @@ owns the host-terminal variant. Both use this presentation:
   input target and focus persist. Restore returns the board unchanged; localStorage remembers
   the choice. Captured `Cmd/Ctrl+Shift+Esc` closes from anywhere.
 - At 720px and narrower, it is a full-window sheet with no maximize toggle; header and Close
-  remain visible. After Open, the destination pane has a blue outline for about two seconds,
+  remain visible.
+- After Open or Go to pane, the destination pane has a blue outline for about two seconds,
   steady with reduced motion.
 
 ## Labels used before
