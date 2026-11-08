@@ -39,7 +39,8 @@ filter restoration, grouping, sorting, notification focus and scroll, and select
 - Native pressed-state Cards / Table buttons change the list. The semantic table has nine columns:
   Session (title and short summary or wait reason), State, Elapsed, Host, Agent, Repository and PR,
   Branch, Labels, Actions. Session buttons select details; links/actions do not select rows.
-  Done and labels are edited in details. Headers are sticky; one focusable region scrolls the
+  Group headings and session counts span the table in separate row groups; label groups can repeat
+  sessions. Done and labels are edited in details. Headers are sticky; one focusable region scrolls the
   table horizontally, retaining the responsive details panel on narrow screens.
 - Sortable headers are native buttons with an arrow, direction in their accessible name, and
   `aria-sort` only on the active heading. Defaults, ordering and tie rules are in behavior.
@@ -48,6 +49,8 @@ filter restoration, grouping, sorting, notification focus and scroll, and select
   Groups span all state columns: group heading/count, local state counts and equal-height bodies
   set by the tallest stack. Empty columns say `None`; empty grouped boards say `No tasks`.
   Catch-all groups (`Not in a Git repository`, `No label`) sort after named groups.
+  Empty groups are omitted. Done adds a column to every group row at once; None keeps one board
+  including its empty columns. The details panel stays outside the shared scroll area.
   Ungrouped column headers stay visible while the board scrolls.
   One sticky group/state band gives way to the next. Rows share column widths and a horizontal
   scroll position, including below 560px and beside details; ungrouped narrow boards stack vertically.

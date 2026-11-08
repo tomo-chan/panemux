@@ -6,7 +6,7 @@
 # decides as it would without the hook), and always exits 0. Records older
 # than 7 days are removed as it writes.
 #
-# Register it in ~/.codex/hooks.json; see docs/behavior/task-codex-permissions.md.
+# Register it in ~/.codex/hooks.json; see docs/behavior/tasks.md.
 in=$(cat)
 id() {
 	printf '%s\n' "$in" | grep -o "\"$1\": *\"[0-9a-f-]*\"" | head -n 1 | sed 's/.*"\([0-9a-f-]*\)"$/\1/'

@@ -113,45 +113,27 @@ are not found.
 | `unknown` | A session is running but its state cannot be read | A live claude process that no readable state file describes — its file is missing or [could not be read](#unreadable-state-files); a live claude process reporting another `status`; or a codex session whose `thread_turns` and rollout tail say nothing about its newest turn, or whose newest `thread_turns` status or last turn event is one this build does not know ([Agent availability](#agent-availability)) |
 | `stop` | Nothing is handling the session | A conversation log with no live claude process for its session ID, or an interactive codex rollout that no live codex process holds open |
 
-- **A process is a claude process when its program has a path component named `claude` or
-  `claude-code`**: argv[0], or the script a `node`, `bun` or `deno` interpreter runs. A process that
-  only has a file under `~/.claude` as an argument (an editor, `tail`, a hook) is not one.
-  `claude -p` / `claude --print` is not a task.
-- **A state file describes a running session only while its pid is a claude process.** A file whose
-  process has gone, or whose pid now belongs to another process (pids restart after a host
-  reboot), is not listed as running; its session shows up as stopped through its conversation log
-  instead. `procStart` is not used.
-- **`/resume` inside a running Claude Code switches the task in place.** The process and its
-  `<pid>.json` stay the same and the file's `sessionId` becomes the resumed session, so the session
-  switched away from is listed as stopped and the resumed one as running where the process runs.
-  A normal exit removes the state file.
-- **A state file that cannot be read is not a task.** It is reported as a diagnostic instead
-  ([Unreadable state files](#unreadable-state-files)); the claude process its name (`<pid>.json`)
-  points to is listed as any claude process no state file describes is, below.
-- **A running claude process that no readable state file names is shown as `unknown`, not `stop`**, with its
-  process's working directory, so a Claude Code release that moved or stopped writing the state
-  files does not make every running agent look stopped.
-- A running `unknown` claude task is taken to be writing the newest conversation log in its working
-  directory: that log is not listed again as a stopped task.
-- Two live state files for one session ID keep the one updated most recently.
-- `stop` covers a host restart, a crash and a normal exit alike; the dashboard does not tell them
-  apart. Whether a task's work is finished cannot be read off a process, so no state means "done":
-  done is what a person records ([Done and labels](task-records.md#done-and-labels)), and it never changes `state`.
-- **Stopped sessions are limited to conversation logs changed in the last 7 days, and to the 50
-  newest per host, claude's and codex's together.** Subagent logs (`<session>/subagents/*.jsonl`) are
-  not sessions of their own.
-- The time a task entered its state is `statusUpdatedAt`, falling back to `updatedAt` and then
-  `startedAt`; for a stopped task it is the log's modification time. Every host time is converted by
-  its age against that host's own clock, so a host whose clock is wrong does not shift the dashboard.
-  A time ahead of the host's clock is treated as "now".
+Claude process matching requires a program path component `claude` or `claude-code`, either
+argv[0] or a node/bun/deno script, excluding `-p`/`--print`; merely referencing `~/.claude` is not
+an agent. State files count only while their pid is such a process (`procStart` is unused).
+Missing/reused pids leave stopped sessions discoverable by logs. `/resume` changes sessionId in
+place: the previous session becomes stopped, the resumed session runs in the same process/file;
+normal exit removes the file. Duplicate live state files keep the newest update.
+
+An unreadable file is a diagnostic, never a task. A live process without readable state is
+`unknown` with its process cwd, taking that directory's newest log as its own so the log is not
+listed again as stopped. No observed state means done; only [records](task-records.md#done-and-labels)
+say that. `stop` cannot distinguish normal exit, crash and restart.
+Stopped tasks are the newest 50 logs per host across both agents, changed within 7 days, excluding
+subagent logs (`<session>/subagents/*.jsonl`). State time is `statusUpdatedAt`, then `updatedAt`,
+then `startedAt`; stopped tasks use log modification time. Host times are converted by age against
+that host's own clock; future times become now.
 
 ## Unreadable state files
 
-The pane header reads these files with the same parser (`session.ParseClaudeSessionState`), so what
-can be read is the same for both. A state file under `~/.claude/sessions` can be read when it is a JSON object with a positive integer
-`pid` and a `sessionId` made of letters, digits, `-` and `_`. Every other field is optional: one that
-is absent or of another type (a `cwd` that is a number, say) is read as absent, and the file is read.
-A file that fails is unreadable for one of three reasons, checked in this order:
+Dashboard and pane headers share the parser. Under `~/.claude/sessions`, a readable JSON object
+requires positive integer `pid` and `sessionId` of letters, digits, `-`, `_`. Other fields are
+optional; absent or wrong-typed values are treated as absent. Failures are classified in order:
 
 | Reason (`reason`) | Shown as | Detail |
 |---|---|---|
@@ -159,25 +141,16 @@ A file that fails is unreadable for one of three reasons, checked in this order:
 | `invalid_pid` | pid missing or not positive | `pid is missing`, or `pid: ` and the value as written |
 | `invalid_session_id` | sessionId missing or not a session ID | `sessionId is missing`, or `sessionId: ` and the value as written |
 
-- An unreadable file whose name is `<pid>.json` is reported only while that pid is a claude process;
-  once it is not, the file is a leftover and is ignored, as a readable leftover is. Claude Code
-  appeared to remove its own file on a normal exit where this was checked; whether a crash or a
-  forced kill leaves one behind is not confirmed. A file whose name carries no pid cannot be checked
-  and is always reported.
-- **Not on the board.** The file is not a task. The live claude process its name points to is listed
-  as `unknown` under `pid-<pid>`, located like any running task, and the newest conversation log in
-  its working directory is taken to be its own.
-- **In the server log**, once per host, file and reason: when a file becomes unreadable, when its
-  reason changes, and when it can be read again or is gone. A file is told apart by its full name,
-  so two names that differ only after the cut below are two files. The file name and detail are
-  quoted.
-- **On the dashboard**, a warning at the right of the top bar carries the count across every host
-  and opens the details: per file, the host, the file name, the reason and its detail, and the
-  process (the pid in the name and where it runs, or `unknown` when the name carries no pid). *Copy
-  details* copies the same as tab-separated text. The details close by themselves when no file is
-  left, and do not reopen when one becomes unreadable again.
-- File names and details come from the host: they reach the API and the log without control or
-  invisible format characters (each replaced by U+FFFD) and cut to 128 and 120 characters.
+Report an unreadable `<pid>.json` only while its pid is a Claude process; ignore leftovers.
+A filename without a pid is always reported. Its live process remains the pid-only `unknown` task
+described above. Crash/forced-kill cleanup by Claude is unconfirmed.
+The server logs unreadable/reason-change/recovery/disappearance once per host and full filename,
+with quoted filename/detail; names differing beyond truncation remain distinct files.
+The dashboard aggregates all hosts in one warning; [diagnostic UI](../ui-design/dashboard-hosts.md#host-tools-and-diagnostics)
+owns presentation. Details and tab-separated Copy details include host, filename, reason/detail,
+pid and location (unknown without a pid). The dialog auto-closes at zero files and does not reopen
+on a later failure. API/log text replaces control/invisible format characters with U+FFFD and
+cuts filenames/details to 128/120 characters.
 
 To fix a file, open the named `~/.claude/sessions/<file>` on its host and compare `pid`,
 `sessionId` (the matching `~/.claude/projects/*/<sessionId>.jsonl`), and optional state fields
@@ -188,12 +161,8 @@ the agent rewrites: use *Copy details* to report the changed format for parser s
 
 ## Agent availability
 
-Capabilities are tracked per host and agent.
-[`GET /api/tasks`](task-api.md#get-apitasks) carries it on each host as `availability`, and the server log carries
-what changes. A launch or resume is
-refused on it as described below the table. Each entry is an agent, a capability (`collect`, `launch`, `resume`), a status
-(`available`, `degraded`, `unavailable`, `unknown`), a reason, a detail and the version the agent's
-newest session recorded.
+Each host's `availability` in [GET tasks](task-api.md#get-apitasks) records agent, capability,
+status, reason/detail and newest observed version, with changes logged. Status rules are:
 
 | Capability | Status / reason | When |
 |---|---|---|
@@ -205,14 +174,8 @@ newest session recorded.
 | `collect` | `degraded` / `unknown_format` | The last full collection found something of the agent's in a format this build does not know (below) |
 | `collect` | `unknown` / `probe_failed` | The last full collection failed: the host could not be reached or its output could not be read. The detail is the host's `error`; what an earlier collection found is not reported until one succeeds again |
 
-`auth_missing` is defined and reported by nothing yet. `session_info_missing` is reported on a task's
-actions, below.
-
-**A task's actions**
-are what the dashboard offers on one task, decided by the server from the task's agent's adapters and
-its host's probe. An action is absent when the task's agent does not declare its capability — an
-agent the registry does not know declares nothing — and `resume` is absent on a task that is not
-`stop`:
+`auth_missing` is reserved and not emitted. Task actions come from declared adapters and the host
+probe: undeclared/unknown agents offer no actions, and non-stopped tasks never offer resume.
 
 | Action | Status / reason | When |
 |---|---|---|
@@ -221,32 +184,19 @@ agent the registry does not know declares nothing — and `resume` is absent on 
 | `summary` | `unavailable` / `session_info_missing` | The task has no session ID a summary can name (a codex one is a UUID), or its conversation log has not been found, which `POST /api/tasks/summary` refuses with `404` |
 | `summary` | `available` | Otherwise. Whether summaries are on is `summaries_enabled`, not the action |
 
-`POST /api/tasks/resume` and `POST /api/tasks/summary` refuse what the actions leave out the same way,
-whatever the request says: an agent that does not declare the capability, or that the registry does
-not know, is `400`.
+Resume/summary requests for undeclared capabilities or unknown agents return `400` regardless of
+client input. The dashboard omits absent actions (Work explains that the agent does not summarize),
+disables unavailable ones with the action detail, else a known cli_missing/session_info_missing
+sentence, else raw reason; available/degraded/unknown remain offered and are checked again on use.
+Unknown agents display `<agent> (unknown agent)` with only pane actions, no resume, summary, done or
+labels, and an explanatory detail note. State notes come from `state_note`; stopped notes always
+say no running process handles the session.
 
-**The dashboard shows what the server decided** and holds no rule of its own per agent name:
-
-- An absent action is not shown: no `Resume`, and Work says "<agent> does not summarize its tasks.".
-- An `unavailable` action is shown disabled, with "Resume is not available: <why>." or "Summarize is
-  not available: <why>." in the detail panel. The why is the action's `detail`, else a sentence for a
-  `reason` this build knows (`cli_missing`, `session_info_missing`), else the `reason` as sent.
-- An `available`, `degraded` or `unknown` action is offered; the server decides again when it is used.
-- A task whose agent is not in `agents` is shown as "<agent> (unknown agent)" on its card and in the
-  detail panel. It offers only the task's pane (`Open`, `Go to pane`, `Type in pane`), which act on
-  the pane and not on the agent: no `Resume` or `Summarize`, and neither `Mark done` nor labels,
-  since the server records nothing for an agent its registry does not know. The detail panel says so.
-- The detail panel's state note is the task's `state_note`; a stopped task of any agent says that no
-  running process handles its session.
-
-**A launch or resume of an agent that is `unavailable` / `cli_missing`** over the host's current
-connection is refused before anything runs — a resume before the host is collected again — with the
-`409` and fixed message the launch script itself gives ("claude was not found on the host"), and the
-host is probed again at once, whatever the age of its last probe, so a CLI installed since is found
-on the next try. `not_probed` and `probe_failed` refuse nothing: the launch script looks for the CLI
-itself. A `collect` that is `degraded` refuses nothing either. Unknown input is rejected rather than
-guessed for a resume: a session whose state is in a format this build does not know is `unknown`,
-never `stop`, so it is not resumed, and its session ID must be one the agent's resume accepts.
+A current-connection `unavailable/cli_missing` launch/resume fails `409` before executing (resume
+before recollection), with the launch script's fixed CLI-missing message, and immediately reprobes
+so a later-installed CLI can be found on retry. Not-probed/probe-failed and degraded collection do
+not block launch; the script checks the CLI. Unknown state never becomes stopped for resume,
+and the agent's accepted session-ID rule still applies.
 
 **The probe** runs asynchronously after a successful full dashboard collection, not an event,
 resume or lookup collection. Only one runs per host; `GET /api/tasks` does not wait for it.

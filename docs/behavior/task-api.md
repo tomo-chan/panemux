@@ -10,22 +10,10 @@ Part of the [task dashboard](tasks.md).
 
 ## `GET /api/tasks`
 
-Collects from every host and returns:
-
-```json
-{
-  "hosts": [{ "name": "", "status": "ok", "collected_at": "2026-09-25T12:00:00Z",
-    "availability": [{ "agent": "claude", "capability": "collect", "status": "available" }] }],
-  "agents": [{ "id": "claude", "display_name": "Claude Code",
-    "capabilities": ["detect", "collect", "launch", "resume", "workdir", "summary", "board"], "notes": {} }],
-  "tasks": [{ "id": "local:claude:7c21e0a4", "host": "", "agent": "claude",
-    "session_id": "7c21e0a4", "cwd": "/workspace/user/project", "state": "wait",
-    "waiting_for": "input needed", "status_since": "2026-09-25T11:57:00Z",
-    "location": { "kind": "tmux", "tmux_session": "task-7c21", "attachable": true },
-    "actions": { "summary": { "status": "available" } } }],
-  "summaries_enabled": false
-}
-```
+Collects every host. The JSON object contains `hosts`, `agents` and `tasks` arrays plus
+`summaries_enabled`; errors in an individual host do not fail the request (`200` even if all fail).
+[Collection](task-collection.md) owns state derivation and [navigation](task-navigation.md) owns
+locations/terminal lifetime. This concept defines wire fields and status codes.
 
 - `hosts` lists the panemux host first, then `ssh_connections` keys in name order. `status` is `ok`,
   `error` (with `error`) or `connecting`; `collected_at` is present when `status` is `ok`.
@@ -80,7 +68,6 @@ Collects from every host and returns:
 - `known_labels` is every label in the record file, listed task or not, once each, in
   case-insensitive alphabetical order ([Done and labels](task-records.md#done-and-labels)). It is omitted when the
   file holds no labels and when `records_error` is present.
-- The request answers `200` even when every host failed; failures are in `hosts`.
 - No bearer token is required ([current boundaries](../overview.md#current-boundaries)).
   The [shared browser request guard](../security/auth.md#shared-browser-request-guard) rejects
   cross-authority requests with `403` before dialing hosts, with header-free CLI compatibility.

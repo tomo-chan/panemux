@@ -20,11 +20,12 @@ ID (UUID for Codex), and a collected log (newest 100 per host within 7 days); pi
 Logs are read on the task's host with a fixed script: the whole file up to 2.25 MiB, otherwise its
 first 256 KiB and last 2 MiB. Claude logs are `~/.claude/projects/*/<session ID>.jsonl`; duplicates
 use collection order, newest modification time then larger size for same-second writes.
-Only supported user/assistant conversation text is sent, excluding tools, thinking, attachments,
+Claude accepts JSON-object lines with `type` `user` or `assistant`, `message.content` a string
+or `text` blocks, excluding `isSidechain` subagent lines. Only conversation text is sent, excluding tools, thinking, attachments,
 sidechains and cut lines: first user message up to 4 KiB, newest messages up to 24 KiB total and
 2 KiB each. Typed or quoted secrets are not masked. Remote excerpts go to the panemux host account,
 never the remote account; only answers are saved, never logs/excerpts.
-[Summary security](../security/command-execution.md#task-summaries) owns source shapes, extraction,
+[Summary security](../security/command-execution.md#task-summaries) owns extraction limits,
 CLI isolation and exact argument rules.
 
 No supported conversation lines means `unreadable`: no raw-log fallback, no CLI request and no
@@ -103,7 +104,8 @@ owns exact argv, answer-file validation and deadline enforcement (including afte
 
 The [Codex rollout reader](../security/command-execution.md#codex-summary-runner-and-rollout-reader)
 owns canonical message extraction, injected-wrapper removal, ID deduplication and pinned-log
-validation; it uses the same first/recent budgets as Claude. Collection chooses modification time,
+validation; empty or fully stripped messages do not consume an ID, so a later message with that
+ID can supply conversation text. It uses the same first/recent budgets as Claude. Collection chooses modification time,
 numeric size, then descending filename; a changed/missing pinned log fails without substitution.
 Only the standard `~/.codex/sessions` root is read: an open custom-root rollout can be collected,
 but fails summary reading if absent there. Scheduling follows the shared rules above. Remote

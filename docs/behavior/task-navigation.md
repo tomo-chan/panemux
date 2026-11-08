@@ -80,26 +80,16 @@ The pane that belongs to a task is found in the browser from the current workspa
 | Stopped | Not opened; a stopped task whose agent resumes offers `Resume` ([Resuming a task](task-launch.md#resuming-a-task)) |
 | Unknown | Not opened |
 
-For a new pane, cards, details and the Type in pane popup all open **Open in workspace**.
-It always appears, even with one workspace, listing workspace names as radio options with the
-active workspace selected. **Open here** confirms the destination. **+ New workspace** reveals a
-name field and changes confirmation to **Create and open**. A blank name after trimming, or a name
-identical to an existing workspace title, shows an input error without creating anything.
-A new workspace is created with `POST /api/workspaces`, then named with
-`PUT /api/workspaces/{id}`, before creating the pane. The workspace already contains its default
-local **Terminal** shell pane; the requested task or host pane is added to its right. Once created, the workspace becomes
-the picker selection, so a retry uses that workspace rather than creating another one. If naming
-fails, the workspace remains with its default title, an error appears and no task or host pane is
-created by that attempt; **Open here** can then open in the retained workspace. A failure after
-session creation resumes without creating the same session again, and a pane already saved in the
-destination layout is not inserted twice when activation is retried. If the pane was already saved
-in a different workspace, the error asks to select that workspace to finish opening. A selected
-workspace that no longer exists, or a failed request, shows an error without falling back to another workspace. Cancel, Escape and × close
-the picker without creating a pane; confirmation disables its controls until the request completes.
-
-After a successful Open, the chosen workspace becomes active, the dashboard closes and the pane
-takes focus and is briefly outlined. Go to pane bypasses the picker and navigates immediately. Opening the same tmux session again
-while its pane is still being created does not create a second pane.
+New panes from cards, details or the popup always ask **Open in workspace**, even with only one
+workspace, defaulting to active. Open here confirms; + New workspace asks a trimmed nonblank,
+unique title and changes confirmation to Create and open. POST workspace then PUT title precede
+pane creation, adding right of the default Terminal pane. Retain the created workspace selection
+for retries. Naming failure leaves its default title and creates no requested pane; Open here can
+retry there. Session creation and saved pane insertion are not repeated on retry. A pane already
+saved elsewhere requires selecting that workspace. Missing destinations/errors never fall back.
+Cancel/Escape/× create no pane; confirmation disables controls until completion. Success activates
+the destination, closes Tasks, focuses/outlines the pane. Go to pane bypasses the picker. Concurrent
+opens of the same tmux session create only one pane.
 
 **Type in pane.** A task waiting for input or idle can also be answered without leaving the
 dashboard: `Type in pane` opens a popup over the board holding a real terminal on the task's tmux
@@ -114,35 +104,20 @@ switch workspaces or add a pane, and it neither starts nor resumes the agent.
 | Waiting for input or idle, run by codex's shared daemon | Not offered; the detail panel says why |
 | Any other state | Not offered, and no reason is shown |
 
-- **One attach per press.** The button reads `Connecting…` and is disabled from the press until the
-  popup closes; the popup opens at once in `Connecting`. An attach that answers after the popup was
-  closed — or after another task's popup was opened — is ended at once and never shown. The
-  exception is a popup reopened on the same task: the server answers its request with that same
-  attach, so the late answer is left for it.
-- **Connection.** The header shows `Connecting`, `Connected`, `Disconnected` or `Failed`. The terminal
-  takes keys only while `Connected`: before that, and after a disconnect, a failed request, a
-  WebSocket that gave up, or a tmux client that exited (a session that ended — including one that
-  ended between the server's check and the attach), it is dimmed and inert, and the popup says
-  "Input is not being sent." with `Retry` or `Reconnect`. Both send `POST /api/tasks/attach` again
-  and read its answer over a new WebSocket; a pane's `/api/sessions/{id}/restart` is never asked.
-- **Bound to the task.** The popup stays on the task ID it was opened for. When a poll moves the task
-  to another column it says "Moved to <column> on the board. This terminal stays on <task>.", and
-  when the board stops listing it, that it no longer does; the terminal, its connection and focus do
-  not change. The task's card carries a `Typing` tag while its popup is open.
-- **With a workspace pane on the same session.** The popup is a second tmux client on that session:
-  input from either reaches it, and the popup says that the window takes the size of the client that
-  was used last.
-- **Closing** (`Close`, `Cmd/Ctrl+Shift+Esc`, or `Escape` while focus is in the popup's header) sends
-  `DELETE /api/tasks/attach/{session_id}`, which ends only the board's tmux client; the agent and
-  its tmux session keep running. The dashboard leaving with the popup open ends it the same way:
-  the layer shortcut unmounts it, and a reload or a closed tab sends the same `DELETE` from
-  `pagehide` as a `keepalive` request, which outlives the page. Were that request lost, the server
-  still destroys the attach once its last WebSocket has been closed for the grace period. A page
-  that comes back from the back/forward cache with the popup open asks for the attach again, as
-  `Retry` does. The board's selection, filters and scroll position are as they
-  were, and focus returns to the button the popup was opened from (the same task's button where its
-  card has moved to, or the dashboard when there is none).
-- The popup's `Go to pane` / `Open` closes it and opens the task as above.
+The button is disabled/Connecting until its popup closes. Late attaches after close or another
+task's popup are deleted, except same-task reopening which reuses that attach. Header state is
+Connecting/Connected/Disconnected/Failed; input works only when Connected. Failures, disconnects,
+given-up WebSockets and exited clients dim the terminal and say "Input is not being sent."
+Retry/Reconnect repeat POST attach with a fresh WebSocket, never restart a pane.
+The popup remains bound to its task ID through column movement or delisting, explaining either
+without changing terminal, connection or focus; its card shows Typing. A workspace pane is a
+second client, with input shared and tmux's latest-used-client size explained.
+
+Close, Cmd/Ctrl+Shift+Esc or Escape in the header sends DELETE attach, ending only that client.
+Leaving Tasks does likewise; pagehide on reload/tab close uses keepalive DELETE. A lost DELETE
+still expires after the last socket's grace period. Back/forward-cache restoration requests the
+attach again. Closing preserves board selection, filters and scroll, focusing the task's surviving
+button or dashboard. Popup Go to pane/Open closes it and navigates as above.
 
 **The board's temporary attach.** What Type in pane uses: a terminal on a task's tmux session that
 is not a pane. [`POST /api/tasks/attach`](task-api.md#post-apitasksattach) opens a tmux client on the running
@@ -166,8 +141,7 @@ never holds it.
 
 ### Dashboard view state
 
-The dashboard and the workspaces are switched with the `← Tasks` and `Workspaces` buttons or with
-`Cmd/Ctrl+Shift+<display.task_dashboard_shortcut>` (`S` unless configured), from either layer.
+[Dashboard UI](../ui-design/task-dashboard.md#navigation-and-top-bar) owns layer controls.
 The search text, host and label filters, Group mode, Cards/Table view, sort and Show done setting belong to App's
 in-memory `TaskDashboardViewState` and survive switching to any workspace and back in the same
 browser tab. The dashboard is still unmounted when leaving, ending its temporary terminal
@@ -176,9 +150,8 @@ Reloading resets search, host and label filters and Show done to empty search, A
 All labels and off. Group (None / Host / Label / Repository), Cards/Table and sort are restored from
 versioned localStorage, independently of these transient filters. No API or config file stores display preferences.
 [Dashboard UI design](../ui-design/task-dashboard.md#lists-and-filters) defines columns and group
-presentation. Session selection, PR links and shared Open / Go to pane, Type in pane and Resume
-act independently. Switching lists preserves selection, details and the terminal popup without
-reconnecting it; each list retains its scroll position. Cards keep collection order.
+presentation. [Architecture](../architecture.md#state-and-ownership) owns selection, input continuity and
+scroll retention across list switches, including Cards' collection order.
 Defaults are Cards / None / State ascending. Unknown enums (including unavailable Session group),
 corrupt JSON and unsupported versions fall back to defaults. Denied or full storage leaves settings
 usable in memory. Loading fallback defaults does not overwrite the stored record; an explicit
@@ -201,9 +174,8 @@ Elapsed uses the same status timestamp and numeric seconds as display, with no f
 time: invalid or missing timestamps are unknown, future timestamps are zero. Every sort uses one
 reference time; display ticks alone need not re-sort. Missing values stay last in either direction;
 ties use fixed task-ID order, also when descending. New keys start ascending except Elapsed (longest
-first); selecting the current column heading reverses direction. Only the active heading has
-`aria-sort`, with an arrow and direction in its button name. Labels and Actions are not sortable.
-The table uses one horizontal scroll region with sticky column headers, including on narrow screens.
+first); selecting the current column heading reverses direction. Labels and Actions are not sortable; [UI design](../ui-design/task-dashboard.md#lists-and-filters)
+owns header ARIA, group presentation and scrolling.
 Each notification jump scrolls and focuses the task selection button once in the active list.
 In grouped Cards, the card is uncovered below its group's variable-height sticky header band.
 Switching views during its highlight preserves focus on the view control and does not extend the highlight. Collection updates
