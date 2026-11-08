@@ -129,7 +129,7 @@
 # the suite is hermetic and needs no gremlins install — the same split
 # scripts/coverage_blocks.sh has with `--profile`.
 #
-# SCOPED TO THE DIFF, for the reason decision D2 gave and one the measurement
+# SCOPED TO THE DIFF, for the reason decision D2 (docs/decisions/quality-gateway/mutation-diff-scope.md) gave and one the measurement
 # added. D2 scoped it because gremlins' own documentation warns of hours on a
 # large module; measured on this repository the whole module takes 14m25s, so
 # that reason is weaker than it looked. The reason that survives is the false
@@ -817,7 +817,7 @@ if [ "$scoped_count" -eq 0 ]; then
 	if [ "$file_mutant_count" -gt 0 ]; then
 		echo "  gremlins produced $file_mutant_count mutant(s) in the files this branch touched, and"
 		echo "  none of them sits on a line the diff changed. That is what the line"
-		echo "  scope is for (decision D2) and what it costs: this run says nothing"
+		echo "  scope is for (decision D2: docs/decisions/quality-gateway/mutation-diff-scope.md) and what it costs: this run says nothing"
 		echo "  about whether the change is protected."
 	else
 		echo "  gremlins produced no mutants at all in the files this branch touched."

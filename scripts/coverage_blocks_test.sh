@@ -287,7 +287,7 @@ expect_no_output "changed" "--summary with a base ref does not run the gate"
 
 # ── Could not check ───────────────────────────────────────────────────────────
 #
-# Principle 4 / decision D4's "could not check is a failure, never a skip": a
+# Principle 4 / decision D4 (docs/decisions/quality-gateway/red-check.md)'s "could not check is a failure, never a skip": a
 # check that reports green having measured nothing is the failure mode being a
 # required check exists to rule out.
 

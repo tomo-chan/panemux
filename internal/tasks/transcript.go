@@ -21,7 +21,7 @@ import (
 // attachments — which carry file contents, command output and credentials —
 // are never read. A log in which nothing is understood is not summarized: it
 // is reported as unreadable, never passed on as raw text. See
-// docs/DECISIONLOG.md, "Stage 3: summaries".
+// docs/decisions/tasks/bounded-summary-input.md.
 
 // ErrInvalidSummary is a summary request refused before anything ran.
 var ErrInvalidSummary = errors.New("invalid task summary request")
