@@ -18,6 +18,8 @@ CI checks `frontend/src/components/`, `frontend/src/App.tsx`, `frontend/src/styl
 output change; non-image files do not count. Use `screenshots-exempt` only when a change
 alters nothing shown.
 
+## Placeholder environment
+
 The capture clears `XDG_*` and git configuration variables and uses a fake HOME, a throwaway
 repository at `/tmp/sample-project`, a private tmux socket, and a stub agmsg store. A fixed task
 list replaces real task collection so images cannot expose the developer's agent sessions.
