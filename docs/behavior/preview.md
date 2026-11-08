@@ -235,38 +235,23 @@ The files it loads beside it are not bounded.
 
 ### The preview header
 
-The header names the host (`local` for the panemux host, otherwise the `ssh_connections` name) and
-the file's absolute path, the URL of a localhost page, or the URL as clicked of a page relayed from an
-SSH host, and carries:
-
-- **Reload**: loads the file again as it is now on disk, or the localhost URL again.
-- **Open in new tab**: opens the same page in a browser tab. A tab opened this way is the browser's
-  own: closing the preview, the popup, the pane or the terminal session does not close it, and it
-  keeps working for as long as panemux runs. It is how a page is seen larger; the preview has no
-  full-screen mode of its own.
-- **Close**: closes the preview only. The terminal takes the whole body again.
-
-While a file is resolving, Reload and Open in new tab are disabled.
+[Split Preview UI](../ui-design/preview.md#split-preview) defines the header and divider presentation.
+The header identifies `local` or the SSH connection name and the absolute file path or clicked URL.
+Reload rereads the file or URL; **Open in new tab** opens the same page in an independent tab;
+**Close** gives the terminal its whole body again. Tabs keep working while panemux runs, even after
+the split, popup, pane or session closes. Reload and Open in new tab are disabled during file resolution.
 
 ### The divider
 
-The split starts at 50:50. The divider between the terminal and the preview:
+The split starts at 50:50. Mouse, pen or touch dragging moves the divider; focused Left/Right keys
+move it by 5 percentage points; double-click returns it to 50:50. The terminal share is 20%–80%,
+with each side at least 160 px. Narrow panes restrict that range to fit both sides (450 px gives
+36%–63%); if that is impossible, the split stays at 50:50.
 
-- moves by dragging with a mouse, a pen or touch;
-- moves by 5 points with the Left and Right arrow keys when it has focus;
-- returns to 50:50 on a double-click;
-- keeps the terminal's share between 20% and 80%, and neither side narrower than 160 pixels.
-
-In a pane too narrow for both sides at 20% or 80%, the divider's range narrows to the shares that
-leave both sides 160 pixels (in a 450-pixel split, 36% to 63%), and the split stays at 50:50 where
-even that is impossible. The divider stops at the end of that range rather than moving past it
-unseen: the share it shows is the one it announces to assistive technology, the one the arrow keys
-step from, and the one kept once it is moved. A kept ratio outside a narrow pane's range shows at
-the range's end until the divider moves, and in full once the pane is wide enough again.
-
-The ratio is kept per pane (workspace panes) and per task (the Type in pane popup) in the browser's
-`localStorage`, so the next preview of that pane or task opens at it. A browser that refuses storage
-opens at 50:50.
+The divider stops at its allowed range. Its visible share, accessibility value and key-step origin
+agree. A saved ratio outside a narrow pane's range shows at its nearest end, and fully again when
+wide enough, unless the divider is moved. Ratios persist in browser `localStorage` per workspace
+pane or task popup; unavailable storage falls back to 50:50.
 
 ### The terminal stays as it is
 

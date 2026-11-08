@@ -10,7 +10,7 @@ description: "Pane chrome, Git links, worktree menus, and split and quick-add af
 Left to right: `⠿` drag handle, connection dot, pane type, optional title, optional Git metadata
 and PR link, reconnecting text, then right-aligned actions. Chrome uses the shared header palette.
 Repository and `#<number>` PR shortcuts are inline text links, with stronger blue and an underline
-on hover, without pills or outlines. [Frontend behavior](../behavior/frontend.md#pane-git-and-pr-metadata)
+on hover, without pills or outlines. [Frontend behavior](../behavior/pane-metadata.md#pane-git-and-pr-metadata)
 owns metadata resolution.
 
 ## Multiple worktrees

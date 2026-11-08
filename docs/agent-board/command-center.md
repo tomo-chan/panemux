@@ -69,7 +69,7 @@ normal confirmation policy remains in force.
 `WS /ws/board/command` accepts a prompt and streams Claude's structured output. Non-fatal problems,
 such as failure to persist history after an otherwise successful query, appear as warnings on the
 terminal `done` or `error` frame. Exact frame shapes are specified in
-[WebSocket protocols](../behavior/websocket.md#command-center-websocket-protocol).
+[WebSocket protocols](../behavior/command-websocket.md#command-center-websocket-protocol).
 
 Panemux stores the streamed lines it already observed rather than parsing Claude's private
 transcripts. Because Claude's stream does not echo the prompt, panemux adds one `panemux_prompt`

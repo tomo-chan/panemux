@@ -15,6 +15,11 @@ Runtime behavior, API contracts, task events, and task dashboard details.
 * [Behavior: opening URLs from a pane](url-open.md) - Opening URLs from terminal panes and forwarding loopback login callbacks.
 * [Behavior: WebSocket protocols](websocket.md) - WebSocket connection policy, terminal frames, and board and task event protocols.
 
+## Pane and command contracts
+
+* [Pane Git and PR metadata](pane-metadata.md) - Pane worktree resolution, repository and PR links, polling, and cache behavior.
+* [Command Center WebSocket protocol](command-websocket.md) - Command Center authentication, query frames, subprocess lifetime, and resume continuity.
+
 ## Task contracts
 
 * [Task collection and state](task-collection.md) - Task identity, host collection, state derivation, diagnostics, and agent availability.

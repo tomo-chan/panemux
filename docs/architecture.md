@@ -41,7 +41,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `internal/host`, `internal/hostexec` | Define host identity and fixed-script execution, including a separate arbitrary stdin stream and local split stdout/stderr capture; own local and shared per-host SSH adapters, lazy dialing, cooldown and reconnect. |
 | `internal/hosttools` | Manage tool status, installation, per-host Codex hook and global tool automatic-update settings and background checks; define the `Tool` port (`Check` / `Install`), optional update-only intent and adapter prerequisites, and shared status. Coordinate per-tool/host call admission, update notification and draining. Consume successful task-collection and persisted host-addition notifications and own cancellation and joining of tool checks. |
 | `internal/codexhook` | Implement the tool port using the shared host execution port; own the embedded permission hook, fixed check/install scripts and hooks.json parsing. |
-| `internal/tasks` | Collect the task dashboard's agent sessions from the panemux host and every `ssh_connections` host with one fixed script, composed at startup from a collect adapter per agent, through the shared host execution port; probe each host's agent CLIs with a second fixed script and keep what can be used per host and agent, including what the collection could not read (`Availability`); list the registered agents with their adapters' notes (`Agents`) and decide which actions each task offers and why one cannot be taken (`TaskActions`, `StateNote`); keep the done and label records in `~/.config/panemux/tasks.json` (`RecordStore`); start and resume claude and codex tasks in detached tmux sessions with one fixed launch script over the same connection (`Launch`, `Resume`), holding a new codex task's labels until its session is collected (`PendingLabels`); read a task's conversation log with a third fixed script and summarize it with its own agent CLI on the panemux host, through a summary adapter per agent (`summaryAdapters`), keeping the summaries in `~/.config/panemux/task-summaries.json` (`SummaryStore`) and reusing one while the excerpt it was made from is unchanged (`Summaries`, `RequestSummary`). |
+| `internal/tasks` | Own agent collection and availability, task actions, done/label records, launch/resume and pending labels, and summary adapters, scheduling and persistence. Fixed scripts run through shared host execution. See [Task contracts](behavior/tasks.md) and [capability adapters](agent-registry/adapters.md). |
 | `internal/taskevents` | Observe the running tasks on every host through `internal/tasks`'s lightweight collection while the task event stream has a subscriber, each host on its own cycle; keep what was last observed, publish each difference as an ordered event, assign unsigned waits their `wait_id`, and fan the events out to subscribers without waiting on any one of them. It decides nothing about notifications or panes. |
 | `internal/api` | Implement REST handlers and mount the route set. It is the single source of truth for API registration. |
 | `internal/ws` | Bridge session bytes and control messages to terminal WebSockets, stream command-center events, and serve the task event stream (`/ws/tasks/events`). |
@@ -69,7 +69,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | task event store (`useTaskEvents`, `utils/taskEvents`) | Hold one `/ws/tasks/events` connection per tab and the tasks and hosts it reports, validated and in `seq` order; reconnect from a fresh snapshot on any gap or close, 2 to 30 seconds apart with no limit. |
 | attention and notifications (`App`, `utils/taskEvents`) | Project the task event store and visibility changes into pane/workspace indicators, browser notifications and the task dashboard's state column, matching tasks to panes with `utils/taskBoard` and recording the `wait_id`s each tab notified, and those whose attention a person cleared, in its session storage. |
 | Agent Board hooks and panels | Poll status/message APIs, stream command-center output, and present dashboard, palette, and history overlays. |
-| `TaskDashboard` and `useTasks` | Poll `GET /api/tasks` while the task dashboard is shown, present tasks as state cards or sortable table rows (sharing filtered tasks and groups; Cards alone distribute each group into state columns), save done and labels through `PUT /api/tasks/records`, start and resume tasks through `POST /api/tasks` and `POST /api/tasks/resume` (`NewTaskDialog`), and match each task to the pane attached to its tmux session, or to the `local` / `ssh` pane its agent's `PANEMUX_PANE_ID` names (`utils/taskBoard`). Type in pane opens and ends the board's temporary attach through `POST`/`DELETE /api/tasks/attach` (`useTaskInput`) and shows it in `TaskInputPopup` / `TaskTerminal`. A host chip opens `HostConnectDialog`: `Open` chooses a destination through `WorkspacePickerDialog` and adds an `ssh` / `ssh_tmux` pane (`paneConfigForHost`), and Type in pane opens a host terminal through `POST`/`DELETE /api/hosts/terminal` (`useHostTerminal`) shown in `HostTerminalPopup`; an `ssh_tmux` session name comes from `POST /api/hosts/session-name`. The menu's `HostTools` lists tools through the shared `HostToolItem`; `codexHookTool` supplies Codex-specific copy and actions. It reads and installs the host's codex permission hook through `GET`/`POST /api/tasks/codex-hook`, and turns updating it by itself on or off through `POST /api/tasks/codex-hook/auto-update`; `agmsgTool` adds manual pinned Install / Update through `/api/hosts/agmsg` when Agent Board is enabled; the panemux host's chip opens its tool items without connection actions. |
+| `TaskDashboard` and `useTasks` | Own dashboard collection/presentation, records, launch/resume dialogs, pane matching, temporary task and host terminals, destination selection, and host tool actions. Shared terminal components use `useTerminal`; task reconnect recreates the attach. See [Task navigation](behavior/task-navigation.md), [task API](behavior/task-api.md), and [host tools](behavior/host-tools.md). |
 | Preview Mermaid runtime | A separate classic bundle draws fenced Mermaid blocks inside the preview’s opaque origin, retains source and per-block errors, and sanitizes final SVG after Mermaid measures a temporary drawing in that same preview origin. It is embedded with frontend assets and served by content hash, independently of the dashboard bundle. |
 | Zod schemas | Runtime-validate structured success payloads and control frames for which schemas are defined. Generated TypeScript types derive from these schemas. |
 
@@ -134,42 +134,11 @@ invokes agmsg scripts, through `host.Runner`; board logic uses its message ports
 
 ### Task dashboard flow
 
-While the dashboard is on screen, the browser polls `GET /api/tasks`. `internal/tasks` runs one
-fixed script on every host at once — locally with `sh -s`, remotely over that host's reused
-`CommandConn` — parses what it prints, and derives each task's state and location: its tmux
-session, or for an agent outside tmux the pane ID its environment carries, which `local` and `ssh`
-panes export to their shell as `PANEMUX_PANE_ID`. The API handler adds each working directory's git
-and pull-request metadata, the issues the pull request closes, the references
-`task_dashboard.autolinks` finds in the branch name and PR title, and each task's done and label
-record from `tasks.RecordStore`; `PUT /api/tasks/records` replaces one record. Opening a task
-chooses a workspace through `WorkspacePickerDialog` for a new pane (including creating and naming
-a workspace through the existing workspace APIs), or directly focuses a `tmux` / `ssh_tmux` pane through the ordinary pane APIs, or focuses the
-`local` / `ssh` pane an agent outside tmux runs in. `POST /api/tasks/attach` instead opens a
-temporary tmux client on a task's session that the layout never holds: the handler finds the task
-with a fresh collection of its host (`tasks.Service.FindTask`), registers an attach-only
-`tmux attach-session -t =<name>` session with the session manager under a `board-` ID served by
-`/ws/{id}`, and removes it on `DELETE` or once no WebSocket has read it for 10s. `POST /api/hosts/terminal` registers a host terminal the same way — an `ssh` / `ssh_tmux` session on an `ssh_connections` entry, built by `session.CreateFromConfig`, new on every request and marked as a host terminal so that each route's `DELETE` ends only its own kind. The dashboard's
-Type in pane popup (`TaskInputPopup`) reads it through `TaskTerminal`, which uses the same
-`useTerminal` as a pane but asks for no `/api/sessions/{id}/restart` on a disconnect: it opens the
-attach again instead. `POST /api/tasks` and `POST /api/tasks/resume`
-run a second fixed script the same way — `sh -s` with the script on stdin — which starts the agent
-in a detached tmux session. The script is composed at startup from a launch and a resume adapter per
-agent (`internal/tasks/launch_adapters.go`), each a fixed fragment under the case of its agent and
-mode; an agent that declares neither is refused before anything runs, and so is one whose CLI the
-host's probe found missing. A resume first collects the host again to confirm the session is stopped
-there, and a start records its labels in `tasks.RecordStore` — when the launch names no session ID
-(codex picks its own once started), `tasks.PendingLabels` holds them in memory under the host, the
-agent and the tmux session, and the first `GET /api/tasks` that finds exactly one session of that
-agent in that tmux session records them. When
-`task_dashboard.summary.enabled` is set, `GET /api/tasks` also attaches each task's summary and starts
-the ones that are due, in the background and at most two at a time: a third fixed script reads the
-task's conversation log on its host, and the matching agent CLI on the panemux host summarizes the conversation
-text extracted from it; `POST /api/tasks/summary` asks for one.
-The task event stream observes with the lightweight collection: the same script without its
-searches for stopped sessions (`attentionScript`), the running tasks only, and none of the handler's
-git, record, label or summary work. Both give a waiting task the same `wait_signature`, derived from
-the wait start the agent recorded on its host. Full behavior is in
-[Task dashboard](behavior/tasks.md).
+The visible dashboard polls tasks through `internal/tasks` and the handler-owned host execution
+pool. The API enriches collection with repository metadata, records and enabled summaries; the
+browser matches tasks to panes. Launch/resume and temporary task/host terminals reuse that host
+boundary but have separate lifecycle contracts. See the [task document map](behavior/tasks.md),
+[REST API](behavior/task-api.md) and [adapter contracts](agent-registry/adapters.md).
 
 ### Task event flow
 
@@ -206,18 +175,13 @@ SSH pane; existing sessions and the tmux server's environment are not reconfigur
 
 ### Preview flow
 
-A path the terminal shows as an HTML or Markdown link is sent to
-`POST /api/sessions/{id}/preview`, which resolves it on the session's host and returns a
-`/preview/<token>/…` address. `PreviewSplit` frames that address beside the terminal; Open in new tab
-opens the same address. A localhost URL on the panemux host needs no server step: `usePaneUrlOpen`,
-the one opener for printed links, OSC 8 links and browser-shim requests, hands it to `usePreview`,
-and `PreviewSplit` frames the URL in its own origin, inside a `srcdoc` document whose policy keeps the frame on loopback.
-For an `ssh` or `ssh_tmux` session the API's `previewHosts` keeps one `preview.Remote` per connection
-a session was dialed with (`session.PreviewTarget`), connected with `session.DialPreviewConn` — the
-pane dialer, its own connection — and files are read over its SFTP subsystem. A localhost URL
-`usePreview` is handed for such a session is sent as `url`; `preview.Relays` gives the host's address
-and port a listener on `127.0.0.1:0` and returns that address, which `PreviewSplit` frames as it
-frames a localhost page. Behavior is in [the split preview](behavior/preview.md), and the isolation in
+`internal/preview` resolves HTML/Markdown paths against the session's working directories and agent
+worktrees. `PreviewSplit` frames the returned token URL beside the terminal. Localhost URLs use
+the same opener and split; SSH-host URLs use dedicated loopback relay ports.
+
+Remote files use a preview-owned SSH connection per pane connection target, dialed with the pane's
+connection settings, and read only through SFTP. Relays use that connection's direct-tcpip channels.
+Their lifetime is independent of terminal sessions. See [Split preview](behavior/preview.md) and
 [preview security](security/preview.md).
 
 ## Trust boundaries

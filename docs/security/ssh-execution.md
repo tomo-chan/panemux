@@ -25,7 +25,7 @@ After validation, the path is wrapped with `shellQuotePath`, which single-quotes
 **A path the remote host itself reports goes through the same guard.** Pane-header metadata resolution
 asks a host where a Claude session's transcript directory is when the name panemux derives is wrong
 (`remoteClaudeProjectProbeCmd` in `internal/session/ssh.go`; see
-[pane metadata behavior](../behavior/frontend.md#pane-git-and-pr-metadata)). Two values cross a trust boundary there and
+[pane metadata behavior](../behavior/pane-metadata.md#pane-git-and-pr-metadata)). Two values cross a trust boundary there and
 both are handled where they cross it:
 
 - **Into** the probe: the session id, which `validClaudeSessionID` (`^[a-zA-Z0-9_-]+$`) has already
