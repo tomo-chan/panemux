@@ -1,3 +1,9 @@
+---
+type: Guide
+title: "Architecture"
+description: "System structure, component ownership, data flow, and trust boundaries."
+---
+
 # Architecture
 
 This guide is the concise map of the current system. It identifies component ownership and the

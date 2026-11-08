@@ -1,3 +1,9 @@
+---
+type: Security Requirement
+title: "Security: Agent Board"
+description: "Agent Board remote-write constraints and treatment of agent-reported values."
+---
+
 # Security: Agent Board
 
 > Part of the [security design](../security.md). The general command-execution and `gosec` rules

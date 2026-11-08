@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: opening URLs from a pane"
+description: "Opening URLs from terminal panes and forwarding loopback login callbacks."
+---
+
 # Behavior: opening URLs from a pane
 
 > Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.

@@ -1,3 +1,9 @@
+---
+type: Guide
+title: "Agent Board"
+description: "Agent Board capabilities, design principles, and routes to focused contracts."
+---
+
 # Agent Board
 
 Agent Board adds self-reported agent status, cross-pane messaging, a read-only dashboard, and an

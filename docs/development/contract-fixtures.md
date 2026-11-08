@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Contract fixtures (`testdata/api-contract/`)"
+description: "Go-produced API fixtures and their validation against frontend runtime schemas."
+---
+
 # Contract fixtures (`testdata/api-contract/`)
 
 > Part of the [development guide](../../DEVELOPMENT.md). That document carries the summary of this one and the rules that always apply.

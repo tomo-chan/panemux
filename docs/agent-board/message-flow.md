@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Agent Board: status and message flow"
+description: "Agent status messages, history collection, and message flow through Agent Board."
+---
+
 # Agent Board: status and message flow
 
 > Part of the current [Agent Board design](../agent-board.md).

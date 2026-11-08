@@ -75,6 +75,12 @@ expect 0 'a component change with new images' \
 	"frontend/src/components/PaneHeader.tsx${nl}docs/images/workspace.png${nl}"
 expect 0 'any one image is enough' \
 	"frontend/src/App.tsx${nl}frontend/src/styles/attention.css${nl}docs/images/task-dashboard.png${nl}"
+expect 1 'an image index is not a retaken screenshot' \
+	"frontend/src/App.tsx${nl}docs/images/index.md${nl}"
+expect 1 'other non-image files are not retaken screenshots' \
+	"frontend/src/App.tsx${nl}docs/images/notes.txt${nl}"
+expect 1 'nested PNG files are not capture output' \
+	"frontend/src/App.tsx${nl}docs/images/nested/sample.png${nl}"
 
 # ── Changes the images cannot show: pass ────────────────────────────────────
 

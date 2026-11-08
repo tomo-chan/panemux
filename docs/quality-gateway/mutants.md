@@ -1,3 +1,9 @@
+---
+type: Reference
+title: "Quality gateway: surviving mutants, the first measurement"
+description: "Recorded surviving mutants, boundary findings, and lessons from mutation measurements."
+---
+
 # Quality gateway: surviving mutants, the first measurement
 
 > Part of the [quality gateway](../quality-gateway.md). That document defines the gates this one explains.

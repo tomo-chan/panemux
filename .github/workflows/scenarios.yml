@@ -112,3 +112,14 @@ jobs:
 
       - name: Every relative link must resolve and name what it opens
         run: make check-docs-links
+
+      - name: Set up Go for the OKF checker
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+
+      - name: The OKF checker's own tests
+        run: make test-docs-okf
+
+      - name: Concept metadata and directory indexes must follow OKF
+        run: make check-docs-okf

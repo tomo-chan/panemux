@@ -1,3 +1,9 @@
+---
+type: Runbook
+title: "Model checking (`make model-check`)"
+description: "Running model checking and regenerating transition fixtures while preserving conformance."
+---
+
 # Model checking (`make model-check`)
 
 > Part of the [development guide](../../DEVELOPMENT.md). That document carries the summary of this one and the rules that always apply.

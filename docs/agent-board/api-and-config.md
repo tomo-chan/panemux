@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Agent Board: API and configuration"
+description: "Agent Board configuration and API ownership with links to exact payload contracts."
+---
+
 # Agent Board: API and configuration
 
 > Part of the current [Agent Board design](../agent-board.md).

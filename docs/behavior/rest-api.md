@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: REST API"
+description: "REST endpoints, request and response contracts, and failure behavior."
+---
+
 # Behavior: REST API
 
 > Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.

@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Agent Board: command center"
+description: "Command center execution, conversation state, and board operation boundaries."
+---
+
 # Agent Board: command center
 
 > Part of the current [Agent Board design](../agent-board.md).

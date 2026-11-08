@@ -166,7 +166,8 @@ skip inside the Claude Code sandbox and fail in CI. Its tmux sockets sit deeper 
 - CI enforces it (`.github/workflows/screenshots.yml`): a pull request that changes
   `frontend/src/components/`, `frontend/src/App.tsx`, `frontend/src/styles/`, `frontend/index.html`
   or `frontend/screenshots/` (test files — `*.test.ts`, `*.test.tsx`, `*_test.sh` — aside; a file moved out of them counts under its old path)
-  without touching `docs/images/` fails. Apply the
+  without updating a direct `docs/images/*.png` capture output fails. Changes only to
+  `docs/images/index.md` or other non-image files do not count as retaken screenshots. Apply the
   `screenshots-exempt` label to a change that genuinely alters nothing the images show.
 - The rule does not stop at those paths: a change under `frontend/src/hooks/`, `schemas/` or `utils/`
   that changes what is on screen needs new images too, though CI does not ask for them.
@@ -333,7 +334,7 @@ A test that genuinely should not go red without its implementation is marked `//
 - There are no exceptions for frontend-only, docs-adjacent, or "small" code changes.
 - Test commands: `make test-verify`, `make test-go`, `make test-go-fixture-agent`, `make test-frontend`, `make test-e2e`, `make test`, `make test-hooks`, `make test-pre-push`, `make test-tmpdir-guard`, `make test-install-hooks`, `make test-golangci-lint-cache`, `make test-require-pty`, `make test-efficacy`, `make test-scenarios-check`, `make test-docs-links`, `make test-screenshots-check`, `make test-coverage-blocks`, `make test-mutation`, `make test-model-check`
 - Ledger command: `make check-scenarios`
-- Documentation-link command: `make check-docs-links`
+- Documentation commands: `make check-docs-links`, `make test-docs-links`, `make check-docs-okf`, `make test-docs-okf`
 - Pull-request-only gates: `make efficacy`, `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`, and `MUTATION_BASE=origin/main make mutation` (all three fail the build — `make mutation` warned until #180's item 6 reached stage 4; see above)
 - Model-checking commands (outside `make check`, they need a JDK and `tla2tools.jar`): `make model-check`, `make model-check-write`
 - `make test-model-check` uses `python3` to run the transition exporter it tests. `python3` is **optional** for the same reason `jq` is below: without it those checks report themselves as skipped, so `make check` still works.
@@ -365,6 +366,8 @@ A test that genuinely should not go red without its implementation is marked `//
   - A package holding a file built with or without the `panemux_fixture_agent` tag also gets `go vet` with that tag, and `make test-go-fixture-agent`, which tests the tagged internal packages listed by `FIXTURE_AGENT_PKGS`. The suite does not test the root package or need a frontend build.
   - `frontend/src` TypeScript: `tsc --noEmit` and `vitest related` on the changed modules. A file under `testdata/api-contract/` selects the frontend contract test.
   - Shell scripts: `scripts/<name>.sh` selects `scripts/<name>_test.sh`, and any `.sh` selects the `$TMPDIR` guard. `.claude/` selects the hook tests; `frontend/screenshots/` and `frontend/e2e/*.sh` select the screenshot fixtures' tests.
+  - Markdown under `docs/` and changes to `scripts/docsokf/` select both `make check-docs-okf`
+    and `make test-docs-okf`; checker Go edits also receive normal package vet/lint/tests.
   - Markdown selects `make check-docs-links`; `docs/scenarios.md` also selects `make check-scenarios`.
 - It falls back to `make check` when the change cannot be narrowed — `go.mod`/`go.sum`, the `Makefile`, `.golangci.yml`, `.node-version`, the frontend's package and build configuration, the runtime selection scripts, `.githooks/` — and when the range cannot be worked out: a remote commit this clone does not have, no `origin/main`, or an unreadable pre-push line.
 - `make test-pre-push` tests the selection, and CI runs it.
@@ -373,7 +376,7 @@ A test that genuinely should not go red without its implementation is marked `//
 
 ### Documentation updates
 
-- Use [docs/README.md](docs/README.md) as the information-architecture guide: product overview,
+- Use [docs/index.md](docs/index.md) as the information-architecture guide: product overview,
   concise current-state topic guides, and focused deep dives serve different reader needs.
 - Every code change must update all related documentation in the same change. Before declaring the
   work complete, inspect the document map in [AGENTS.md](AGENTS.md) and update every current-state
@@ -392,7 +395,16 @@ A test that genuinely should not go red without its implementation is marked `//
   - `make check-scenarios` (part of `make check`) resolves every path and Go test name an `auto` row names, and fails when one no longer exists. A row that names a renamed or deleted test reads as coverage and is worth nothing.
   - CI fails a pull request that changes `frontend/src`, `internal/api` or `internal/config` without touching `docs/scenarios.md`. Apply the `scenarios-exempt` label to a change that genuinely alters no use case.
 - `make check-docs-links` (also part of `make check`) checks the documentation's own integrity: every relative link resolves, every `#fragment` matches a heading in the file it names, and no label names a file other than the one it opens. That last one is the rule to know when moving a section between files — rewriting the target and leaving a label that still says `security.md` while the link opens `security/auth.md` misdirects a reader as surely as a 404 does, and nothing about the rendered page looks wrong.
-- When a document outgrows one file, split it into `docs/<name>/` and leave `docs/<name>.md` as the entry point: orientation, the rules that always apply, and a document map keyed by the section names the file used to carry.
+- Follow [the OKF writing rules](docs/index.md#writing-rules). Treat `docs/` as one OKF v0.2
+  bundle, with `type`, `title`, and `description` frontmatter on concepts and a described
+  `index.md` listing in each directory. Only the bundle-root index carries `okf_version: "0.2"`.
+  Root workflow documents stay outside the bundle. `make check-docs-okf` and `make test-docs-okf`
+  run through `make check` without replacing or weakening the existing link checks.
+- Split by one responsibility per concept and keep each contract authoritative in one concept;
+  link from other documents. The directory hierarchy is a tree and document links are graph
+  edges. Keep `docs/<name>.md` as the topic entrance and `docs/<name>/index.md` as its directory
+  listing. Preserve routes from old section names, and update references and expected paths
+  that actually name moved documents, including comments and tests; leave unrelated fixtures alone.
 - Put dated evidence such as coverage counts or benchmark results in a topic-specific measurements
   document, with its commit/date, rather than presenting the number as timeless specification.
 
@@ -454,7 +466,7 @@ Long-form testing references split out of this guide live in [`docs/development/
 
 Enduring product and design documents:
 
-- Documentation index and reader routes: [docs/README.md](docs/README.md)
+- Documentation index and reader routes: [docs/index.md](docs/index.md)
 - Product overview: [docs/overview.md](docs/overview.md)
 - Architecture and security design: [docs/architecture.md](docs/architecture.md)
 - Security requirements for implementation: [docs/security.md](docs/security.md)

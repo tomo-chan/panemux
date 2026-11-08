@@ -1,3 +1,9 @@
+---
+type: Runbook
+title: "Maintenance Guide"
+description: "Maintenance procedures for toolchains, dependencies, CI, releases, and Agent Board tools."
+---
+
 # Maintenance Guide
 
 This document captures repository maintenance rules that belong in durable project documentation rather than in the agent index.
@@ -27,6 +33,13 @@ and frontend jobs do not invoke `make test`. Keep the fixed verification entry
 points and original gates aligned; their saved local base must never replace
 CI's pull-request base. User-managed approval setup and remaining capability
 limits are documented in [Codex verification](development/codex-verification.md).
+
+The OKF bundle checker and its Go tests run explicitly in `ci.yml` and the documentation job in
+`scenarios.yml`, since those workflows do not invoke `make check`. `scripts/docsokf` is a normal
+Go package included in coverage, red-check, and mutation. Keep its pre-push selection aligned
+with bundle Markdown and checker changes.
+Its package name matches its directory because gremlins v0.6.0 resolves per-mutant test
+packages through that match; the thin CLI entrypoint lives in `scripts/docsokf/cmd`.
 
 ## GitHub Actions Pinning
 

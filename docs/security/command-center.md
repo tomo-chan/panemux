@@ -1,3 +1,9 @@
+---
+type: Security Requirement
+title: "Security: command center subprocess execution"
+description: "Command center subprocess execution, token handling, and working directory constraints."
+---
+
 # Security: command center subprocess execution
 
 > Part of the [security design](../security.md). That document carries the general rules, the `gosec` policy, and the map of these files.

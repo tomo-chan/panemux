@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Agent Board: agmsg compatibility contract"
+description: "The supported agmsg interface, compatibility guarantees, and upgrade verification contract."
+---
+
 # Agent Board: agmsg compatibility contract
 
 > Part of the current [Agent Board design](../agent-board.md).

@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Agent Board: cross-host relay"
+description: "Cross-host message relay, deduplication, and delivery lifecycle."
+---
+
 # Agent Board: cross-host relay
 
 > Part of the current [Agent Board design](../agent-board.md).

@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "UI Design"
+description: "Interface principles and interaction contracts for workspaces, panes, dialogs, and tasks."
+---
+
 # UI Design
 
 This document describes the visual design decisions for the PaneMux frontend, covering always-available layout editing, drag-and-drop, the workspace bar, modal dialogs, and the task dashboard.

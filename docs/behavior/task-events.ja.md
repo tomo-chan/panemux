@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "タスクイベント（日本語訳）"
+description: "タスクイベントの観測・配信と受け手の契約を説明する英語正本の日本語訳。"
+---
+
 # Behavior: task events（日本語訳）
 
 [task-events.md](task-events.md) の日本語訳です。正本は英語版で、変更するときは同じ pull request で両方を更新します。

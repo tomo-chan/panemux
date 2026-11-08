@@ -1,3 +1,9 @@
+---
+type: Runbook
+title: "Codex verification"
+description: "Fixed Codex verification commands, approval scope, caches, logs, and PR base setup."
+---
+
 # Codex verification
 
 Use fixed verification commands in a trusted checkout to avoid changing the shell
