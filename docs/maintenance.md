@@ -256,6 +256,7 @@ Do not move an already published tag.
 - Never manually close a release-please PR.
 - Closing it leaves the `release-please--branches--main` tracking branch stale.
 - On the next push to `main`, release-please may recreate a PR with incorrect release notes that include historical commits.
+- The release PR bumps `.release-please-manifest.json` itself and, through `extra-files` in `release-please-config.json`, three version fields: `$.version` in `frontend/package.json`, and `$.version` and `$.packages[""].version` in `frontend/package-lock.json`. Add any other file that records the release version to `extra-files`.
 
 ### Overriding a proposed version
 
