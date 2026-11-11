@@ -19,7 +19,7 @@ import (
 // and install.sh behavior used by managed Install / Update carry no such
 // promise, so an agmsg upgrade can change them without that being a bug
 // on agmsg's side.
-const TestedAgmsgVersion = "1.7.1"
+const TestedAgmsgVersion = "1.7.2"
 
 // agmsgVersionFile is agmsg's own version marker at its install root.
 const agmsgVersionFile = "VERSION"
