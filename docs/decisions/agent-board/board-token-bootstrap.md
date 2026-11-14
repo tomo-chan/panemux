@@ -9,4 +9,4 @@ description: "Bootstrap browser tokens through a dedicated local endpoint outsid
 The original command-center design covered how its subprocess received a bearer token but not how
 the bundled frontend learned a randomly generated token. `GET /api/session-token` was added as the
 bootstrap contract. It is deliberately outside the authenticated `/api/board/*` subtree and is
-limited to the local/trusted deployment model documented in [security/auth.md](../../security/auth.md).
+limited to the local/trusted deployment model documented in [security/auth.md](../../security/auth.md#loopback-token-bootstrap).
