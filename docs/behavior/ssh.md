@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: SSH connections"
+description: "SSH connection configuration, session behavior, and remote host assumptions."
+---
+
 # Behavior: SSH connections
 
 > Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.
@@ -22,7 +28,7 @@ same setting, and a field left out keeps the block's value:
 | `host` | `HostName` | Hostname or IP address |
 | `user` | `User` | Remote username |
 | `port` | `Port` | SSH port (22 when neither sets one) |
-| `key_file` | `IdentityFile` | Absolute path to a private key, or `~/…`, which is expanded at load time. A path that is still relative when the key is read is refused — see [security/command-execution.md](../security/command-execution.md#ssh-private-key-paths-and-an-unresolvable-home-directory) |
+| `key_file` | `IdentityFile` | Absolute path to a private key, or `~/…`, which is expanded at load time. A path that is still relative when the key is read is refused — see [security/ssh-execution.md](../security/ssh-execution.md#ssh-private-key-paths-and-an-unresolvable-home-directory) |
 | `password` | — | Password for password-based authentication |
 | `known_hosts_file` | — | Path to known\_hosts file for host-key verification (default `~/.ssh/known_hosts`). Absolute or `~/…`, refused when still relative at the read, for the same reason as `key_file` |
 
@@ -30,7 +36,7 @@ same setting, and a field left out keeps the block's value:
 a name-only entry included — takes both from the `Host` block. An entry that sets its own `host` takes
 neither: the route belongs to the host the block names, and the entry has replaced that host. Its
 `ProxyJump` is then not resolved at all, so one panemux cannot follow does not stop the entry from
-connecting ([security](../security/command-execution.md#ssh-proxycommand)).
+connecting ([security](../security/ssh-execution.md#ssh-proxycommand)).
 
 An entry needs a host from one of the two: an entry with no `host` and no `Host` block of its name
 fails when it is connected — the pane does not start, and the task dashboard reports the error on
@@ -61,7 +67,7 @@ ssh_connections:
     known_hosts_file: ~/.ssh/known_hosts
 ```
 
-`ssh_connections` is also the list of hosts the [task dashboard](tasks.md#hosts-and-connections)
+`ssh_connections` is also the list of hosts the [task dashboard](task-collection.md#hosts-and-connections)
 collects agent sessions from. A host that only has a `~/.ssh/config` `Host` block — including one
 added with **Add SSH Host**, which writes `~/.ssh/config` — can be a pane's `connection` but is not
 collected from until its name is listed under `ssh_connections`.
@@ -108,7 +114,7 @@ Host-key verification uses `known_hosts_file` if configured, or `~/.ssh/known_ho
 
 `tmux_session` must match `^[a-zA-Z0-9_.-]+$`.
 
-`cwd` is validated against `validRemotePath` before use: absolute paths only, no shell metacharacters (`;|&$` + "`" + `'"<>(){}[]!`), no control characters. See *Security Design* in `architecture.md`.
+`cwd` is validated against `validRemotePath` before use: absolute paths only, no shell metacharacters (`;|&$` + "`" + `'"<>(){}[]!`), no control characters. See [Remote path arguments](../security/ssh-execution.md#remote-path-arguments-ssh-working-directory).
 
 Pane settings in the frontend expose a directory browser for `cwd`. Local and local tmux panes browse the local filesystem; `ssh` and `ssh_tmux` panes browse the selected SSH connection's remote filesystem. The browser lists directories only and hides dot-directories by default unless the user enables the hidden-directory toggle.
 
@@ -118,9 +124,7 @@ New sessions created by `ssh_tmux` panes on tmux 3.3 or newer receive the browse
 environment when enabled. Existing sessions and the task dashboard's attach are left as they are;
 see [New remote tmux sessions](url-open.md#new-remote-tmux-sessions).
 
-Persistence behavior:
+### Persistence behavior
 
-- layout and workspace changes are persisted immediately when a save path is available
-- pane resize, split, close, quick-add create, move, workspace add/delete/rename, active-workspace changes, `tab_position` changes, and vertical workspace-bar width changes all follow the same immediate-save path
-- when no `--config` is given, the default save path is `~/.config/panemux/config.yaml`; the directory is created automatically on first save
-- pane maximize state is frontend-local, tracked per workspace, and restored when the user switches away from a workspace and then returns
+Layout/workspace persistence and per-workspace maximize state are specified in
+[Frontend persistence behavior](frontend.md#persistence-behavior).

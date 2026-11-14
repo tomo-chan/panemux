@@ -1,9 +1,15 @@
+---
+type: Guide
+title: "Quality Gateway"
+description: "Product and test quality characteristics, verification gates, and enforcement responsibilities."
+---
+
 # Quality Gateway
 
 This guide defines the current quality model and the gates that enforce it. Use
 [DEVELOPMENT.md](../DEVELOPMENT.md) for commands and workflow, [Scenario coverage](scenarios.md) for
-the user-facing acceptance ledger, and [quality-gateway/decisions.md](quality-gateway/decisions.md)
-for the rollout history and rationale behind decisions D1–D14.
+the user-facing acceptance ledger, and [Quality decision index](decisions/quality-gateway/index.md)
+for the history and rationale behind decisions D1–D14.
 
 ## What the tests protect
 
@@ -43,7 +49,7 @@ The order is intentional: cheaper checks should reject a defect before expensive
 
 | # | Gate | Checks | Enforcement |
 |---|---|---|---|
-| **G0** | Spec | User-visible changes update `scenarios.md`; changes the documentation screenshots show retake them; documentation links and fragments resolve | Scenario and screenshots CI plus `make check-docs-links` |
+| **G0** | Spec | User-visible changes update `scenarios.md`; changes the documentation screenshots show retake them; documentation links and fragments resolve; OKF concept metadata and index structure are valid | Scenario and screenshots CI plus `make check-docs-links` and `make check-docs-okf` |
 | **G1** | Edit | `gofmt -s`, targeted `go vet`, or `tsc --noEmit` for an edited file | `.claude` post-edit hook |
 | **G2** | Unit | Go and frontend unit/integration suites | `make check` and CI; pre-push runs the changed packages and modules only (D14) |
 | **G3** | Contract | Real-router HTTP/WS tests, exhaustive route expectations, Go-produced Zod fixtures, agmsg contract, and model-to-code transition replay | Always-on tests in `make check`; real agmsg and TLC in dedicated CI/opt-in jobs |
@@ -53,14 +59,10 @@ The order is intentional: cheaper checks should reject a defect before expensive
 
 ### Toolchain consistency
 
-Gate results use the exact Go and Node versions in `go.mod` and `.node-version` locally and
-in CI. The common runtime shell selects and verifies them before Makefile initialization and
-recipes; direct hooks, npm tasks, efficacy/mutation scripts, and browser fixture launchers
-use the same selector. Required SDK acquisition and startup failures stop the check. Node's
-verified cache install is locked and published atomically; damaged SDKs fail closed.
-`make test-go-toolchain` and `make test-node-toolchain`, included in `make check` and run
-explicitly in CI, protect selection, inheritance, and bootstrap failure behavior.
-See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
+Gate results use the exact Go and Node versions in `go.mod` and `.node-version`.
+The [runtime contract](development/runtime.md) owns selection, verified acquisition, locking,
+and failure behavior. `make test-go-toolchain` and `make test-node-toolchain`, included in
+`make check` and run explicitly in CI, protect selection, inheritance, and bootstrap failures.
 
 ### The fixture agent's tagged build
 
@@ -93,7 +95,7 @@ The stand-ins' own behavior is tested by `make test-screenshots-check`.
 `make test-agmsg-automation` runs offline Python tests for release/SHA resolution,
 PR scope, fixture and pin updates, and proposal deduplication/retry. It runs in `make check`
 and CI. Actual scheduled App authentication and PR delivery need owner-provided secrets;
-these remain an operational check. See [maintenance](maintenance.md#the-agmsg-compatibility-contract-job).
+these remain an operational check. See [maintenance](maintenance/agmsg-contract.md#the-agmsg-compatibility-contract-job).
 
 ### Local verification execution
 
@@ -141,17 +143,16 @@ or a JDK use explicit opt-in commands or dedicated CI jobs.
 Inside the Claude Code sandbox, the tests and gates that need a pseudo-terminal, a tmux server, `ps`
 or `dscl` probe for it and report themselves skipped; with `CI` set the same probe failing fails them,
 so CI (L4) is where they are verified. See D13 in
-[quality-gateway/decisions.md](quality-gateway/decisions.md).
+[Decision rationale](decisions/quality-gateway/capability-probes.md).
 
 ## Deep dives
 
 | Topic | Document |
 |---|---|
-| Why the gates have this shape; decisions D1–D14 | [Design decisions](quality-gateway/decisions.md) |
+| Why the gates have this shape; decisions D1–D14 | [Design decisions](decisions/quality-gateway/index.md) |
 | First mutation findings and their classification | [Mutation findings](quality-gateway/mutants.md) |
-| Versioned benchmark and accessibility evidence | [Measurements](quality-gateway/measurements.md) |
+| Benchmark evidence and accessibility policy | [Measurements](quality-gateway/measurements.md), [Accessibility ceilings](quality-gateway/accessibility.md) |
 | Commands and exemptions for each mechanism | [Development deep dives](development/) |
-| Chronological cross-topic milestones | [Decision log](DECISIONLOG.md#quality-gateway) |
 
 ## Sources
 

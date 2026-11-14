@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Contract fixtures (`testdata/api-contract/`)"
+description: "Go-produced API fixtures and their validation against frontend runtime schemas."
+---
+
 # Contract fixtures (`testdata/api-contract/`)
 
 > Part of the [development guide](../../DEVELOPMENT.md). That document carries the summary of this one and the rules that always apply.
@@ -23,5 +29,5 @@
   a response schema means adding a capture there and an entry in `contract.test.ts`; both sides have
   an exhaustiveness check that fails until you do.
 - See [testdata/api-contract/README.md](../../testdata/api-contract/README.md) for the values normalized out
-  of a capture, and decision D10 in [docs/quality-gateway/decisions.md](../quality-gateway/decisions.md) for why the
+  of a capture, and decision D10 in [Decision rationale](../decisions/quality-gateway/rewritten-contract-fixtures.md) for why the
   fixtures are rewritten rather than diffed.

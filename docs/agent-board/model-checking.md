@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Agent Board: state-machine model checking"
+description: "State-machine verification responsibilities and conformance between Agent Board models and code."
+---
+
 # Agent Board: state-machine model checking
 
 > Part of the current [Agent Board design](../agent-board.md).

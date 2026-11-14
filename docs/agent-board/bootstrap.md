@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Agent Board: pane detection"
+description: "Pane agent detection, bootstrap behavior, and configuration compatibility."
+---
+
 # Agent Board: pane detection
 
 > Part of the current [Agent Board design](../agent-board.md).

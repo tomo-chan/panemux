@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.30.0](https://github.com/tomo-chan/panemux/compare/v0.29.0...v0.30.0) (2026-11-08)
+
+
+### Features
+
+* remove Agent Board PTY onboarding ([#511](https://github.com/tomo-chan/panemux/issues/511)) ([3da39f6](https://github.com/tomo-chan/panemux/commit/3da39f628832575ed71d6933e923363f437c3424))
+
+
+### Bug Fixes
+
+* disable agmsg self naming in Agent Board ([#517](https://github.com/tomo-chan/panemux/issues/517)) ([5eacd5e](https://github.com/tomo-chan/panemux/commit/5eacd5ea92ccce7420a9bc08cc8c10f06828cb40))
+
 ## [0.29.0](https://github.com/tomo-chan/panemux/compare/v0.28.0...v0.29.0) (2026-11-06)
 
 

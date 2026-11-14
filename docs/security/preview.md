@@ -1,13 +1,18 @@
+---
+type: Security Requirement
+title: "Security: the split preview"
+description: "Preview isolation, path validation, symbolic links, tokens, and remote content boundaries."
+---
+
 # Security: the split preview
 
 > Part of the [security design](../security.md). That document carries the general rules, the `gosec` policy, and the map of these files.
 
 ## Previewing Local Files
 
-The split preview ([behavior](../behavior/preview.md)) shows HTML and Markdown from the panemux
-host's filesystem in the dashboard. An HTML mock is untrusted content: an agent wrote it, and its
-scripts run. Read this section before changing `internal/preview`, `PostSessionPreview` /
-`ServePreview` in `internal/api/preview.go`, `PreviewSplit`, or `usePreview`.
+The [split preview](../behavior/preview.md) shows local HTML and Markdown as untrusted content,
+including agent-written scripts. Read this section before changing `internal/preview`,
+`PostSessionPreview` / `ServePreview` in `internal/api/preview.go`, `PreviewSplit`, or `usePreview`.
 
 ### Isolation from the dashboard's origin
 
@@ -26,8 +31,8 @@ dashboard or opened in a tab of its own. That is the isolation:
 - it cannot read the dashboard's DOM, storage or cookies, nor the dashboard read it;
 - every request it makes to `/api/*` or `/ws/*` arrives as cross-site — `Origin: null` or
   `Sec-Fetch-Site: cross-site` — and the [shared browser request guard](auth.md#shared-browser-request-guard)
-  refuses it before any handler runs. `TestServer_PreviewIsIsolatedFromTheDashboardOrigin` pins this
-  through the shipped router, and the WebSocket and session-token routes with it;
+  refuses it before any handler runs, including WS and session-token routes (production-router
+  regression: `TestServer_PreviewIsIsolatedFromTheDashboardOrigin`);
 - no `Access-Control-Allow-Origin` is sent, so a script in it cannot read even a refused answer;
 - without `allow-top-navigation` or `allow-popups` it cannot navigate the dashboard or open windows.
 
@@ -49,16 +54,13 @@ not served by panemux: `PreviewSplit` frames the URL itself, and panemux makes n
 The page is the operator's own development server, the same page a tab would show, so it keeps its
 server's origin — its module scripts, hot reload socket and storage depend on it.
 
-The page is not framed directly. `PreviewSplit` frames a document of panemux's own
-(`localhostFrameDocument` in `utils/preview.ts`, given as `srcdoc`) that holds one frame of the page,
-and that document's `Content-Security-Policy` is `default-src 'none'; style-src 'unsafe-inline';
-frame-src` followed by `http`/`https` on any port for `localhost`, `127.0.0.1` and the IPv4 loopback
-address the URL names. A browser enforces `frame-src` on every navigation of that frame, a redirect
-or one the page starts itself, so a localhost page that leads to an external site — a `302`, an
-open redirect, a login bounced to an external identity provider, `location.href` — is refused in
-the frame rather than shown under the localhost URL; #359 opens external sites in a tab. Navigation
-between loopback addresses stays allowed. The document runs no script of its own (`default-src
-'none'`), and the URL reaches it only as an escaped attribute value.
+`PreviewSplit` wraps one inner page frame in a script-free `srcdoc` document
+(`localhostFrameDocument` in `utils/preview.ts`). Its CSP is `default-src 'none'; style-src 'unsafe-inline'; frame-src`
+followed by `http`/`https` on any port for `localhost`, `127.0.0.1` and the URL's IPv4 loopback
+address. `frame-src` applies to every navigation, including `302`, open redirects, external
+identity-provider redirects and `location.href`: external navigation is refused in the frame;
+#359 opens external sites in a tab. Navigation between loopback addresses remains allowed. The URL enters
+only as an escaped attribute value, and `default-src 'none'` forbids the wrapper's own scripts.
 
 A policy cannot name an IPv6 address, so an `[::1]` URL is framed as `localhost` on the same port,
 path, query and fragment, which the browser resolves to `::1` as well. That page's origin is then
@@ -146,9 +148,8 @@ site cannot ask for a file. This section covers `local` and `tmux` sessions, who
 host; `ssh` and `ssh_tmux` sessions are in [Previewing Files of an SSH Host](#previewing-files-of-an-ssh-host).
 Only HTML and Markdown names resolve.
 
-Only files inside the session's working directory and its agent's worktrees can be previewed. That
-is the boundary #359's "path and symlink escape" asks for: the request names a path, and the server
-decides which directories it may reach — never the path itself.
+Only files inside the session's working directory and its agent's worktrees can be previewed.
+The server decides the allowed directories; a request path never selects that boundary.
 
 Each opened file is registered with a **root**, the innermost of those directories holding it (see
 [behavior](../behavior/preview.md#what-is-shown)):
@@ -187,21 +188,17 @@ to outlive the pane it came from ([lifetime](../behavior/preview.md#lifetime)).
 
 ### Size
 
-The previewed HTML or Markdown file is at most `preview.MaxDocumentBytes` (10 MiB), checked when it is
-opened and again on every request, and Markdown is read through a reader bounded to that size, so a
-file that grew does not turn rendering into an unbounded read. HTML is served through an
-`io.SectionReader` of the size that request checked, since `http.ServeContent` seeks to the end of
-what it is given to learn the length: a file that grows past the limit while it is being served is
-cut at the checked size. Other files are streamed with
-`http.ServeContent` and are not bounded.
+HTML and Markdown are limited to `preview.MaxDocumentBytes` (10 MiB), checked at open and on
+every request. Markdown reads are bounded; HTML uses an `io.SectionReader` at the checked size
+so `http.ServeContent`'s end-seek cannot expose later growth. Other files stream through
+`http.ServeContent` without a size bound.
 
 ## Previewing Files of an SSH Host
 
-For an `ssh` or `ssh_tmux` session (a pane, or a task's attach) the preview reads the file from the
-session's host and can relay a localhost URL of that host (issue #387,
-[behavior](../behavior/preview.md#panes-on-an-ssh-host)). Read this section before changing
-`internal/preview`'s `remote.go` or `relay.go`, `session.PreviewConn`, or `previewHosts` in
-`internal/api/preview.go`.
+For `ssh` / `ssh_tmux` panes and task attaches, preview reads files and relays localhost URLs
+from the session's host ([behavior](../behavior/preview.md#panes-on-an-ssh-host)). Read this
+section before changing `internal/preview`'s `remote.go` / `relay.go`, `session.PreviewConn`,
+or `previewHosts` in `internal/api/preview.go`.
 
 ### The connection
 
@@ -266,10 +263,9 @@ A relay binds a real listening socket on the panemux host, so its scope is delib
   certificate for the name it was issued for. panemux never sees or holds the page's TLS keys.
 - **One relay per host and address.** A relay is keyed by the `preview.Remote`, the address and the
   port, and never handed to another: a tab keeps the target it was opened on (#359).
-- **Kept for the server's lifetime.** #359 rules out tying a tab to the pane, a count limit or an idle
-  expiry, so relays have none; they close when the server shuts down. This differs on purpose from
-  [loopback port forwarding](url-open.md#loopback-port-forwarding), which republishes an OAuth
-  callback at its own port number and is bounded.
+- **Kept for the server's lifetime.** Relays have no pane-bound lifetime, count limit or idle expiry;
+  they close at server shutdown. [OAuth loopback forwarding](url-open.md#loopback-port-forwarding)
+  instead republishes the callback's own port and is bounded.
 
 What a relay grants, stated plainly: while panemux runs, every process on the panemux host can reach
 that one loopback address of the SSH host through `127.0.0.1:<relay port>`, as with a forward.

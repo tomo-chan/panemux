@@ -14,9 +14,16 @@ import (
 // execArguments forwards arguments through fixed script text; values never become script text.
 const execArguments = `exec "$@"`
 
-// Board calls act for other agents, never as the calling session. Override any
-// inherited opt-in on the execution host with the public agmsg family opt-out.
-const agmsgExecArguments = `export AGMSG_SELF_NAME=off; exec "$@"`
+// Board calls act for other agents, never as the calling session. The pinned
+// built-in drivers cannot identify a pane after these markers are removed, so
+// self-rename returns before reading/writing durable marks. Keep HOME, PATH and
+// storage settings. Child Bash must not restore the markers or opt in at startup.
+const agmsgEnvironment = `unset BASH_ENV ENV TMUX TMUX_PANE HERDR_ENV HERDR_SOCKET_PATH HERDR_PANE_ID
+unset ORCA_TERMINAL_HANDLE CLAUDE_CODE_ENTRYPOINT CODEX_THREAD_ID
+export AGMSG_SELF_NAME=off
+`
+
+const agmsgExecArguments = agmsgEnvironment + execArguments
 
 // validAgmsgIdentifier constrains team values to the existing safe alphabet.
 // From/to use board.ParseIdentity's structured name and BoardID validation before

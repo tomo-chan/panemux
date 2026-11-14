@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Agent Board: testing plan"
+description: "Required verification layers and test responsibilities for Agent Board."
+---
+
 # Agent Board: testing plan
 
 > Part of the current [Agent Board design](../agent-board.md). Follow the repository-wide TDD,

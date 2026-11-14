@@ -1,3 +1,9 @@
+---
+type: Security Requirement
+title: "Security Design"
+description: "Implementation security invariants, development trust boundaries, and routes to sink requirements."
+---
+
 # Security Design
 
 This document defines the implementation-time security requirements for panemux. Treat it as required reading before changing command execution, shell argument handling, SSH path handling, host key handling, or `gosec`-sensitive code.
@@ -11,7 +17,18 @@ reading before touching the code it covers.
 
 | Sections | Document |
 |---|---|
-| Shell path; Tmux session name; Remote path arguments; SSH private key paths and an unresolvable home directory; SSH `ProxyCommand`; Launching the operator's browser (`--open`); Host execution with separate standard input; Task dashboard collection; Task agent probe; Task launch and resume; Task summaries | [command-execution.md](security/command-execution.md) |
+| Command execution sinks | [command-execution.md](security/command-execution.md) |
+| Shell paths | [shell-path.md](security/shell-path.md) |
+| Tmux sessions | [tmux.md](security/tmux.md) |
+| SSH execution | [ssh-execution.md](security/ssh-execution.md) |
+| Operator browser launch | [browser-open.md](security/browser-open.md) |
+| Host execution | [host-execution.md](security/host-execution.md) |
+| Agmsg acquisition and installation | [agmsg-install.md](security/agmsg-install.md) |
+| Task collection | [task-collection.md](security/task-collection.md) |
+| Codex permission hook | [codex-hook.md](security/codex-hook.md) |
+| Task agent probe | [task-probe.md](security/task-probe.md) |
+| Task launch and resume | [task-launch.md](security/task-launch.md) |
+| Task summaries | [task-summaries.md](security/task-summaries.md) |
 | Agent board remote writes; Agent-reported values in the dashboard UI | [agent-board.md](security/agent-board.md) |
 | Command center subprocess execution | [command-center.md](security/command-center.md) |
 | Auth token and transport encryption | [auth.md](security/auth.md) |
@@ -20,7 +37,8 @@ reading before touching the code it covers.
 
 ## Session Command Execution
 
-All session types that execute a local process use `exec.Command` with user-configurable values such as shell paths and tmux session names. These values must be sanitized before reaching the exec sink. See [command-execution.md](security/command-execution.md) for each sink's guard, [agent-board.md](security/agent-board.md) and [command-center.md](security/command-center.md) for the board and command-center paths, and [url-open.md](security/url-open.md) for the two mechanisms behind opening a URL from a pane.
+User-configurable values, including shell paths and tmux session names, must be sanitized before any session's local `exec.Command` sink.
+Follow the [execution-boundary map](security/command-execution.md), [Agent Board](security/agent-board.md), [command center](security/command-center.md) and [URL-opening](security/url-open.md) requirements for their respective paths.
 
 ## General Rules
 
@@ -40,7 +58,7 @@ all localhost services, including services outside the sandbox. Treat unauthenti
 services as a potential route to actions outside the sandbox, and non-loopback listeners as
 reachable from other machines. This is a development-tool permission; it does not authenticate
 panemux routes or change their runtime trust boundaries. Platform differences and managed-policy
-limits are documented in [Claude Code sandbox](../DEVELOPMENT.md#claude-code-sandbox).
+limits are documented in [Claude Code sandbox](development/claude-sandbox.md).
 
 That is the only permission they grant. Do not add `sandbox.allowPty`,
 `sandbox.network.allowUnixSockets`, `sandbox.network.allowAllUnixSockets` or
@@ -53,7 +71,7 @@ That is the only permission they grant. Do not add `sandbox.allowPty`,
   (`/tmp/claude-<uid>`), so a shared file cannot name it.
 
 Tests that need these capabilities skip inside the sandbox and are verified in CI instead
-(decision D13 in [quality-gateway/decisions.md](quality-gateway/decisions.md)).
+(decision D13 in [Decision rationale](decisions/quality-gateway/capability-probes.md)).
 
 Tests must not write to the developer's own configuration or cache directories. The sandbox makes a
 violation fail loudly, but the rule holds outside it too: substitute `internal/cachedir` and
@@ -70,7 +88,7 @@ and provide npm/npx. A bad published cache is an error, not a reason to silently
 runtime. This is development tooling, with no product/user-input route into its commands.
 Exclusive locking assumes a conforming `mkdir`; affected uutils 0.10.0 is unsuitable
 for concurrent acquisition. The platform limitation and follow-up are in the runtime contract.
-See [the runtime contract](../DEVELOPMENT.md#runtime-version-contract).
+See [the runtime contract](development/runtime.md).
 
 ## agmsg release proposal CI
 
@@ -80,7 +98,7 @@ input is a bounded data-only JSON artifact: fixed capture filenames, JSON object
 provenance validated against independently resolved scope outputs. Reject code, paths, symlinks,
 extra files and oversized content. Trusted code applies constants and fixture data, then runs
 the package tests before minting the repository-scoped App token. See
-[maintenance](maintenance.md#github-app-setup-repository-owner) for permissions and setup.
+[maintenance](maintenance/agmsg-contract.md#github-app-setup-repository-owner) for permissions and setup.
 
 ## `gosec` Policy
 
@@ -90,11 +108,11 @@ the package tests before minting the repository-scoped App token. See
 
 ## Exception: OpenSSH Hashed `known_hosts` Compatibility
 
-`internal/session/ssh.go` intentionally keeps a narrow `//nolint:gosec` on `crypto/sha1` (`G505`) for matching OpenSSH hashed `known_hosts` entries (`|1|<salt>|<hash>`). This is not application-defined hashing and not a credential-storage decision. It is protocol and file-format compatibility with existing OpenSSH user data.
+`internal/session/ssh.go` keeps a narrow `//nolint:gosec` on `crypto/sha1` (`G505`) solely for OpenSSH hashed `known_hosts` patterns (`|1|<salt>|<hash>`), whose format requires HMAC-SHA1. This is protocol/file-format compatibility, not application-defined hashing or credential storage.
 
-OpenSSH defines these hashed host patterns in terms of HMAC-SHA1. To decide which host-key algorithms to advertise, panemux scans the user's `known_hosts` file and must recognize both plaintext host entries and hashed `|1|...` entries. Replacing SHA-1 with another hash would make hashed entries stop matching and would reintroduce SSH connection failures for users whose `known_hosts` files were generated by standard OpenSSH tooling such as `ssh-keygen -H`.
+To narrow `HostKeyAlgorithms` to the host's recorded key types, the scan must recognize both plaintext and hashed entries, including those produced by `ssh-keygen -H`. A different hash would break matching and SSH connections.
 
-This exception is limited to matching OpenSSH `known_hosts` host patterns. It does not weaken host-key verification itself: verification still goes through `knownhosts.New(...)`, and the SHA-1 path is used only to recognize existing hashed entries so the client can narrow `HostKeyAlgorithms` to the key types already recorded for that host.
+Host-key verification still uses `knownhosts.New(...)`; this exception permits only recognition of existing hashed host patterns.
 
 ## Related Documents
 

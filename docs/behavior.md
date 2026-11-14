@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior Specification"
+description: "Startup, configuration, operational assumptions, and routes to runtime contracts."
+---
+
 # Behavior Specification
 
 ## Startup Sequence
@@ -29,7 +35,7 @@ The YAML config defines:
 - optional `task_dashboard` settings: `task_dashboard.autolinks`
 - optional `agent_board` and `command_center` settings
 - optional `task_dashboard.summary.enabled` (default `false`), which turns on the task dashboard's
-  summaries ([Summaries](behavior/tasks.md#summaries)); it is written back only when set
+  summaries ([Summaries](behavior/task-summaries.md#summaries)); it is written back only when set
 
 Legacy top-level `layout` is accepted at load time and normalized to one `default` workspace. The
 next save writes the current `workspaces` shape.
@@ -63,7 +69,7 @@ Layout rules:
 - a list of autolink references shaped like a GitHub repository's: `key_prefix`, `url_template`
   and `is_alphanumeric`. A reference in a task's branch name or PR title links to `url_template`
   with `<num>` replaced by its identifier (see
-  [task dashboard behavior](behavior/tasks.md#repository-branch-pull-request-issues-and-references))
+  [task dashboard behavior](behavior/task-records.md#repository-branch-pull-request-issues-and-references))
 - `key_prefix` is required, without whitespace, and may not overlap another entry's: as on GitHub,
   `TICKET` and `TICK` cannot both be set, since both would match `TICKET123`
 - `url_template` is an absolute `https` URL with a host, containing `<num>` after the host; a
@@ -91,11 +97,21 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 | Agent Attention Notifications | [notifications.md](behavior/notifications.md) |
 | REST API | [rest-api.md](behavior/rest-api.md) |
 | Agent Board REST API; `GET /api/session-token` | [board-api.md](behavior/board-api.md) |
-| WebSocket Protocol; Command Center WebSocket Protocol | [websocket.md](behavior/websocket.md) |
-| Frontend Runtime Behavior; Pane Git and PR metadata | [frontend.md](behavior/frontend.md) |
+| WebSocket Protocol | [websocket.md](behavior/websocket.md) |
+| Command Center WebSocket Protocol | [command-websocket.md](behavior/command-websocket.md) |
+| Frontend Runtime Behavior | [frontend.md](behavior/frontend.md) |
+| Pane Git and PR metadata | [pane-metadata.md](behavior/pane-metadata.md) |
 | Opening URLs from a Pane | [url-open.md](behavior/url-open.md) |
 | Split Preview; Panes on an SSH host; Localhost URLs of an SSH host; `POST /api/sessions/{id}/preview` | [preview.md](behavior/preview.md) |
-| Task Dashboard; Wait signature; `GET /api/tasks`; `POST /api/tasks/hosts/{name}/reconnect`; `PUT /api/tasks/records`; `POST /api/tasks`; `POST /api/tasks/resume`; `POST /api/tasks/summary`; `POST /api/tasks/input-given`; `GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`; agmsg host tool (`GET` and `POST /api/hosts/agmsg`, `POST /api/hosts/agmsg/auto-update`) | [tasks.md](behavior/tasks.md) |
+| Task dashboard model and document map | [tasks.md](behavior/tasks.md) |
+| Collection, state, availability and wait signatures | [task-collection.md](behavior/task-collection.md) |
+| Repository metadata, done and labels | [task-records.md](behavior/task-records.md) |
+| Launch and resume | [task-launch.md](behavior/task-launch.md) |
+| Task summaries and persistence | [task-summaries.md](behavior/task-summaries.md) |
+| Task locations, navigation and temporary terminals | [task-navigation.md](behavior/task-navigation.md) |
+| Task and host terminal REST contracts | [task-api.md](behavior/task-api.md) |
+| Codex permission hook | [task-codex-permissions.md](behavior/task-codex-permissions.md) |
+| Shared host tool coordination and agmsg management | [host-tools.md](behavior/host-tools.md) |
 | Task summaries: what they cost (measurements) | [task-summary-cost.md](behavior/task-summary-cost.md) |
 | Task Events; `GET /ws/tasks/events` | [task-events.md](behavior/task-events.md) (Japanese: [task-events.ja.md](behavior/task-events.ja.md)) |
 
@@ -109,24 +125,20 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 
 ## Distribution and Installation
 
-- Releases are distributed as versioned `.tar.gz` archives through GitHub Releases.
-- The release archives contain the embedded-frontend CLI binary plus reference files such as `config.example.yaml`.
-- macOS installation is expected through `install.sh`, which downloads the correct archive from GitHub Releases and installs the binary into a user-local bin directory by default.
-- Windows installation is supported through WSL2 by using the Linux release archive and the same shell-based installer flow.
-- The release pipeline builds the frontend first, then cross-compiles the Go binary so the shipped executable already contains `frontend/dist`.
-- Repository automation is Makefile-first: CI and release workflows call `make` targets instead of duplicating raw `npm` and `go` command sequences in workflow steps.
+GitHub Releases provides versioned `.tar.gz` archives containing the embedded-frontend CLI and
+reference files such as `config.example.yaml`. macOS uses `install.sh` to install into a user-local
+bin directory by default; Windows uses the same flow with the Linux archive through WSL2.
+See [Installation](../README.md#installation) for commands and options.
 
-Example installation flow:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh | bash -s -- --repo OWNER/REPO
-```
-
-Example version-pinned installation:
+The installer also accepts repository/version environment variables:
 
 ```sh
 MST_REPO=OWNER/REPO MST_VERSION=v1.2.3 ./install.sh
 ```
+
+The release pipeline builds the frontend before cross-compiling Go. CI and release workflows call
+Make targets rather than duplicating raw npm/Go commands; [Maintenance](maintenance.md) owns those
+procedures.
 
 ## Related Documents
 

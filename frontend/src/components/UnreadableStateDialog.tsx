@@ -110,7 +110,7 @@ export default function UnreadableStateDialog({ isOpen, hosts, onClose }: Unread
             ))}{' '}
             from each file. Compare a file with these fields, then follow{' '}
             <a href={UNREADABLE_DOC_URL} target="_blank" rel="noopener noreferrer">
-              How to fix (docs/behavior/tasks.md)
+              How to fix (docs/behavior/task-collection.md)
             </a>
             .
           </p>

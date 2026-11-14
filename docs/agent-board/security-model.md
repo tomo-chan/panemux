@@ -1,3 +1,9 @@
+---
+type: Security Requirement
+title: "Agent Board: security model"
+description: "Agent Board trust boundaries and security responsibilities across hosts and processes."
+---
+
 # Agent Board: security model
 
 > Part of the current [Agent Board design](../agent-board.md). Implementation rules live in
@@ -32,6 +38,9 @@ remains available to the other board. Terminal pane connections are separate.
 - All agmsg script calls, including Install / Update, export the fixed
   `AGMSG_SELF_NAME=off` on the execution host. agmsg's self-naming and `/rename`
   side effects must not name or type into panemux's calling session on behalf of `from`.
+  The same wrapper removes child-shell startup hooks and the pinned drivers' caller-pane
+  markers, so the opt-out cannot be reset by `BASH_ENV`/`ENV` or leave a durable rename
+  skip mark that changes an agent's later actions. Existing agent marks are untouched.
 
 The encoded-body construction mirrors this repository's accepted allowlist-before-exec shape, but
 has not been verified by a real CodeQL run. Treat it as structural mitigation, not proof that the

@@ -1,3 +1,9 @@
+---
+type: Runbook
+title: "Adding an agent"
+description: "Steps and verification requirements for registering and integrating a coding agent."
+---
+
 # Adding an agent
 
 > Part of the [agent registry](../agent-registry.md). That document carries the capabilities, the
@@ -32,7 +38,7 @@ end to end; it is the example below.
    ID, so an agent whose CLI is named otherwise cannot be launched or probed yet
    ([#428](https://github.com/tomo-chan/panemux/issues/428)).
 7. Add its rows to [docs/scenarios.md](../scenarios.md) and its behavior to
-   [docs/behavior/tasks.md](../behavior/tasks.md). Nothing in the API schema or the dashboard
+   [docs/behavior/task-collection.md](../behavior/task-collection.md). Nothing in the API schema or the dashboard
    changes: `agents`, each host's `availability` and each task's `actions` already carry what it
    declares.
 
@@ -50,49 +56,23 @@ end to end; it is the example below.
 | `usage` | — (declared by no agent yet, [#345](https://github.com/tomo-chan/panemux/issues/345)) | — | — | — |
 
 An absent capability is absent everywhere: no availability row, no action on its tasks, no button,
-and the route refuses it ([a task's actions](../behavior/tasks.md#agent-availability)).
+and the route refuses it ([a task's actions](../behavior/task-collection.md#agent-availability)).
 
 ## The fixture agent: a minimal adapter set
 
 The fixture agent declares `detect`, `collect`, `launch` and `summary`, and leaves `resume`,
-`workdir`, `board` and `usage` out, so it also stands for an agent supported in part. Its code is in
-files that build only with the tag:
+`workdir`, `board` and `usage` out, so it also stands for an agent supported in part. The tagged example lives in
+`internal/agent/fixture_agent.go` and `internal/tasks/fixture_agent.go`; the adjacent `*_off.go`
+files return empty lists in the shipped build.
 
-- `internal/agent/fixture_agent.go` — its `Definition`: the ID `panemux-fixture-agent`, the
-  capabilities, and a Task rule that recognizes a process whose program is named like the ID, and a
-  one-shot run (`--print`) as not a session.
-- `internal/tasks/fixture_agent.go` — its adapters, joined to the lists through
-  `fixtureCollectAdapters()`, `fixtureLaunchAdapters()` and `fixtureSummaryAdapters()`:
-  - collect: two sections — the state files under `~/.panemux-fixture-agent/sessions`, and each log's
-    modification time and size under `~/.panemux-fixture-agent/logs` — its process hint, and the code
-    that turns a state file of a running interactive process into a task;
-  - launch: a session ID panemux mints and the fixed fragment that starts the CLI with it. There is
-    no resume adapter, as there is no `resume` declaration;
-  - summary: a source whose fixed script prints a session's log, and a runner that summarizes with
-    the CLI's `--print` mode.
-- `*_off.go` beside each — the untagged build's empty `fixtureAgents()` and adapter lists, so a
-  shipped binary has none of it.
+Its ID and CLI name are `panemux-fixture-agent`. Collection reads state files under
+`~/.panemux-fixture-agent/sessions` and log modification times/sizes under
+`~/.panemux-fixture-agent/logs`, turning running interactive processes into tasks. Launch mints a
+session ID; summary reads the log and runs the CLI in `--print` mode. Its Task rule excludes that
+one-shot mode. There is no
+resume adapter. The common pipelines and API/dashboard consume these adapters without agent-name
+branches.
 
-What checks it:
-
-- `make test-go-fixture-agent` runs its own tests and every contract test in the table above with
-  the tag — for `board` and `workdir`, which it does not declare, that it has no adapter — and the
-  HTTP routes' handling of it (`internal/api`): a launch reaches the host, a resume is refused and
-  runs nothing. It writes `testdata/api-contract/tasks-fixture-agent.json`, the
-  `GET /api/tasks` response with the fixture agent
-  ([contract fixtures](../development/contract-fixtures.md)).
-- `frontend/src/schemas/contract.test.ts` reads that capture with the shipped schemas, and
-  `frontend/src/components/TaskDashboard.fixtureAgent.test.tsx` renders it: its task shows as one
-  of a known agent, with its pane and summary and no Resume, and the New task dialog offers and
-  starts it.
-- The task-dashboard E2E (`frontend/e2e/task-dashboard.spec.ts`) runs panemux built with the tag
-  against a fake CLI, `frontend/e2e/fixtures/fixture-agent/panemux-fixture-agent`, first on `PATH`:
-  a running session is listed in its state with its summary, and a task is started from the New task
-  dialog in a tmux session. The fixture's stand-ins for the CLIs — the fake one, and a `claude` and a
-  `codex` that refuse a summary — are put first on `PATH` right before panemux starts
-  (`frontend/e2e/stand-ins.sh`), so no real CLI runs. `ps` and `lsof` stand-ins answer only for
-  the fixture's own processes, so the developer's own sessions are never listed or read.
-
-The tagged files sit outside the coverage, red-check and mutation gates, and the Claude Code
-`PostToolUse` hook vets them untagged
-([the fixture agent's tagged build](../quality-gateway.md#the-fixture-agents-tagged-build)).
+The [tagged-build contract](../quality-gateway.md#the-fixture-agents-tagged-build) owns verification:
+registry-wide adapter checks (including the absent board/workdir adapters), HTTP launch reaching the host/resume refused before execution, Go-produced `tasks-fixture-agent.json`, frontend schema/rendering checks, and isolated E2E
+against a fake CLI. It also states the untagged coverage/red-check/mutation scope and hook limit.

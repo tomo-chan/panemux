@@ -19,7 +19,7 @@ name: mutation
 #
 # Three things had to be true before the exit code could change, and each was
 # measured rather than assumed — the full record is decision D9 in
-# docs/quality-gateway/decisions.md:
+# docs/decisions/quality-gateway/mutation-verdicts.md:
 #
 #   - The 34% have somewhere to go: //mutation:exempt now waives a mutant TYPE
 #     and not a whole line (#236), so a reason written about the buffer-size

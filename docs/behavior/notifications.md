@@ -1,110 +1,31 @@
+---
+type: Specification
+title: "Behavior: agent attention notifications"
+description: "Agent attention notifications and their relationship to task state and browser visibility."
+---
+
 # Behavior: agent attention notifications
 
-> Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.
+> Part of the [behavior specification](../behavior.md).
 
 ## Agent Attention Notifications
 
-panemux tells the operator when a coding agent starts waiting for them. The input is the
-[task event stream](task-events.md): the server observes the agents' own state on the panemux host
-and every `ssh_connections` host and publishes each change, and the browser decides what to show.
-Terminal output is not searched for prompts, so an agent waiting in a pane no browser has open is
-noticed as well. Codex records nothing when it asks to approve a command; that wait is noticed on
-each host where its permission hook is registered
-([Codex permission requests](tasks.md#codex-permission-requests)), and not at all elsewhere.
+The [task event stream](task-events.md#task-events) observes agent state, rather than searching
+terminal output for prompts. Codex command approval waits require the host's
+[permission hook](task-codex-permissions.md#codex-permission-requests).
 
-When a task starts a wait ([Pane and workspace attention](task-events.md#pane-and-workspace-attention)):
+The receiver contract owns attention and notification eligibility:
 
-- the frame of the pane the task matches flashes while the task is in `wait` on a host that is `ok`,
-  until the pane receives focus or a click; it goes when the task leaves `wait` (`busy`, `idle`,
-  `run` or `unknown`, or it stops running) or its host stops being `ok`, and comes back when the
-  same wait is seen again on an `ok` host, unless it was cleared in this tab meanwhile
-- the containing workspace tab flashes when that workspace is not active, and clears when selected
-  or when the pane's flash goes
-- the browser Notification API is used when permission has already been granted and the wait is not
-  currently visible to the user: neither its pane nor, on the task dashboard, its task is on screen
-- clicking a browser notification brings the app forward and goes to the task: its pane, focused and
-  briefly outlined, in its workspace with any maximized pane hiding it restored; or, when it matches no
-  pane, the task dashboard with the task selected and highlighted
-- if notification permission is undecided, the browser is asked on the first pointer or key
-  interaction instead of waiting for the first wait
+- [Pane and workspace attention](task-events.md#pane-and-workspace-attention): task matching,
+  host health, focus/click clearing and per-tab persistence of cleared waits.
+- [Browser notifications](task-events.md#browser-notifications): visibility, notification permission,
+  `wait_id` deduplication, snapshot/reconnect eligibility, storage limits, contents and click navigation.
+- [Store and connection](task-events.md#store-and-connection): one connection per tab, including
+  while the page is hidden.
 
-Browser notification eligibility is determined by the current UI state:
+If notification permission is undecided, the browser asks on the first pointer or key interaction,
+instead of waiting for the first wait.
 
-| Browser state | On screen | Browser notification |
-|---|---|---|
-| active | the task's pane, in the active workspace and not hidden by maximize | no |
-| active | the task dashboard, listing the task | no |
-| active | anything else: the pane in another workspace or hidden by maximize, the dashboard with the task filtered out, or the workspaces for a task that matches no pane | yes |
-| inactive | anything | yes |
-
-A wait is notified once per `wait_id` in a browser
-([Browser notifications](task-events.md#browser-notifications)): each tab keeps the IDs it has
-notified in its session storage, so a reload or a reconnect of that tab does not notify the same wait
-again. Tabs do not coordinate: two tabs showing panemux can each notify the same wait, and the
-notification's `tag` (the `wait_id`) replaces one still shown rather than stacking it. The pane and workspace indicators
-reappear after a reload while the task is still waiting, unless this tab already cleared that wait,
-which it records in its session storage the same way. A wait is recorded as notified only once a
-notification is shown. One that arrived while permission was not granted is notified on a later
-reconnect whose snapshot has it with its host still `ok`; after a reload that stopped observation
-(the only tab), its host is `pending` in the snapshot and the wait is not notified by that tab, though
-its pane flashes. A wait that starts after permission is granted is notified as usual. A later wait of the same task has a new
-`wait_id` and notifies again. The notification shows the agent, the host and the task's directory
-name, never what it waits for or conversation text.
-
-Attention detection is the server's: the browser keeps one task event connection per tab rather than a
-connection per pane.
-
-For pane-header Git status, local and local tmux panes inspect the local filesystem, while `ssh`
-and `ssh_tmux` panes run the equivalent Git inspection on the remote host. This allows headers to
-show branch/repository info even when the repository exists only on the SSH target.
-
-Workspace tab summaries and their integrated pane groups use the same Git metadata source and also
-poll `/api/sessions` to summarize pane connection state across every workspace, including inactive
-ones.
-
-Pane-header Git and PR metadata is fetched immediately when a pane becomes visible, then refreshed
-every 10 seconds only while both the browser tab and that pane remain visible.
-
-The backend caches each session's git-info response for 30 seconds so that this steady-state polling
-(and any other concurrent viewer of the same session, such as another browser tab) does not repeat
-process/transcript scanning, remote git inspection over SSH, or `gh pr view` lookups on every request.
-A pane's displayed Git/PR metadata may therefore lag the true state by up to 30 seconds; the cache is
-cleared whenever a session is deleted or recreated so a new session never inherits another session's
-cached response. Explicit refresh triggers — clicking or focusing a pane, restoring the browser tab,
-or opening VS Code — only skip the frontend's own request if it already has a response no older than
-10 seconds, matching the steady-state poll interval, so an explicit refresh is bounded by that 10
-seconds plus the server-side cache above rather than compounding a larger, independent client-side
-window on top of it.
-
-Workspace-summary session-state and Git metadata polling are frontend-only and best-effort. While
-the browser tab is visible, the frontend polls every 10 seconds so it can summarize all known
-panes across all workspaces without mounting hidden terminal instances. The integrated summary view
-marks the currently focused pane so the overview stays aligned with the live terminal focus state.
-For `top` and `bottom` workspace bars, pane cards are shown in a hover/focus overlay anchored to
-the workspace tab. For `left` and `right` workspace bars, pane cards stay expanded inline beneath
-their workspace tab. In vertical mode, the workspace tabs and inline cards scroll inside the bar,
-while the `+` action and tab-position controls stay pinned at the bottom.
-
-When a pane is hidden behind maximize, its header Git/PR polling stops until it becomes visible
-again. Restoring the browser tab or making a pane visible again triggers an immediate refresh so
-newly created PR links become clickable without waiting for the next steady-state poll.
-
-When panemux detects that an interactive `codex` or `claude` session is operating in a sibling Git
-worktree for the same repository, pane-header Git/PR metadata and the VS Code open action prefer
-that worktree. After the agent exits, panemux keeps the last valid sibling worktree pinned for that
-pane session until a newer valid sibling worktree is detected or the pane itself changes to a
-different repository.
-
-To avoid repeatedly transferring and parsing unchanged interactive-agent logs, panemux reuses the
-last parsed Codex or Claude worktree result while the underlying session-log or transcript file
-fingerprint remains unchanged. For SSH-backed panes this check uses remote file metadata first and
-only reads the full `jsonl` contents again when the fingerprint changes.
-
-Remote Git inspection currently depends on `git rev-parse --path-format=absolute --git-common-dir`
-on the SSH target, which requires Git 2.31 or newer. Older remote Git versions degrade to "no git
-info" in the pane header for SSH-backed panes.
-
-For terminal text selection, panemux keeps tmux mouse mode unchanged for `tmux` and `ssh_tmux`
-panes. Plain drag therefore continues to follow tmux mouse behavior. To force browser-side xterm
-selection while tmux mouse mode is active, hold `Option` during drag on macOS or `Shift` during
-drag on Linux and Windows.
+Pane-header Git/PR resolution, transcript reuse and workspace-summary polling are specified in
+[Pane Git and PR metadata](pane-metadata.md). Terminal selection modifiers are specified in
+[Selection and copy behavior](frontend.md#selection-and-copy-behavior).

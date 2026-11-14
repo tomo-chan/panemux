@@ -19,7 +19,7 @@ import (
 // ~/.codex/thread_history_1.sqlite's thread_turns (codex-cli 0.157 and
 // later), or else from the last turn event in the rollout — taken together
 // with the process being alive. Checked on real codex-cli 0.142.2 and 0.157.1
-// (macOS) and 0.157.1 (Linux); see docs/behavior/tasks.md.
+// (macOS) and 0.157.1 (Linux); see docs/behavior/task-collection.md.
 
 // codexCollect is Codex's collect adapter. Its live sections are the
 // rollouts codex processes hold open and the approval requests its

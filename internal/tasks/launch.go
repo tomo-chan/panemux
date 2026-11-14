@@ -26,8 +26,7 @@ import (
 // tmux session name are panemux's own and pass allowlist checks, the working
 // directory passes the remote-path guard, and the working directory and the
 // prompt travel inside single-quoted heredocs whose terminator carries a
-// random tag. See docs/security/command-execution.md, "Task launch and
-// resume".
+// random tag. See docs/security/task-launch.md.
 
 // ErrInvalidLaunch is a launch or resume refused before anything ran.
 var ErrInvalidLaunch = errors.New("invalid task launch")

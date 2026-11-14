@@ -10,7 +10,7 @@
 # and a component moved out of components/ and restyled in the same pull
 # request would pass unseen. A change "the images show" is a
 # non-test file (`*.test.ts`, `*.test.tsx`, `*_test.sh`) under the paths below; "retaking them" is any change under
-# docs/images/, which is where `make screenshots` writes.
+# direct PNG files under docs/images/, which is what `make screenshots` writes.
 #
 # The trigger is deliberately the presentation layer only: components, the
 # app shell, stylesheets, the page shell, and the capture itself. hooks/,
@@ -37,8 +37,8 @@ if [ -z "$shown" ]; then
 	exit 0
 fi
 
-if printf '%s\n' "$changed" | grep -q '^docs/images/'; then
-	echo "docs/images/ was updated alongside:"
+if printf '%s\n' "$changed" | grep -qE '^docs/images/[^/]+\.png$'; then
+	echo "PNG screenshots in docs/images/ were updated alongside:"
 	printf '%s\n' "$shown" | sed 's/^/  /'
 	exit 0
 fi

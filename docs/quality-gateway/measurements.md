@@ -1,46 +1,35 @@
+---
+type: Reference
+title: "Quality gateway: first measurements"
+description: "Dated quality measurements, performance evidence, and routes to accessibility ceilings."
+---
+
 # Quality gateway: first measurements
 
 > Part of the [quality gateway](../quality-gateway.md). That document defines the gates this one explains.
 
 ## First measurements
 
-Roadmap item 7 asked for observation without gating, so the point of it is the numbers.
+`make bench` reports observations without a performance gate.
 
-**Read them as indicative, not as a baseline to diff against.** They come from `make bench
-BENCH_ARGS='-count 5'` on a shared container, and the median is quoted with the observed min–max
-beside it because that spread is the story: the `publish` rows move by up to **2.9× between runs of
-the same binary on the same machine**. Anyone rerunning these and getting a different number has not
-found a regression. Choosing a threshold from a single run of these figures would produce a gate
-that fires on container noise, which is principle 4's failure mode exactly — a distribution measured
-on dedicated hardware is what that step actually needs.
+**These timings are indicative, not a regression baseline.** They are medians and observed min–max
+from five shared-container runs of `make bench BENCH_ARGS='-count 5'`. Identical `publish` binaries
+vary up to **2.9×** on the same machine. Different rerun figures do not establish regression;
+a timing threshold needs a distribution on dedicated hardware to avoid principle 4's noise gate.
 
-The rows below were taken in two sessions on two different containers — the originals on a 4-core
-Intel Xeon @ 2.80GHz, the [#193](https://github.com/tomo-chan/panemux/issues/193) before/after pair
-on a 4-core Intel Xeon @ 2.10GHz. **Only compare figures measured together.** The
-before-and-after tables under "Terminal output throughput" were run back to back on the same
-container for exactly that reason; the relay figures are from the first session and have not been
-retaken.
+Originals used a 4-core Intel Xeon @ 2.80GHz; the [#193](https://github.com/tomo-chan/panemux/issues/193)
+pair used another container (4-core Intel Xeon @ 2.10GHz). **Only compare figures measured together.**
+The throughput before/after pairs ran back to back on the same container; relay figures remain
+from the original session and have not been retaken.
 
-**None of the caution above applies to the accessibility rows**, and it is worth saying so rather
-than letting a reader carry it down the page. Those are violation counts, not timings: they have no
-distribution to be noisy, they *were* retaken on a second container and came back identical, and
-they are the only figures in this section that a check actually enforces. That is what made the
-ceiling in #194 possible where a performance threshold still is not.
+Accessibility counts are enforced separately; see [Accessibility](#accessibility).
 
 ### Terminal output throughput
 
-`managedSession.publish` is the path every byte a pane produces travels. The first measurement of it
-found the replay buffer dominating everything else, and [#193](https://github.com/tomo-chan/panemux/issues/193)
-fixed it; both sets of numbers are kept below, because the *shape* of the finding is the useful part
-and it changed.
-
-**What was found.** The replay buffer was a plain slice, and retaining a fixed 256KB window meant
-reallocating and copying the whole window on every chunk. A pane open for more than a few seconds is
-in that state permanently, so it paid a full window copy per 4KB of output, forever — two orders of
-magnitude more than the same call on a cold buffer. `publish` is now backed by a ring
-(`internal/session/replay_buffer.go`): it writes into storage it already owns and moves two indices,
-so the steady-state cost is the length of the chunk and the steady-state allocation is nothing at
-all.
+`managedSession.publish` carries every pane-output byte. [#193](https://github.com/tomo-chan/panemux/issues/193)
+replaced the slice replay buffer, which copied a 256KB window per 4KB chunk at steady state,
+with a ring (`internal/session/replay_buffer.go`). It writes into existing storage and advances
+two indices; steady-state work scales with chunk length and allocates nothing.
 
 **What it costs now.** Per 4KB chunk with no subscribers, five runs before and after, on the same
 container back to back:
@@ -67,16 +56,11 @@ directly comparable, and they are the ones the finding rests on. Separately, the
 111,808 low is the first of its five runs and roughly half the other four; treat the median, not the
 range, as the figure.
 
-The multiple is still not worth quoting to two significant figures — at these spreads the same two
-benchmarks support anything from ~120× to ~200× — and an earlier revision of this section said
-"~33×", computed from a cold figure that the benchmark's own `b.StopTimer` calls had inflated
-threefold. The finding survived that correction comfortably; the precision never existed.
+The spread supports only approximate speedup comparisons; do not quote precise multiples.
 
-**The second conclusion inverted, and that is the part to carry forward.** With the buffer copy in
-place, subscriber fan-out looked cheap — 16 subscribers added roughly 35% to a 4KB chunk, so
-many-pane cost appeared to be dominated by the per-pane buffer. Removing the buffer copy leaves
-fan-out as the whole of it: `publish` still hands every subscriber its own copy of every chunk under
-the session mutex.
+Before the ring, 16 subscribers added roughly 35% per 4KB chunk, so buffer copies dominated.
+Afterwards, fan-out dominates: `publish` copies every chunk for every subscriber under the
+session mutex.
 
 | Subscribers (4KB chunk, full buffer) | before, ns/op (median) | after, ns/op (median) |
 |---|---|---|
@@ -117,61 +101,10 @@ Medians of five runs; these are far steadier than the `publish` rows above (≤1
 `MessagesSince` scans the whole history even when the caller is caught up and gets nothing back,
 which is the shape to watch if the history limit is ever raised.
 
-There is no empty-history `AppendMessage` row, and an earlier revision's claim of a ~270 vs ~730
-contrast between empty and full was noise read as signal. A benchmark cannot hold the cache empty:
-`b.N` is millions, so the first 2000 iterations fill it and the rest measure the full case. Nor is
-there anything to find — the trim is a pointer bump, and append's amortized regrow is paid alike
-either way. `BenchmarkBoardCacheAppendMessage`'s comment records both halves.
+There is no empty-history `AppendMessage` row: `b.N` fills the 2000-row cache, so the benchmark
+measures the full case. Trimming bumps a pointer and append pays amortized regrowth in either
+case. See `BenchmarkBoardCacheAppendMessage`'s comment.
 
 ### Accessibility
 
-Unlike the performance figures above, these are **not** indicative: they are the ceiling
-`frontend/e2e/a11y.spec.ts` now enforces (through the comparator and map in
-`frontend/e2e/a11y-ceiling.ts`), and they reproduced exactly on a second machine before
-being frozen. They are measured against the spec's own fixture and panemux process
-(`frontend/e2e/a11y.yml`, port 4178), not the shared E2E server — D11 records why that separation is
-load-bearing rather than tidiness. Excluding `.xterm` (xterm.js owns that canvas and its markup):
-
-| Page state | Rule | Impact | Ceiling (nodes) |
-|---|---|---|---|
-| Dashboard | `aria-required-children` | critical | 1 |
-| Dashboard | `color-contrast` | serious | 2 |
-| Dashboard | `region` | moderate | 7 |
-| Pane settings dialog open | `aria-required-children` | critical | 1 |
-| Pane settings dialog open | `select-name` | critical | 1 |
-| Pane settings dialog open | `color-contrast` | serious | 10 |
-| Pane settings dialog open | `region` | moderate | 7 |
-
-The task dashboard and its host connection menu open (issue #314) are scanned too, with the host
-list stubbed to one reachable remote host since the fixture has no SSH server. They have no rows:
-every rule is held at zero there. Their first CI measurement found one `scrollable-region-focusable`
-(serious) node in each — the board, which at 1280px scrolls sideways and, with the fixture's empty
-task list, held nothing focusable. The board was made a tab stop of its own rather than given a
-ceiling.
-
-**Every row is a violation this repository still has.** Listing it here is not approval of it; it is
-the refusal to ship a gate that starts red, which is what turning axe on over an existing UI would
-otherwise mean (principle 4). A count may fall and must not rise, and a rule absent from the table
-has a ceiling of zero, so a new *kind* of violation fails the run the day it appears. D11 records
-why the ceiling is per rule and counts nodes rather than taking either of the looser forms.
-
-That the gate bites was confirmed by perturbation, not assumed: an `<img>` with no `alt` and a
-low-contrast `<span>` added to `TerminalPane` failed both scans, on both branches — `image-alt` as a
-new rule at a ceiling of zero, `region` as an existing rule risen from 7 nodes to 9.
-
-That it does **not** bite spuriously was confirmed the harder way, by it doing so: the first version
-shared the default E2E server and passed alone while failing inside `make test-e2e`. See D11.
-
-**Lowering a ceiling after fixing something.** The run does the arithmetic; the edit is manual and
-takes two files:
-
-1. Run `make test-e2e`. A count that came in under its ceiling prints as
-   `a11y[<page state>] ceiling can be lowered` with the exact replacement — `set
-   CEILINGS['pane-settings']['color-contrast'] to 9 (was 10)`, or `remove 'select-name' from
-   CEILINGS['pane-settings']` when a rule is gone entirely. The same text is in the run's
-   `axe-<page state>.txt` attachment.
-2. Apply it to `CEILINGS` in `frontend/e2e/a11y-ceiling.ts` and to the table above, in the same commit
-   as the fix.
-
-The run passes either way. Nothing forces step 2 — deliberately, per D11 — so a fix that skips it
-silently leaves room for the next regression.
+See [Accessibility ceilings](accessibility.md) for the enforced counts and update procedure.

@@ -1,3 +1,9 @@
+---
+type: Overview
+title: "Application Overview"
+description: "Product purpose, capabilities, operating model, and current boundaries."
+---
+
 # Application Overview
 
 PaneMux is a browser-based terminal workspace. One server process renders multiple local, SSH, and
@@ -5,7 +11,7 @@ tmux sessions in a resizable split layout and serves the browser UI that control
 
 Use this page for the product-level picture. Continue to [Architecture](architecture.md) for system
 structure, [Behavior specification](behavior.md) for runtime contracts, or the
-[documentation index](README.md) to choose another topic.
+[documentation index](index.md) to choose another topic.
 
 ## What it provides
 
@@ -74,23 +80,16 @@ backend and UI are released together.
 - Runtime pane creation is intentionally narrower than the full configuration format. It is used by
   browser pane splitting and by the task dashboard, which creates only `tmux` and `ssh_tmux` panes
   attaching to a task's existing tmux session.
-- The task dashboard reads files Claude Code and codex write for themselves (`~/.claude/sessions`,
-  `~/.claude/projects`, `~/.codex/sessions`, `~/.codex/thread_history_1.sqlite`), which are not a
-  published format, and finds a running codex's session through the rollout file it holds open. It
-  cannot tell a codex waiting for command approval from one at work, so that wait is not notified,
-  unless a hand-registered codex hook records the request
-  ([Codex permission requests](behavior/tasks.md#codex-permission-requests)). It
-  collects only while it is on screen, or while a browser tab subscribes to the task event stream,
-  which observes the running tasks only. A waiting task's `wait_signature` exists only when the
-  agent recorded when the wait began. It finds the pane of an agent outside tmux only on Linux and macOS hosts, where it can read
-  the agent's environment, and on macOS not for an agent that is one of Apple's own binaries. The
-  macOS reading has not yet been run on a macOS host
-  ([details](behavior/tasks.md#the-pane-of-an-agent-outside-tmux)). Whether a task is done is only
-  what a person marked; only tasks with a session ID can be marked done or labeled.
-- The task dashboard starts and resumes claude and codex tasks, each as one agent process in a
-  detached tmux session of its own on the host; it opens no pane for them, and a codex held at a
-  start-up screen waits for a person in that pane. Starting one creates no pane
-  config either, so the runtime pane creation rule above is unchanged.
+- The task dashboard depends on unpublished Claude Code and Codex state formats. See
+  [collection and states](behavior/task-collection.md) for data sources, polling, unknown formats,
+  wait signatures, and done/label eligibility. Codex command-approval waits require the
+  [permission hook](behavior/task-codex-permissions.md#codex-permission-requests).
+- Finding an agent's pane outside tmux has platform limits; see
+  [task navigation](behavior/task-navigation.md#the-pane-of-an-agent-outside-tmux), including the
+  unverified macOS environment-reading support.
+- [Task launch and resume](behavior/task-launch.md) starts Claude Code and Codex in detached tmux
+  sessions without creating a pane or pane config; a Codex task held at a startup screen waits
+  for operator input in its tmux pane.
 
 ## Where to continue
 
@@ -98,4 +97,4 @@ backend and UI are released together.
 - [Behavior specification](behavior.md) — startup, configuration, APIs, and browser behavior.
 - [Security design](security.md) — implementation requirements by sensitive sink.
 - [UI design](ui-design.md) — interaction and presentation rules.
-- [Decision log](DECISIONLOG.md) — why the present design replaced earlier approaches.
+- [Decision log](decisions/index.md) — why the present design replaced earlier approaches.

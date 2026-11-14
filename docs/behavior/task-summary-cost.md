@@ -1,9 +1,15 @@
+---
+type: Reference
+title: "Task summaries: what they cost"
+description: "Dated measurements of task summary cost for synthetic conversations and selected models."
+---
+
 # Task summaries: what they cost
 
-> Measurements for [task summaries](tasks.md#summaries). These numbers are evidence, dated
+> Measurements for [task summaries](task-summaries.md#summaries). These numbers are evidence, dated
 > 2026-10-10, not a specification: they come from one synthetic conversation and the CLI and models
 > of that day. Why the summarizer runs as it does is in
-> [DECISIONLOG.md](../DECISIONLOG.md#summaries-cost-less-a-fixed-system-prompt-no-tools-and-haiku-2026-10-10-issue-353).
+> [Decision rationale](../decisions/tasks/summary-cost.md).
 
 ## How it was measured
 
@@ -90,4 +96,4 @@ An organization's managed `availableModels` can leave Haiku out. The CLI then an
 default model and does not fail, so one summary costs about what the default-model rows above show:
 around 30 times Haiku's cost. The summarizer reads the model names in `modelUsage` from the CLI's
 answer. When one is not a Haiku, the summary records it, the detail panel names it, and the server
-logs it once per model ([tasks.md](tasks.md#summaries)).
+logs it once per model ([task-summaries.md](task-summaries.md#summaries)).

@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: REST API"
+description: "REST endpoints, request and response contracts, and failure behavior."
+---
+
 # Behavior: REST API
 
 > Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.
@@ -17,16 +23,8 @@ Every route that changes the config persists it before answering, and each one a
 when that step fails: **the config panemux is still running is the config the error says was not
 saved.**
 
-This has to be arranged rather than assumed. `Config.write()` serializes the whole in-memory config,
-so a route cannot save first and mutate afterwards — it mutates, then writes. A route that returned
-`500` and left its mutation in place therefore did two things the operator could not see: it kept
-running a config it had just reported as unsaved, and it left that change to be persisted by the next
-successful write from *any other* route, so a failed workspace deletion could land in `config.yaml`
-when an unrelated rename succeeded minutes later.
-
-Each route now takes a `config.Snapshot()` before it mutates and restores it when the write fails
-(issue [#204](https://github.com/tomo-chan/panemux/issues/204)). Sessions are the other half of the
-same rule, and the ordering follows from it:
+Each config mutation takes a snapshot and restores it if persistence fails. Session lifecycle
+ordering preserves the same rule:
 
 - A route that **destroys** a session — `DELETE /api/sessions/{id}`, `DELETE /api/workspaces/{id}` —
   persists the config change first and tears the session down only once the write has succeeded. A
@@ -34,9 +32,8 @@ same rule, and the ordering follows from it:
 - A route that **creates** sessions — `POST /api/workspaces` — closes and unregisters the ones it had
   already created when a later pane or the write itself fails, so a failed attempt leaves neither a
   workspace whose panes have no session nor sessions no workspace lists.
-- `POST /api/sessions/{id}/restart` is the shape the other routes were brought in line with: it
-  creates the replacement session before it touches anything, so a failure leaves the existing
-  session registered and servable.
+- `POST /api/sessions/{id}/restart` creates the replacement session before it touches anything, so a failure
+  leaves the existing session registered and servable.
 
 Validation failures (`400`, `422`) and unknown IDs (`404`) never reach the mutation at all.
 
@@ -44,32 +41,15 @@ Validation failures (`400`, `422`) and unknown IDs (`404`) never reach the mutat
 
 Returns the current layout tree as JSON.
 
-Every layout node in a response carries both `direction` and `children`, whatever the config file
-says. `config.yaml` may omit either — and may write a single-pane workspace as `layout: {pane: ...}`
-with no children at all, which validation accepts — but `normalizeLayoutNode` fills in the direction,
-substitutes an empty array for absent children, and moves a root `pane` into the one child it means
-before anything serializes. The frontend's `LayoutNodeSchema` requires both keys and covers the whole
-response, so without normalization a node missing either fails the *entire* workspaces payload
-rather than dropping a key; see issue #198. Every frontend call site reads `child.pane` off a layout *child*, so relocating
-a root `pane` is what makes such a workspace display at all.
+Every response layout node carries `direction` and `children`. Missing direction is normalized;
+missing children become `[]`. A root `pane` with no children becomes its single layout child and
+is validated like any other pane: missing type or an undefined SSH connection fails startup with
+the equivalent child-pane error. Normalization does not repair invalid values such as direction.
 
-The migration is persisted the next time the layout is saved, so a hand-written config converges on
-the `direction` + `children` form rather than being rewritten underneath the operator on read.
-
-**Relocation applies only to a root `pane` with no children.** A node written as `{pane, children}` is
-left exactly as the operator wrote it, and the response still carries the root `pane` — prepending it
-to children that already sum to 100 would rescale every sibling and surface a pane that has never
-rendered. `LayoutNodeSchema` therefore keeps declaring `pane`: a key the schema does not declare is
-stripped by `parse()`, stored stripped, and written back on the next split, which would delete it from
-`config.yaml`.
-
-**A relocated root pane is validated like any other pane.** Once it becomes a `LayoutChild` it goes
-through `validatePane`, so a root pane with no `type`, or one of
-`type: ssh` naming a connection that `ssh_connections` does not define, now fails startup with the
-same message the equivalent child pane has always produced. This is deliberate: normalization does not
-substitute values the operator never wrote (the same reason an invalid `direction` is reported rather
-than corrected), and an error naming the pane is more actionable than the previous outcome, which was
-an invalid workspace that displays nothing.
+A node containing both `pane` and children is preserved as written, including the root `pane` in
+the response and frontend schema, without prepending or rescaling siblings. Zod requires direction
+and children for the whole workspaces response; undeclared fields would be stripped and lost on
+later saves. The normalized shape is persisted on the next layout save, never rewritten on read.
 
 ### `PUT /api/layout`
 
@@ -79,14 +59,10 @@ Accepts a layout JSON document, validates it, updates in-memory state, and persi
 - `422`: structurally invalid layout
 - `200`: accepted and returned
 
-The request body is normalized before it is validated, stored and echoed, and `~/` expansion runs
-after normalization rather than before — the same order `finishLoad` uses. `ExpandLayoutPaths` walks
-`children` only, so expanding first would leave a relocated root pane's `cwd` as a literal `~/`, which
-is then a relative path for whatever starts that pane's session. A `PUT` therefore persists and
-returns the same shape a load would have produced. Without that the echoed body is the only
-`LayoutNode` in an API response that never passes through `normalizeLayoutNode` — a node `PUT` without
-a direction would come back as `"direction": ""`, which `LayoutNodeSchema`'s enum rejects. The same
-applies to `PUT /api/workspaces/{id}/layout`.
+The request is normalized, then `~/` paths are expanded, then it is validated, stored and echoed,
+matching config load order. Expansion follows normalization so a relocated root pane's `cwd`
+is expanded too. The echoed response has normalized direction/children and passes the frontend
+schema. The same applies to `PUT /api/workspaces/{id}/layout`.
 
 ### `GET /api/workspaces`
 
@@ -113,8 +89,8 @@ Accepts `{ "vertical_bar_width": <int> }`, validates the shared vertical workspa
 ### `GET /api/sessions`
 
 Returns a list of active sessions with `id`, `type`, `title`, and `state`. The task dashboard's
-temporary attaches ([`POST /api/tasks/attach`](tasks.md#post-apitasksattach)) and host terminals
-([`POST /api/hosts/terminal`](tasks.md#post-apihoststerminal)) are not listed.
+temporary attaches ([`POST /api/tasks/attach`](task-api.md#post-apitasksattach)) and host terminals
+([`POST /api/hosts/terminal`](task-api.md#post-apihoststerminal)) are not listed.
 
 ### `POST /api/sessions`
 
@@ -153,28 +129,16 @@ starts successfully.
   working against it instead of 404ing until a future restart succeeds.
 - `200`: the new session replaced the old one (or was created fresh if none existed)
 
-The SSH transport-dial step retries transient failures (such as a momentary DNS resolution error) a
-bounded number of times with a short backoff before this endpoint returns `500`. Only the initial
-TCP/ProxyJump/ProxyCommand connection step is retried, not SSH handshake or authentication failures.
-The retry budget is a single wall-clock deadline shared across an entire ProxyJump chain (each hop
-reuses the same deadline rather than getting its own fresh budget), and each retried attempt's own
-timeout shrinks to whatever of that budget remains, so a hanging/unreachable host cannot make this
-endpoint wait dramatically longer than the ceiling a single dial attempt already tolerated before
-retries were introduced.
+SSH transport dialing retries transient failures (including DNS errors) a bounded number of times
+with short backoff. Only TCP/ProxyJump/ProxyCommand connection setup is retried, never handshake
+or authentication failure. One wall-clock deadline covers the entire ProxyJump chain and every
+attempt's timeout shrinks to the remaining budget.
 
-Once the transport is up, the SSH handshake (version exchange, key exchange and authentication) is
-bounded too, and by panemux rather than by the transport. Its ceiling is 30 seconds, but it gets
-whatever is left of the dial budget when that is less: the handshake shares the budget instead of
-opening a window of its own on top of it, because a ProxyJump chain reaches this step once per hop
-and unshared windows would multiply — a wedged two-hop chain would wait three times the ceiling the
-budget documents. The handshake runs in its own goroutine and the call returns when it finishes or
-when that timer fires, whichever comes first. It has to work this way for all three transports:
-`golang.org/x/crypto/ssh`'s `NewClientConn` reads no timeout, sets no deadline and takes no context,
-and the transports disagree about deadlines anyway — a TCP conn honors them, a ProxyJump hop is an
-SSH channel whose `SetDeadline` reports "not supported", and the ProxyCommand transport's is a no-op
-because its pipes have none. The timeout prevents a ProxyCommand bastion that hangs while
-establishing its own tunnel from blocking a pane's reconnect indefinitely. A timed-out handshake is
-reported as a `500` from this endpoint like any other handshake failure.
+Once connected, each SSH handshake (version exchange, key exchange and authentication) gets at
+most 30 seconds and no more than the remaining dial budget; it does not open a fresh window per
+hop. Panemux enforces this even where transport deadlines are unsupported or ineffective
+(ProxyJump channels and ProxyCommand pipes), so a hung bastion cannot block reconnect indefinitely.
+A timed-out handshake returns `500`, like any other handshake failure.
 
 ### `POST /api/sessions/{id}/open-url`
 
@@ -261,30 +225,19 @@ symbolic links leading outside the root answer `404`; an HTML or Markdown file o
 
 ### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume`, `POST /api/tasks/summary`, `POST /api/tasks/input-given`, `GET`/`POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update` and `POST`/`DELETE /api/tasks/attach`
 
-The task dashboard's collection, its per-host reconnect, the done and label records (and the labels
-used before, `known_labels` on `GET /api/tasks`), starting
-and resuming tasks, and asking for a task's summary. Their responses and the collection rules are in
-[task dashboard behavior](tasks.md#get-apitasks); the records are in
-[Done and labels](tasks.md#done-and-labels) and [`PUT /api/tasks/records`](tasks.md#put-apitasksrecords);
-starting and resuming are in [Starting a task](tasks.md#starting-a-task),
-[Resuming a task](tasks.md#resuming-a-task), [`POST /api/tasks`](tasks.md#post-apitasks) and
-[`POST /api/tasks/resume`](tasks.md#post-apitasksresume); summaries are in [Summaries](tasks.md#summaries)
-and [`POST /api/tasks/summary`](tasks.md#post-apitaskssummary); marking a codex permission request
-answered is in [`POST /api/tasks/input-given`](tasks.md#post-apitasksinput-given); a host's codex permission hook
-and updating it by itself are in [`GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`](tasks.md#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update); the board's temporary tmux attach is in
-[`POST /api/tasks/attach`](tasks.md#post-apitasksattach).
+Task payloads, response fields, status codes and failure semantics are authoritative in the
+[task REST API](task-api.md). Runtime rules are linked from the [task dashboard guide](tasks.md).
 
 ### `GET` and `POST /api/hosts/agmsg`
 
 Manual pinned agmsg state and installation/update for the panemux host or a configured SSH host,
-available only with Agent Board enabled. See [Manual agmsg host tool](tasks.md#manual-agmsg-host-tool).
+available only with Agent Board enabled. See [Manual agmsg host tool](host-tools.md#manual-agmsg-host-tool).
 
 ### `POST /api/hosts/session-name` and `POST`/`DELETE /api/hosts/terminal`
 
-Opening a host from its chip on the task dashboard: a generated tmux session name for an
-`ssh_tmux` terminal, and the host terminal Type in pane shows. They are in
-[Opening a host](tasks.md#opening-a-host), [`POST /api/hosts/session-name`](tasks.md#post-apihostssession-name)
-and [`POST /api/hosts/terminal`](tasks.md#post-apihoststerminal).
+Generated session names and temporary host terminals: see the
+[host terminal API](task-api.md#post-apihostssession-name) and
+[host navigation](task-navigation.md#opening-a-host).
 
 ### `GET /api/ssh-connections`
 
@@ -331,12 +284,12 @@ Request body:
 - `500`: unable to read or write `~/.ssh/config`
 - `201`: host appended
 
-`name` must match `^[a-zA-Z0-9_.\-]+$`. `hostname`, `user`, and `identity_file` must not contain a control character: each is written as the rest of one line, and a line break would add a directive of its own ([security](../security/command-execution.md#ssh-proxycommand)). `port` defaults to 0 (omitted from the written block) when not specified. `identity_file` is optional.
+`name` must match `^[a-zA-Z0-9_.\-]+$`. `hostname`, `user`, and `identity_file` must not contain a control character: each is written as the rest of one line, and a line break would add a directive of its own ([security](../security/ssh-execution.md#ssh-proxycommand)). `port` defaults to 0 (omitted from the written block) when not specified. `identity_file` is optional.
 
 ### `/api/config/ssh-connections`
 
 Lists and edits `ssh_connections` in `config.yaml`: the hosts the
-[task dashboard](tasks.md#hosts-and-connections) collects from, which panes can also use
+[task dashboard](task-collection.md#hosts-and-connections) collects from, which panes can also use
 ([SSH](ssh.md#defining-connections-in-ssh_connections)). This is not `~/.ssh/config`, which
 `POST /api/ssh-config/hosts` writes. All four routes refuse a request another site's page made with
 `403`, as the task routes do, and every change is written to `config.yaml` through the same
@@ -392,4 +345,4 @@ effective task dashboard shortcut letter, upper-cased, `S` when the config does 
 
 The global agmsg preference uses `POST /api/hosts/agmsg/auto-update` with only an enabled boolean,
 not a host selector. Tool responses include its global value and retained automatic results; see
-[global agmsg automatic updates](tasks.md#global-agmsg-automatic-updates).
+[global agmsg automatic updates](host-tools.md#global-agmsg-automatic-updates).

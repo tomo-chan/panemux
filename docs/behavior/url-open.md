@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: opening URLs from a pane"
+description: "Opening URLs from terminal panes and forwarding loopback login callbacks."
+---
+
 # Behavior: opening URLs from a pane
 
 > Part of the [behavior specification](../behavior.md). That document carries startup, configuration, and operational assumptions.
@@ -76,7 +82,7 @@ Two limitations are inherent to the mechanism:
   command instead, so it execs the login shell explicitly (`$SHELL -l` for `bash`, `zsh`, and
   `fish`; a plain `exec "$SHELL"` for anything else). Panes that set `cwd` or `shell` keep their
   `cd` and `exec`, after the shim's setup. A pane whose ID is exported as `PANEMUX_PANE_ID`
-  ([task dashboard](tasks.md#the-pane-of-an-agent-outside-tmux)) runs such a command whether or not
+  ([task dashboard](task-navigation.md#the-pane-of-an-agent-outside-tmux)) runs such a command whether or not
   the shim is enabled; `url_open.browser_shim: false` only drops the shim from it. A pane with
   neither keeps the SSH shell request, or its plain `cd` / `exec` command.
 
@@ -122,18 +128,13 @@ that forward before navigating, and forwarding failures are shown in the popup. 
 does not offer **Preview**, including for localhost URLs. Retry or Reconnect drops pending requests
 and errors belonging to the replaced terminal.
 
-A printed link, whose text is the URL, opens when clicked. In workspace panes and task popups,
-a localhost link opens in [the split preview](preview.md#opening-a-localhost-url) instead of a tab:
-in a terminal on the
-panemux host as it is, and in an `ssh` or `ssh_tmux` pane, or the popup of a task on an SSH host,
-that host's URL through a relay of its own rather than a forward
-([Localhost URLs of an SSH host](preview.md#localhost-urls-of-an-ssh-host)). While the terminal is
-connected, clicking a printed localhost link previews it and prepares no forward; while it is not,
-the preview cannot open, and the link opens in a tab — in a pane with its callback forward, in
-the task's Type in pane popup without one. In a pane the strip's `Open` keeps the tab and the callback
-forward, on an SSH host as everywhere, so an OAuth flow whose callback must arrive at its own port
-number is opened from the strip with `Open`. The task's Type in pane popup is not a pane and has no
-forwards; its `Open` opens the tab only.
+A printed link opens when clicked. In workspace panes and task popups, a connected terminal's
+localhost link opens in the [split preview](preview.md#opening-a-localhost-url), through the
+[remote relay](preview.md#localhost-urls-of-an-ssh-host) for SSH hosts, and prepares no callback
+forward. Without a connected terminal it opens a tab: a workspace pane prepares its callback
+forward, but a task popup never does. For these two surfaces, the strip's **Open** prepares a
+callback forward in a workspace pane and opens the tab without a forward in a task popup. Use a
+workspace pane's **Open** for OAuth callbacks that must arrive at the original port number.
 An OSC 8 hyperlink's target is chosen by the program's output and need not match its text, so a
 click on one shows the approval strip above, saying `This link goes to` and naming the target, with
 `Open` and `Ignore`, plus `Preview` in workspace panes and task popups. OSC 8 links are `http` and

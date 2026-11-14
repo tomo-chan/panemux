@@ -24,6 +24,7 @@
 #   .claude/            the hook tests
 #   frontend/screenshots, frontend/e2e/*.sh  the screenshot fixtures' tests
 #   *.md                the documentation link check
+#   docs/*.md, scripts/docsokf/*.go  OKF checker and its Go tests
 #   docs/scenarios.md   the scenario ledger check
 #
 # Falls back to `make check` — never to checking nothing — when a change cannot
@@ -190,6 +191,12 @@ else
 		case "$f" in
 		*.md) add docs-links ;;
 		esac
+		case "$f" in
+		docs/*.md | scripts/docsokf/*.go)
+			add docs-okf
+			add docs-okf-tests
+			;;
+		esac
 		[ "$f" = docs/scenarios.md ] && add scenarios
 	done < "$files.sorted"
 fi
@@ -289,6 +296,12 @@ for t in $(args shell); do
 done
 if grep -qx docs-links "$plan.sorted"; then
 	run "documentation links" sh scripts/docs_links_check.sh
+fi
+if grep -qx docs-okf-tests "$plan.sorted"; then
+	run "OKF checker tests" make test-docs-okf
+fi
+if grep -qx docs-okf "$plan.sorted"; then
+	run "OKF bundle" make check-docs-okf
 fi
 if grep -qx scenarios "$plan.sorted"; then
 	run "scenario ledger" sh scripts/scenarios_check.sh

@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/tomo-chan/panemux/actions/workflows/ci.yml/badge.svg)](https://github.com/tomo-chan/panemux/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go 1.24](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://golang.org)
+[![Go](https://img.shields.io/badge/Go-00ADD8?logo=go)](https://golang.org)
 [![Releases](https://img.shields.io/github/v/release/tomo-chan/panemux)](https://github.com/tomo-chan/panemux/releases)
 
 ![panemux in the browser: on the left, the workspace bar lists the "Development", "Review" and "Ops" workspaces with a card per pane showing its repository and branch. The "Development" workspace is split into a local shell showing git log, and on the right a tmux pane running a dev server above a local shell that ran the tests. Each pane header shows its type, title, repository and branch.](docs/images/workspace.png)
@@ -45,7 +45,7 @@ Or with options:
 
 ### Build from source
 
-Requirements: **Go 1.24+**, **Node.js 20+**
+Requirements: use the exact Go and Node versions in the [runtime version contract](DEVELOPMENT.md#runtime-version-contract).
 
 ```sh
 git clone https://github.com/tomo-chan/panemux.git
@@ -117,13 +117,16 @@ Common uses:
 
 ### Notifications and attention prompts
 
-- panemux watches terminal output for agent confirmation prompts such as approval or proceed requests.
-- Codex permission menus such as MCP tool allow prompts are detected too.
-- When one is detected, the pane frame is highlighted.
-- If the pane belongs to an inactive workspace, that workspace tab is highlighted too.
-- Browser notifications are shown after notification permission has been granted only when the prompt is not currently visible to the user, and clicking one switches to the matching workspace.
-- panemux remembers the last browser-notified prompt per pane, so refreshes, reconnects, and maximize toggles do not re-notify the same prompt replay.
-- Notification permission is requested on the first browser interaction, instead of waiting for the first prompt.
+panemux observes coding agents' recorded task state through the
+[task event stream](docs/behavior/task-events.md), including agents outside visible panes.
+Codex command-approval waits need the host's
+[permission hook](docs/behavior/task-codex-permissions.md#codex-permission-requests).
+
+A waiting task highlights its pane frame and inactive workspace tab. With browser notification
+permission granted, a wait that is not visible can also notify; clicking it reveals the pane or
+opens the task dashboard. Permission is requested on the first browser interaction. See
+[notifications and attention](docs/behavior/notifications.md) for visibility, clearing and
+per-tab deduplication rules across reloads and reconnects.
 
 ### Task dashboard
 
@@ -137,7 +140,7 @@ Common uses:
 - A session running inside `tmux` can be opened: **Open** adds a `tmux` (or `ssh_tmux`) pane attached to its tmux session to the current workspace, and **Go to pane** jumps to a pane already attached to it. A session running outside tmux, or stopped, cannot be opened in a pane.
 - Each SSH host gets one command connection shared by both boards, separate from its panes. An unreachable host shows its error and a **Reconnect** button without hiding the other hosts.
 - A card links the repository, branch and pull request of the task's directory, the issues that pull request closes (needs `gh` 2.72.0 or later), and references such as `JIRA-123` in the branch name or pull request title. References are set up in `config.yaml` under `task_dashboard.autolinks`, in the same shape as a GitHub repository's autolink references: `key_prefix: JIRA-` with `url_template: https://jira.example.com/JIRA-<num>` links `JIRA-123` to `https://jira.example.com/JIRA-123`. The tracker itself is never queried.
-- Claude Code sessions are read from the files Claude Code keeps under `~/.claude` on each host, and codex sessions from `~/.codex` (the session log a running `codex` holds open, and its turn history when `sqlite3` is installed). A codex waiting for command approval shows as working, since codex records nothing for it, unless its permission hook is registered on that host ([Codex permission requests](docs/behavior/tasks.md#codex-permission-requests)). A `codex` started without `--no-daemon` runs its session in codex's shared daemon, which the dashboard shows as a card of its own that cannot be opened in a pane.
+- Claude Code sessions are read from the files Claude Code keeps under `~/.claude` on each host, and codex sessions from `~/.codex` (the session log a running `codex` holds open, and its turn history when `sqlite3` is installed). A codex waiting for command approval shows as working, since codex records nothing for it, unless its permission hook is registered on that host ([Codex permission requests](docs/behavior/task-codex-permissions.md#codex-permission-requests)). A `codex` started without `--no-daemon` runs its session in codex's shared daemon, which the dashboard shows as a card of its own that cannot be opened in a pane.
 - **New task** starts `claude` or `codex` in a tmux session of its own on the chosen host, and **Resume** restarts a stopped session there. If codex stops at a start-up screen (trusting the directory, a new model), open the task's pane to answer it.
 - Set `task_dashboard.summary.enabled: true` in `config.yaml` to have each agent CLI on this machine summarize its own Claude Code or Codex session: what it is doing and the work left, on its card and in its detail panel. It sends the text of the conversation (never tool output) to the corresponding agent account on this machine, so it is off by default. Codex uses the operator's existing settings and permissions.
 
@@ -184,7 +187,7 @@ cooldown; **Reconnect** clears that wait for both boards.
 
 **[agmsg](https://github.com/fujibee/agmsg) must be installed** on every host whose panes join
 the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux is tested against the
-[pinned agmsg version and commit](docs/maintenance.md#bumping-the-pinned-agmsg-version); it reads each host's `VERSION` on its first successful probe and logs a warning for anything else, without
+[pinned agmsg version and commit](docs/maintenance/agmsg-contract.md#bumping-the-pinned-agmsg-version); it reads each host's `VERSION` on its first successful probe and logs a warning for anything else, without
 blocking. agmsg promises compatibility only for reading through `scripts/api.sh`, while panemux also
 depends on `send.sh` for messaging and `install.sh` for managed Install / Update, so a different
 version may work or may misbehave.
@@ -341,7 +344,7 @@ workspaces:
 
 Older config files with a top-level `layout:` are still accepted. When the config is next saved, panemux migrates that layout into a `default` workspace and writes the `workspaces:` format.
 
-The workspace bar is always available for workspace actions. Newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. The same bar also exposes inline workspace rename, workspace delete with confirmation, a `+` workspace action, and tab-position controls. When the bar is vertical, its width is shared across all workspaces and is also persisted. It also acts as a cross-workspace operational overview: pane detail cards can be selected to focus that pane, and those same cards can be dragged onto another workspace to move the pane there. Switching the active workspace, changing `tab_position`, and resizing the vertical workspace bar are persisted so the same navigation chrome is restored after restart. Agent confirmation prompts, including Codex MCP allow menus, can mark inactive workspace tabs and trigger browser notifications after notification permission has been granted. Clicking the notification switches to the relevant workspace.
+The workspace bar is always available for workspace actions. Newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. The same bar also exposes inline workspace rename, workspace delete with confirmation, a `+` workspace action, and tab-position controls. When the bar is vertical, its width is shared across all workspaces and is also persisted. It also acts as a cross-workspace operational overview: pane detail cards can be selected to focus that pane, and those same cards can be dragged onto another workspace to move the pane there. Switching the active workspace, changing `tab_position`, and resizing the vertical workspace bar are persisted so the same navigation chrome is restored after restart. For task-state attention, the Codex permission hook requirement, and notification navigation to a pane or the task dashboard, see [Notifications and attention prompts](#notifications-and-attention-prompts).
 
 ### Pane types
 
@@ -354,70 +357,48 @@ The workspace bar is always available for workspace actions. Newly added workspa
 
 ### SSH connections
 
-Connections can be defined in two ways:
+Use a named `ssh_connections` entry or any non-wildcard `~/.ssh/config` host alias as a pane's
+`connection`. A name-only YAML entry (`gpu-box:`) takes its details from the same-named `Host`
+block; explicitly set fields override that block. **Hosts…** on the task dashboard manages the YAML
+entries; **Add SSH Host** writes `~/.ssh/config`. The task dashboard collects only YAML-listed SSH hosts.
 
-**In the YAML config** under `ssh_connections` — supports `host`, `user`, `port`, `key_file`, `password`, and `known_hosts_file`, all optional. An entry can be just a name (`gpu-box:`), in which case its details come from the `~/.ssh/config` `Host` block of the same name. A field set in the entry overrides that block's value for the same setting; the fields left out keep the block's values.
+See [SSH connections](docs/behavior/ssh.md) for all fields, `ProxyJump` / `ProxyCommand` precedence,
+authentication order, host-key requirements, and pane working-directory behavior.
 
-**Via `~/.ssh/config`** — any non-wildcard `Host` entry is automatically available as a `connection` name. `HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump`, and `ProxyCommand` are read from the file. This lets you reuse your existing SSH config without duplicating it in YAML.
-
-The task dashboard collects only from the hosts under `ssh_connections`. A host that exists only in `~/.ssh/config` — including one added from the UI with **Add SSH Host**, which writes `~/.ssh/config` — is usable in panes but is not collected from until its name is listed under `ssh_connections`, which **Hosts…** on the task dashboard does without editing the file.
-
-An entry that sets its own `host` does not take the `Host` block's `ProxyJump` or `ProxyCommand`; leave `host` unset to connect through the route `~/.ssh/config` describes.
-
-Earlier versions added every `~/.ssh/config` host to `ssh_connections` when the config was saved, if `ssh_connections` was not empty. Those entries are not removed automatically; delete the ones you do not want on the task dashboard from `ssh_connections` by hand.
-
-Authentication is attempted in order: the key file (`key_file`, or the `Host` block's `IdentityFile` when `key_file` is not set) → configured `password` → default key files (`~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`).
+Earlier versions copied SSH-config hosts into a non-empty `ssh_connections` on save. Those entries
+are not removed automatically; remove unwanted dashboard hosts from YAML by hand.
 
 ---
 
 ## Documentation
 
-Start with the [documentation index](docs/README.md). It separates a short product
+Start with the [documentation index](docs/index.md). It separates a short product
 [overview](docs/overview.md), concise current-state topic guides, focused deep dives, and the
-[decision log](docs/DECISIONLOG.md) that preserves design history and rejected alternatives.
+[decision log](docs/decisions/index.md) that preserves design history and rejected alternatives.
 
 ---
 
 ## Development
 
+See [DEVELOPMENT.md](DEVELOPMENT.md) for pinned runtime requirements, first-time
+`make install-deps`, dev-server commands, and the mandatory `make check` quality gate.
+It also defines coverage, lint, test and pre-push requirements; CI runs the full suite on each PR.
+
 ### Prerequisites
 
-- Go 1.24+
-- Node.js 20+
+Use the [runtime version contract](DEVELOPMENT.md#runtime-version-contract).
 
 ### Setup
 
-```sh
-make install-deps   # first time: npm install + go mod download + repo-local pre-push hook setup
-```
+Follow [Build And Run](DEVELOPMENT.md#build-and-run).
 
 ### Dev servers
 
-```sh
-make dev-backend    # Go backend on :8080
-make dev-frontend   # Vite dev server on :5173 (proxies /api and /ws to :8080)
-```
+Use the [development commands](DEVELOPMENT.md#build-and-run).
 
 ### Quality gate
 
-```sh
-make check   # lint + test + coverage (must pass before build)
-```
-
-`make install-deps` also configures the tracked `.githooks/pre-push` hook, which runs the checks the
-pushed change touches before every `git push`. CI runs the whole suite on every pull request.
-
-Individual commands:
-
-```sh
-go test ./... -v -race           # Go tests
-cd frontend && npm test          # Frontend tests
-make test-e2e                    # Playwright E2E for browser-only rendering regressions
-make coverage-go                 # Go coverage (≥ 80 % required)
-cd frontend && npm run coverage  # Frontend coverage (≥ 80 % required)
-go vet ./...                     # Go lint
-cd frontend && npx tsc --noEmit  # TypeScript type check
-```
+Follow the [quality gate](DEVELOPMENT.md#quality-gate) and [push protection](DEVELOPMENT.md#push-protection).
 
 ---
 

@@ -1,8 +1,14 @@
+---
+type: Guide
+title: "Agent Board"
+description: "Agent Board capabilities, design principles, and routes to focused contracts."
+---
+
 # Agent Board
 
 Agent Board adds self-reported agent status, cross-pane messaging, a read-only dashboard, and an
 optional conversational command center. This guide summarizes the current design; the
-[Decision log](DECISIONLOG.md#agent-board) records its history.
+[Decision log](decisions/agent-board/index.md) records its history.
 
 ## What it does
 
@@ -63,7 +69,7 @@ agmsg's scripts; it never reads agmsg's database or team files directly.
 | `/api/session-token` | loopback-only browser bootstrap for authentication and feature flags |
 
 Exact request/response behavior lives in [Agent Board REST API](behavior/board-api.md) and
-[Command Center WebSocket Protocol](behavior/websocket.md#command-center-websocket-protocol).
+[Command Center WebSocket Protocol](behavior/command-websocket.md#command-center-websocket-protocol).
 
 ## Document map
 
@@ -81,12 +87,12 @@ Exact request/response behavior lives in [Agent Board REST API](behavior/board-a
 | How is compatibility with agmsg verified? | [agmsg contract](agent-board/agmsg-contract.md) |
 | Which state-machine property is modeled? | [Model checking](agent-board/model-checking.md) |
 | How is the subsystem tested? | [Testing plan](agent-board/testing-plan.md) |
-| Why were alternatives rejected? | [Decision log](DECISIONLOG.md#agent-board) |
+| Why were alternatives rejected? | [Decision log](decisions/agent-board/index.md) |
 
 ## Related documents
 
 - [Architecture](architecture.md) — whole-system component ownership.
 - [Behavior specification](behavior.md) — runtime and protocol contracts.
 - [Security design](security.md) — implementation requirements.
-- [UI design](ui-design.md#agent-board-ui) — dashboard, palette, and history interactions.
-- [Decision log](DECISIONLOG.md#agent-board) — chronological reasoning and superseded designs.
+- [UI design](ui-design/agent-board.md#agent-board-ui) — dashboard, palette, and history interactions.
+- [Decision log](decisions/agent-board/index.md) — chronological reasoning and superseded designs.

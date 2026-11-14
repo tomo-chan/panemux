@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Agent Board: integration with agmsg"
+description: "Participation, identity selection, and messaging through the official agmsg workflow."
+---
+
 # Agent Board: integration with agmsg
 
 > Part of the current [Agent Board design](../agent-board.md).
@@ -72,7 +78,7 @@ an interactive profile is insufficient.
 ### Version coverage
 
 `agmsg.TestedAgmsgVersion` and `agmsg.TestedAgmsgCommit` pin the tested release and source commit.
-Read those constants for the current tested pair; [maintenance](../maintenance.md#bumping-the-pinned-agmsg-version) describes verified bump proposals.
+Read those constants for the current tested pair; [maintenance](../maintenance/agmsg-contract.md#bumping-the-pinned-agmsg-version) describes verified bump proposals.
 Startup compares normalized installed releases with the pinned release; every different release,
 including a newer patch, warns without blocking messaging. Missing VERSION remains unknown.
 Only whitespace and a leading v are normalized. Describe builds, dirty trees and prereleases

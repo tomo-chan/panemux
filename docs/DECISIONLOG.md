@@ -1,2284 +1,382 @@
+---
+type: Decision
+title: "Decision Log"
+description: "Compatibility routes to decisions grouped by topic."
+---
+
 # Decision Log
 
-This log records *why* a consequential design or implementation choice was made, what it replaced,
-and the sequence in which related choices changed. The rest of `docs/` describes the current state.
-
-Newest entries appear first within each topic. Dates and pull requests are included when repository
-history identifies them. A decision remains here after its consequences are reflected in the
-current specification; superseded decisions are retained and labelled as such.
+See the [decision index](decisions/index.md) for topic listings.
 
 ## Release recovery uses the original source with GNU coreutils (2026-11-02, PR #479)
 
-The v0.27.0 draft was created before its GoReleaser build failed. Later main pushes
-do not emit `release_created` for that draft, and rerunning its old workflow does
-not acquire newer runner setup. Recovery therefore resolves the existing draft's
-full target SHA and uses the current main workflow to build that source. It leaves
-the release in draft for asset verification and publication, without adding later
-product features or changing the next release proposal.
-
-Installing zsh alone did not resolve the original failure. An Ubuntu 26.04 probe
-of the unchanged release source reproduced two successful `mkdir` calls for the
-same install lock, followed by the second `rmdir` failing. Its uutils 0.10.0 checks
-existence before creation, then incorrectly accepts `EEXIST` even without `-p`;
-the upstream correction is
-[mkdir: do not ignore EEXIST on non-recursive creation](https://github.com/uutils/coreutils/commit/bf423f388d543b9180db6b7283d82b301f138913).
-The [failing probe](https://github.com/tomo-chan/panemux/actions/runs/41428251934)
-records both installers passing lock acquisition. Local runs, including 30 with
-dash for both parent and nested shells, did not reproduce the coreutils defect.
-
-The release build job uses Ubuntu 24.04's GNU coreutils, as the regular CI job
-does. The [GNU coreutils verification](https://github.com/tomo-chan/panemux/actions/runs/41429903531)
-ran the unchanged v0.27.0 source's Node suite 30 times, then passed its complete
-`make check build-frontend` gate. This preserves the original release's source and full quality gate rather
-than ignoring lock-cleanup errors, retrying until a race happens to pass, or
-overlaying newer scripts onto an older release. Returning to a newer runner
-requires a corrected `mkdir` and successful concurrent-selector and release-gate
-verification. See [release maintenance](maintenance.md#recovering-a-failed-release-build)
-for draft checks, serialized runs and partial-upload cleanup.
-
-Both release paths resolve metadata inside the publisher's `contents: write`
-job because draft visibility requires push access. They build the draft's target
-SHA; a [live Actions token check](https://github.com/tomo-chan/panemux/actions/runs/41442887780)
-successfully read and validated the actual v0.27.0 draft with that permission.
-Both paths use the recorded
-SHA rather than the triggering push SHA, and reject existing assets before
-checkout or tests. Metadata validation and upload share a per-tag concurrency
-group; GitHub can replace a pending same-tag job, while an active upload and
-other tags are unaffected. A main-ref condition prevents accidental dispatch
-from another branch but does not restrict writers who can change workflow code.
-The [GitHub concurrency probe](https://github.com/tomo-chan/panemux/actions/runs/41447379449)
-used the production job condition and cancellation policy in an isolated group
-with an empty tag. A readiness job ensured that group was already occupied before
-the no-release job became eligible. The holder ran from 12:46:15 to 12:46:20 UTC,
-while the no-release job became `skipped` at 12:46:19 UTC, without waiting for the
-group. The read-only probe never built, uploaded or published a release, and its
-temporary workflow was removed after verification.
-The underlying development-tool lock limitation remains tracked in
-[issue #480](https://github.com/tomo-chan/panemux/issues/480).
+[Moved to release-source-recovery](decisions/maintenance/release-source-recovery.md).
 
 ## agmsg pin bump proposals (2026-10-31, issue #437)
 
-The daily real-install contract resolves the latest stable release tag to its commit SHA (peeling
-annotated tags), then uses that SHA throughout installation and capture. PR checks read
-TestedAgmsgCommit directly, so retagging cannot change the code under review. Successful markers
-include tag and SHA; cached successes may retry proposal creation.
-
-A GitHub App token, chosen in #437, creates fix PRs with version/SHA, captured Tier 1 fixtures and
-matching assertions. Capture works on CI with an isolated HOME; the original v1.2.0 ID-order
-regression remains frozen because fresh captures need not reproduce that ordering. Contents and
-pull-requests write suffice; the owner creates/installs the App and registers secrets. Missing
-secrets skip proposals without failing verification. Token minting runs on a separate fresh runner,
-after validating a data-only artifact and testing trusted code against it. The upstream runner
-receives no App secrets. Only JSONL and provenance cross the job boundary; scripts, Go source and
-hooks never do. Preflight avoids repeating capture for existing proposals. Pin-dependent tests
-derive expectations from constants/captures, so bumps need no test edits or efficacy exemptions.
-GITHUB_TOKEN was not chosen because its events do not trigger ordinary PR CI.
-
-Release-specific branches deduplicate all PR states, including deliberate closure. A newer tag
-gets its own proposal; older proposals remain unchanged for human comparison and closure rather
-than being force-updated or automatically merged. A pushed branch without a PR is reused after a
-creation failure. Release-please is unchanged: fix triggers a patch proposal and publishing its
-draft remains manual. This is stage 5 of #438; it neither tracks upstream main nor alters #435's
-runtime acquisition design.
+[Moved to agmsg-pin-proposals](decisions/maintenance/agmsg-pin-proposals.md).
 
 ## Documentation structure
 
+[Moved to development](decisions/development/index.md).
+
 ### The screenshots' fixed paths are links into the run's own root (2026-10-10, issue #328)
 
-`/tmp/sample-project` was a real directory the run claimed through a marker file inside it. On
-2026-10-08 a run stopped because the directory was still there with its directories but none of
-its files, marker included; `/tmp/panemux-screenshots-agmsg` was found the same way. macOS's
-`com.apple.tmp_cleaner` (`/usr/libexec/tmp_cleaner`, daily at 00:00) deletes files under `/tmp`
-whose access, modification and change times are all more than three days old, and empty
-directories more than three days old; a directory a file was just deleted from is newly modified,
-so the directories outlast their files. The marker is never read after it is written, so it went
-while a file read since stayed. As long as the marker lived at the fixed path, losing it alone
-stopped every later run until the developer moved the directory away. The fixed paths became symbolic links into
-`$TMPDIR/panemux-screenshots`, so the marker that decides what may be emptied sits only at the
-run's root. A directory holding nothing but empty directories is removed as left over, with
-`rmdir`, rather than refused: nothing a developer keeps can be lost that way. The root itself,
-under the developer's own `$TMPDIR`, is cleaned the same way by `com.apple.bsd.dirhelper`, so it is
-also claimed without the marker when every entry in it is a name the run creates there. A fresh
-`mktemp` root per run, which would need no claiming at all, was not chosen: its longer name puts
-the tmux socket past macOS's 104-byte limit under the default `$TMPDIR`, and the capture's teardown
-would have to find a root that changes every run. Recognising a link
-the run made by its target's name, `<...>/panemux-screenshots/<the link's own name>`, was chosen
-over recording its target in a file, which could be lost the same way; replacing a link never
-touches what it points to.
+[Moved to screenshot-owned-roots](decisions/development/screenshot-owned-roots.md).
 
 ### The screenshot-helper tests choose where tmux's sockets go (2026-10-10, issue #343)
 
-`screenshots-env_test.sh` moved its tmux sockets from `/tmp` to `$TMPDIR` in #315 so the Claude Code
-sandbox, which cannot write `/tmp`, could run it. Its deepest socket then overran macOS's 104-byte
-limit outside the sandbox, where `$TMPDIR` is `/var/folders/...` and tmux resolves it into
-`/private/var/folders/...`; Linux CI and the sandbox both have a short `$TMPDIR`, so neither saw it.
-The test now uses `$TMPDIR` when the socket fits there and `/tmp` otherwise, and fails saying so
-when neither fits. Flattening the test's directories alone was not enough: the socket's path under
-the run root (`panemux-screenshots/tmux/tmux-<uid>/default`) is the fixture's own. The length check
-now measures the resolved path, since that, not the path as given, is what tmux binds.
+[Moved to screenshot-socket-paths](decisions/development/screenshot-socket-paths.md).
 
 ### Retaking the screenshots is checked by diff, not by pixels (2026-10-03, issue #285)
 
-A pull request that changes the presentation layer (`frontend/src/components/`, `App.tsx`,
-`styles/`, `index.html`) or the capture itself must also change `docs/images/`, unless it carries
-the `screenshots-exempt` label (`.github/workflows/screenshots.yml`). Regenerating the images in CI
-and comparing them pixel by pixel was not chosen: the images carry relative times ("2s ago") and
-font rendering differs between a developer's machine and the runner, so the comparison would fail
-on changes nobody made. `hooks/`, `schemas/` and `utils/` are outside the trigger for the reason
-the scenario ledger's check keeps its trigger narrow: they change what is on screen far less often
-than they change, and a check that fires without cause gets bypassed.
+[Moved to screenshot-diff-check](decisions/development/screenshot-diff-check.md).
 
 ### Screenshots are generated, and the task dashboard's tasks are a fixture (2026-10-03, issue #285)
 
-The README and docs images are captured by `make screenshots` (Playwright, `frontend/screenshots/`)
-rather than by hand, so they can be regenerated when the UI changes. The capture has its own
-Playwright config instead of being an e2e spec: it writes tracked files under `docs/images/`, and
-neither `make test-e2e` nor CI should do that or fail on a pixel difference.
-
-The workspace, pane settings and Agent Board images come from the real server against placeholder
-state (a fake `HOME`, a sample git repository, a private tmux socket, a stub agmsg store). The task
-dashboard image does not: the real collection lists every claude and codex process of the user
-running it (`ps -U <own uid>`), so a developer's own sessions and their working directories would
-appear in the image. The capture serves `/api/tasks` from a fixed placeholder list and keeps the
-task event stream from connecting instead.
+[Moved to screenshot-fixtures](decisions/development/screenshot-fixtures.md).
 
 ### Current-state guides and historical decisions are separate (2026-09-23)
 
-Top-level topic documents had accumulated three different kinds of information: current rules,
-deep implementation detail, and a narrative of issues and rollout phases. Readers looking for the
-current contract had to infer it from phrases such as "landed", "earlier revision", and "Phase 3".
-
-The documentation now has three reading levels: [overview](overview.md), concise topic guides, and
-same-topic deep dives. This log owns chronology, rejected alternatives, and migration reasoning.
-The structure and writing rules are indexed in the [documentation index](README.md).
+[Moved to current-state-and-history](decisions/development/current-state-and-history.md).
 
 ## Architecture
 
+[Moved to architecture](decisions/architecture/index.md).
+
 ### Domain config and file context use separate types (2026-09-20, issue #66, PR #240)
 
-`config.Data` is the serializable domain model and preserves user-facing YAML section order.
-`config.Config` embeds it and adds load/save context such as file and SSH-config paths. The earlier
-single type mixed persisted data with runtime context; a separate serialization struct then had to
-repeat every config section and silently dropped a section when that copy was not updated.
+[Moved to domain-config-context](decisions/architecture/domain-config-context.md).
 
 ### Filesystem globals use named seams (2026-09-10 through 2026-09-13, PRs #224, #231, #234)
 
-Home-directory, cache-directory, and persistent-write behavior had been overridden independently by
-callers or manipulated through process-wide environment variables in tests. The repository adopted
-`internal/homedir`, `internal/cachedir`, and `internal/fileops` as one named seam per global
-capability. The separation is deliberate: home and cache lookup have different platform semantics,
-and atomic file replacement has different safety properties from either lookup.
-
-These seams make failure paths injectable and give lint a single allowed location for direct OS
-lookups. They are not safe for parallel substitution; tests that override them remain non-parallel.
+[Moved to filesystem-seams](decisions/architecture/filesystem-seams.md).
 
 ### Loopback callbacks use a panemux-host forward (2026-08-23, PR #177)
 
-CLI login flows in remote panes open `localhost` callback URLs on the SSH host, while the browser
-runs on the panemux host. Panemux chose an on-demand local listener backed by SSH `direct-tcpip`
-instead of exposing a general proxy or requiring users to preconfigure `ssh -L`. The scope remains
-loopback-only and the listener exists only for the callback flow.
+[Moved to loopback-callback-forward](decisions/architecture/loopback-callback-forward.md).
 
 ## Runtime and API contracts
 
+[Moved to runtime](decisions/runtime/index.md).
+
 ### Browser interception in new remote tmux sessions (2026-10-09, issue #339)
 
-Claude MCP authentication showed panemux's approval strip in an `ssh` pane but not an `ssh_tmux`
-pane. The difference was the missing shim environment and tmux consuming the private OSC, rather
-than an earlier Open suppressing a later request. Support is limited to new sessions created by
-panemux's `ssh_tmux` pane, as requested: existing shells and agents cannot inherit environment
-changes retroactively. Session-local `new-session -e` sets the browser and opt-in marker without
-seeding settings into the server's global environment. Real-tmux tests showed that tmux overwrites
-the initial pane's PATH from the attaching client, ignoring `-e PATH`. A fixed new-pane bootstrap
-therefore prepends the shim after that override, then invokes the operator's configured default
-command literally or starts the configured login shell. The configured options remain unchanged.
-The shim opts only its emitting pane into passthrough and wraps its OSC; tmux 3.3 is the minimum
-for that scoped option. Global passthrough remains unchanged. Browser approval remains mandatory.
+[Moved to remote-tmux-browser-shim](decisions/runtime/remote-tmux-browser-shim.md).
 
 ### Command-center terminal frames carry non-fatal warnings (2026-09-11 through 2026-09-13, PRs #228 and #234)
 
-A failed history write was first represented as `error` followed by `done`, violating the protocol's
-one-terminal-frame rule; limiting the warning to successful turns then hid it whenever the query
-also failed. `warnings` now rides whichever single terminal frame ends the turn. Malformed stream
-output cancels the subprocess before its remaining output is drained, preventing the drain from
-holding the busy flag and client error until the full timeout.
+[Moved to terminal-frame-warnings](decisions/runtime/terminal-frame-warnings.md).
 
 ### Layout responses are normalized before frontend parsing (2026-09-03, PR #198)
 
-Valid hand-written config can omit `direction`/`children` or put a lone pane at the layout root,
-while the browser contract requires a normalized recursive node. The API now fills missing keys,
-relocates a lone root pane into its implied child, and validates that pane exactly like every other
-pane. The normalized form is persisted only on the next explicit save.
+[Moved to layout-normalization](decisions/runtime/layout-normalization.md).
 
 ### Command-center prompts use a panemux-owned history entry (2026-08-17)
 
-The Claude stream contains `stream_event`, `system`, `assistant`, and `result` frames but does not
-repeat the prompt that produced them. Deriving history from the captured stream alone therefore
-made each turn unreadable. Panemux now writes the prompt first as `panemux_prompt`, a type the CLI
-does not emit, then appends the captured subprocess frames. A subprocess failure still records the
-prompt; a request that never starts a subprocess does not create a turn.
+[Moved to prompt-history](decisions/runtime/prompt-history.md).
 
 ## Task dashboard
 
+[Moved to tasks](decisions/tasks/index.md).
+
 ### A started agent runs through the user's login and interactive shell (2026-10-29, issue #445)
 
-On an SSH host where `ANTHROPIC_API_KEY` was exported in `~/.bashrc`, a claude typed into an
-`ssh_tmux` pane was signed in and one started from the dashboard asked to log in, on a fresh tmux
-server after a reboot too. The pane's claude descends from tmux's own shell for the window, a login
-and interactive shell that reads the rc files; the dashboard's descended from `sh -s` on the exec
-channel, tmux and a fixed `sh -c`, none of which reads them. From inside the dashboard's claude,
-`$SHELL -lic 'echo ${ANTHROPIC_API_KEY:+set}'` printed `set`, so the key was reachable through the
-user's shell. The agent's command now runs through `$SHELL -lic '<a fixed command>'`, which runs the
-agent's fixed `sh -c` once the rc has run.
-
-- **Login and interactive, as a pane's shell.** `-l` alone stops at the `case $- in *i*) ;; *)
-  return;; esac` that opens most distributions' default `~/.bashrc`; `-i` alone skips
-  `~/.bash_profile` and `~/.profile`. tmux starts a window's default shell as a login shell, and it
-  is interactive, so `-lic` reads what a pane reads.
-- **The rc before the agent's own command.** The prompt file is read, the directory changed to and
-  codex's `PATH` set after the rc, so an rc that changes directory or `PATH` undoes neither; the
-  prompt file waits, mode `0600`, while the rc runs.
-- **bash, zsh and sh only.** fish (`$argv`) and csh (its own syntax) cannot take the same
-  constant. dash, ksh and mksh handed the arguments on too, but were left out by the operator's
-  choice to keep the set to bash, zsh and sh; mksh also left SIGTSTP ignored in the agent it ran
-  (measured as `SigIgn` under tmux 3.4), which neither the old direct start nor a pane's shell
-  does. Any other shell keeps the old direct start.
-- **The arguments travel in variables, not as the shell's positional parameters.** The first
-  version gave the user's shell `exec "$@"` with the agent's command as its arguments. A review
-  found that the rc runs in that same shell, so a top-level `set --` or `shift` — the
-  `set -- ~/.profile.d/*.sh; for f; do . "$f"; done` idiom of POSIX profiles — replaced what ran,
-  and that an rc that `exec`s another shell or exits left the prompt file behind, since the agent's
-  command read it. Now a fixed `start` script reads and removes the prompt file first and passes
-  the command and its arguments in exported `PANEMUX_LAUNCH_` variables, which the user's shell
-  expands after its rc and the agent's command unsets. Rejected: a launcher file holding the
-  arguments, which would write the prompt to disk again for the rc's duration; and shell arrays,
-  which sh lacks.
-- **Rejected: passing the key.** `tmux new-session -e ANTHROPIC_API_KEY=…` puts it in the tmux
-  server's process arguments for the server's lifetime. Reading named variables on the host and
-  passing them in a mode-`0600` file writes a secret to disk, needs a list of names, and still
-  leaves `PATH`, proxies and everything else the rc sets different from a pane.
-- **Rejected: typing the command into the window's shell (`send-keys`).** The request's values would
-  be parsed by a shell, and the keys would race the shell's start-up.
-- **Not added: a setting to skip the rc.** A pane runs the same rc; one can be added if an rc that
-  holds or breaks an unattended start turns up.
+[Moved to login-shell-launch](decisions/tasks/login-shell-launch.md).
 
 ### Opening a host from its chip on the dashboard (2026-10-09, issue #314)
 
-A host chip opens a terminal on that host, with the task's two destinations: `Type in pane` (the
-default) in a popup over the board, and `Open` as a new workspace pane.
-
-- **A popover dialog, not two buttons on the chip.** The connection type (`ssh` / `ssh_tmux`) has to
-  be chosen before either destination, so the chip opens a menu that follows the shared modal rules
-  (`useModalKeyboard`) rather than growing buttons that would crowd the host list as hosts are
-  added.
-- **Only reachable remote hosts.** The panemux host is opened from a pane, not from here; a
-  `connecting`, failed or not-yet-collected host would fail to open, so its chip is not a button.
-- **Always a new terminal.** Unlike a task, a host has no one session to go to: an existing pane on
-  the host may be in any directory or tmux session, so moving to it would guess.
-- **The tmux session name is made on the server, in one place.** Generating it in the browser would
-  put a second copy of the name rule beside `validTmuxSessionName`; the server replaces each
-  character the rule refuses with `-` and appends random hex, so any connection name yields a valid
-  and fresh session, and both destinations show the name before it is used.
-- **Type in pane reuses the board's attach.** A host terminal is held, served and destroyed like a
-  task's board attach, so the popup, the `pagehide` cleanup and the grace period needed no second
-  mechanism. Each kind's `DELETE` ends only its own kind, so a task attach cannot be closed through
-  the host route or the reverse.
-- Rejected: an `ssh_tmux` popup that attached to an existing session (it would need a session
-  picker), and skipping the menu for `ssh` (the type choice would then be a second gesture).
+[Moved to host-chip-terminal](decisions/tasks/host-chip-terminal.md).
 
 ### Unreadable state files are diagnostics, not tasks (2026-10-09, issue #313)
 
-Stage 1 of issue #252 kept a state file it could not read on the board as an `unknown` task
-(`state-file:<file name>`), so that a Claude Code format change would not look like every agent had
-stopped. The card did signal that, but nothing could be done with it: with no session ID it could not
-be marked done, labelled or resumed, its file name sat only inside its task ID, and why it failed —
-not JSON, no positive `pid`, no valid `sessionId` — was neither shown nor logged.
-Issue [#313](https://github.com/tomo-chan/panemux/issues/313) replaces it:
-
-- **The file is not a task; its process is.** The live claude process the file name names is listed
-  as `pid-<pid>`, as any claude process with no readable state file is. Showing it only in the
-  details, as the design mock first proposed, was rejected because the running task is what claims
-  the newest conversation log in its directory: without it, that log would appear a second time as
-  a stopped task. A pid inside an unreadable file no longer counts as describing a process.
-- **Only `pid` and `sessionId` make a file unreadable.** Decoding the whole file into one struct
-  had also failed it for a `cwd` or `status` of another type, a fourth reason the issue did not
-  list. Every field being optional, such a field is now read as absent instead.
-- **One warning for all hosts, among the bar's actions.** A warning per host chip would crowd the
-  chips as hosts are added. With too many hosts for one line, the actions wrap as one group, so the
-  warning keeps its place at the head of them, rather than a separate place for narrow bars. The
-  first version kept the group on one line whatever the width, which cut off its last buttons on a
-  screen narrower than the group (review of PR #337); the group now wraps inside only then.
-- **Logged on change, not per collection.** A collection runs every few seconds while the dashboard
-  is shown; a line per collection would bury everything else. A file is logged when it appears, when
-  its reason changes, and when it is readable again or gone.
-- **Leftovers stay ignored.** An unreadable file whose pid is no longer claude is not reported, as
-  before (confirmed with the user, 2026-10-09). Claude Code appeared to remove its file on a normal
-  exit where this was checked; whether a crash leaves one is not confirmed.
-- **Only `GET /api/tasks` reports them.** The task event stream's host status is not extended, so the
-  attention collection neither reports nor logs them a second time.
+[Moved to unreadable-state-diagnostics](decisions/tasks/unreadable-state-diagnostics.md).
 
 ### Working directory suggestions come from the board's tasks, stored nowhere (2026-10-09, issue #311)
 
-Issue [#311](https://github.com/tomo-chan/panemux/issues/311) offers New task's working directory
-from the directories used before on the chosen host. They are the `cwd` of that host's tasks in
-`GET /api/tasks`, which the browser already holds, so the API, its schemas and contract fixtures
-are unchanged.
-
-- **Derived, not stored.** A list of its own — a file beside `tasks.json`, a field added to it, or
-  the browser's `localStorage` — was considered and not chosen: the board already says which
-  directories were used, by which agent and when, and a separate list would have to be kept in step
-  with it. The cost is that a directory goes once its last task leaves the board (the running tasks
-  and the 50 newest stopped per host within 7 days). Adding a field to `tasks.json` would also have
-  been dropped by an older build's write, since that file's reader ignores unknown fields.
-- **No `×` to remove a row**, though the design mock had one: with nothing stored, a removed row
-  would come back with the next collection.
-- **A dropdown, unlike #310's tags.** A directory is the whole value of a one-line field, so a
-  combobox completes it without the partial-value problem that kept labels out of one; tags of full
-  paths would have taken the form's space and been hard to tell apart (the issue's option B).
-- **The server's path rule on the suggestions, not a check that they exist.** A `cwd` with shell
-  metacharacters or control characters would only be refused on start, so it is not offered; a
-  directory removed since is left to the start's own refusal rather than probed on every collection.
-- **The form's own focus does not open the list.** Opening it there would make the first `Escape`
-  close the list instead of the form.
+[Moved to workdir-suggestions](decisions/tasks/workdir-suggestions.md).
 
 ### Labels used before come from the record file, as tags on `GET /api/tasks` (2026-10-07, issue #310)
 
-Issue [#310](https://github.com/tomo-chan/panemux/issues/310) offers the labels already used when a
-task is labeled. They are read from `~/.config/panemux/tasks.json`, the records themselves, rather
-than kept in a list of their own: a label nobody's record holds any more stops being offered without
-a second file to keep in step, at the cost that a label cleared from its last task is gone.
-
-- **Tags rather than a dropdown.** The suggestions are a `Used before:` row of tags under the input
-  (the issue's option B). An autocomplete dropdown was not chosen: it shows nothing until something
-  is typed, and the comma-separated New task field would need a combobox that completes one part of
-  its value.
-- **On `GET /api/tasks`, not an endpoint of its own.** The handler already reads the record file to
-  attach each task's record, so `known_labels` costs no further read, follows the poll, and goes away
-  with `records_error` under the same condition. A `GET /api/tasks/labels` fetched when a label input
-  opens was the alternative; it would have added a request, a failure state and its own cross-site
-  rule for the same data. A save adds its labels in the browser at once; a label that went from the
-  file goes with the next poll.
-- **Folding at eight.** More than eight suggestions after filtering fold behind `+<n> more`, which
-  keeps the detail panel's row to about two lines at 360px.
-- **A label typed in full is kept when a tag is clicked** (review of PR #329). A click first
-  replaced everything after the last comma, so with `bug, frontend` typed, `✓ bug` emptied the field
-  and `+ docs` dropped `frontend`, though both showed `✓`. Now taking a label out keeps every other,
-  and adding one replaces the text after the last comma only while that is not a label used before
-  in full, that is, only while it is not shown `✓`. The "no match" note follows the same reading: it
-  shows when no label used before contains the typed text, whether or not those that do are entered.
-- **Ordered by code point, on both sides** (review of PR #329). The server compares UTF-8 bytes,
-  which is code point order; the browser compared UTF-16 code units, which differs once a label holds
-  a character beyond the Basic Multilingual Plane. The browser now compares code points, so a label
-  it adds after a save lands where the next poll puts it.
+[Moved to label-suggestions](decisions/tasks/label-suggestions.md).
 
 ### Input-wait notifications come from server-published task events (2026-10-02, issue #277)
 
-Issue [#277](https://github.com/tomo-chan/panemux/issues/277) feeds the task dashboard's `wait` into
-the pane/workspace attention and the browser notifications. The design is in
-[Task events](behavior/task-events.md); the architecture review is on the issue
-([design](https://github.com/tomo-chan/panemux/issues/277#issuecomment-5952558159)). Decided:
-
-- **The server publishes every task state change; receivers decide what to do with it.** The first
-  attempt (PR #291, closed) had each tab poll `GET /api/tasks/attention` every 15 seconds and join the
-  result with the frontend's terminal-output detector inside a time window; every choice of window
-  traded missed notifications for duplicates, and review went back and forth on it. Two other designs
-  were investigated and rejected: running the same regular expressions on the backend's PTY stream
-  (it would still need a rule for joining a terminal match with a task's wait, and still notices only
-  what an attached client's screen shows), and having browsers report their detections to the server
-  (no detection without an open tab, and the browser's claim becomes trusted input).
-- **Terminal-output detection is removed, not kept as a fallback.** A state no agent records — codex
-  waiting for command approval — is therefore not notified until it can be observed as state
-  ([issue #294](https://github.com/tomo-chan/panemux/issues/294)); a pattern on output is not added
-  for it.
-- **Matching a task to a pane stays in the browser** (`utils/taskBoard`), which already does it for the
-  dashboard's Open from the same workspaces it renders. The server sends the location only.
-- **`GET /api/tasks/attention` (issue #278) is removed.** Nothing but the closed PR #291 used it, and
-  keeping it beside the stream would leave two answers to "what is running": the stream's last
-  observation and a fresh collection. The lightweight collection and the wait signature it introduced
-  are what the stream observes with.
-- **`GET /ws/tasks/events`, not `/ws/tasks`.** Pane IDs may be any string but `_system`, and
-  chi prefers a static route, so a one-segment path would shadow the terminal socket of a pane named
-  `tasks` (as `/ws/board-command` does for a pane of that name). It is unauthenticated like the other
-  task routes and refuses cross-site requests like them, in addition to the upgrade's Origin check.
-- **Unsigned waits get a `wait_id` from the stream position at which they were first observed.** Not
-  giving them one would leave a receiver unable to tell a reload from a new wait, so they could flash
-  but never notify; deriving one from `status_since` is impossible because the clock conversion moves
-  it. The cost is one possible repeat notification after a server restart.
-- **A failing host publishes only its status.** Removing its tasks would make attention flicker on
-  every transient failure and come back on recovery; keeping them is not a guess, because the host's
-  status says how old they are.
-- **Each host is observed on its own 5-second cycle.** One round across all hosts (`CollectAttention`)
-  would let a host slow to answer delay every other host's notifications by up to the 15-second
-  per-host timeout. 5 seconds rather than the dashboard's 10 keeps the delay to a notification short;
-  it is not configurable until a measurement asks for it.
-- **No keepalive and no slow-subscriber protocol.** The publisher and the browser normally share one
-  machine over loopback: a closed tab or a crashed browser closes its socket at once, and a sleeping
-  machine sleeps with the server, so no changes pile up. Pings, a write deadline and a dedicated close
-  code were dropped as unneeded. What remains is ordinary fan-out hygiene: publishing never waits for
-  one subscriber, and a connection that cannot take its frames is closed rather than given a stream
-  with a hole in it, since the receiver already recovers from any close with a fresh snapshot.
-  A review of the implementation (issue #293) asked again for a write deadline, since a client that
-  stops reading after the handshake leaves its handler blocked in a write. It was not added: a test
-  showed that this holds only that connection's goroutines, while the publisher keeps observing and
-  every other subscriber keeps receiving, which is the case this decision accepts over loopback.
-- **Each tab notifies on its own; tabs do not coordinate.** A tab records the waits it notified in its
-  session storage, which survives its own reloads, and the notification's `tag` is the `wait_id`.
-  Several browser tabs are not a requirement: one page shows every workspace, so there is no use for
-  showing the same pane in two tabs, and the requirement is no duplicate within a tab across reloads
-  and reconnects. Two tabs opened anyway may both notify one wait. Coordination was therefore not
-  built: neither a claim in storage shared by the tabs (racy unless taken under a Web Lock, and a
-  background tab could claim a wait the focused tab is showing) nor electing one tab with the Web Locks
-  API (the elected tab would judge visibility from its own state only). Recording on the server would
-  make the server decide how an event is handled.
-- **Attention also clears when the task's wait ends**, besides focus, click and selecting the
-  workspace, so a wait answered elsewhere — from the dashboard's Type in pane popup, another terminal,
-  or by the agent exiting — does not keep flashing. Terminal-output detection could not see a prompt
-  end, so it had no such rule. A change to `unknown` does not clear it: a state file read mid-write can
-  look `unknown` for one observation. Closing a browser notification already shown was not added.
-- **Observation stops as soon as the last subscriber leaves, and keeps its model.** A grace period (30
-  seconds was considered) would only spare a reload one extra observation per host and a moment of
-  `pending`; it was not worth a timer. Keeping the model is what matters: discarding it would give an
-  unsigned wait a new ID, and so a new notification, on every reload.
-- **Stopping does not interrupt an observation in flight** (decided in the design review, settled in
-  the implementation, issue #293). Cancelling it would close the host's SSH channel, and whether the
-  `sh -s` running the script without a terminal then stops is not established; a channel closed early
-  could leave it running with nobody reading it. Letting it finish costs at most one per-host timeout
-  of work, and its result is discarded, so a stopped stream publishes nothing. Server shutdown is the
-  exception: it cancels everything, as every other collection does then.
-- **The dashboard takes states from the stream but still collects every 10 seconds** for what the
-  stream does not carry: stopped sessions, git and pull requests, records and summaries. Without the
-  overlay a task reached from a notification could show `busy` for up to 10 seconds. Replacing the poll
-  with a collection the stream triggers was not taken up: it is an optimization #277 does not ask for,
-  the poll runs only while the dashboard is on screen, and pull-request changes would still need a
-  slower poll of their own. It is reconsidered only if the poll's load becomes a problem.
-- **Three receiver details were settled while implementing it** (2026-10-03, issue #279). The
-  dashboard takes `status_since` from the stream along with the state, since a `wait` shown with the
-  time since the collection's earlier `busy` misreads how long the task has been waiting. A snapshot
-  after a reconnect clears the attention of a wait that ended while the tab was disconnected — a task
-  now `busy`, `idle` or `run`, or gone from a host that answered — rather than leaving it until someone
-  focuses the pane; `unknown` and a host not answering keep it, for the reasons above. A wait is
-  recorded as notified only once a notification is shown: recording it while permission was not
-  granted would keep it from ever being notified after permission is given. The waits whose
-  attention a person cleared are recorded in session storage like the notified ones, so a reload does
-  not bring that attention back. PR #291's time window (`paneWaits`, `holdMs`) and its 15-second poll
-  were not carried over; its notification click, the dashboard's highlighted task and the minimal
-  notification text were.
-- **Three review findings on the receiver were settled** (2026-10-03, PR #300). A wait that starts
-  before the tab has its workspaces is not notified rather than held until they load: holding it
-  would need a rule for a load that fails (the tab then shows only an error). The cost is that a wait
-  starting during a page load, or still unnotified in the first snapshot, is not notified by that tab;
-  its attention is still shown. (PR #291 was reviewed for the same race.) A notification's click resolves the task against the latest store rather than the one
-  the notification was created from, so a task that moved since lands on its current pane. A frame
-  without `status_since` clears the collected one: the stream is authoritative for the state, and the
-  collected time belongs to an earlier state.
-- **A wait on a host that is not `ok` neither flashes nor notifies** (2026-10-03, PR #300, from a
-  PR #295 review). Observation stops with its model kept (decision J), so a reload's snapshot carries
-  waits answered meanwhile under a `pending` host; the receiver flashed and notified them, and the
-  flash stayed until the host answered, or for good on `error`. Attention is now read from the store
-  after each frame — a task in `wait` on an `ok` host whose `wait_id` this tab has not cleared —
-  instead of being set on a wait's start and removed on its end. That replaced the rule that `unknown`
-  and a failing host keep attention: both now hide it until the wait is seen again. A notification
-  still needs a wait start, and a start is taken only under an `ok` host. Rejected: holding such waits
-  and judging them when the host turns `ok` — the publisher sends a host's `ok` before the
-  differences it found, so at that frame an answered wait still looks current, and the receiver has
-  no marker for the end of one host's differences; publishing the `ok` after the differences instead
-  — the publisher sends events as they happen and carries no ordering rule for a receiver's sake;
-  and judging after a short delay, which is a guess about timing.
-- **A wait that began before notification permission was granted may go unnotified** (2026-10-03,
-  PR #300). Under the rule above, a reload of the only tab stops observation, so its snapshot has every
-  host `pending` and a wait still going on is never judged as a start; the pane flashes, but no
-  notification is shown. A reconnect while observation kept running still notifies such a wait, since
-  its host stays `ok`. The behavior was accepted and the documents corrected (option A). Rejected
-  (option B): judging waits not yet recorded as notified again when their host turns `ok` — that is
-  the frame at which an answered wait still looks current, so it would bring back the stale
-  notifications the rule removed.
+[Moved to server-task-events](decisions/tasks/server-task-events.md).
 
 ### A lightweight collection and a stable wait signature for input-wait notifications (2026-10-02, issue #278)
 
-Issue [#277](https://github.com/tomo-chan/panemux/issues/277) notifies the operator when a task starts
-waiting for input; #278 is its backend. Decided:
-
-- **A separate `GET /api/tasks/attention`, not `GET /api/tasks` polled more often.** The full route
-  runs `gh pr view` per directory, reads the record file, starts summaries and searches seven days of
-  conversation logs and rollouts — none of which a notification needs. The attention route shares the
-  script's live part (`collectLiveScript`) as a constant, so it cannot drift from how the dashboard
-  decides a running task's state, and skips only the two searches for stopped sessions. A query
-  parameter on `GET /api/tasks` was rejected: one handler would carry two response shapes.
-  *Superseded in part:* the route was removed when the task event stream took its place (issue
-  #277, above); the lightweight collection it introduced remains.
-- **The signature comes from the wait start the agent recorded, on the host's clock.** Using the
-  converted `status_since` would change it whenever the clock conversion moved by a millisecond
-  between collections, and a rollout's mtime moves on every write while codex waits. Claude's
-  `updatedAt` and `startedAt` and codex's turn start are not the start of the wait, so a wait that
-  lacks the real one is left unsigned rather than given a value that could repeat or change. For codex
-  the question's own `timestamp` tells two questions in one turn apart.
-- **Versioned and opaque** (`w1-<sha256>`). Clients compare it only; changing its inputs changes the
-  version, so a browser's remembered signatures can never match a value made another way.
-- Devin sessions are not covered; they wait on issue #276.
+[Moved to lightweight-wait-observation](decisions/tasks/lightweight-wait-observation.md).
 
 ### Type in pane: the popup over the board (2026-10-02, issue #284)
 
-Issue [#280](https://github.com/tomo-chan/panemux/issues/280) chose a popup (with maximize) over
-expanding the task in place: a wide terminal and an unambiguous input target were worth more than
-seeing other tasks while answering. #284 builds it on #283's attach. Decided:
-
-- **`useTerminal` directly, not `TerminalPane`.** `TerminalPane` brings a pane's header, status bar,
-  layout context and drag handling, none of which a popup has. A small `TaskTerminal` uses
-  `useTerminal` — so IME, paste, copy and scrollback are a pane's — and `useTerminal` gained one
-  option, `recoverOnDisconnect`, because its recovery calls `/api/sessions/{id}/restart`, which knows
-  only panes and answers `404` for a board attach. A shared terminal surface extracted from
-  `TerminalPane` was rejected as a refactor of the pane for no behavior the popup needs.
-- **Retry and Reconnect ask for the attach again.** An exited client is replaced only by a new
-  `POST`, and one that is still alive comes back as the same session; either way the popup reads it
-  over a new WebSocket. Nothing is shown as sent while the terminal is not connected: it is inert,
-  not merely dimmed.
-- **Escape belongs to the terminal.** claude interrupts and codex cancels with it, so the popup
-  closes with `Close`, `Cmd/Ctrl+Shift+Esc`, or `Escape` only from the header. For the same reason
-  the popup's own focus trap leaves `Tab` to a focused terminal, which the shared
-  `useModalKeyboard` would have taken.
-- **The maximized state is kept in `localStorage`.** It is a per-browser display preference;
-  `config.yaml` would have needed a backend change for a choice that does not belong to the server.
-- **English labels.** The design in #280 was written in Japanese (`Paneで入力`, `閉じる`, …); the
-  dashboard's UI is English throughout, so the popup's are `Type in pane`, `Close`, `Connecting…`,
-  `Typing` and so on.
+[Moved to task-terminal-popup](decisions/tasks/task-terminal-popup.md).
 
 ### The board's temporary tmux attach (2026-10-02, issue #283)
 
-Issue [#280](https://github.com/tomo-chan/panemux/issues/280) wants a task opened in a popup over the
-dashboard rather than as a pane added to a workspace; #283 is its backend. Decided:
-
-- **A dedicated `POST`/`DELETE /api/tasks/attach`, not `POST /api/sessions`.** The request names only
-  a task ID and the server collects that task's host again for the tmux session name and host.
-  Reusing `POST /api/sessions` would have let the browser name any tmux session and host, made the
-  session look like a pane to `GET /api/sessions`, and tied its lifetime to a layout it is not in.
-- **Attach only, never `new-session -A`.** A pane's `new-session -A` creates the session when it is
-  missing; for an ended task that would start a shell under the task's name. `attach-session -t =<name>`
-  fails instead, and the `=` stops tmux's prefix match from attaching to another task's session.
-- **`has-session` before the attach** (PR #286 review). `attach-session` starts its client before it
-  reports a missing session, so a session that ended after the collection returned `201` and an
-  attach that exited at once. Checking first keeps the documented `502`; the alternative of treating
-  an exit soon after start as a failure would have needed a timeout that guesses how slow a host is.
-  The window between the check and the attach remains and is documented rather than closed.
-- **Destroyed 10s after the last WebSocket, and reused on reopen.** Destroying on the WebSocket's close
-  would lose the client on a reload; keeping it until `DELETE` would leak a tmux client per closed
-  tab. The same 10s applies when no WebSocket ever connects. Attaches are in memory only, as a pane's
-  sessions are. The manager reports subscriber counts in the order they changed, dropping one older
-  than a count already delivered, and reports 0 when a client's exit drops its WebSockets: a stale 0
-  had destroyed an attach still being read, and an exited client had been kept forever (PR #286
-  review).
-- **No `window-size` change.** Setting a tmux option would change the user's server for every client.
-  With tmux's default `latest`, the window follows the client used last and returns to the other
-  client's size when the attach ends, which was checked on a private tmux server.
+[Moved to temporary-task-attach](decisions/tasks/temporary-task-attach.md).
 
 ### Dashboard hosts are managed from the dashboard (2026-10-01, issue #272)
 
-`ssh_connections` could be edited only in `config.yaml`, while the one SSH host form in the UI —
-**Add SSH Host** in the pane settings — writes `~/.ssh/config`, so a host added from the UI never
-reached the dashboard and nothing on screen said why. The task dashboard now has a **Hosts…** dialog
-over `GET`/`POST`/`PUT`/`DELETE /api/config/ssh-connections`, and **Add SSH Host** says what it
-writes and where dashboard hosts are added. The dialog lives on the dashboard rather than in the pane
-settings because what it decides is what the dashboard collects; panes can use either source.
-
-- **The password is never read back.** An entry reports `has_password` only. On an update an empty
-  `password` keeps the saved one and `clear_password` removes it; sending both is refused. Echoing
-  the saved value into the form, or a masked stand-in, was rejected: the first puts the secret in
-  every list response, and a stand-in sent back unchanged is indistinguishable from a password that
-  really is that string.
-- **Fields are replaced, not merged.** A `PUT` body is the entry's new field set, so a field the
-  form left empty is removed and falls back to the `~/.ssh/config` block, as in `config.yaml`. The
-  password is the one exception, for the reason above.
-- **No renaming.** Panes refer to an entry by name; a rename would have to rewrite every pane that
-  uses it, across workspaces, in the same save. Deleting and adding under the new name is available
-  when no pane uses it.
-- **Deleting is refused only when it would break something.** Every `ssh`/`ssh_tmux` pane's
-  connection and every other dashboard host is resolved the way it is dialed, with and without the
-  entry, and the delete is refused when one resolves now and would not after, naming them. The first
-  version checked only panes naming the entry, with no same-named `Host` block to fall back to;
-  review found that a `~/.ssh/config` `ProxyJump` resolves through `ssh_connections` too, so
-  deleting a jump host broke every pane and dashboard host behind it.
-- **Editing reconnects, and discards a dial in flight.** The dashboard's connection for an edited
-  host was made with the old details, so it is dropped. Review found that clearing the connection
-  was not enough: a dial still in flight — the host shows `connecting…`, which is when a person goes
-  to fix it — finished afterwards and stored its old failure for 60 seconds, or its connection made
-  with the old user or key. `Reconnect` now replaces the host's entry, so that dial's result is
-  discarded, which also applies to the dashboard's own **Reconnect** button.
-- **One lock for the config, not one for the map.** The first version guarded only
-  `ssh_connections` with a lock of its own. Review showed, with `go test -race`, that it did not
-  cover the workspace and layout routes: each `config.yaml` write serializes the whole config, so a
-  workspace save could persist an `ssh_connections` change that its route then rolled back and
-  reported as failed. `internal/api` now has one `cfgMu`: every route that changes the config or
-  writes the file holds it from its snapshot to its save, and the readers of the workspaces,
-  layouts and `ssh_connections` hold it for reading. Task collection dials read the map through it
-  from goroutines of their own.
-- **Name rule.** A new entry's name follows the rule **Add SSH Host** applies to a `~/.ssh/config`
-  alias, so a `~/.ssh/config` host can always be added by name. An existing name in `config.yaml` is
-  not re-checked, so an entry written by hand can still be edited and deleted; the routes unescape
-  the name in the path, which chi hands back still escaped when it holds an `@`, `:` or `/`.
-- **The list carries what `config.yaml` holds.** Its `port` is not range-checked in the response
-  schema, because `config.yaml` is not checked on load: one hand-written port out of range made the
-  whole list fail to parse, leaving no entry editable. Saving it through the dialog checks it.
+[Moved to dashboard-host-management](decisions/tasks/dashboard-host-management.md).
 
 ### Dashboard hosts are listed by name; details come from `~/.ssh/config` (2026-09-29, issue #272)
 
-The dashboard collects only from `ssh_connections`, which kept a host that lives in `~/.ssh/config`
-off it unless every connection detail was copied into YAML. An `ssh_connections` entry can now be
-just a name: its details come from the `~/.ssh/config` `Host` block of that name, and each field the
-entry does set overrides the block's value for that setting. Field-by-field merging was chosen over
-using the `Host` block only when the entry is empty, so that one setting (a different `user`, say)
-can be changed without copying the rest. The consequence is that an entry that already set `host`
-and `user` now also takes `IdentityFile` and `Port` from a `Host` block of the same name when it leaves
-those unset; before, a name in both sources used only the YAML entry.
-
-The route is the exception. An entry that sets its own `host` takes neither `ProxyJump` nor
-`ProxyCommand` from the block. The first version of the merge inherited both, and review of PR #274
-found two consequences: a block's `ProxyJump` that panemux cannot follow (`user@host`, a list, `none`)
-failed an entry that had connected on its YAML values alone, and the block's `ProxyCommand` ran through
-`/bin/sh -c` with the YAML `host` substituted for `%h` — a data flow from `config.yaml` into a shell
-that had not existed. Parsing the other `ProxyJump` forms was the alternative; it was not taken because
-the route a block describes belongs to the host it names, and the setups this change is for (a
-name-only entry over a block whose `ProxyJump` is an alias) keep it either way. The same review found
-that a `ProxyJump` cycle recursed until the stack overflowed, which the merge had made reachable from
-fully specified entries too; the chain is now carried along and a cycle is an error.
-
-Checking that fix, the next review found that `POST /api/ssh-config/hosts` — the **Add SSH Host**
-dialog's route — wrote `hostname`, `user` and `identity_file` into `~/.ssh/config` unchecked, so a line
-break in one added any directive, `ProxyCommand` included. The flaw predates the change, but the
-security guide it added rested on "no API writes a ProxyCommand", and a name-only entry made
-**Add SSH Host** then one line in `ssh_connections` the natural way to reach the dashboard's dialer.
-It was fixed in the same pull request rather than split out: control characters in those values are
-refused with `422`, and `AppendHost` refuses them too.
-
-The collection scope itself is unchanged: widening it to every `~/.ssh/config` host was rejected in
-issue #272, since that file commonly lists hosts that have nothing to do with agents. The same change
-fixed validation adding the `~/.ssh/config` hosts to the config's own `ssh_connections` map whenever
-that map was non-empty — which made every such host a dashboard host and wrote it into config.yaml on
-the next save. Entries a config already had written that way are not removed by the fix: they stay
-dashboard hosts until deleted from `ssh_connections` by hand. Issue #272's proposal of a UI to edit
-`ssh_connections` was not built in that change; it followed in the next one (below).
+[Moved to named-dashboard-hosts](decisions/tasks/named-dashboard-hosts.md).
 
 ### Codex sessions: state, starting and resuming (2026-09-27, issue #264)
 
-Stage 1 listed a codex task as a running process known only by its pid, and stage 2 started and
-resumed claude only, because codex's files had not been checked. They were checked on real codex-cli
-0.142.2 and 0.157.1 on macOS (by the operator, with a stand-in model server for the states a
-usage-limited account could not reach, and a real model on 0.157.1) and 0.157.1 on Linux (in the
-implementation session, with a stand-in model server); the results are the comments on #264. The
-operator decided the approach from them, and the design points the Linux check raised were put to
-the operator before implementation:
-
-- **A codex process's session is the rollout it holds open.** Codex writes no `<pid>.json` and no
-  state value; the TUI process (not the npm node wrapper, not the 0.157 app-server daemon) keeps its
-  rollout open, found through `lsof` on macOS and `/proc/<pid>/fd` on Linux. Reading codex's
-  `logs_2.sqlite` (whose `process_uuid` names the pid) was the alternative; it is an internal trace
-  log.
-- **The state is the newest turn — `thread_turns.status` in `thread_history_1.sqlite` where
-  available, otherwise the rollout's last turn event — and only while the process is alive.** A
-  killed turn stays `inProgress` forever, so a dead process is always `stop`. Waiting for command
-  approval is `busy`, since codex records nothing for it on either platform; a pending
-  `request_user_input` call is `wait`. The operator chose `sqlite3` as the primary source and the
-  rollout as the fallback for hosts without `sqlite3` and codex before 0.157.
-- **The rollout's last line is not its last record of interest.** On Linux 0.157.1 every waiting and
-  running turn ended with `token_usage_record` after the call (the macOS observation had the call
-  last), so the script keeps the last turn event and the last `response_item` separately rather than
-  reading the final line.
-- **A turn older than its process is a leftover.** Found in the Linux check: a session killed
-  mid-turn and resumed without an instruction still had its killed turn as the newest one, in
-  `thread_turns` and in the rollout, so it read as working while codex sat idle. A process's start
-  (from `ps`'s POSIX `etime`) now bounds which turns can be in progress. Stage 1 rejected `procStart`
-  for claude because its meaning was unknown; `etime` is ps's own elapsed time.
-- **After `/new` or a TUI `/resume`, the rollout written last is the session** (operator's choice
-  among the options raised). The Linux check switched A → B → A inside one process: the newest
-  modification time matched the current session at every step, while the highest descriptor number
-  was wrong after returning to A, which codex reopens at a lower number.
-- **A codex task held at a start-up screen is `run`, known by its pid, with a note to open the pane**
-  (operator's choice). Showing it as `wait` would also flag a codex just started from a shell and
-  sitting at its prompt, and telling the two apart by whether the command line carries a prompt was
-  the rejected third option. panemux does not answer the screens or write codex's configuration to
-  avoid them; only the update prompt is turned off, with `-c check_for_update_on_startup=false`.
-- **A new codex task's labels are held until its session is collected** (operator's choice). Codex
-  has no option to set its session ID — the Linux check found none in `codex --help` — so the ID is
-  known only after the first instruction. Holding the labels in memory keyed by tmux session was
-  chosen over hiding the labels field for codex and over waiting up to 15 seconds in the request,
-  which would lose them exactly when a start-up screen holds the task.
-- **Stopped codex sessions are the TUI's and share the cap with claude** (operator's choice): 50
-  stopped tasks per host across both agents, keeping stage 1's "50 per host". The first version kept
-  `source` `cli` only; review of PR #271 found that a TUI running through codex's shared daemon writes
-  `source` `vscode` (with `originator` `codex-tui`), so those sessions were never listed. The operator
-  chose `originator` `codex-tui`, which keeps `codex exec` (`codex_exec`) out, and the script now counts
-  its 100 after that filter (the first version cut at 100 first, so 100 newer `codex exec` rollouts
-  hid every TUI session).
-- **A session codex's shared daemon runs is a task of its own** (operator's choice, from review of
-  PR #271). From codex-cli 0.157, `codex` started without `-c` or `--no-daemon` runs its session in a
-  shared `codex app-server` daemon, which holds the rollout — and keeps holding it, with its writer
-  lock, after the TUI exits. The implementation session's Linux check had always passed `-c`, which
-  keeps the session in the TUI, so it never saw the daemon. Nothing ties the TUI to the session: the
-  TUI holds only a socket, and `logs_2.sqlite` records the session under the daemon's pid. The
-  alternatives were pairing a TUI with a daemon session of the same working directory when only one
-  matched (rejected: a guess that goes wrong when an exited session lingers in the daemon) and only
-  documenting the limit. The chosen form shows the session's real state under a `daemon` location
-  that offers no pane, beside the TUI's `run` card, and never offers `Resume` on a session the daemon
-  still holds.
-- **The dashboard's own starts pass `--no-daemon`** (operator's choice), so their sessions stay tied
-  to their tmux session. That `-c` alone did the same was an observation, not a documented rule.
-- **A codex without `--no-daemon` is refused** (operator's choice, from the second review of PR
-  #271). codex-cli 0.142.2 exits 2 on the option, which left the dashboard reporting a start whose
-  tmux session had already ended. The alternatives were passing `--no-daemon` only where the help
-  lists it (older versions have no daemon to avoid) and only documenting a minimum version. The
-  check reads the help rather than comparing versions, since the version that added the option was
-  not checked.
-- **`--` before codex's prompt and its resumed session ID, and UUIDs only.** Checked on both
-  platforms: without `--`, a prompt beginning with `-` is an option, and `codex resume <id> '-h …'`
-  prints help and exits 0; `codex resume` also takes a session name, which codex sets automatically
-  from the first instruction with a real model.
-- **A codex resume's tmux session is named from the ID's last eight characters.** Codex IDs are
-  version 7 UUIDs, whose first eight characters are a timestamp shared by sessions started within a
-  minute.
-- **codex's own directory is added at the end of `PATH`.** Found in the Linux check: an npm
-  install's `codex` is a node script, and started from a `PATH` without node it failed with
-  `env: 'node': No such file or directory`. The first version put the directory first; review of PR
-  #271 showed that this also moved every command codex and its model run ahead to that directory (a
-  `python3` beside codex won). The operator chose the end, which still supplies node. The second
-  review showed the other side — a `node` earlier on the `PATH` runs codex instead — and the operator
-  chose to document it rather than run codex with the `node` beside it, which would depend on how
-  the npm package is laid out and break a native codex that happens to have a `node` next to it.
-- **Codex tasks are not summarized.** The summary reads claude's log format; a rollout is another.
+[Moved to codex-session-observation](decisions/tasks/codex-session-observation.md).
 
 ### Stage 1: a dashboard of agent sessions, independent of panes (2026-09-25, issue #252)
 
-The design, its stages and its open questions are agreed in issue #252. The choices stage 1 made
-while being built:
-
-- **Claude Code's own files are read as they are.** `~/.claude/sessions/<pid>.json` and
-  `~/.claude/projects/*/<session>.jsonl` are not a published format. They are the only record of a
-  session that does not depend on panemux having started it, which is the point of the feature, so
-  the dependency is accepted and made to fail visibly: every field is optional, an unreadable state
-  file stays on the board as `unknown` instead of disappearing, and only the first `"cwd"` of a log
-  is read. Codex has no equivalent that has been checked, so codex tasks are running processes and
-  nothing more (issue #252, open question 5). *Superseded by the issue #264 entry above: codex's
-  rollouts are read.* *The unreadable state file as a task on the board is superseded by the issue #313 entry above.*
-- **Liveness is "the pid is alive and its program is claude", and `procStart` is not used.** A
-  state file's pid alone is not enough, because pids restart after a host reboot. Claude
-  Code 2.1.282's `procStart` matched field 22 of `/proc/<pid>/stat` (clock ticks since boot) for the
-  one process checked on Linux, while the observation recorded in the issue did not match (425
-  against 419), so how it is computed is still unknown and nothing relies on it. "Its program" is a
-  path component named `claude` or `claude-code` in argv[0], or in the script `node`/`bun`/`deno`
-  runs, because how Claude Code shows in `ps` depends on how it was installed — a native binary
-  under `…/claude/versions/<version>`, or `node` running the npm package. The first version matched
-  `claude` anywhere in the command line; review found that an editor or `tail` with a file under
-  `~/.claude` as its argument then passed for a waiting agent.
-- **A running claude process with no state file is `unknown`, not `stop`** (review of PR #253).
-  Building running tasks only from state files meant a Claude Code release that moved those files
-  would have shown every running agent as stopped. Such a process is taken to be writing the newest
-  log in its directory, so that session is not listed twice.
-- **Codex's interactive sessions are recognized by subcommand**, from `codex --help` of codex-cli
-  0.157.0: no subcommand (a prompt), `resume` and `fork` are interactive, every other subcommand is
-  not. The first version excluded any process with an `exec` token anywhere, which hid a prompt
-  containing the word and listed `codex app-server`.
-- **Only the collecting user's processes are listed** (`ps -U`), so on a shared host another
-  user's agents are not shown as one's own tasks.
-- **A slow collection keeps its connection** while the connection answers an SSH keepalive. The
-  first version dropped the connection on any timeout, so a host whose collection took longer than
-  15 seconds was redialed every 10 seconds and never showed a result. Keeping the connection stops
-  the redialing only: a host whose script alone takes longer than 15 seconds every time still never
-  shows a result, and its script is started again at every collection. What the remote script does
-  once panemux closes the exec channel (no signal is sent) has not been checked.
-- **The task routes refuse cross-site requests.** They stay unauthenticated like the rest of
-  `/api/*`, but `GET /api/tasks` is the first GET with a heavy side effect — dialing every host — so
-  a page on another site must not be able to trigger it with an `<img>`.
-- **A stopped task reports its repository but not its branch or PR**: git metadata is read from the
-  directory as it is now, which says nothing about the branch a stopped session worked on. So
-  `gh pr view` runs only for a directory a running task uses (review of PR #253); the first version
-  ran it for every directory and threw the stopped-only results away. A lookup a request abandoned
-  is not cached, so an aborted `gh pr view` does not hide a running task's PR for 30 seconds.
-- **The local collection is killed as a process group** (review of PR #253). The first version
-  relied on `exec.CommandContext` killing `sh` alone; a probe the script had started kept its
-  stdout open, so the collection outlived its 15 seconds until that probe finished.
-- **`/resume` and exit were checked on a real machine** (macOS, 2026-09-26; the Claude Code
-  version was not recorded). `/resume` keeps the same process and the
-  same `<pid>.json`, and rewrites that file's `sessionId` to the resumed session (`updatedAt`
-  moves with it) — so the switched-from session shows as stopped and the switched-to one as running
-  in the same place, as issue #252 expected. `/exit` removes both `<pid>.json` and its `.key` file,
-  so a normal exit leaves no state file behind; the liveness check still guards against the files a
-  crash or a host restart can leave.
-- **One fixed script per host, fed on stdin.** Every host runs the same constant script through
-  `sh -s`: one round trip per collection, identical parsing for local and remote, no remote value
-  ever quoted into a command, and nothing that depends on the remote login shell being POSIX. The
-  alternative — one exec per probe, as the pane header's lookups do — would cost several round trips
-  per host every 10 seconds.
-- **The pane a task belongs to is found in the browser, not by the API.** The browser already holds
-  the workspaces, so a pane the dashboard has just created is matched at once rather than after the
-  next collection, and the API has no layout state to keep consistent with it.
-- **Stopped sessions are the last 7 days, at most 50 per host.** Decided for stage 1 while it was
-  built; conversation logs are never deleted, so without a bound every past session would be
-  listed. Open question 1 still decides retention and recording for stage 2.
-- **panemux opens on the workspaces**, as before, rather than on the dashboard the issue's mockup
-  starts on.
-- **The layers switch with `Cmd/Ctrl+Shift+S`, and the letter is configurable** as
-  `display.task_dashboard_shortcut` (open question 6). `S` was chosen for stage 1 while it was
-  built; the environment it was built in could not reach a list of Chrome's own shortcuts. On a real,
-  non-headless browser on macOS (2026-09-26), `Cmd+Shift+S` switched layers and was not taken by the
-  browser; `Ctrl+Shift+S` on Linux or Windows was not checked there. It is a config setting rather
-  than a per-browser one so every browser on one panemux behaves the same; `K` and `B` are refused
-  because the palette and the board already use them. `GET /api/display` reports the effective
-  letter so the default lives in one place, and an unset value is never written back.
-- **The UI text is English**, like the rest of panemux's interface, although the issue's mockup is
-  written in Japanese.
+[Moved to session-dashboard](decisions/tasks/session-dashboard.md).
 
 ### Opening an agent outside tmux through `PANEMUX_PANE_ID` (2026-09-26, issue #254)
 
-Stage 1 located an agent only through tmux, so one running directly in a `local` or `ssh` pane could
-not be opened. Issue #254 chose to have those panes export `PANEMUX_PANE_ID` to their shell, the way
-the browser shim exports `BROWSER`, and to read it back from the agent's environment at
-collection. The choices made while building it:
-
-- **Only IDs matching `^[A-Za-z0-9_.-]{1,128}$` are exported.** Pane IDs have no charset rule in the
-  config. Exporting any ID would have put arbitrary text into an SSH pane's remote command, relying
-  on quoting alone; limiting it keeps the value inert in a shell and lets collection apply the same
-  rule to what it reads back. Every ID panemux generates matches, so only a hand-written config ID
-  can lose the feature.
-- **SSH panes export it whether or not the browser shim is enabled.** An `ssh` pane that used the
-  SSH shell request now runs a command that execs the login shell, the change the shim already
-  made. Exporting it only with the shim would have left agents in those panes impossible to open,
-  and `AcceptEnv` on the server cannot be relied on for `Setenv`.
-- **Remote commands with setup are handed to `/bin/sh`.** sshd runs an exec request with the
-  user's login shell. The first version of this change prepended `PANEMUX_PANE_ID=…; export …` to
-  the command, which `fish` rejects as a syntax error and `tcsh` half-runs, so an `ssh` pane on
-  such a host exited at once, and `url_open.browser_shim: false` no longer avoided it (review of
-  PR #260). The shim's own setup had always failed the same way on those hosts. The whole script is
-  now passed as `exec /bin/sh -c '<one line>'`, with the shim's body as octal escapes because
-  `tcsh` expands the `!` of `#!/bin/sh` even inside single quotes. Checked on Linux (2026-09-26)
-  against a real sshd with `fish` 3.7.0 and `tcsh` login shells, with and without the shim, for
-  panes with and without `cwd`. Exporting through `exec env PANEMUX_PANE_ID=… "$SHELL"` was
-  rejected because it left the shim broken, and keeping the SSH shell request when the shim is
-  disabled because those panes would have had no pane ID.
-- **The browser matches the ID against the panes it holds**, as it already did for tmux sessions,
-  rather than the server checking it against the config. The value only claims a pane, so it opens
-  one only when that pane is a `local` pane (panemux host) or an `ssh` pane on the task's
-  connection.
-- **Only the agent's own environment is read, and at first only on Linux** (`/proc/<pid>/environ`).
-  On macOS (2026-09-26), a `sleep 120` started with `PANEMUX_PANE_ID=test-1` was listed by
-  `ps -E -p <pid> -o command=` and by `ps eww -p <pid> -o command=` as `sleep 120` alone, without
-  the variable. No other way to read another process's environment on macOS was verified, so
-  macOS hosts reported no pane ID rather than relying on an unchecked method. Issue #263 later
-  found that `/bin/sleep` was an exception (below).
-- **Process ancestry was not used instead.** Matching an agent's parent chain against a local
-  pane's shell pid would work without reading environments on the panemux host, but the pid of an
-  `ssh` pane's remote shell is not known to panemux, and an agent that detached from its shell
-  would be lost; the environment survives both.
+[Moved to pane-environment-identity](decisions/tasks/pane-environment-identity.md).
 
 ### Issue links and autolinked references (2026-09-26, issue #255)
 
-- **An issue is one the task's pull request closes**, read from `gh pr view --json
-  closingIssuesReferences` in the same `gh` call that already found the pull request, so the
-  dashboard runs no extra command and still looks up only directories a running task uses. That
-  the field exists and what it exports (`id`, `number`, `url`, and the repository's `name` and
-  owner `login`; the query asks for the first 100) was checked in the source of gh 2.101.0
-  (`api/export_pr.go`, `api/query_builder.go`), not against a real pull request: the environment it
-  was built in had no working GitHub token. Whether an issue linked by hand in the pull request's
-  sidebar, rather than by a closing keyword, is included has not been checked either. Issue titles
-  are not shown, since that export carries none.
-- **An older `gh` keeps the PR link** (review of PR #261). `closingIssuesReferences` first appears
-  in gh 2.72.0 (it is absent from `api/query_builder.go` at v2.71.2), and gh refuses a whole call
-  that names a field it does not know, before contacting GitHub. The first version therefore lost
-  the task's PR link on an older `gh` while the pane header, which asks for `url,number` only,
-  still showed it. A call refused with `Unknown JSON field` is now repeated with `url,number`. Only
-  that refusal is retried: a branch without a pull request also makes `gh` fail, and is the common
-  case, so a retry on any failure would double the `gh` runs.
-- **References use the shape of GitHub's autolink references** (`task_dashboard.autolinks`:
-  `key_prefix`, `url_template` with `<num>`, `is_alphanumeric`; review of PR #261, at the
-  author's direction). The first version had a Jira site (`task_dashboard.jira_url`) and found keys
-  by shape, `[A-Z][A-Z0-9_]+-[1-9][0-9]*`. The shape alone also matched `UTF-8` and `SHA-256` in a
-  title and cut `CVE-2024-45337` to `CVE-2024`. A `task_dashboard.jira_projects` allowlist was added
-  next and then replaced: a list of prefixes, each with its own URL template, is the allowlist and
-  the site together, is not tied to Jira or to its `/browse/` path, and is configured the way
-  GitHub already asks for it. Only the configuration's shape follows GitHub; panemux does not read
-  a repository's autolink settings, which GitHub's API ties to repository administration permission
-  (stated for GitHub Apps in its REST documentation; not checked for a user's own token).
-  Dropping a key followed by `-<digit>` was also considered, and rejected: it would have fixed only
-  the `CVE-2024` case and hidden a real key in a branch such as `PAY-418-2-retry`.
-- **Where GitHub's documentation is silent, panemux chose** (its own documentation and API
-  descriptions say what `<num>` may contain and that prefixes may not overlap, nothing more): the
-  prefix matches case included and not directly after an ASCII letter or digit, a numeric
-  identifier not directly before one, and an omitted `is_alphanumeric` means digits only. The last
-  is because an alphanumeric identifier includes `-` and so runs on through a branch name's words
-  (`TICKET-12-retry` gives `12-retry`); GitHub's own default for the field was not found.
-- **References are linked, never queried.** No tracker API is called and no ticket title is
-  fetched, so panemux holds no tracker credentials. The setting is a new top-level `task_dashboard`
-  section rather than part of `display`, since it says where links point rather than how anything
-  looks. A `url_template` must be `https`, because it becomes the address of a link the operator
-  clicks, and `<num>` must come after the host, so an identifier cannot change where a link goes.
-- **A template's host and port are held to what the browser parses** (review of PR #261).
-  `url.Parse` accepted `https://jira.example.invalid:99999`, `https://ex<ample.com` and
-  `https://xn--/`, which the browser's `new URL()` refuses; one such link made the browser reject
-  the whole task list. Go has no WHATWG URL parser, so the check is narrower than the browser
-  instead of equal to it: an IP or ASCII letters, digits and `-`, no punycode label (there is no
-  decoder in the module to check one with), no numeric last label unless the host is an IPv4
-  address, and a port 1–65535. `testdata/autolink-url-validation.json` is read by the Go test and
-  by the frontend's schema test, so a URL Go accepts that the browser does not fails a test.
+[Moved to issue-autolinks](decisions/tasks/issue-autolinks.md).
 
 ### Reading `PANEMUX_PANE_ID` on macOS through `ps -E` (2026-09-27, issue #263)
 
-Issue #254 left macOS hosts without a pane ID because `ps -E` had not shown the variable for
-`/bin/sleep`. A check on macOS 26.3.1 with SIP enabled (2026-09-27, claude 2.1.283, codex-cli
-0.142.2 and 0.157.1) found that `/bin/sleep` was the exception, not the rule:
-
-- `ps -E`, `ps eww` and `sysctl` `KERN_PROCARGS2` all showed the variable for claude (a native
-  Mach-O binary), codex's `node` wrapper and its native binary, `node -e`, and a `sleep` equivalent
-  compiled locally.
-- Apple-signed OS binaries (`/bin/sleep`, `/usr/bin/tail`, `/bin/zsh`) showed no environment at all:
-  the kernel returns none for them.
-- `KERN_PROCARGS2` refused root's processes (`EINVAL`). What the setuid-root `ps -E` shows for
-  another user's process was not checked; collection only reads the user's own processes.
-- codex 0.157's resident daemon (`codex app-server --managed-daemon`, started by launchd) has no
-  pane ID because it was not started from a pane; the process writing an interactive session is
-  the TUI, which has one.
-
-The choices made from that (decided by the user in issue #263):
-
-- **`ps -E`, read by the fixed `sh -s` script.** `KERN_PROCARGS2` delimits entries with NULs and
-  would be exact, but it needs a compiled helper or an interpreter to call `sysctl`; the macOS
-  `sysctl` command does not expose it (`unknown oid`). A helper does not fit a script that is one
-  constant run with `sh -s`, so it was rejected.
-- **The arguments are removed from the front.** `ps -E` joins the arguments and the `NAME=value`
-  entries with spaces, so a process whose argument is `PANEMUX_PANE_ID=…` would otherwise supply
-  the value. Removing what `ps -p <pid> -o command=` prints from the front was checked on macOS to
-  tell the two apart; output that does not start with the arguments is not read.
-- **Exactly one ` PANEMUX_PANE_ID=` or nothing.** Another variable's value can contain a space and
-  `PANEMUX_PANE_ID=` (`AAA='x PANEMUX_PANE_ID=evil'`), which `ps -E` prints indistinguishably from
-  the real entry. Taking the first or the last occurrence was rejected because which one is right
-  cannot be told from the output; the agent then has no pane ID.
-- **One occurrence inside another variable's value is read, and this is accepted** (review of
-  PR #269, decided by the user). With no real `PANEMUX_PANE_ID`, `AAA='x PANEMUX_PANE_ID=pane-b'`
-  or a value with a newline before ` PANEMUX_PANE_ID=pane-b` is reported as pane `pane-b` on macOS,
-  where Linux reports nothing. It is accepted because only someone who can start an agent as the
-  same user outside a pane can plant it — and such a process can set `PANEMUX_PANE_ID` directly —
-  the effect is at most a `Go to pane` that focuses another existing `local`/`ssh` pane of that
-  host, and no command runs. Rejected alternatives: skipping the reading whenever the environment
-  part contains a newline would stop only the newline form, not the space form, and would lose the
-  pane of a legitimate agent whose environment holds a multi-line value; reading
-  `KERN_PROCARGS2` through `perl` or another interpreter would be exact, but reverses the decision
-  above not to go beyond the fixed `sh -s` script, and whether macOS 26 provides a usable
-  interpreter was not checked.
-- **The same rule as Linux** (`^[A-Za-z0-9_.-]{1,128}$`) is applied to the value, read up to the next
-  space. The shell also prints it only when it consists of those characters, so a newline in it
-  cannot start a row of the output.
-- **The macOS reading is chosen by `uname -s` being `Darwin`**, not by `/proc` being absent, so
-  another system without `/proc` does not run a `ps -E` whose meaning there was not checked.
-- Apple's own binaries and other users' processes reporting no pane ID is documented as a limit
-  rather than worked around.
-
-The script's macOS branch is tested on Linux by replaying the `ps -E` output recorded in the issue
-through a fake `ps` and `uname`; it has not yet been run on a real macOS host.
+[Moved to macos-pane-identity](decisions/tasks/macos-pane-identity.md).
 
 ### Stage 2: done and labels are recorded on the panemux host (2026-09-26, issue #256)
 
-Issue #252's open question 1 left where done and labels are kept, and for how long, to this stage.
-The operator decided the four points below before implementation; the rest was chosen while it was
-built.
-
-- **One file, `~/.config/panemux/tasks.json`, beside panemux's other state files** — decided with
-  the operator. Keeping it out of `config.yaml` keeps a record save from racing a layout save and
-  keeps a dotfiles-managed config free of per-session data.
-- **Records are kept until a person clears them, and a task off the list is not shown** — decided
-  with the operator. The 7-day, 50-per-host listing bound stays as stage 1 set it; a record whose
-  session left it is neither deleted nor turned into a card built from the record alone, and applies
-  again if the session is listed again. A rejected alternative was to show such records in the Done
-  column, which would have meant cards with none of what the collection knows.
-- **A task marked done that runs again shows its real state** — decided with the operator. The
-  record is not cleared automatically: that would have made `GET /api/tasks` write, and a task that
-  stops again returns to Done without being marked a second time. Always showing it in Done was the
-  other alternative, rejected because it would hide a task that is waiting for input.
-- **Only tasks with a session ID can carry a record** — decided with the operator. A pid is reused
-  after its process exits, so a record keyed by one would move to an unrelated process.
-- **Done is a field, not a state.** Issue #252's column table gives Done a `done` state; the API
-  keeps `state` as what the host reported and adds `done`, so a running task marked done still says
-  what it is doing, and the column rule ("done and stopped") lives in one place in the browser.
-- **The record's key is host, agent and session ID.** A session ID is unique only on its own host.
-- **`PUT /api/tasks/records` replaces the whole record.** The dashboard sends what it shows. A
-  collection that was already running when a record was saved had read the records before it, so
-  the browser drops that answer rather than let it put the old record back for up to 10 seconds.
-- **A file panemux cannot read is never overwritten.** It is reported in `records_error`, tasks are
-  listed without records, and writes fail until the file is fixed, so a file from a newer panemux or
-  a broken hand edit is not silently replaced by an empty set.
-- **A file edited by hand is read again** (review of PR #262). The first version read the file once
-  and served memory afterwards, so a hand edit made while panemux ran was hidden and then undone by
-  the next save — and editing the file is the only way to clear the record of a task that has left
-  the list. The file's modification time and size are compared before each use; an edit that keeps
-  both is not seen, which was accepted over re-reading the file on every 10-second poll.
-- **A symlinked record file is written through** (review of PR #262), the way `config.yaml` is.
-  `AtomicWrite` alone replaces a link with a regular file, which would have moved the records out of
-  a dotfiles repository without saying so.
-- **Clearing a record does not need its host to be configured** (review of PR #262). The first
-  version refused every request for a host no longer in `ssh_connections`, which left that host's
-  records impossible to clear through the API. Adding a record still needs a configured host.
-  Removing the records when a host is removed from the config was the alternative; it was not taken
-  because it would tie the record file to the config's save path.
-- **Label limits** (32 characters, 20 labels, no control characters) were chosen while it was built,
-  to keep a label a short tag on a card rather than free text. Invisible format characters and line
-  and paragraph separators were added to the refused set in review of PR #262: they let a label look
-  empty, look identical to another label, or reorder the text after it. That also refuses emoji
-  joined with a zero-width joiner, which was accepted as the cost of a simple rule; invisible
-  characters outside those categories (a Hangul filler, a braille blank) still pass.
-- **The catch-all rows are keyed in a `Map`** (review of PR #262). Keying them apart from label
-  names first used an object literal, which made a label named `__proto__` crash the dashboard when
-  rows were split by label, and `constructor` or `toString` show as an empty catch-all row.
+[Moved to task-records](decisions/tasks/task-records.md).
 
 ### Stage 2: starting and resuming claude tasks from the dashboard (2026-09-26, issue #257)
 
-Issue #252's open questions 1 (what resuming does) and 2 (the security design of a new command path)
-were decided with the operator before implementation, from a proposal checked against claude 2.1.283
-and tmux 3.4 in the development environment. The operator decided:
-
-- **claude only.** Codex tasks are known only by a pid, so they cannot carry labels, and a codex
-  process that exited is not listed, so there is nothing to resume; codex could not be checked
-  either, since it was not installed. Codex support is issue #264. *Superseded by the issue #264
-  entry above.*
-- **The tmux session ends with claude.** Keeping a login shell in it (so the last output stays
-  readable) was the alternative; ending it makes the task list as stopped again, which is what the
-  board is for.
-- **A resumed task keeps its record.** A task marked done that is resumed stays marked done and shows
-  its running column, as #256's rules already say; clearing done on resume was the alternative.
-- **Starting a task opens no pane**; the dashboard waits for the task to be listed and selects it.
-- **The working directory is typed**, not only picked from directories tasks already use.
-- **A tmux session name that already exists is an error**, not an attach or a replacement.
-- **A real Claude Code run is a manual scenario (J21)**: that the first instruction becomes the first
-  message, and that the state file names the minted ID, could not be observed here.
-
-The security design, also agreed before implementation:
-
-- **The prompt never enters a command line a shell parses.** A remote start must cross the remote
-  login shell, unlike the command center's `exec.CommandContext` argv, so the launch reuses the
-  collection's shape — a fixed script on `sh -s` stdin — and carries the directory and the prompt in
-  heredocs with a quoted, randomly tagged terminator. Escaping values into a command string was the
-  rejected alternative: it makes safety depend on a quoting routine being right for every shell.
-- **The prompt travels through a temp file, not tmux's arguments.** Found while verifying: a tmux
-  server keeps the arguments of the client that started it as its own process arguments for its
-  whole life, so a prompt passed there would stay readable in `ps` long after the task.
-- **`--` before the prompt, and `--resume=<id>` in the `=` form.** Command-center history showed a
-  prompt starting with `-` being parsed as an option; for `--resume`, verified that
-  `claude --resume --version` prints the version, because its value is optional. Session IDs are
-  therefore UUIDs only (`--resume` also accepts a title), panemux mints the ID for a new task with
-  `--session-id` (so its labels can be recorded at once), and a resume uses only an ID the host
-  lists as a stopped claude task at that moment.
-
-Chosen while it was built:
-
-- **claude is found through the login shell when `PATH` lacks it.** An SSH exec channel's `PATH`
-  rarely holds a per-user install such as `~/.local/bin`; only an absolute path to an executable is
-  run.
-- **Host refusals are fixed codes** (`no-tmux`, `no-cwd`, `no-claude`, `tmux-exists`,
-  `tmux-failed`, `prompt-file`) mapped to fixed messages, so no host output reaches the response.
-- **Labels are checked before the task starts**, and a start whose labels could not be written still
-  answers `201` with `records_error`, since the task is already running.
-- **A launch during a running collection collects again when it finishes.** That collection began
-  before the task existed, and skipping the launch's own collection left the task unlisted until the
-  next poll.
-- **The working directory is not given to tmux's `-c`** (review of PR #265). tmux expands `-c` as a
-  format, and a directory holding `#` silently became the home directory while the launch reported
-  success. The fixed `sh -c` inside the session changes to it instead; escaping `#` as `##` was the
-  alternative, rejected because it depends on tmux's format rules staying as they are.
-- **A resume adds a window to a session of the task's name that no agent runs in** (review of PR
-  #265, decided with the operator). A pane opened on the task attaches with `new-session -A`, so
-  recreating it after claude exited left a shell session of that name, and every later resume was
-  refused with no way to clear it from the dashboard. Rejected alternatives: replacing the pane's
-  window with `respawn-pane -k` (kills whatever the shell was running), a different session name
-  (the open pane would not show claude, and the shell session lingers), and changing how task panes
-  attach (a config-schema change to every `tmux`/`ssh_tmux` pane).
-- **Resumes of one (host, session) are serialized inside panemux** (review of PR #265, decided with
-  the operator). Reusing a session is decided from the collection a resume makes before launching,
-  so two overlapping resumes could both find the session free and start two `claude --resume` on one
-  conversation. Checking the session's panes for claude inside the script, just before
-  `new-window`, was the alternative; it was not taken because walking the process tree in shell is
-  fragile across `ps` implementations and still leaves a gap. Two panemux processes are not
-  coordinated.
-- **Each resume in flight is tracked per task** (review of PR #265). One tracked ID was replaced by a
-  second resume, re-enabling the first task's button while its request still ran.
+[Moved to task-launch-resume](decisions/tasks/task-launch-resume.md).
 
 ### Stage 3: summaries of a task's work and what is left (2026-09-26, issue #258)
 
-Issue #252's open questions 3 (depending on the conversation log's format) and 4 (what reaches
-`claude -p`), and when summaries are made again, were decided with the operator before
-implementation, from facts checked in the development environment (Claude Code 2.1.283, one real
-conversation log of 75 lines and 605 KB, and real `claude -p` runs):
-
-- In that log, `attachment` lines held 349 KB and tool results most of the rest; the text of the
-  user's and the assistant's messages was 3.6 KB in all. One line was 130 KB. One attachment's kind
-  was `credential_org`. The session's first instruction was at the top of the file.
-- `claude -p` with the excerpt on stdin and `--json-schema` answered in `structured_output`. One
-  summary cost about US$0.03 with the CLI's default model and with `claude-haiku-4-5` alike (most of
-  it output tokens and the CLI's own ~6k-token system prompt) and took 4.6 to 22 seconds.
-
-The operator decided:
-
-- **The log is interpreted as little as possible, and a format it does not understand is not
-  summarized** (open question 3). The Agent Board's principle is that a private transcript format is
-  not part of a contract; the dashboard already reads the log's first `"cwd"` (stage 1), and a
-  summary cannot be made without reading the conversation. So the dependency is limited to "each line
-  is a JSON object; `type` `user`/`assistant`; `message.content` a string or `text` blocks", and a
-  log in which no line has that shape reports `unreadable` rather than falling back to raw text.
-  Rejected: passing the log's raw tail without interpreting it (no format dependency, but the text
-  would have been almost all tool output and attachments, the part most likely to hold secrets), and
-  interpreting it with a raw-text fallback (a format change would silently start sending tool output).
-- **claude is given the first user message (4 KiB) and the newest 24 KiB of conversation text**
-  (open question 4); the host sends at most the log's first 256 KiB and last 2 MiB for that. Rejected:
-  the newest text alone (a summary without the task's goal) and 64 KiB (more tokens and more
-  exposure for little gain).
-- **Summaries are off unless `task_dashboard.summary.enabled` is set**, the conversation text is not
-  masked (no masking can be relied on), and summaries are kept in memory only. The behavior document
-  says what is and is not sent. Rejected: on by default.
-- **Running tasks that are not working are summarized by the poll, stopped ones when selected**, a
-  summary is reused while the log keeps its modification time and size, a busy task is not
-  summarized again until it stops working, at most two run at once, and one run is limited to 2
-  minutes. Rejected: summarizing every task automatically (up to 50 stopped tasks per host, about
-  US$1.50 at first sight of a busy host) and summarizing only on a button.
-
-Chosen while it was built:
-
-- **The log's size joins its modification time as the summary's key.** The collection reported only
-  the modification time, in whole seconds; a log written twice in one second would have kept a stale
-  summary. The size is a fourth field of the transcript rows, so an older row without it still parses.
-- **claude's tools are denied with the command center's list, not removed with `--tools ""`.**
-  Checking whether an empty `--tools` leaves the CLI with no tools needed its tool listing, which the
-  development environment's permission policy refused; the model's own claim that it still had Bash
-  was not evidence either way. `--disallowedTools` is the denial the command center verified.
-- **The argv is the command center's otherwise** — no setting sources, strict MCP config, slash
-  commands disabled, a minted session ID — plus `--no-session-persistence`, so summaries leave no
-  session files under the panemux host's `~/.claude`. The shipped argv was run once against claude
-  2.1.283: a Japanese conversation came back summarized in Japanese, and the temporary directory was
-  removed.
-- **A failure shows a fixed message.** claude's own output can quote the conversation.
-- **A failed summary is not retried by the poll for the same log.** Retrying every 10 seconds would
-  spend tokens on a failure that is likely to repeat (claude not signed in, say); the detail panel's
-  button retries it.
-- **A done candidate is an answer with an empty `remaining` list**, not a separate verdict from
-  claude, so the candidate and the list shown under it cannot disagree.
-- **The card's title button no longer also selects through the card's click handler**, which ran for
-  every click and would have asked for a stopped task's summary twice.
-- **An `unknown` task is summarized only when asked** (review of PR #268, decided with the operator).
-  The first version summarized `unknown` with `wait` and `idle` on the poll. But `unknown` includes a
-  running session reporting a status this release does not know, which may be working with its log
-  growing at every poll — so a new Claude Code status would have started `claude -p` every 10
-  seconds, the failure mode spending money exactly when the format changed. Summarizing it once and
-  then treating it like `busy` was the alternative.
-- **The fetch picks a session's log the way the collection does** (review of PR #268). The collection
-  keys a summary on the first of a session's logs after `sort -rn` over `<mtime> <size> <path>`, while
-  the fetch script first read the first one the shell's glob found, and then the newest by mtime
-  alone, so a session with logs in two project directories — changed in the same second, in the
-  second version — could get a summary of the other log recorded as current. The script now orders
-  them with the same line and the same `sort`. Rejecting a fetch whose size differs from the
-  collected one was the alternative; a running task's log grows between the two, so it would have
-  failed ordinary summaries.
-- **A log that cannot be read keeps a disabled button** (review of PR #268, decided with the operator).
-  The server does not read such a log again until it changes, so the button did nothing; hiding it
-  was the alternative, rejected so the panel still shows that summarizing is what cannot be done.
-  The first version kept it disabled even after the log changed, and with `unknown` off the poll
-  nothing could summarize such a task again. An `unreadable` or `error` summary is now marked
-  outdated once the log changes after that attempt, which enables the button and makes selecting a
-  stopped or `unknown` task ask again (decided with the operator). Always enabling the button, with a
-  tooltip saying nothing happens until the log changes, was the alternative.
+[Moved to bounded-summary-input](decisions/tasks/bounded-summary-input.md).
 
 ### Summaries kept across restarts and reused by their input (2026-10-10, issue #352)
 
-Summaries were kept in memory only (stage 3), so a restart lost every one and the next poll paid for
-them again, and a summary was reused only while the log kept its modification time and size — a tool
-result appended to the log, which the excerpt leaves out, made the same excerpt go to the agent again.
-Parent issue #321 agreed, before implementation, to save them and to reuse them by what is actually
-sent:
-
-- **Summaries are saved in `~/.config/panemux/task-summaries.json`**, a file of their own beside
-  `tasks.json`, written the same way (`fileops.AtomicWrite`, 0600, a format version, a symlink written
-  through). Only what a card shows and what decides whether it is current are saved — the answer,
-  when it was made, the excerpt's SHA-256 and the log version it was last found current for — never
-  the log or the excerpt. A summary still running, a failure and an unreadable log are not saved.
-  Rejected: adding them to `tasks.json`, which holds what a person recorded and refuses to be
-  written while it cannot be read; a cache's failure should not block that file, nor the reverse.
-- **A summary is reused when the hash of the excerpt it would send is the one the answer was made
-  from.** The hash covers the excerpt, the agent and the summarizer's version (the instruction, the
-  schema and `summaryPipelineVersion`, raised by hand when the excerpt or the CLI's arguments change),
-  so an answer made by another version is never current. The log is still read again only when its
-  version changes, and only where a summary would have been made — a `wait` or `idle` task on the
-  poll, any task when asked — so a `busy` task keeps its last summary marked outdated, as before.
-  Rejected: comparing the excerpt itself (it would have to be saved) and reading the log of every
-  listed task at every change (a host round trip per busy task per poll).
-- **A restart restores and asks nothing.** A restored answer whose log has not changed is current;
-  one whose log changed is outdated and follows the usual conditions.
-- **Kept 30 days after the task was last listed, 1000 at most** (the operator chose 1000), the least
-  recently listed dropped first; a host removed from `ssh_connections` loses its summaries. A task
-  that leaves the list no longer takes its summary with it: a task listed again — a log just past the
-  7-day window, a host that was briefly down — would otherwise be paid for again. When a task was
-  last listed is saved at most once a day per summary, so the 10-second poll does not rewrite the file.
-- **A file that cannot be used is moved aside and saving starts again at once** (decided with the
-  operator). Not JSON, another format version, or an entry this build would not have written is
-  renamed to `task-summaries.json.bad-<UTC time>`, unchanged, and logged. Parent issue #321 had
-  proposed refusing an unknown version without overwriting it, as `tasks.json` does; the operator
-  chose not to leave summaries unsaved until someone repairs the file, since everything in it can be
-  made again — and moving it aside still overwrites nothing. Only a file that cannot be read or moved
-  stops saving, which the dashboard then reports. Rejected: stopping saves until the operator moves
-  the file (how long that takes is up to the operator noticing), and moving aside only a broken file
-  while refusing an unknown version (the operator preferred one rule).
-- **With summaries off the file is neither read nor written**, and is left as it is (decided with the
-  operator); turning them on again restores it. Rejected: deleting it when they are off, which would
-  pay for every summary again.
+[Moved to summary-persistence](decisions/tasks/summary-persistence.md).
 
 ### Summaries cost less: a fixed system prompt, no tools and Haiku (2026-10-10, issue #353)
 
-Issue #321 asked for the cost of a summary to be measured and cut further once #352 had stopped
-asking again for an unchanged excerpt. The measurements, on a synthetic conversation and update
-sequence with Claude Code 2.1.294, are in
-[behavior/task-summary-cost.md](behavior/task-summary-cost.md). The sequence made five calls before
-#352 and two after it; one call cost US$0.035–0.056 for a 3 KB excerpt and US$0.092 for the 24 KiB
-budget, and the CLI's own system prompt and tool definitions were about 3,900 of a short excerpt's
-6,400 input tokens. Stage 3's finding — the CLI's ~6k-token system prompt and the output are most of
-the cost, and Haiku cost about the same — no longer held: Haiku 5.5 cost about 2% of Opus 5.5.
-
-The operator decided, from those measurements:
-
-- **The CLI's system prompt is replaced by a fixed one, and no tool is offered** (`--system-prompt`,
-  `--tools ""`): about −40% (warm cache) to −56% (cold) on the default model, with no loss of quality seen. The denial list,
-  `--setting-sources ""`, `--strict-mcp-config` and `--disable-slash-commands` stay as they are; stage
-  3 had kept `--tools ""` out only because its effect had not been verified, and it was verified here.
-- **Haiku answers, by the CLI's `haiku` alias** (about −98 to −99% with the fixed prompt). A pinned
-  model ID was the alternative, rejected because a retired ID would make every summary fail; with the
-  alias, a newer Haiku can answer without the summarizer version changing, so summaries made by the
-  older one stay current.
-- **A summary that Haiku did not make says so** (review of PR #356). When an organization's
-  `availableModels` leaves Haiku out, the CLI answers with its default model without failing, at
-  around 30 times the cost. The summarizer reads the model names in `modelUsage` from the CLI's
-  answer, and when one is not a Haiku it logs that once per model and the detail panel names the
-  model. The summary is kept rather than failed: the call has already been paid for. Only the model
-  ID is logged or shown, and a name that is not shaped like one is reported as `unknown`.
-- **The system prompt tells claude to describe only the excerpt.** The first Haiku run with the fixed
-  prompt listed "check whether the directory is a git repository" as remaining work: the CLI still
-  tells the model about the empty directory it runs in. That sentence removed it in the next run.
-- **The system prompt and model are part of Claude's summarizer version**, not a raised
-  `summaryPipelineVersion`: Claude's saved summaries become outdated, and Codex's, whose summarizer
-  did not change, stay current.
-
-Rejected for now:
-
-- **Updating from the previous summary and the new messages** (−32% more on the default model): the
-  summary would drift over successive updates unless it were made again from the whole excerpt now
-  and then, and the saved file would have to keep more; with Haiku the saving is a fraction of a cent.
-- **Collecting updates that follow one another closely (debounce)**: in the measured sequence it saves
-  nothing, since a busy task is not summarized and an unchanged excerpt is not sent again.
-- **Smaller input or output limits**: a long conversation would lose context for a saving Haiku
-  already makes; output was a minor part of the cost.
-- **`--bare`**: it authenticates with `ANTHROPIC_API_KEY` alone rather than the operator's signed-in
-  CLI, a change of authentication the issue left out of scope.
+[Moved to summary-cost](decisions/tasks/summary-cost.md).
 
 ## Agent Board
 
+[Moved to agent-board](decisions/agent-board/index.md).
+
 ### Pane-independent relay by source host (2026-11-07, #495 / #505)
 
-S3 adopts source-host attribution (design A): public `api.sh` reads establish the host for a
-valid unqualified agmsg name in the configured team. Roster lookup adds no authentication
-within the same-user boundary, and session/pane mapping would exclude plugin workers.
-BoardIDs use `local` and `ssh:<configuration key>` to distinguish even the SSH key `local`.
-
-Cross-host addresses are `name@BoardID`; forwarding strips the destination host and qualifies
-the original sender so the recipient can reply verbatim using `send.sh --force`. Qualified
-senders are copies or forgeries and are excluded from aggregation and forwarding. Legacy bare
-pane destinations retain their route; only configured pane senders keep a bare `from` there.
-Pane-free senders are qualified even on that route (orchestrator decision, 2026-11-07), because
-otherwise the forwarded copy would be accepted as an unknown original at the destination.
-
-The own-send ledger's host/team/bare-recipient/body-hash multiset, TTL, rollback and TLA+
-transitions stay unchanged. It remains sufficient for `_system`; forwarded-copy filtering needs
-no extra ledger. Status keys are host-qualified internally; the existing pane API gets only the
-matching pane/host projection. New API/MCP/UI identities belong to S3b. No proxy roster entries,
-send wrapper, panemux participation hook or remote listener is introduced. Received messages
-are not work or approval authorization, and same-user name spoofing remains possible.
+[Moved to pane-independent relay](decisions/agent-board/pane-independent-relay.md).
 
 ### Live pane eligibility after configuration edits (2026-10-29, #435 / PR #447 review)
 
-Routing now reads immutable maps derived under the API configuration lock for each relay operation;
-bootstrap refreshes pane membership each tick. Enabled boards continue running even when the
-initial layout is empty. New panes and configured hosts become available without a restart, removed
-IDs lose sender/destination authority, and moving a pane revokes its old host. Participation is
-synchronized on ticks, clearing instruction state on host changes while retaining historical reports.
-Detection continues every five seconds for all eligible panes; the steady-state process/tmux/SSH
-probe cost is documented rather than changing detection semantics in this review fix.
+[Moved to live-pane-eligibility](decisions/agent-board/live-pane-eligibility.md).
 
 ### Keep source data separate from diagnostics (2026-10-31, #435 review round 2)
 
-The combined input lane retained failure diagnostics but also mixed successful git warnings into
-rev-parse and tar output. Git source acquisition now uses a local split-output entry point sharing
-hostexec's command setup and cancellation. Only stdout is source data; stderr is attached only to
-failure diagnostics. The existing combined RunInput contract is unchanged for installers and
-prerequisite probes. Regression cases cover warnings during verification, archive creation and both.
+[Moved to source-output-separation](decisions/agent-board/source-output-separation.md).
 
 ### Scope automatic-update success to its host run (2026-10-31, #435 B3 review)
 
-Success and restart guidance survive a queued confirmation within the same worker run, but a new
-opt-in run starts without a success claim. Adding a host clears the previous identity's outcomes,
-even while automatic updates are off; changing its result generation also rejects late outcomes
-from the old identity. The shared result invalidation is used after successful manual updates too.
-These are result/notification changes; installation admission and execution are unchanged.
+[Moved to update-result-lifetime](decisions/agent-board/update-result-lifetime.md).
 
 ### Automatic-update event delivery (2026-10-31, #435 B3 review)
 
-An off-to-on event received during a host's active check is retained as one pending confirmation.
-The same worker consumes it after the current attempt, coalescing overlapping events and keeping
-shutdown joining and per-host update admission intact. A host addition uses the existing successful
-SSH-connection persistence event to notify tool management, after releasing the config lock.
-Only that host is checked for enabled global tools; unrelated hosts' retained failures are not
-retried. Failed saves and disabled preferences schedule nothing. No periodic watcher is added.
-Current-state installer/security descriptions describe these shipped capabilities directly.
+[Moved to update-event-delivery](decisions/agent-board/update-event-delivery.md).
 
 ### Global agmsg automatic updates (2026-10-31, #435 B3)
 
-B3 activates the previously persisted instance-wide agmsg preference. Host management checks all
-configured hosts at process startup and each off-to-on opt-in, and retains outcomes.
-Only older installed releases are updated; the eligibility recheck is inside B2's reservation,
-and the adapter preserves update-only intent at its final probe, so an externally removed
-installation cannot become an automatic Install. Acquisition, prerequisites, archive
-transfer and drain/pause use B2's execution path. Failures support manual Update; there
-is no retry loop, periodic monitor or automatic recovery. Turning off skips updates that have not
-started, while a running installer finishes. The global checkbox is available on every host and
-explains unattended installer consent. Its API saves config.yaml and rolls back on save failure;
-Codex hook keeps its per-host settings. B3 completes #435; #437 remains separate.
+[Moved to global-agmsg-updates](decisions/agent-board/global-agmsg-updates.md).
 
 ### Manual installer diagnostics and non-release versions (2026-10-31, #435 review)
 
-Target prerequisites and git acquisition use the shared input lane so failures retain output on
-both local and SSH hosts. Git diagnostics name the source operation rather than task collection.
-Only exact release/tag spellings are comparable: describe builds, dirty trees and prereleases
-are unknown, warn, and are never installed over. Prerequisites remain inside B1's reserved update
-window to preserve prompt overlap refusal and avoid racing another installer. Moving slow source
-preparation out of that window would need separate preparation reservation semantics.
+[Moved to installer-diagnostics](decisions/agent-board/installer-diagnostics.md).
 
 ### Manual pinned agmsg installation (2026-10-30, #435 B2)
 
-B2 connects B1's input lane, prerequisites and pause to the pinned agmsg tool adapter and host menu.
-The release stays 1.2.0 and SHA stays 3c537a51bb76a23e312e7c27770df4a58ba794ff. Startup warnings
-now compare with the pinned normalized release, including newer patches. A SHA-specific bare Git
-cache is verified before archive transfer and can be reused offline. Manual operations expose
-installer consent, output/exit failures and restart guidance. Relay leases cover source/destination
-batches before state changes; bootstrap leases extend through PTY onboarding. Installer attempts
-invalidate discovery. The global auto-update setting remains persisted but inactive with no UI
-checkbox until B3. #435 stays open.
+[Moved to pinned-agmsg-install](decisions/agent-board/pinned-agmsg-install.md).
 
 ### Split installer work into three PRs (2026-10-30, #435 / #438)
 
-After part A merged, the user approved splitting B into three main-targeting PRs, each following
-the previous merge, to keep implementation, verification and review within manageable context.
-B1 supplies the common stdin execution lane, call drain/pause and adapter-defined prerequisites.
-The existing Codex hook paths use the coordination; arbitrary stdin and optional prerequisite
-checks are available for adapters, with no agmsg installation or board-pause integration yet.
-B2 adds the manual agmsg Install/Update vertical slice, board integration and host-menu UI.
-B3 adds instance-wide automatic updating and completes the remaining #435 acceptance criteria.
-B1 and B2 reference #435; B3 closes it. The approved product decisions below remain unchanged.
+[Moved to installer-pr-sequence](decisions/agent-board/installer-pr-sequence.md).
 
 ### Global board participation and installer split (2026-10-29, #435 / #438)
 
-The user approved the implementation decisions recorded in #435 on 2026-10-29.
-`agent_board.enabled` defaults to false, `mode` to monitor, and `agmsg_auto_update` to false.
-Enablement, mode, team, and automatic-update preference are instance-wide. Enablement and mode
-are configured in YAML; pane settings no longer expose either. Removed pane `agent_board` blocks
-and `agent_board.agmsg_path` are migration errors, rather than silently discarded settings.
-The installation location is fixed at each host's `~/.agents/skills/agmsg`, using the local home seam.
-
-All configured panes with a resolvable board host become relay addresses, including shells.
-This broadens the set of impersonatable same-host names without changing the same-user trust
-boundary. Only detected agents or reporting panes appear in the UI. The authenticated status API
-adds a synchronized participation map with pane ID, host, registry agent type, whether the current
-session received its instruction, and optional last-report time. Sending an instruction does not
-prove the agent executed it. Global opt-in consents to onboarding all eligible agents; `turn` and
-`both` also consent to agmsg's persistent project-local delivery hooks.
-
-Implementation is split into two main-targeting PRs. Part A contains configuration, enablement,
-fixed paths, participation API/UI, isolated fixtures, and current-state docs. Part B follows after
-A merges: tool prerequisites and pause notification, Install/Update, global automatic updating,
-version+SHA pin and exact-version startup warnings, host-menu UI and their docs. Until B,
-`agmsg_auto_update` is persisted but inactive and existing version-warning behavior remains.
-
-For B the approved initial pin is version 1.2.0 with commit
-`3c537a51bb76a23e312e7c27770df4a58ba794ff` (`TestedAgmsgCommit` alongside `TestedAgmsgVersion`).
-SHA-specified shallow fetch from the repository-documented `https://github.com/fujibee/agmsg.git`
-was verified. Cache verified sources under cachedir's `panemux/agmsg/<SHA>` and reuse them offline.
-Archive only the verified commit; extend the execution port to carry tar on stdin to a fixed
-command that extracts into mktemp storage, runs install.sh with stdin closed, and cleans it up.
-Install has no arguments; Update uses only `--update`. Refuse Update when another named install
-exists: v1.2.0 otherwise chooses the first install it finds. Show installer output/exit/timeout
-without automatically attempting recovery. Check prerequisites; install none of them.
-
-The tool manager will support global and per-host auto-update settings, preserving Codex hook's
-store. Check all hosts at startup and when enabled, updating only older installed copies; show
-failure with manual retry. Drain ongoing panemux calls before an update, refuse new sends promptly,
-pause probing/bootstrap/relay and preserve affected relay cursors until it ends, including failure.
-Agent-owned script calls cannot be paused. Successful Install invalidates absence caching so the
-board can join without restarting panemux; recommend restarting agents separately.
-
-Installer consent covers execution of the fixed commit, also unattended when auto-update is on.
-Its own initialization may create a DB/default config; panemux does not directly manage them or
-teams. The pinned installer can write Claude commands, other agents' skill directories, Codex
-writable roots and an existing shim outside the shared skill directory. Tests use isolated HOME
-and fixtures, never the developer's installation. These are approved B decisions, not capabilities
-introduced by A.
+[Moved to global-board-participation](decisions/agent-board/global-board-participation.md).
 
 ### Isolate the board message transport (2026-10-26, #438 / #441)
 
-The user confirmed five implementation choices in #441. `internal/board` owns `MessageClient`
-(`HostID`, `Since`, `Send`) and `Participation` (availability, address validation, join instruction).
-Requests use registry `agent.ID`, team, pane ID, and mode; rows remain `board.Row`.
-`internal/agmsg` is the only adapter, executing through `host.Runner`. It owns script names,
-paths, JSONL parsing and cursor filtering, versions, participation prose, and agent-specific steps.
-This leaves relay, cache, sender validation, and bootstrap orchestration independent of agmsg.
-
-The adapter's agent-ID-to-type/participation table is checked at startup, as the previous root
-board adapter list was, and by table-driven tests for declarations, duplicates, and valid types.
-`Definition.AgmsgType` and reverse lookup are removed; session detection returns registry IDs.
-Detection rules stay in the registry, with their external provenance documented in the integration.
-
-Captured fixtures move unchanged to `internal/agmsg/testdata/agmsg-v1.2.0`; parser, cursor and
-real-install contract tests move with them. Participation goldens also move unchanged. Relay
-cursor/ledger tests and the TLA+ transition table stay board-owned. Makefile contract execution,
-fixture-agent checks, coverage scope, and CI pin lookup/path selection follow the adapter package.
-
-The participation port also exposes adapter-owned diagnostic labels and a generic path-discovery
-error classification. Bootstrap keeps path and presence warning streaks independent, including
-path-failure → presence-failure transitions, while retaining the original operator-facing messages.
-Adapter retry, send-lane and concurrent discovery tests live with the adapter so package-scoped
-mutation testing exercises the owning package's behavior.
-
-The public `agmsg_path` key, default and validation results remain unchanged. The adapter owns the
-default path and validation and config delegates to it. Relay discovery still remembers absence;
-bootstrap independently caches paths and rechecks presence. The type-name documentation moves to
-`docs/agent-board/agmsg-integration.md`, linked from the transport-independent registry docs.
-Enablement, installation, version/SHA pinning and automatic update PRs remain #435/#437 work.
+[Moved to message-transport-port](decisions/agent-board/message-transport-port.md).
 
 ### Host tool management and the Codex hook adapter (2026-10-26, #438 / #440)
 
-`internal/hosttools` owns host tool management and defines the `Tool` port: `Check` returns the
-shared six-state status, and `Install` returns the status read back or an installation error.
-`internal/codexhook` is its first adapter; it owns the scripts and uses `internal/host.Executor`.
-Task collection only emits a successful-collection notification. Management owns the background
-check context and joins those checks before the shared execution pool closes.
-
-The four implementation decisions were confirmed in #440: keep Codex-specific automatic-update
-conditions, per-host settings and `~/.config/panemux/codex-hook.json` in this step; generalize for
-agmsg's global setting in #435. Keep `/api/tasks/codex-hook` and its JSON unchanged and route it to
-host management internally. Extract `HostTools` / `HostToolItem` with tool-specific copy supplied
-as data, preserving the existing markup, CSS, text and actions. API migration and new visible UI
-would expand a refactor without helping its ownership boundary, so neither is part of this step.
+[Moved to host-tool-port](decisions/agent-board/host-tool-port.md).
 
 ### One host identity and shared execution (2026-10-25, #438 / #439)
 
-Both boards use the panemux host plus the keys of `ssh_connections`. `internal/host` defines the
-I/O-free identity and fixed-script execution port; `internal/hostexec` owns local `sh -s` execution
-and one lazy SSH command connection per key. The task board no longer owns connection state, and
-Agent Board no longer executes through a pane's `BoardExecutor`. Scripts travel on stdin and
-variable values remain positional arguments quoted at the SSH boundary. Concurrent operations use
-separate exec channels; cancelling one preserves a healthy shared connection.
-
-Name equality (option A) determines an SSH pane's host. Comparing resolved hostname/user/port
-(option B) was rejected: separate configured names remain separate hosts, even for the same machine.
-A pane named only by OpenSSH configuration is excluded with a startup warning and guidance to add
-a name-only `ssh_connections` entry, rather than rejected by configuration validation.
-
-Connection recovery follows the task board contract: failed dial cooldown is 60 seconds, transport
-loss during use allows immediate redial, and manual reconnect discards shared state, including an
-in-flight dial. Lazy board probes let an initially unreachable host recover without restart or a
-pane on that host. Bootstrap resolves paths and checks presence through the same port, while its
-participation instruction remains a pane PTY write. Confirmed absent agmsg remains a relay skip;
-tool installation, global enablement and agmsg adapter consolidation belong to later stages.
-
-The API handler owns the shared pool independently of either board. A task service closes only a
-pool it constructed itself, so replacing a consumer does not tear down the board's connection.
-Board polling and bootstrap start missing connections without waiting for dial completion, retaining polling
-of all configured keys while preventing an unused unreachable key from stalling healthy hosts.
-Operator sends instead wait for connection establishment within their context, so a healthy host
-can receive a first send or a send immediately after reconnect. Repeated identical poll failures are logged on state change. The execution port checks current
-configured membership on every connection lookup, so removing a key cannot fall back to OpenSSH.
-
-Two existing task tests accessed private connection state. Their fixtures/waits now use observable
-connection availability; their assertions and tested behavior are unchanged, as agreed in #439.
-
+[Moved to shared-host-execution](decisions/agent-board/shared-host-execution.md).
 
 ### Compatibility is checked against a real agmsg release (2026-08-23, PR #176)
 
-Fixture tests could not detect false assumptions about `watch.sh` output or the shape of event-log
-message IDs. A second contract tier now installs the pinned agmsg version in CI and runs daily
-against the latest release. Its first live run found that treating IDs as numbers prevented the
-relay cursor from advancing; the current cursor contract treats IDs as opaque ordered values from
-the returned stream.
-
-The design borrows Pact's consumer-owned contract principle, but not Pact tooling: agmsg is a CLI
-dependency without an HTTP/message provider verification loop or broker. Direct Go tests against
-the installed scripts verify the actual boundary with less machinery.
+[Moved to real-agmsg-contract](decisions/agent-board/real-agmsg-contract.md).
 
 ### Contract incidents favor behavior over environment and wording (2026-08-23 onward, PR #176)
 
-The live contract first asserted a `watch.sh` diagnostic that is absent on its successful path; it
-now observes message delivery. Its first CI run also depended on finding an agent in the test
-process ancestry, so locks looked live locally and stale on runners. Tests now set agmsg's documented
-`AGMSG_AGENT_PID` override and verify that a dead owner can be replaced.
-
-The scheduled canary later failed when agmsg v1.3.1 changed a diagnostic sentence while preserving
-the behavior Agent Board needs. The assertion was narrowed to the stable fact that the dropped pair
-is named. The canary remains daily because the measured median between 22 releases from v1.0.2
-through v1.2.2 was 2.9 days; a weekly sample could span several releases and obscure the cause.
+[Moved to behavioral-contract-assertions](decisions/agent-board/behavioral-contract-assertions.md).
 
 ### Version coverage normalizes install provenance (2026-08, PR #176)
 
-An installed `VERSION` may be a bare release, a `v`-prefixed tag, or `git describe` provenance.
-Literal comparison to the tested pin falsely warned on supported installs. Panemux now normalizes
-those forms and treats later patches on the tested major/minor line as covered. This is a warning-noise
-policy, not a semver promise; the real-install contract remains authoritative. Patch tolerance also
-avoids forcing pin churn at agmsg's observed multi-day release cadence.
+[Moved to version-provenance](decisions/agent-board/version-provenance.md).
 
 ### Usage remains outside the Agent Board status contract (2026-08)
 
-Account-wide usage belongs to the agent provider. Per-pane usage may still be derived by summing the
-documented `usage` field already stored in each pane's transcript: that is direct field reading, not
-inference from private state. If added, it belongs to panemux's existing pane-inspection surface,
-not the cooperative agmsg status schema.
+[Moved to usage-contract-boundary](decisions/agent-board/usage-contract-boundary.md).
 
 ### The own-send ledger is the model-checking pilot (2026-09, PR #243, issue #168)
 
-The ledger was chosen before `Relay.processRow` because it is the smallest self-contained state
-machine and had already suffered a multiset-versus-set bug. It established the TLA+, generated
-transition graph, and Go conformance tiers at low cost. `Relay.processRow` is the intended next
-model; dynamic executor selection is a search-and-retry algorithm better suited to fuzz or property
-tests.
+[Moved to ledger-model-pilot](decisions/agent-board/ledger-model-pilot.md).
 
 ### Same-project panes claim an agmsg actas lock (2026-08-22, PR #171)
 
-agmsg's default watcher resolves every identity registered for one project and agent type. Two
-Claude panes in the same directory therefore subscribed to each other's messages even though their
-board identities were distinct. Bootstrap now follows agmsg's own template: join, claim the pane ID
-against the Claude session ID, then run `watch.sh` with the pane ID as its narrowing argument. A
-held lock is reported instead of disturbing the owning watcher.
+[Moved to same-project-identity-claim](decisions/agent-board/same-project-identity-claim.md).
 
 ### Dashboard capability is independent from command-center capability (2026-08-22, PR #171)
 
-The dashboard can be enabled without the command center and vice versa. A single
-`command_center_enabled` flag could not represent both cases, so `/api/session-token` also returns
-`agent_board_enabled`. The dashboard remains read-only; broadcast composition stays in the command
-center/API surface.
+[Moved to independent-board-capability](decisions/agent-board/independent-board-capability.md).
 
 ### Command center pins its own execution context (2026-08-22, PR #171)
 
-Live CLI verification showed that plain `claude -p` can report the ambient interactive session ID,
-and inherited settings can broaden an `--allowedTools` policy. The command center now mints and
-persists its own session ID, disables ambient setting sources, uses an empty per-query directory,
-passes its instructions explicitly, restricts MCP configuration, and combines an allowlist with an
-explicit acting-tool denylist. The current security contract and evidence are in
-[security/command-center.md](security/command-center.md).
+[Moved to command-center-context](decisions/agent-board/command-center-context.md).
 
 ### Browser clients obtain the board token from a dedicated bootstrap endpoint (2026-08-14, PR #170)
 
-The original command-center design covered how its subprocess received a bearer token but not how
-the bundled frontend learned a randomly generated token. `GET /api/session-token` was added as the
-bootstrap contract. It is deliberately outside the authenticated `/api/board/*` subtree and is
-limited to the local/trusted deployment model documented in [security/auth.md](security/auth.md).
+[Moved to board-token-bootstrap](decisions/agent-board/board-token-bootstrap.md).
 
 ### Command-center subprocess arguments are structurally separated (2026-08-14, PR #170)
 
-Adversarial testing against the real `claude` CLI found two independent argv defects: a
-dash-prefixed prompt could be parsed as a flag, while ordinary prompts failed because of variadic
-flag placement. The runner now constructs a fixed option segment, uses the CLI's option terminator,
-and keeps the prompt in the operand position. Exact argv-shape tests are intentionally retained as
-a security contract. See [security/command-center.md](security/command-center.md).
+[Moved to command-argument-separation](decisions/agent-board/command-argument-separation.md).
 
 ### Command center uses panemux's API, not agmsg scripts (2026-08, PR #162)
 
-Direct script execution would have made the LLM responsible for shell-safe composition and would
-have limited it to one host's agmsg state. A narrow MCP server exposes only board status, message
-history, and broadcast, backed by panemux's authenticated REST API. `internal/board` remains the
-only package that invokes agmsg scripts.
+[Moved to command-center-api](decisions/agent-board/command-center-api.md).
 
 ### The own-send ledger authenticates sentinel-attributed rows (2026-08, PR #162)
 
-`send.sh --force` does not authenticate the free-text `from` value, so trusting every row from the
-reserved `_system` identity allowed impersonation. Panemux now accepts such a row only when it
-matches a recent send recorded by panemux itself. Model checking later formalized this multiset
-behavior; see [agent-board/model-checking.md](agent-board/model-checking.md).
+[Moved to sentinel-send-ledger](decisions/agent-board/sentinel-send-ledger.md).
 
 ### Remote message bodies use an encoded wrapper argument (2026-08, PR #162)
 
-agmsg's `send.sh` accepts the body as a positional argument and has no stdin write contract. Panemux
-therefore base64-encodes the body, allowlists the encoded alphabet, quotes every
-`RunBoardCommand` argument, and uses a fixed remote wrapper to decode immediately before `send.sh`.
-Team and agent identifiers use a narrower direct allowlist. The security argument and its explicit
-CodeQL-verification caveat live in [security/agent-board.md](security/agent-board.md).
+[Moved to encoded-message-wrapper](decisions/agent-board/encoded-message-wrapper.md).
 
 ### Agent Board uses agmsg only (2026-08-08, PR #162)
 
-Supersedes an early dual-backend design with a panemux-owned SQLite protocol for Claude panes.
-Maintaining two protocols added no capability: agmsg already supplied the messaging contract and
-interoperability with multiple agent types. Panemux therefore owns relay/cache behavior but no
-message schema or database.
-
-Claude Code's native cross-session messaging was also evaluated and rejected: it is Claude-only,
-does not fit arbitrary SSH hosts, and exposes no documented process API that panemux can call.
+[Moved to agmsg-only](decisions/agent-board/agmsg-only.md).
 
 ## Quality gateway
 
-The quality gateway has a denser numbered record. [quality-gateway/decisions.md](quality-gateway/decisions.md)
-contains decisions D1–D14 in decision order, including evidence and rejected alternatives. The
-rollout sequence is retained there rather than in the current [quality-gateway guide](quality-gateway.md).
-
-Key milestones were:
-
-| Date | Change | Decision |
-|---|---|---|
-| 2026-08-28 | Real-router tests, wider coverage scope, agent hooks, red-check, and scenario checks | D1–D6 |
-| 2026-08-30 | Diff-scoped block coverage and mutation measurement | D7–D8 |
-| 2026-09-03 | Go-produced contract fixtures and accessibility ceilings | D10–D11 |
-| 2026-09-15 | Mutation findings became a blocking gate | D9 |
-| 2026-09-21 | TLA+ transition export plus Go conformance replay | D12 |
-| 2026-10-08 | Tests needing a pty, tmux, `ps` or `dscl` skip inside the Claude Code sandbox and fail in CI | D13 |
-| 2026-10-09 | The pre-push hook checks only the pushed change; CI runs the whole suite | D14 |
+[Moved to quality-gateway](decisions/quality-gateway/index.md).
 
 ### golangci-lint caches inside each checkout (2026-10-09, issue #325)
 
-`make lint-go` sets `GOLANGCI_LINT_CACHE` to the checkout's own ignored `.cache/golangci-lint/`.
-It had used golangci-lint's default under the user cache directory, falling back to `$TMPDIR` where
-that was not writable (#315). Both locations are shared by every checkout on the machine, so one
-worktree could report issues cached for another, and the sandbox fallback depended on a write probe.
-The location is derived from the script's own path rather than the working directory, and an
-inherited `GOLANGCI_LINT_CACHE` is overridden rather than honoured: honouring it would let a value
-exported in one worktree leak into another, which is the sharing this replaces. Creating the
-directory failing is an error, not a fallback. The Go build and module caches were left where they
-are; old user-directory lint caches are not moved or deleted.
+[Moved to checkout-lint-cache](decisions/quality-gateway/checkout-lint-cache.md).
 
 ### Agent hooks check the checkout that holds the change (2026-10-11, issue #350)
 
-Claude Code runs the hooks under `$CLAUDE_PROJECT_DIR`, which can be the main checkout while the
-session works in a worktree nested inside it (`<repo>/.claude/worktrees/<name>`). The edit hook
-derived its repository from its own path, so it vetted `./.claude/worktrees/<name>/<pkg>` in the
-main module and failed every Go edit. It now asks git for the top level and the prefix of the edited
-file's directory, and runs `gofmt`, `go vet` and `tsc --noEmit` there; the prefix rather than
-stripping the top level off the path, because git resolves symbolic links such as macOS's `/tmp`.
-Only checkouts of the hook's own repository are vetted and type-checked: the file's git common
-directory must equal the hook checkout's, compared with symbolic links resolved. Taking any git top
-level instead blocked edits in unrelated throwaway repositories (no `go.mod`, or a `go` directive
-newer than the pinned toolchain) and ran their own `node_modules/.bin/tsc`; such files get `gofmt`
-only, as before. A `go: ` load error in a worktree of this repository, such as a toolchain-bump
-branch's newer `go` directive, is reported without blocking; the go command's own progress lines
-(`go: downloading ...`) carry the same prefix and are dropped first, so a diagnostic printed after
-them still blocks. The Stop hook already took its
-repository from the working directory, but wrote gofmt's stderr to `$repo_root/.git/`, which in a
-worktree is a file, so gofmt never ran there. It now runs gofmt once per stream and needs no
-temporary file; a `mktemp` under `$TMPDIR` was tried first, and blocked the turn when it could not
-create the file, a fault of the machine rather than the change. Delegating to the hooks on the
-worktree's own branch was rejected: the main checkout's hooks checking the worktree's module is
-enough, and running the branch's hook scripts would make which checks run depend on the branch
-under edit. What those checks invoke is the worktree's own: `go vet` loads the worktree's module
-and `tsc` comes from the worktree's `frontend/node_modules`, the same dependencies `make check`
-there uses.
+[Moved to worktree-aware-hooks](decisions/quality-gateway/worktree-aware-hooks.md).
 
 ## WebSocket route separation and browser authority guard (#297, #298)
 
-The command stream moved from `/ws/board-command` to `/ws/board/command` so the valid
-`board-command` pane can keep its terminal URL. A legacy alias would preserve the collision,
-so command clients must update and old tabs must reload. Fixed streams use two segments,
-while terminal IDs occupy one.
-
-All WebSockets and already-guarded task/SSH APIs now share hostname/effective-port Origin
-validation and reject same-site/cross-site Fetch Metadata. The former arbitrary-loopback-port
-exception exposed terminal input to other local web pages. Fetch Metadata alone was rejected
-because Chrome WS upgrades were observed without it. Both Vite proxies preserve Host and Origin;
-HTTP string proxy shorthand had changed Host and would have broken strict validation.
-
-Scheme matching against backend TLS was rejected because existing deployments terminate TLS
-upstream. Host without a port uses Origin's scheme default (http 80, https 443); same explicit
-host/port across schemes remains an accepted limitation. Forwarded headers are not trusted,
-no public-Origin setting was added, and CLI Origin-free access remains supported. Protecting
-all remaining side-effect APIs and DNS rebinding are separate work.
+[Moved to websocket-authority](decisions/runtime/websocket-authority.md).
 
 ## Codex task summaries (#312)
 
-Codex conversations use Codex rather than the Claude account. The bounded rollout excerpt retains
-canonical user/assistant text, and the summary cache includes the agent. The initial isolation
-proposal excluded global instructions and required an empty tool allowlist; the operator chose
-instead to respect existing Codex configuration and permissions. The runner therefore preserves
-authentication, default model and global/managed settings in a dedicated ephemeral exec invocation.
-It requests no tools and never approves or relaxes permissions, but does not promise a tool-free
-runtime. Inherited instructions, MCP and hooks may affect input, actions and cost.
+[Moved to codex-summary-runner](decisions/tasks/codex-summary-runner.md).
 
 ## 2026-10-11: One browser authority boundary for APIs and WebSockets (#360)
 
-Isolated preview pages can use a different loopback port, so permitting every localhost port
-through CORS would let such pages reach the terminal server. CORS also cannot prevent simple
-requests from executing handlers. All API and WS paths therefore apply the shared browser
-request guard before routing and preflight responses; API mounts enforce it independently
-before handlers. Development uses Vite’s existing same-origin proxy rather than a permanent
-5173 allowlist. Origin-free CLI requests remain supported, while browser evidence without
-Origin requires a matching Referer and consistent Fetch Metadata. Missing evidence and direct
-navigation to protected APIs fail closed. Authority comparison preserves the existing TLS
-termination contract and its documented scheme limitation; authentication and broader DNS
-rebinding protection remain separate work.
+[Moved to browser-authority-boundary](decisions/runtime/browser-authority-boundary.md).
 
 ## 2026-10-15: The split preview's isolation and bounds (#385)
 
-The #360 entry above anticipated isolated preview pages on another loopback port. #385 isolates them
-on the dashboard's own port instead: every preview response is sandboxed by Content-Security-Policy
-without `allow-same-origin`, so the page runs in an opaque origin, framed or in a tab, and its
-requests to `/api` and `/ws` reach the shared request guard as cross-site and are refused. A second
-listener would have been the same isolation with a port to choose, bind and close, and the remote
-relays of #386/#387 decide their own ports. The frame repeats `sandbox` so the isolation does not
-rest on the header alone.
-
-Previews are served under a random token rather than by path behind the request guard, because a
-sandboxed page's own stylesheets and images are cross-site requests the guard would refuse. Tokens
-are kept for the server's lifetime: #359's lifetime rule is that a tab opened on a preview outlives
-the pane, popup and session it came from, and no expiry was asked for.
-
-A file is served from the innermost working directory holding it, looked up through that
-directory's `os.Root` when it is opened and on every request, so "path and symlink escape" has one
-boundary that relative stylesheets can still use. #359 requires a size limit
-without a value; 10 MiB bounds the HTML or Markdown document — the file read whole for rendering —
-and not the files it loads. Markdown is rendered on the server by goldmark with raw HTML omitted, so
-the page needs no script.
-
-The first cut let an absolute path name any file on the host, served from its own directory, and
-checked symbolic links with `filepath.EvalSymlinks` and `os.Stat` on the clicked path. CodeQL flagged
-both as uncontrolled data in a path expression, and the operator chose to bound previews instead of
-dismissing the alerts: only files inside the session's working directory and its agent's worktrees
-open, and a file is found and checked only through `os.Root` for one of them. A path elsewhere is
-refused with the directories allowed, rather than opened, because an agent-printed path is the input
-and #359's "path and symlink escape" names the boundary. Using `os.Root` for lookup as well as
-serving also refuses symbolic links with an absolute target; the first cut registered such a link
-when it pointed inside the root and then answered `404` for it, since serving already went through
-`os.Root`.
-
-Comparing the clicked path with the working directories as strings then refused files that are
-inside them: a pane's working directory is reported resolved (`/private/tmp/...` on macOS), while
-the shell and its agents print the path they were given (`/tmp/...`), and a case-insensitive
-filesystem accepts another letter case. A path that is not inside a working directory as written is
-now compared by the identity of the directories above it, each resolved and looked up through an
-`os.Root` for `/`; the scope is unchanged, only how a path is recognized as inside it. Matching a
-resolved form of each working directory instead would have missed the logical form the shell prints,
-which cannot be derived from the resolved one.
+[Moved to file-preview-isolation](decisions/preview/file-preview-isolation.md).
 
 ## 2026-10-16: Localhost pages in the split preview, and one URL opener (#386)
 
-A localhost URL on the panemux host is framed directly, not proxied through panemux. A development
-server's pages use root-absolute paths (`/@vite/client`, `/src/main.ts`) and open their hot reload
-socket on their own host and port, so serving them under `/preview/<token>/` would have broken them,
-and a proxy on another port would have been a new listener to choose, bind and close for a page the
-browser can already reach. The frame keeps the page's own origin (`allow-same-origin`), because a
-sandboxed opaque origin makes Vite refuse its module scripts as cross-origin; that origin is the
-development server's, the request guard already refuses another loopback port, and the dashboard's
-own responses refuse framing. The browser running on the panemux host is the assumption URL opening
-already documents.
-
-Framed directly, the page could lead the frame anywhere: review of #397 showed a `302` or
-`location.href` to an external site displayed inside the preview under the localhost URL. The
-suggested dashboard-wide `frame-src` would have had to list every loopback host up front, and CSP
-cannot name `[::1]` or the rest of `127/8` with a wildcard. The page is instead framed inside a
-`srcdoc` document whose own policy names `localhost`, `127.0.0.1` and the URL's IPv4 address, so
-other `127.x` addresses keep working. `[::1]`, which no policy can name, is framed as `localhost` on
-the same port, path, query and fragment; the operator chose this over dropping Preview for `[::1]`
-(a restriction #359 does not have) or leaving `[::1]` unguarded, accepting that its cookies and
-storage in the preview are localhost's.
-
-Whether a frame was refused (`X-Frame-Options`, `frame-ancestors`) or hot reload works cannot be read
-from a cross-origin frame. Probing the URL from the server would have added a request panemux makes
-on the page's behalf; instead the preview always says what a frame may not show and points at Open
-in new tab.
-
-Printed links, OSC 8 links and the browser shim now go through one opener (`usePaneUrlOpen`).
-OSC 8 links used to bypass it through xterm's default handler: a `confirm()` dialog and a tab, with
-no forward and no preview. They now wait in the shim's approval strip, since their target is chosen
-by the terminal output as the shim's is. Printed links stay one click, their text being the URL.
-"Double launch" is answered by each approval taking its request as it acts and a click removing a
-request for the same URL; "replay re-issue" by the existing rule that a request in replayed
-scrollback is ignored, which OSC 8 links never needed, as they open only on a click.
+[Moved to localhost-preview](decisions/preview/localhost-preview.md).
 
 ## Agent registry
 
+[Moved to agent-registry](decisions/agent-registry/index.md).
+
 ### One registry declares agents; capabilities are ports in their consumers (2026-10-12, issue #372)
 
-Agent names, aliases and process rules were spread over three places that each matched a little
-differently: Agent Board's six-type table in `internal/session`, the same package's claude/codex
-check for a pane's working directory, and `internal/tasks`'s own claude and codex predicates,
-which alone knew `claude-code` as another name for Claude Code. Adding an agent meant finding all
-of them. They moved, unchanged, into `internal/agent`; unifying the three rule sets is left to the
-change that makes collection per agent (#373), because each difference is behavior someone relies
-on.
-
-- **Static, explicit registration.** One function lists every definition. `init()` registration
-  was rejected: the set would be whatever happened to be linked, and the order — which decides the
-  first matching Board rule — would follow file names. Declaring agents in configuration was
-  rejected too: a pattern or script from a file would reach process matching and, later, the
-  collection script on every host.
-- **Declarations in the registry, implementations in their consumers.** Defining each capability's
-  interface inside `internal/agent` would have meant inventing agent-neutral copies of
-  `internal/tasks`'s types before any adapter needed them, and fixing method signatures stages
-  ahead of their first implementation. A single interface probed by type assertion was rejected as
-  implicit and impossible to list. The registry holds a capability set; the consuming package
-  is to define the port in its own types when its capability moves behind one (#373 onward).
-- **A struct session key.** `{Host, Agent, SessionID}` is comparable and needs no escaping, unlike
-  a joined `host/agent/session` string. A PID is not part of it, since codex's shared app-server
-  daemon serves several sessions.
-- **Forward compatibility over backward compatibility.** Agents release faster than panemux
-  follows, so the layer that reads their formats exists mainly to notice a format it does not know
-  and stop rather than guess. Each rule records the release it was verified against and what it
-  does with an unknown argument; versions are told from the data rather than by running
-  `<agent> --version` on every host, which would add a command per collection.
+[Moved to static-agent-registry](decisions/agent-registry/static-agent-registry.md).
 
 ### Collection is composed from per-agent collect adapters (2026-10-16, issue #373)
 
-The collection script was one hand-written constant that read Claude Code's and codex's files in
-sections named `state`, `transcripts`, `codex-open` and `codex-rollouts`, and `derive.go` and
-`codex.go` read them in one builder. The first step of making collection per agent moves each
-agent's sections and their reading into a collect adapter, without changing what is listed.
-
-- **Composed at startup, from constants.** The adapters provide script fragments as Go constants,
-  and the script is joined once when panemux starts; nothing from a request, a config file or a host
-  enters it, as before. Generating it from configuration was rejected for the same reason the
-  registry is not configuration.
-- **Namespaces and the protocol version.** Common sections stay bare (`ps`, `tmux`, `cwd`, `env`);
-  an adapter's are `<agent ID>/<name>`, and `/` cannot occur in an ID. The protocol moved to
-  `::panemux-tasks v2` because the section names changed; the rule is to move it when the
-  directives' grammar or a common section's rows change, not when an adapter adds a section. Script
-  and parser ship in one binary, so the version only tells a mismatched output apart.
-- **A missing section fails the host.** The first protocol read a section that never appeared as
-  empty. A host whose output lacks a declared section now fails its collection, so a broken probe is
-  reported instead of silently listing no sessions. An output carrying a section its run did not
-  ask for — a stopped section in the attention collection's — is still read, as before.
-- **Live before common.** Each adapter's live sections run before `ps`, so a process that exits
-  between the two is not listed. The first script read Claude Code's state files before `ps` but
-  codex's open rollouts after it; both now take the order that drops a vanished process rather than
-  listing it without its session.
-- **One live normalization.** The full and the attention collection decide a running task from the
-  live sections alone; a test builds both from one output and requires the same running tasks.
-- **Ports in the consumer, registered by ID.** The adapter interface is `internal/tasks`'s, in its
-  own types, and `collectAdapters` lists each adapter under its registry ID; startup checks the list
-  against the registry's `collect` declarations. Sub-packages per agent were rejected: they would
-  need `internal/tasks`'s types exported and would import it back.
-- **The prefilter follows the adapters.** The `cwd`/`env` sections probe only processes whose first
-  two command fields contain an adapter's process hint (`claude|codex`). A test checks that every
-  sample command a Task rule lists passes it. The prefilter was case-sensitive while the Task rules
-  compare base names case-insensitively; matching the two was left to the change that merges the
-  rule sets (#375, below), since it changes which processes are probed.
-- **Codex's approval records are a codex section.** The records the PermissionRequest hook writes
-  (#384, below) are read as the codex adapter's live section `codex/permission`. It is an adapter
-  section added, so the protocol stays v2; a host without the hook prints the heading with no rows.
+[Moved to collect-adapters](decisions/agent-registry/collect-adapters.md).
 
 ### Agent availability: a separate probe and an anti-corruption layer for formats (2026-10-16, issue #373)
 
-The second step of #373 finds out, per host, whether an agent's capabilities can be used, and stops
-the collection from guessing past a format it does not know. Nothing reads the result yet: the API
-(#376) and refusing a launch or resume (#374) come later.
-
-- **A probe of its own, not a collection section.** Looking for the CLI needs a login shell, which
-  can be slow and print anything; inside the collection script it would hold up every collection and
-  could break the line protocol. It is a second fixed script with its own header, run after a full
-  collection that succeeded, with 5 seconds of its own, never in the task event stream's collection
-  or a resume's (which would wait on it before launching).
-- **Cached per host and connection for 5 minutes, failures too.** A host whose login shell is slow
-  would otherwise cost up to 5 seconds on every 10-second poll. The entry remembers the connection it
-  ran over, so a reconnect or a redial probes again.
-- **Beside the collection, not inside it.** The first version ran the probe inside the host's
-  collection, so whenever the cache was cold (the first collection, every 5 minutes, a reconnect) a
-  login shell that blocked held `GET /api/tasks` for the whole 5 seconds, and each poll arriving
-  meanwhile started a probe of its own. It now runs in the background, one per host at a time, under
-  the service's context rather than the request's; while it runs, the previous result of the same
-  connection is reported (a cold host is `not_probed`) rather than flipping to unknown every 5 minutes.
-- **The probe leaves the connection alone.** Run through the collection's remote path, a probe out of
-  time pinged the connection under another 5 seconds and dropped it when the ping failed, and its
-  error named the collection's 15-second timeout. Whether a connection is still good is the
-  collection's to judge; the probe reports its own failure within its own budget, and nothing else.
-- **The probe never runs the CLI.** `<agent> --version` would put a CLI's own start-up (an update
-  check, a first-run screen) on every host every 5 minutes; the version is read from what the agent
-  writes instead, and recorded only.
-- **Unknown is not guessed past.** A `thread_turns` status codex added used to fall back to the
-  rollout's last turn event. The two need not agree — the event may be from an earlier turn — so a
-  status nobody has read could show a finished turn as `busy` or the reverse; the session is now `unknown`, notifies nothing, and makes
-  codex's `collect` degraded. The same holds for a turn event: the script used to keep only the three
-  known ones, so a new one was invisible and an older known one decided. It now hands over the last
-  `task_*` or `turn_*` event but `turn_diff` (the only such event that neither starts nor ends a turn),
-  and one it does not know makes the session `unknown`. A known `thread_turns` status still decides
-  past it. A Claude Code `status` was already `unknown` when not known; a missing one stays an older
-  release's, not a new format.
-- **What is counted.** Structure that cannot be read (Claude Code's unreadable state files, codex rows
-  that cannot be parsed — but not `ps`'s own rows) and values outside the known sets, for live
-  sessions. The detail carries counts by kind, the first 3 examples and up to 3 versions, each bounded,
-  so a host with many sessions in a new format does not grow the log line or the future API field.
-  It is logged when it changes, like unreadable state files.
-- **The codex version comes from the stopped rollouts' section.** Adding a column to `codex/open`
-  would have changed every fixture of that row; `codex/rollouts` already took optional trailing
-  columns, and its rollouts include the live ones written in the last 7 days.
+[Moved to availability-probe](decisions/agent-registry/availability-probe.md).
 
 ### Launch and resume through per-agent adapters (2026-10-18, issue #374)
 
-The launch script and `Service.Launch`/`Resume` branched on the claude and codex IDs for the
-arguments, the session ID minted or not, the tmux session name and the codex `--no-daemon` check, and
-`PendingLabels` was codex's alone. Agreed on #374:
-
-- **Launch and resume are two adapters, not one.** An agent can launch without resuming. Each is
-  listed by ID in `launchAdapters`/`resumeAdapters` and checked against the registry at startup, as
-  collect adapters are.
-- **One fixed script, with each adapter's fragment composed under `case $agent:$mode`.** Request
-  values stay in the seven checked placeholders; a fragment is a Go constant, checked to set only its
-  variable, stay in its case and refuse only with declared codes. A per-agent script was rejected: the
-  tmux, working-directory and prompt-file handling is the same for every agent and is where the
-  safety argument lives.
-- **Whether labels wait is read from the launch, not the agent's name.** A launch that names no
-  session ID holds them in `PendingLabels`, keyed by (host, agent, tmux session). Only exactly one
-  session of that agent claims them. A task of another agent in the tmux session no longer keeps them
-  waiting (codex's version counted any task there, so a claude started in it held them until
-  restart), and two sessions of the agent drop them rather than guess.
-- **`cli_missing` refuses before anything runs, and probes again.** The refusal reuses the script's
-  `no-<agent>` code and `409`, so no API shape changes (the API exposure of availability is #376).
-  Probing again at once was chosen over refusing for the rest of the 5-minute TTL, which would refuse
-  a CLI installed in the meantime. `not_probed` and `probe_failed` refuse nothing: the script still
-  looks for the CLI itself, and refusing on what is not known would be guessing.
+[Moved to launch-resume-adapters](decisions/agent-registry/launch-resume-adapters.md).
 
 ### Records keep agents this build does not list; Board joining through adapters (2026-10-18, issue #375)
 
-Stage D of #348, first half. Agreed on #375:
-
-- **The record file is open-world.** A file holding one record of an agent other than claude or
-  codex used to be unreadable as a whole, so every write failed until it was edited. Records are now
-  writable only for agents that declare `collect`, read from the registry; a record of any other
-  agent whose name has the shape of an ID is kept as read and written back. A malformed agent name
-  still makes the file unreadable — loosening the shape check too was rejected, since it would accept
-  what no build could have written. Kept records are not served, so the API and the labels offered
-  are unchanged. An alias is not rewritten to its ID: two records could then collide. A kept record
-  is held as the JSON it was read as, so fields a newer build wrote survive the next save. The summary
-  file follows its own capability: a summary is stored only for an agent that declares `summary`.
-- **Joining Agent Board goes through board adapters in the consumer.** The onboarding builder in
-  `bootstrap.go` compared the agmsg type with `claude-code` to add the identity claim. Each agent that
-  declares `board` now has an adapter in `boardAdapters`, checked against the registry at startup;
-  Claude Code's writes the claim and the watcher replacement, the other five share one that writes
-  nothing. The instruction text for all six types in every mode is fixed by a golden test and did not
-  change. codex's `CODEX_THREAD_ID` stays unused: it is unverified. Board detection stays separate
-  from the other rule sets, since it mirrors agmsg's.
+[Record preservation](decisions/agent-registry/open-world-records.md) and
+[board participation adapters](decisions/agent-registry/board-participation-adapters.md).
 
 ### Pane workdirs per session, on the Task rule (2026-10-18, issue #375)
 
-Stage D of #348, second half. Agreed on #375:
-
-- **One rule set for sessions.** The pane header found its agent by a Workdir rule (base name exactly
-  `claude` or `codex`, `-p`/`--print`/`exec` anywhere excluded); the task board by the Task rule. The
-  Workdir rule is gone and the pane uses the Task rule, among the agents that declare `workdir`. Four
-  things change, all accepted: claude run by `node`/`bun`/`deno` gets a header; codex's
-  non-interactive subcommands (`review`, `login`, `mcp-server`, `app-server`, `e`, `apply`, …) no
-  longer do; Claude Code not named `claude` (`claude-code`, `.../claude/versions/<ver>`) does; and
-  codex with `exec` other than as its first positional argument (`codex -p exec`, a word of the
-  prompt) does. A headless `codex exec` stays out however options precede it, since the Task rule
-  skips option values as codex parses them. Two boundaries follow and were accepted when asked:
-  a program with a path component named `claude` (`/opt/claude/bin/codex`) is Claude Code's, as the
-  task board already counted it, and the header's state-file keys are matched in their exact case,
-  as the task board's are (Go's struct decoding had also accepted `"PID"` and the like; Claude Code
-  writes them in lower case). The first file whose pid is the process's still decides, usable or
-  not, as before — unless its `cwd` or `sessionId` is of another type, which Go's struct decoding
-  failed on and passed over, so the header passes over it too. A review of the PR found a fifth change, also accepted when asked: codex's
-  `-i/--image <FILE>...` takes every argument up to the next option, so `codex -i a.png review` and
-  `codex -i a.png exec` are sessions with images, for the header and the task board alike; an
-  attached value (`--image=a.png`) is read as one value, since what codex does after it could not be
-  verified. Board detection stays separate: it mirrors agmsg's.
-- **The Workdir capability is per session, in `internal/session`.** `internal/tasks` imports
-  `internal/session`, so the capability could not live in `tasks`. `locate` turns an agent process
-  into a `WorkdirSession` (`SessionKey`, PID, cwd, log) and `workdirs` resolves it; the local and
-  SSH reads differ only in a host abstraction that fetches, so their remote commands are unchanged.
-  The descendant-cwd fallback stays the pane's own. The task board's call and its display are stage
-  E: they change the API.
-- **One `~/.claude/sessions` parser.** The header and the task board each parsed the file; both now
-  use `session.ParseClaudeSessionState`, and the task board maps its problems to the unreadable-file
-  reasons it reports.
-- **The prefilters lower-case the program.** Stage B left the collection's `cwd`/`env` prefilter
-  case-sensitive while the Task rules are not. It now matches `tolower($2 " " $3)`, probing slightly
-  more processes. codex/open's own filter had the same difference and lower-cases the base name too.
-- **Not one observation per host.** Sharing a single per-host snapshot between the header and the
-  task board was rejected for failure isolation (a collection failure would blank the header),
-  freshness and migration risk; what is shared is the rule, the parser and the session model. The
-  gaps left are in #415.
+[Moved to session-workdirs](decisions/agent-registry/session-workdirs.md).
 
 ### The dashboard on the agent capabilities (2026-10-23, issue #376)
 
-Stage E of #348, second half (the UI), applying what #376 agreed:
-
-- **No rule per agent name in the browser.** The UUID check, the `claude`/`codex` lists for Resume
-  and Summarize, the New task form's two fixed options and its codex note, and the per-agent state
-  notes were removed; the dashboard reads `agents`, `hosts[].availability` and `tasks[].actions` /
-  `state_note`. The generic note on a stopped task stays, being the same for every agent.
-- **A CLI missing on the host disables `Start`, it does not hide the agent.** This is the agreed rule
-  for an `unavailable` capability (shown disabled, with why) applied to the form: switching hosts then
-  never changes which agents are listed, and the form says what to install where.
-- **Why, in the server's words.** The reason shown is the action's `detail`, falling back to a
-  sentence for a known `reason` and then the `reason` itself, so a reason added on the server is
-  still shown rather than dropped.
-- **Agent IDs stay as the labels.** The cards and the form keep showing `claude` / `codex`, not
-  `display_name`, so the existing screens read the same; an unregistered agent is marked
-  "(unknown agent)".
-- **An unknown agent's task keeps its pane.** Agreed on #376 after review: its tasks offer `Open`,
-  `Go to pane` and `Type in pane`, which act on the pane rather than the agent and which the server
-  does not refuse; `Resume`, `Summarize`, `Mark done` and labels are not shown, since the server
-  refuses each for an agent its registry does not know. Hiding the pane actions too was rejected: it
-  would leave a running session of a newer agent unreachable from the dashboard.
-- **`daemon` stays a location.** "codex's shared daemon" where a card says where a task runs comes
-  from the location kind the server reports, not from the agent name, and is left as it is.
+[Moved to capability-driven-dashboard](decisions/agent-registry/capability-driven-dashboard.md).
 
 ### A third agent behind a build tag (2026-10-24, issue #377)
 
-Stage G of #348, first part. Agreed on #377:
-
-- **A build tag, not a test seam.** The fixture agent, a third agent with collect, launch and summary
-  and without resume, workdir, board and usage, is registered only with the `panemux_fixture_agent`
-  tag. `registered()` is the shipped agents plus `fixtureAgents()`, and each `*Adapters()` list is the
-  shipped adapters plus the fixture agent's, so the registration stays explicit and static. A
-  `ForTest` seam in shipped code was rejected: the test agent's code would be in every binary, and the
-  E2E run, which starts a real binary, could not use it. A hidden flag was rejected for the same
-  reason, and because it would let a shipped binary change its registry. The fixture CLI is found as
-  every launchable agent's is, by its ID on `PATH`; nothing from the environment or the configuration
-  reaches the registry or an exec.
-- **A selected tagged run.** `make test-go-fixture-agent` runs the fixture agent's tests and the
-  registry-wide contract tests rather than whole packages: many tests pin the shipped agents' set,
-  sections and probe answers, and making each of them depend on the tag would weaken what they pin
-  about the shipped build. The Makefile names the contract tests the run must hold
-  (`FIXTURE_AGENT_REQUIRED`), and the run fails when one of them is not among those its pattern
-  selects, or when a package matches none: a per-package check alone let a renamed contract test drop
-  out while the package's own fixture-agent tests kept it green (review on #429). Its one fixture,
-  `tasks-fixture-agent`, is written by that run alone.
-- **Mutation measures the default build.** gremlins mutates every Go file whatever its build
-  constraints but runs the tests in the default build, so each mutant in a tagged file came back
-  NOT COVERED and the gate failed for deciding nothing. `scripts/mutation.sh` leaves out a changed
-  `panemux_fixture_agent` file the default build does not compile (`go list -e`'s `IgnoredGoFiles`) and
-  names it; only that tag does, since which OS-specific files a build ignores depends on where the gate
-  runs (review on #429). A second
-  gremlins run with the tag was rejected: the tagged build fails the tests that pin the shipped agents.
-- **Lint reaches the tagged files.** golangci-lint, gosec included, reads them through `build-tags`,
-  `make lint-go` vets both builds, and the pre-push hook vets and tests a package holding them with
-  the tag. The Claude Code `PostToolUse` hook was left untagged.
-- **CLI name is the ID.** The launch script and the probe find an agent's CLI by its ID, so the fixture
-  agent's ID is its CLI's name; an agent whose CLI is named otherwise is #428.
-- **The UI and the E2E (G2).** The dashboard's unit tests render `tasks-fixture-agent` itself rather
-  than a hand-written response. The E2E reuses the task-dashboard fixture, which runs panemux with the
-  tag and puts a fake CLI from `frontend/e2e/fixtures/fixture-agent/` first on `PATH`; no fixture of
-  its own was added. Summaries are on in that fixture so the fixture agent's is made, which would
-  also summarize the other tasks the real collection lists — among them this machine's own codex
-  sessions — so its `claude` stand-in refuses a summary and a `codex` stand-in refuses everything,
-  and the real CLIs never run. The runtime selection `run-panemux-e2e.sh` repeats puts the Node
-  SDK's bin, where npm-installed CLIs live, ahead of everything, so the stand-ins are put first again
-  right before `go run`, and the run stops when one of them is not what `PATH` resolves (review on
-  #430).
-- **The fixture reads only its own processes (review on #430).** The real collection listed the
-  developer's own claude and codex sessions and read their working directories, environments and
-  open rollouts. The fixture's `ps` and `lsof` stand-ins now answer only for processes that descend
-  from its start-up script and its private tmux server, so no production code changed. Two
-  alternatives were rejected:
-  - a production setting that narrows the collection, which would put a test-only branch in the
-    production path;
-  - running the E2E as another user or in a container, which would protect CI but not a local
-    `make test-e2e`.
-
-  A detached `claude` process with a state file is the detector: the spec fails if it is listed.
-  The isolation would stop working if production called `ps` by absolute path, and that detector
-  would then fail.
+[Moved to tagged-fixture-agent](decisions/agent-registry/tagged-fixture-agent.md).
 
 ### Summary adapters (2026-10-24, issue #347)
 
-Stage F of #348. Agreed on #347:
-
-- **A source and a runner, registered together.** Reading a session's conversation (on its host) and
-  summarizing it (on the panemux host) are separate parts of one adapter, listed by ID in
-  `summaryAdapters`. One interface for both was rejected: it would leave no seam for summarizing one
-  agent's log with another's CLI should that ever be wanted. Today a task is summarized only by its
-  own agent's runner, with no fallback, since each CLI has its own authentication, settings and tool
-  limits.
-- **The summarizer versions did not move.** Claude's and Codex's versions are computed from the
-  adapters to the same hashes as before, so the summaries saved before (#321) stayed current and
-  nothing was summarized again: a source at its first version (`""`) adds nothing to the hash. An
-  adapter's later change raises its own version.
-- **The unexpected-model warning is the runner's.** It had been Claude's sentence in the common code,
-  which read wrongly for a runner that asks for no model. Each runner now gives its own line, or none.
-- **A saved summary of an agent without an adapter is kept.** It used to make the whole file unusable
-  and moved aside, losing every other agent's summaries. It is now kept unshown and written back
-  until the 30-day retention drops it, as #348 keeps unknown agents' records. Logging such entries was
-  rejected as noise.
-- **The summary action from the adapter.** `tasks[].actions.summary` is offered when the agent has an
-  adapter, and the adapter's session ID rule replaced the per-agent check that was repeated in the
-  action, the request and the saved file. Letting each adapter return its own action was rejected:
-  the shared conditions would be repeated per agent. No reason value was added; a CLI missing on the
-  panemux host is a fixed error message.
-- **The test agent's UI, E2E and contract fixture are #377's.** Putting the test agent in a fixture
-  needs it collected, which needs the registry and collect adapters to accept a test registration —
-  the third-agent groundwork stage G builds. Here it is verified in `internal/tasks`.
+[Moved to summary-adapters](decisions/agent-registry/summary-adapters.md).
 
 ### Capabilities in the task snapshot (2026-10-23, issue #376)
 
-Stage E of #348, first half (the API). Agreed on #376:
-
-- **In `GET /api/tasks`, not an endpoint of its own.** The registered agents (`agents`), each host's
-  availability and each task's actions are part of the snapshot the dashboard already polls. A
-  separate `GET /api/agents` was rejected: the list is small, a second route needs its own guard,
-  schema and fixture, and the dashboard would have to reconcile two answers taken at different times.
-- **The server decides a task's actions.** Whether a session ID is one an agent resumes is the resume
-  adapter's rule; deciding it in the browser repeated the UUID check per agent name. The actions are
-  absent for a capability the agent does not declare; a declared one that cannot be used says why
-  (`session_info_missing`, `cli_missing`), and `unknown` leaves it to the server, as before.
-- **Notes come from the consumer's adapters.** A launch adapter gives what to know before starting
-  one, a collect adapter what a state means for its agent, as fixed text with no host or request
-  value. Putting them in the registry was rejected: a state note depends on the task, which the
-  registry does not know.
-- **Summary eligibility from the registry, the rest left for #347.** The `claude`/`codex` name check
-  became the `summary` declaration; reading the log and choosing the runner stay where they are.
-- **Codex's own features stay.** The permission hook's Input given and the host menu's Codex input
-  notifications are not capabilities and are left as they are.
-- **Every worktree of a task on the board is #420.** It needs the Workdir capability per task and more
-  git lookups, apart from capabilities.
+[Moved to snapshot-capabilities](decisions/agent-registry/snapshot-capabilities.md).
 
 ## 2026-10-17: Updating the codex permission hook by itself (#294, #402)
 
-Stage 4 of #294 was to ship the hook as a binary for four targets and update it. Stage 3 had already
-made it a POSIX `sh` script embedded in panemux, which reaches any host, so the binaries were dropped
-and only the updating kept.
-
-- **Opt-in per host, Update only.** `Update automatically` is off until a host's menu turns it on.
-  It never installs on a host that has no hook, and never touches codex itself.
-- **When the check runs.** Stage 3 checks only when a host's menu opens, which would have left an
-  update waiting for someone to open it. A host with the setting on is therefore also checked once
-  in the background after panemux starts, on its first successful collection, so restarting a new
-  panemux updates every such host with nothing pressed.
-- **Once per process.** Each host is updated by itself at most once per panemux process, success or
-  failure; a failure is shown and not retried until a restart. No lock between panemux instances, no
-  downgrade guard and no online lookup of a newer hook: each would answer a failure no one has met.
-- **A file of its own.** The setting lives in `~/.config/panemux/codex-hook.json`, not in
-  `config.yaml` (which has no entry for the panemux host) or the task record file (keyed by task).
+[Moved to codex-hook-updates](decisions/maintenance/codex-hook-updates.md).
 
 ## 2026-10-16: Installing the codex permission hook from the host menu (#294, #396)
 
-Stage 3 of #294 replaces copying the hook and editing `~/.codex/hooks.json` by hand with an
-`Install` / `Update` item in each host's menu. The panemux host's chip, which opened nothing, opens a
-menu with that item alone.
-
-- **Content decides, not versions.** A hook that differs from the one this panemux embeds shows
-  `Update`; there is no version number, no downgrade guard, no lock between two panemux instances and
-  no crash journal. Each would answer a failure no one has met yet.
-- **Read in Go, written by a fixed script.** `hooks.json` is merged in Go, from the file the check
-  read, and written back through a quoted heredoc, because a host may have no `jq` and the shell
-  cannot merge JSON. A file that is not the shape codex reads is reported and left alone rather than
-  repaired.
-- **Trust stays with the person.** panemux says to trust the hook in codex's `/hooks` and neither
-  writes nor checks codex's trust.
-- **No codex is not the same as not checked.** A host that could not be checked says so; hiding the
-  item there would read as a host without codex.
+[Moved to codex-hook-install](decisions/maintenance/codex-hook-install.md).
 
 ## 2026-10-15: Codex approval waits from a PermissionRequest hook (#294, #384)
 
-Codex's own files record nothing when it asks to run a command, so approval waits showed as `busy`.
-Stage 1 of #294 adds a hand-registered `PermissionRequest` command hook that records the session,
-turn and time, read by the existing collection; the wait clears when the person presses
-`Input given` or the turn ends.
-
-- **Not proof of a person being asked.** The hook also fires before codex approves a request on its
-  own, and nothing tells panemux when the person answers in the pane. The first implementation
-  (PR #379, sub-issues #363–#367) tried to establish both, with owner identification, pinned codex
-  versions and per-path proofs; it was withdrawn as too heavy. The accepted contract is the
-  approximation above.
-- **One file per session, in memory for answers.** The latest request replaces the session's
-  record, so a later request in the same turn is a new wait; answered requests are kept only in
-  panemux's memory, since a request of a finished turn is not shown anyway.
-- **Later stages** — SSH hosts, installing from the host menu, a bundled helper, the pane's own
-  prompt — are #294's, each its own change.
+[Moved to codex-permission-observation](decisions/maintenance/codex-permission-observation.md).
 
 ## 2026-10-16: Previewing an SSH host's files and localhost URLs (#387)
 
-#359's C stage: paths and localhost URLs of `ssh` and `ssh_tmux` panes and remote tasks open in the
-split preview #385 built, through the same registry, route and policies.
-
-- **SFTP, not a shell.** Files are read over the SFTP subsystem of a connection the preview keeps per
-  host, so no path reaches a remote shell. Reading with `cat` over exec was rejected: it would need
-  every path through `validRemotePath`, which refuses names a working directory may hold, and would
-  still put the path in a command.
-- **Links resolved by panemux.** SFTP's `REALPATH` is not trusted to follow symbolic links — pkg/sftp's
-  server, for one, does not — so the boundary check resolves each component with `LSTAT`/`READLINK`
-  itself. The window between that check and the `OPEN` is accepted and recorded in
-  [preview security](security/preview.md#remote-paths-and-symbolic-links).
-- **Its own connection, to the pane's host.** The pane's connection ends with the pane, and #359
-  requires a tab to outlive it, so the preview dials its own with the pane dialer, with the
-  configuration the pane was dialed with. Resolving the pane's `ssh_connections` name again was the
-  first implementation and was rejected in review: editing an entry restarts no pane, so a live pane
-  on host A previewed host B, and an entry edited A→B→A got A a new relay port.
-- **SFTP only.** The operator decided a host without an SFTP subsystem shows the reason and no
-  fallback (`scp`, `cat` over exec) is added.
-- **A checked connection, not a bounded tab.** Review found a stopped `sshd` left file tabs waiting
-  indefinitely and a lost `sftp-server` left them failing until restart. The connection is pinged,
-  a request's lookups are bounded, and a connection failing for anything but a file is made again.
-  None of this ends a tab, which #359 rules out. A fixed 15 s bound on the keepalive reply and on a
-  lookup was the first form, and a later review found it closed busy connections on links slower than
-  about 100 KB/s, where both wait behind relay data. Liveness is now anything arriving on the
-  transport, as OpenSSH's `ServerAliveInterval` counts it, so only a connection that receives nothing
-  is closed.
-- **Connecting outside the lock.** Holding the host's lock while dialing made `Close`, and so a
-  graceful shutdown, wait out the SSH dial's retries; callers now wait for one attempt instead.
-- **TLS keeps `localhost`.** An `https` relay of a `localhost` URL is named `localhost`, since the
-  relay passes TLS through and the certificate names `localhost`; `http` relays name `127.0.0.1`.
-- **A relay per host and address, not loopback port forwarding.** The OAuth forward republishes a port
-  at its own number, which collides with the panemux host's and another host's same port, and is
-  bounded by count and idle expiry. A relay takes a port the system chooses, is never reassigned, and
-  has no count limit, idle expiry or pane-bound lifetime — all three were rejected in #359.
-- **The relayed page keeps its own origin.** Its frame adds `allow-same-origin`, unlike a file's,
-  because development servers' module scripts and hot reload fail in an opaque origin; the relay's
-  port is not the dashboard's, which the request guard refuses.
-
+[Moved to remote-preview](decisions/preview/remote-preview.md).
 
 ## 2026-11-01: Mermaid inside isolated Markdown previews (#471)
 
-Markdown keeps goldmark's GFM renderer and escaped fenced-code output. An AST check enables a
-product-owned classic script only when a Mermaid block exists. Rendering in the preview itself
-keeps local/SFTP, pane/popup, and independent-tab behavior on one path. Rendering in the dashboard
-would require cross-origin messaging and a separate implementation for tabs; server-side Mermaid
-CLI would add a browser and Node to the runtime distribution.
-
-The renderer is bundled separately as one IIFE, with diagram loaders folded into that file.
-Opaque-origin previews therefore need neither ESM CORS permission nor `allow-same-origin`.
-A response-specific nonce authorizes the product script, without authorizing scripts selected by
-the Markdown. The server hashes the bundled bytes to create its asset URL; a fixed build output
-name replaces the proposed build manifest because there is only one runtime asset. Licenses stay
-in the bundle. Diagram configuration directives and frontmatter are refused rather than trying
-to enumerate the settings an evolving Mermaid version might expose. Per-block errors preserve
-the original source. Input limits bound work but are not a preemptive rendering timeout.
-
-MathJax, GeoJSON/TopoJSON maps and ASCII STL remain separate future work; the file-type boundary
-is unchanged. GitHub compatibility concerns syntax and viewing behavior, not matching its
-private integration or a deployed library version.
-
-
-The local verification also exposed two test-harness assumptions: the login-shell fixture's
-`.profile` sources `.bashrc` when macOS `sh` is Bash, and the growing tasks package exceeded the
-coverage run's aggregate 60-second package budget while an individual test had run only one
-second. The fixture probes the actual shell without inherited startup environment, and the
-coverage package budget is 120 seconds. Production task-launch behavior is unchanged.
-
+[Moved to mermaid-runtime](decisions/preview/mermaid-runtime.md).
 
 ## 2026-11-02: Mermaid measurement and final-output sanitization (#477 review)
 
-Mermaid needs a live DOM to measure its unsanitized SVG before returning the final drawing.
-The existing Markdown image policy also applies during that measurement, so image metadata can
-make external requests. Final SVG sanitization removes image elements but cannot retract an
-already-issued request. Behavior/security guidance and a browser test cover both successful
-image loading and a decode failure; there is no claim that diagram rendering is network-isolated.
-
-The renderer now limits a document to 10 attempts and 50,000 UTF-16 code units, with 20,000 per
-diagram and 100 edges where Mermaid supports the edge cap. These tighten the library defaults
-without claiming a preemptive CPU deadline. Detection reuses the rendered Markdown AST, runtime
-replacement is atomic, and build notices fall back to declared package licenses or fail when
-neither source of license information exists. Mermaid 12.2.0 replaces the version whose KaTeX
-dependency was affected by GHSA-238p-pmpm-9mq7.
+[Moved to mermaid-sanitization](decisions/preview/mermaid-sanitization.md).
 
 ### 2026-11-07: retire Agent Board PTY onboarding (#503, #495 S1)
 
-PTY onboarding can interleave synthesized text with user input. Remove instruction generation,
-terminal writes and retries, identity-claim text, and bootstrap persistence. Keep pane detection
-and the participation API shape while the later session model is developed; `instructed` remains
-false. Existing `board-bootstrap-state.json` files remain untouched. For one release, retain mode
-validation and serialization, warn once when loaded, and ignore it (Q7). Hook registration and
-message wrappers are separate changes. Review S1 first, but merge only when S6 and S7 are ready,
-to avoid a released interval without participation setup.
-
-S1 review follow-up: configuration saves omit deprecated mode instead of regenerating the warning
-on every restart; the API default remains in memory. Presence confirmation is per pane session,
-with two consecutive detections before probing and retries only until successful. Session/host
-changes and removal invalidate it. Managed tool pauses skip checks silently without reinstating
-a PTY lease. Remove the unused bootstrap-state reader/writer and its self-tests, leaving old files
-untouched. Defer the unreachable frontend `instruction sent` branch and its test to #510 (S8),
-where the participation API/UI changes together.
-
-2026-11-07 (#495 policy change): merge S1 independently; delegate participation, identity selection, and reception to agmsg's official workflow rather than adding panemux participation hooks.
+[Moved to retire-pty-onboarding](decisions/agent-board/retire-pty-onboarding.md).

@@ -3,7 +3,7 @@ override SHELL := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/scripts/runtime
 
 .PHONY: all build build-frontend build-backend dev clean run install-deps install-deps-ci install-hooks test-install-hooks test-pre-push test-tmpdir-guard test-golangci-lint-cache test-require-pty \
         test-node-toolchain test-go-toolchain test test-go test-go-fixture-agent test-frontend test-e2e test-agmsg-contract test-hooks test-efficacy efficacy \
-        test-scenarios-check check-scenarios check-docs-links test-docs-links screenshots test-screenshots-check \
+        test-scenarios-check check-scenarios check-docs-links test-docs-links check-docs-okf test-docs-okf screenshots test-screenshots-check \
         coverage-blocks test-coverage-blocks \
         mutation test-mutation bench \
         model-check model-check-write test-model-check \
@@ -43,7 +43,7 @@ install-hooks:
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 test: test-agmsg-automation test-verify test-node-toolchain test-go-toolchain test-go test-frontend test-hooks test-pre-push test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-efficacy test-scenarios-check test-docs-links test-screenshots-check \
-      test-coverage-blocks test-mutation test-model-check
+      test-coverage-blocks test-mutation test-model-check test-docs-okf
 
 .PHONY: test-agmsg-automation
 test-agmsg-automation:
@@ -196,9 +196,17 @@ check-docs-links:
 test-docs-links:
 	sh scripts/docs_links_check_test.sh
 
+# OKF metadata and index structure use the existing YAML parser; relative
+# links and anchors remain the responsibility of check-docs-links.
+check-docs-okf:
+	go run ./scripts/docsokf/cmd
+
+test-docs-okf:
+	go test ./scripts/docsokf -v
+
 # ── Efficacy: red-check (gate G4(b)) ──────────────────────────────────────────
 #
-# Asserts decision D4: a test this branch changed must FAIL when this branch's
+# Asserts decision D4 (docs/decisions/quality-gateway/red-check.md): a test this branch changed must FAIL when this branch's
 # implementation diff is reverted. That is the strongest possible mutation —
 # remove the implementation entirely — and it catches the two shapes the other
 # gates are blind to: a tautological test, and a test written after the fact.
@@ -241,7 +249,7 @@ test-efficacy:
 # repository has ~275 unexecuted blocks today, so a gate over all of them would
 # start red — and docs/quality-gateway.md principle 4 is that a gate which
 # starts red gets routed around, taking the working gates with it. Diff-scoped,
-# it starts green and stays cheap. Same reasoning as decision D2.
+# it starts green and stays cheap. Same reasoning as decision D2 (docs/decisions/quality-gateway/mutation-diff-scope.md).
 #
 # Outside `make check` for the reason `make efficacy` is: it needs the base
 # branch. It runs as its own pull-request CI job.
@@ -272,7 +280,7 @@ test-coverage-blocks:
 # What changed is that those survivors now have a per-type waiver to go to
 # (#236), a mutant with no verdict can no longer be dropped silently (#235),
 # and the size of a red run is known — about 5 mutants per 317 changed lines
-# (#237). Decision D9 in docs/quality-gateway/decisions.md carries the
+# (#237). Decision D9 in docs/decisions/quality-gateway/mutation-verdicts.md carries the
 # measurements.
 #
 # SKIPPED is the exception and does not fail on its own: gremlins sets it from
@@ -407,7 +415,7 @@ test-model-check:
 # ── Coverage (≥ 80 %) ─────────────────────────────────────────────────────────
 #
 # The threshold is deliberately NOT raised above 80 %: see decision D1 in
-# docs/quality-gateway/decisions.md. Coverage is only meaningful as a lower bound, and
+# docs/decisions/quality-gateway/coverage-scope.md. Coverage is only meaningful as a lower bound, and
 # the cheapest way to satisfy a higher one is to generate tautological tests,
 # which lowers protection against regressions and resistance to refactoring at
 # the same time. What gets strengthened is the SCOPE below, never the number.
@@ -446,7 +454,7 @@ test-model-check:
 #           UI components (App, SplitContainer, TerminalPane …) require a real
 #           browser renderer and are covered by integration / E2E tests.
 
-COVERAGE_PKGS := ./internal/agent/...,./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/agmsg/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/host/...,./internal/hostexec/...,./internal/hosttools/...,./internal/codexhook/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,./internal/preview/...,./internal/testcap/...,.
+COVERAGE_PKGS := ./internal/agent/...,./internal/config/...,./internal/api/...,./internal/ws/...,./internal/server/...,./internal/board/...,./internal/agmsg/...,./internal/portforward/...,./internal/commandcenter/...,./internal/boardmcp/...,./internal/fileops/...,./internal/host/...,./internal/hostexec/...,./internal/hosttools/...,./internal/codexhook/...,./internal/homedir/...,./internal/cachedir/...,./internal/tasks/...,./internal/taskevents/...,./internal/requestsecurity/...,./internal/preview/...,./internal/testcap/...,./scripts/docsokf/...,.
 
 coverage: coverage-go coverage-frontend
 
@@ -481,6 +489,7 @@ coverage-go: build-frontend
 	  ./internal/requestsecurity/... \
 	  ./internal/preview/... \
 	  ./internal/testcap/... \
+	  ./scripts/docsokf/... \
 	  . \
 	  -coverprofile=coverage.out \
 	  -coverpkg=$(COVERAGE_PKGS) \
@@ -536,7 +545,7 @@ lint-frontend:
 
 # ── Quality gate (lint + test + coverage) ─────────────────────────────────────
 
-check: build-frontend lint test coverage check-scenarios check-docs-links
+check: build-frontend lint test coverage check-scenarios check-docs-links check-docs-okf
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 

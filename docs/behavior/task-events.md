@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: task events"
+description: "Task event observation, WebSocket delivery, and receiver responsibilities."
+---
+
 # Behavior: task events
 
 A Japanese translation is in [task-events.ja.md](task-events.ja.md). This English document is the
@@ -14,11 +20,11 @@ the same stream ([Receiver](#receiver)).
 
 - **What is observed is the tasks' state, and nothing else.** The input is the collection the task
   dashboard already runs, without its searches for stopped sessions
-  ([Collection](tasks.md#collection)). Terminal output is not read for prompts; a state an agent does
+  ([Collection](task-collection.md#collection)). Terminal output is not read for prompts; a state an agent does
   not record — codex waiting for command approval
   ([issue #294](https://github.com/tomo-chan/panemux/issues/294)) — is not observed and shows as the
   state the agent's files do give (`busy`), unless the permission hook is registered and records it
-  ([Codex permission requests](tasks.md#codex-permission-requests)).
+  ([Codex permission requests](task-codex-permissions.md#codex-permission-requests)).
 - **Only agents are covered.** An agent is supported by adding its observation to the collection,
   not by a pattern on its output. Devin is not covered yet
   ([issue #276](https://github.com/tomo-chan/panemux/issues/276)); a program that is not an agent is
@@ -31,16 +37,16 @@ the same stream ([Receiver](#receiver)).
 #### Tasks
 
 A task is one running agent session, identified by the task `id` of
-[`GET /api/tasks`](tasks.md#get-apitasks): `local:<agent>:<key>` on the panemux host and
+[`GET /api/tasks`](task-api.md#get-apitasks): `local:<agent>:<key>` on the panemux host and
 `ssh:<host>:<agent>:<key>` on a connection. The key is normally the session ID, so the id is stable
 for as long as the session runs. Two cases change it, and both are published as one task removed and
 another added rather than joined by a guess:
 
 - a codex process that has no session yet (`pid-<pid>`) gets one, and
 - `/resume` inside a running Claude Code switches the process to another session
-  ([States](tasks.md#states)).
+  ([States](task-collection.md#states)).
 
-The states are those of [States](tasks.md#states) that a running task can have: `busy`, `wait`,
+The states are those of [States](task-collection.md#states) that a running task can have: `busy`, `wait`,
 `idle`, `run` and `unknown`. `stop` is not used. A task that is no longer running is **removed**,
 because the collection cannot tell an exit from a `/resume` or a host losing its process, and
 calling any of them `stop` would be a guess.
@@ -50,7 +56,7 @@ calling any of them `stop` would be a guess.
 Each observed task is reduced to its *view* — the fields of the [task frame](#task-view) — and a
 change is a view that differs from the previous one in anything but `status_since`. `status_since`
 is converted from the host's clock on every collection and can move by up to a second while nothing
-changed ([States](tasks.md#states)), so it is carried, as of the change, but never compared. A task's
+changed ([States](task-collection.md#states)), so it is carried, as of the change, but never compared. A task's
 process ID, its start time and its conversation log are not part of the view.
 
 #### The wait ID
@@ -60,7 +66,7 @@ wait it has already handled from a new one.
 
 | The task | `wait_id` |
 |---|---|
-| is in `wait` and has a [wait signature](tasks.md#wait-signature) | the `wait_signature` itself (`w1-…`), the same across collections, reloads and server restarts |
+| is in `wait` and has a [wait signature](task-collection.md#wait-signature) | the `wait_signature` itself (`w1-…`), the same across collections, reloads and server restarts |
 | is in `wait` without one (the agent did not record when the wait began) | `e1-<epoch>-<seq>`: the [stream position](#ordering-epoch-and-seq) at which the wait was first observed. It stays the same while the task stays in that wait with the same `waiting_for`, and is valid until the server restarts |
 | is in any other state | none |
 
@@ -76,7 +82,7 @@ Each host is published with a status:
 |---|---|
 | `pending` | Observation has started and this host has not answered yet |
 | `ok` | The last collection on this host succeeded |
-| `connecting` | Its connection is still being set up ([Hosts and connections](tasks.md#hosts-and-connections)) |
+| `connecting` | Its connection is still being set up ([Hosts and connections](task-collection.md#hosts-and-connections)) |
 | `error` | The last collection failed; `error` says why |
 
 **A host that is not `ok` publishes no task event.** Its tasks stay as last observed and the host's
@@ -89,7 +95,7 @@ A host added to `ssh_connections` is published as added, in `pending`. A host re
 published as removed, and so is each of its tasks.
 
 Unreadable, missing or unknown agent files never produce a wait: the collection already reports them
-as `unknown` or `run`, without a signature ([Wait signature](tasks.md#wait-signature)), and that is
+as `unknown` or `run`, without a signature ([Wait signature](task-collection.md#wait-signature)), and that is
 what is published.
 
 ### `GET /ws/tasks/events`
@@ -97,14 +103,11 @@ what is published.
 The task event stream. The server sends JSON text frames; anything the client sends is ignored.
 
 - **Not authenticated**, like [`/ws/{sessionID}`](websocket.md#websocket-protocol) and
-  [`GET /api/tasks`](tasks.md#get-apitasks): no bearer token.
-- **Cross-site requests are refused with `403` before upgrading and before any collection starts**:
-  the same rule as `GET /api/tasks` (a `Sec-Fetch-Site` of `cross-site` or `same-site`, or an `Origin`
-  whose hostname or effective port differs from the request Host), and the upgrade's own Origin check as on
-  `/ws/{sessionID}`. Opening the stream makes every host be dialed, so the refusal protects that side
-  effect ([Task dashboard collection](../security/command-execution.md#task-dashboard-collection)).
-  Origin-free browser requests also require a matching Referer and consistent Fetch Metadata
-  under the [shared browser request guard](../security/auth.md#shared-browser-request-guard).
+  [`GET /api/tasks`](task-api.md#get-apitasks): no bearer token.
+- **Cross-authority requests return `403` before upgrading or collecting**, under the
+  [shared browser request guard](../security/auth.md#shared-browser-request-guard), plus the
+  WebSocket upgrade's Origin check as on `/ws/{sessionID}`. This protects host dialing as a side
+  effect; header-free CLI compatibility remains.
 - A frame the client sends is limited to 512 bytes; a larger one closes the connection.
 
 #### Frames
@@ -167,12 +170,12 @@ location). A task that appears already waiting is an `added` frame in `wait`.
 
 | Field | Meaning |
 |---|---|
-| `id`, `host`, `agent`, `session_id`, `cwd` | As in [`GET /api/tasks`](tasks.md#get-apitasks) |
+| `id`, `host`, `agent`, `session_id`, `cwd` | As in [`GET /api/tasks`](task-api.md#get-apitasks) |
 | `state` | `busy`, `wait`, `idle`, `run` or `unknown` |
 | `waiting_for` | What a `wait` task waits for, as the agent wrote it; only on `wait` |
 | `wait_id` | [The wait ID](#the-wait-id); only on `wait` |
 | `status_since` | When the task entered its state, converted to the server's clock as of this frame; not compared ([What counts as a change](#what-counts-as-a-change)) |
-| `location` | `kind`, `tmux_session`, `pane_id`, `attachable`, exactly as in [Where a task runs](tasks.md#where-a-task-runs) |
+| `location` | `kind`, `tmux_session`, `pane_id`, `attachable`, exactly as in [Where a task runs](task-navigation.md#where-a-task-runs) |
 
 No frame carries conversation text, a prompt, a command line or a process ID.
 
@@ -202,7 +205,7 @@ no history to replay.
   hosts not answered yet as `pending`.
 - **Each host has its own cycle.** A host is observed again 5 seconds after its previous observation
   finished, so observations of one host never overlap, and a slow host — up to the collection's
-  per-host timeout ([Hosts and connections](tasks.md#hosts-and-connections)) — lengthens only its own
+  per-host timeout ([Hosts and connections](task-collection.md#hosts-and-connections)) — lengthens only its own
   cycle. The hosts are read again on every cycle, so a host added to or removed from
   `ssh_connections` is picked up.
 - **Observation stops when the last subscriber leaves.** A page reload therefore stops it and starts
@@ -237,20 +240,21 @@ it from that store.
 
 #### Pane and workspace attention
 
-- A task is matched to a pane from its `location` and `host` by the same rule as the task dashboard's
-  Open ([Opening a task](tasks.md#opening-a-task)): a tmux task to the `tmux` / `ssh_tmux` pane on its
-  session, a task outside tmux to the `local` / `ssh` pane its `pane_id` names. Every task in one tmux
-  session matches the same pane. A codex daemon task, or one outside tmux in no pane, matches none.
+- Task-to-pane matching follows [Where a task runs](task-navigation.md#where-a-task-runs).
+  Every task in one tmux session matches the same pane; daemon tasks and outside tasks without a
+  matching workspace pane match none.
 - A matched pane has attention while its task is in `wait` on a host that is `ok`, unless that
   `wait_id` was cleared in this tab. Attention is read from the store as it stands after each frame,
   not kept from one frame to the next, so a reload shows a wait that is still current again.
+- The workspace tab containing a pane with attention flashes only while that workspace is inactive.
+  It clears when the workspace is selected or when the pane no longer has attention.
 - **A wait on a host that is not `ok` gives no attention.** Such a host's tasks are as last observed
   ([Hosts](#hosts)), and while observation was stopped they are what was kept from before
   ([Lifecycle](#lifecycle)): a snapshot after a reload has every host `pending`, and a wait in it
   may already have been answered. It shows once the host answers with the task still in `wait`. The
   host's `ok` frame comes before the difference it found, so a wait that had ended shows for no longer
   than the frames between the two.
-- Attention clears as described in [Agent attention notifications](notifications.md#agent-attention-notifications):
+- Attention clears on user interaction:
   the pane on focus or click, the workspace tab on selecting the workspace — and, in addition, whenever
   the task is no longer in `wait` on an `ok` host, wherever it was answered: a `changed` frame to
   `busy`, `idle`, `run` or `unknown`, `removed`, or its host turning `pending`, `connecting` or
@@ -263,7 +267,7 @@ it from that store.
 #### Codex permission requests in a pane
 
 A matched pane whose task waits on a codex permission request
-([Codex permission requests](tasks.md#codex-permission-requests): `agent` `codex`, `waiting_for`
+([Codex permission requests](task-codex-permissions.md#codex-permission-requests): `agent` `codex`, `waiting_for`
 "a permission request from codex", a `w1-` `wait_id`) on a host that is `ok` shows a one-line strip
 between its header and its terminal, as the Type in pane popup does for its own task. It is read from
 the store like the attention, but clearing the attention does not touch it: focusing or clicking the
@@ -278,8 +282,7 @@ offers `Review in Tasks` instead, which opens the dashboard on the first of them
 
 #### Browser notifications
 
-- A wait the user cannot currently see is notified once per `wait_id`, under the conditions in
-  [Agent attention notifications](notifications.md#agent-attention-notifications). A wait is visible
+- A wait the user cannot currently see is notified once per `wait_id`. A wait is visible
   when the browser is active and either its pane is on screen, or the task dashboard is on screen and
   lists the task. A task that matches no pane is therefore visible only on the dashboard.
 - A wait is notified only when it starts while its host is `ok`: a frame that starts it, or a
@@ -318,7 +321,7 @@ offers `Review in Tasks` instead, which opens the dashboard on the first of them
 
 #### Task dashboard
 
-The dashboard lists tasks from [`GET /api/tasks`](tasks.md#get-apitasks), which adds what the stream
+The dashboard lists tasks from [`GET /api/tasks`](task-api.md#get-apitasks), which adds what the stream
 does not carry: stopped sessions, git and pull request details, records and summaries. A task's
 `state`, `waiting_for`, wait and `status_since` come from the stream whenever the stream is live and
 has that task, so a change, and the time spent in the new state, shows as soon as it is published
@@ -327,7 +330,7 @@ not known, so the dashboard shows none rather than the collected time of an earl
 
 ## Related Documents
 
-- Task dashboard collection and states: [tasks.md](tasks.md)
-- Notification conditions and attention indicators: [notifications.md](notifications.md)
-- Collection command safety: [Task dashboard collection](../security/command-execution.md#task-dashboard-collection)
+- Task dashboard collection and states: [task-collection.md](task-collection.md)
+- Notification overview and permission prompt timing: [notifications.md](notifications.md)
+- Collection command safety: [Task dashboard collection](../security/task-collection.md)
 - Architecture: [architecture.md](../architecture.md)

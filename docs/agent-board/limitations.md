@@ -1,3 +1,9 @@
+---
+type: Reference
+title: "Agent Board: known limitations"
+description: "Current Agent Board availability, recovery, and deployment limitations."
+---
+
 # Agent Board: known limitations
 
 > Part of the current [Agent Board design](../agent-board.md).

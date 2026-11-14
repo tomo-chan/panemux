@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "タスクイベント（日本語訳）"
+description: "タスクイベントの観測・配信と受け手の契約を説明する英語正本の日本語訳。"
+---
+
 # Behavior: task events（日本語訳）
 
 [task-events.md](task-events.md) の日本語訳です。正本は英語版で、変更するときは同じ pull request で両方を更新します。
@@ -6,7 +12,7 @@
 
 panemux は、panemux のホストとすべての `ssh_connections` のホストで動いているエージェントのセッションを観測し、その状態の変化をすべてイベントとして 1 本の WebSocket で配信する。サーバーは観測して配信するだけで、ある変化を通知するか、枠を点滅させるか、何もしないかは決めない。それは受け手がそれぞれ決める。いまの受け手はブラウザだけで、そのタスクダッシュボード、pane と workspace の attention、ブラウザ通知は、どれも同じストリームからの投影である（「受け手」）。
 
-- **観測するのはタスクの状態だけ。** 入力は、タスクダッシュボードがすでに実行している収集から、停止したセッションの検索を除いたもの（[Collection](tasks.md#collection)）。端末の出力からプロンプトを探すことはしない。エージェントが記録しない状態（codex のコマンド承認待ち、[issue #294](https://github.com/tomo-chan/panemux/issues/294)）は観測されず、エージェントのファイルから分かる状態（`busy`）として表示される。ただし permission hook を登録して承認要求を記録している場合は除く（[Codex permission requests](tasks.md#codex-permission-requests)）。
+- **観測するのはタスクの状態だけ。** 入力は、タスクダッシュボードがすでに実行している収集から、停止したセッションの検索を除いたもの（[Collection](task-collection.md#collection)）。端末の出力からプロンプトを探すことはしない。エージェントが記録しない状態（codex のコマンド承認待ち、[issue #294](https://github.com/tomo-chan/panemux/issues/294)）は観測されず、エージェントのファイルから分かる状態（`busy`）として表示される。ただし permission hook を登録して承認要求を記録している場合は除く（[Codex permission requests](task-codex-permissions.md#codex-permission-requests)）。
 - **対象はエージェントだけ。** エージェントは、出力に対するパターンではなく、収集に観測を足すことでサポートする。Devin はまだ対象外（[issue #276](https://github.com/tomo-chan/panemux/issues/276)）。エージェントでないプログラムは対象にしない。
 - **タスクと pane の対応付けは受け手の役目。** 各イベントはタスクが動いている場所を載せる。サーバーは、どの pane がそれを表示しているか（あるいは表示していないか）を知らない。
 
@@ -14,16 +20,16 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 
 #### タスク
 
-タスクは動いている 1 つのエージェントセッションで、[`GET /api/tasks`](tasks.md#get-apitasks) のタスク `id` で識別する。panemux のホストでは `local:<agent>:<key>`、接続先では `ssh:<host>:<agent>:<key>`。key は通常セッション ID なので、セッションが動いている間 id は変わらない。変わるのは次の 2 つの場合で、どちらも推測でつなげず、1 つのタスクの削除と別のタスクの追加として配信する。
+タスクは動いている 1 つのエージェントセッションで、[`GET /api/tasks`](task-api.md#get-apitasks) のタスク `id` で識別する。panemux のホストでは `local:<agent>:<key>`、接続先では `ssh:<host>:<agent>:<key>`。key は通常セッション ID なので、セッションが動いている間 id は変わらない。変わるのは次の 2 つの場合で、どちらも推測でつなげず、1 つのタスクの削除と別のタスクの追加として配信する。
 
 - まだセッションのない codex のプロセス（`pid-<pid>`）にセッションができたとき
-- 動いている Claude Code の中の `/resume` が、プロセスを別のセッションに切り替えたとき（[States](tasks.md#states)）
+- 動いている Claude Code の中の `/resume` が、プロセスを別のセッションに切り替えたとき（[States](task-collection.md#states)）
 
-状態は、[States](tasks.md#states) のうち動いているタスクが取りうる `busy`、`wait`、`idle`、`run`、`unknown`。`stop` は使わない。動かなくなったタスクは **削除（removed）** になる。収集では、終了と `/resume` とホストがプロセスを失ったことを区別できず、どれかを `stop` と呼ぶのは推測になるため。
+状態は、[States](task-collection.md#states) のうち動いているタスクが取りうる `busy`、`wait`、`idle`、`run`、`unknown`。`stop` は使わない。動かなくなったタスクは **削除（removed）** になる。収集では、終了と `/resume` とホストがプロセスを失ったことを区別できず、どれかを `stop` と呼ぶのは推測になるため。
 
 #### 何を変化とみなすか
 
-観測したタスクはそれぞれ *view*（「タスクの view」の節のフィールド）に落とし、前回の view と `status_since` 以外で違えば変化とする。`status_since` は収集のたびにホストの時計から変換するので、何も変わっていなくても最大 1 秒ほど動く（[States](tasks.md#states)）。そのため変化の時点の値を載せるだけで、比較には使わない。プロセス ID、開始時刻、会話のログは view に含めない。
+観測したタスクはそれぞれ *view*（「タスクの view」の節のフィールド）に落とし、前回の view と `status_since` 以外で違えば変化とする。`status_since` は収集のたびにホストの時計から変換するので、何も変わっていなくても最大 1 秒ほど動く（[States](task-collection.md#states)）。そのため変化の時点の値を載せるだけで、比較には使わない。プロセス ID、開始時刻、会話のログは view に含めない。
 
 #### 待ち ID
 
@@ -31,7 +37,7 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 
 | タスク | `wait_id` |
 |---|---|
-| `wait` で、[wait signature](tasks.md#wait-signature) がある | `wait_signature` そのもの（`w1-…`）。収集、再読込、サーバーの再起動をまたいで同じ |
+| `wait` で、[wait signature](task-collection.md#wait-signature) がある | `wait_signature` そのもの（`w1-…`）。収集、再読込、サーバーの再起動をまたいで同じ |
 | `wait` で、署名がない（エージェントが待ちの開始を記録していない） | `e1-<epoch>-<seq>`：その待ちを初めて観測した「ストリームの位置」。同じ `waiting_for` のまま待ちが続く間は同じで、サーバーが再起動するまで有効 |
 | それ以外の状態 | なし |
 
@@ -45,22 +51,24 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 |---|---|
 | `pending` | 観測を始めたが、このホストはまだ答えていない |
 | `ok` | このホストの最後の収集が成功した |
-| `connecting` | 接続をまだ準備している（[Hosts and connections](tasks.md#hosts-and-connections)） |
+| `connecting` | 接続をまだ準備している（[Hosts and connections](task-collection.md#hosts-and-connections)） |
 | `error` | 最後の収集が失敗した。`error` に理由がある |
 
 **`ok` でないホストはタスクのイベントを配信しない。** そのホストのタスクは最後に観測したままで、それが古いことはホストの状態が受け手に伝える。推測で削除することも、待ちのままにしておくこともしない。ホストがまた答えたら、そのタスクを最後に観測したものと比べ、違いを配信する。ホストが失敗している間に始まって終わった待ちは、観測していないので配信されない。1 台のホストの失敗や遅さが、ほかのホストを遅らせたり隠したりすることはない。
 
 `ssh_connections` に足されたホストは `pending` で added として配信する。取り除かれたホストは removed として配信し、そのタスクもそれぞれ removed になる。
 
-読めない・ない・未知の形式のエージェントのファイルから待ちが生まれることはない。収集がすでにそれらを署名なしの `unknown` や `run` として報告しており（[Wait signature](tasks.md#wait-signature)）、それがそのまま配信される。
+読めない・ない・未知の形式のエージェントのファイルから待ちが生まれることはない。収集がすでにそれらを署名なしの `unknown` や `run` として報告しており（[Wait signature](task-collection.md#wait-signature)）、それがそのまま配信される。
 
 ### `GET /ws/tasks/events`
 
 タスクのイベントストリーム。サーバーは JSON の text フレームを送る。クライアントから送られたものは無視する。
 
-- **認証しない。** [`/ws/{sessionID}`](websocket.md#websocket-protocol) や [`GET /api/tasks`](tasks.md#get-apitasks) と同じく bearer トークンは要らない。
-- **cross-site の要求は、upgrade の前、収集を始める前に `403` で拒否する。** `GET /api/tasks` と同じ規則（`Sec-Fetch-Site` が `cross-site` か `same-site`、または `Origin` のホスト名・実効ポートが要求の Host と一致しない）に加え、`/ws/{sessionID}` と同じ upgrade 自身の Origin 検査を行う。ストリームを開くとすべてのホストに接続するので、この拒否はその副作用を守る（[Task dashboard collection](../security/command-execution.md#task-dashboard-collection)）。
-- Origin のない browser 要求には、Host と一致する Referer と整合する Fetch Metadata が必要。browser header のない CLI 要求は維持する（[共有 browser request guard](../security/auth.md#shared-browser-request-guard)）。
+- **認証しない。** [`/ws/{sessionID}`](websocket.md#websocket-protocol) や [`GET /api/tasks`](task-api.md#get-apitasks) と同じく bearer トークンは要らない。
+- **別の authority からの要求は upgrade・収集前に `403` で拒否する。**
+  [共有 browser request guard](../security/auth.md#shared-browser-request-guard) に加え、
+  `/ws/{sessionID}` と同じ WebSocket upgrade 自身の Origin 検査を行う。ホストへの接続の
+  副作用を守り、browser header のない CLI 要求との互換性は保つ。
 - クライアントが送るフレームは 512 バイトまで。超えたら接続を閉じる。
 
 #### フレーム
@@ -121,12 +129,12 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 
 | フィールド | 意味 |
 |---|---|
-| `id`、`host`、`agent`、`session_id`、`cwd` | [`GET /api/tasks`](tasks.md#get-apitasks) と同じ |
+| `id`、`host`、`agent`、`session_id`、`cwd` | [`GET /api/tasks`](task-api.md#get-apitasks) と同じ |
 | `state` | `busy`、`wait`、`idle`、`run`、`unknown` のどれか |
 | `waiting_for` | `wait` のタスクが何を待っているか。エージェントが書いたまま。`wait` のときだけ |
 | `wait_id` | 「待ち ID」。`wait` のときだけ |
 | `status_since` | タスクがその状態に入った時刻。このフレームの時点でサーバーの時計に変換したもの。比較には使わない（「何を変化とみなすか」） |
-| `location` | `kind`、`tmux_session`、`pane_id`、`attachable`。[Where a task runs](tasks.md#where-a-task-runs) と同じ |
+| `location` | `kind`、`tmux_session`、`pane_id`、`attachable`。[Where a task runs](task-navigation.md#where-a-task-runs) と同じ |
 
 会話の本文、プロンプト、コマンドライン、プロセス ID はどのフレームにも載らない。
 
@@ -148,7 +156,7 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 ```
 
 - **観測はストリームに購読者がいる間だけ、何人いても 1 本だけ動く。** 最初の購読者が観測を始め、すべてのホストを一度に観測する。まだ答えていないホストは、その購読者のスナップショットで `pending` になる。
-- **ホストごとに周期を持つ。** あるホストは、前の観測が終わってから 5 秒後にまた観測する。同じホストの観測は重ならず、遅いホストは（収集のホストごとのタイムアウトまで、[Hosts and connections](tasks.md#hosts-and-connections)）自分の周期を延ばすだけ。ホストの一覧は周期ごとに読み直すので、`ssh_connections` へのホストの追加や削除に追従する。
+- **ホストごとに周期を持つ。** あるホストは、前の観測が終わってから 5 秒後にまた観測する。同じホストの観測は重ならず、遅いホストは（収集のホストごとのタイムアウトまで、[Hosts and connections](task-collection.md#hosts-and-connections)）自分の周期を延ばすだけ。ホストの一覧は周期ごとに読み直すので、`ssh_connections` へのホストの追加や削除に追従する。
 - **最後の購読者が去ったら観測を止める。** そのため、ページを再読込すると観測は止まって始め直し、すべてのホストをもう一度観測する。最後に観測したもの、epoch、`seq`、署名のない待ち ID は保持するので、再読込でまだ署名のない待ちに新しい ID が付くことはない。観測を再開したら、各ホストは答えるまで `pending` で、保持していたものとの違いを配信する。
 - **止めるときに実行中の観測は中断しない。** その観測は収集のホストごとのタイムアウトまで走り、結果は捨てる。ホストのコマンドのチャネルを閉じても、そこで動いているスクリプトが止まるかは分かっていないので、途中で切っても監視されないスクリプトが残るだけになる。観測が終わる前に購読者が来たら、その観測から観測を再開し、同じホストに重なる 2 本目の観測は始めない。
 - 配信は 1 つの購読者を待たないので、読まなくなった接続がほかの接続を止めることはない。接続のストリームの途中のフレームを落とすことはなく、フレームを受け取れない接続は閉じる。そのタブは接続し直し、新しいスナップショットから続ける。書き込みに期限はないので、購読を閉じてもその接続で止まっている書き込みは中断されない。待つのはその接続のハンドラーだけで、ソケットが閉じるまで待つ。ほかに一緒に待つものはない。
@@ -165,15 +173,16 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 
 #### pane と workspace の attention
 
-- タスクは `location` と `host` から、タスクダッシュボードの Open と同じ規則で pane に対応付ける（[Opening a task](tasks.md#opening-a-task)）。tmux のタスクはそのセッションの `tmux`／`ssh_tmux` の pane に、tmux の外のタスクは `pane_id` が指す `local`／`ssh` の pane に。1 つの tmux セッションの中のタスクはすべて同じ pane になる。codex の daemon のタスクや、どの pane にもない tmux の外のタスクは、どの pane にも対応しない。
+- タスクと pane の対応は [Where a task runs](task-navigation.md#where-a-task-runs) に従う。同じ tmux セッションのタスクは同じ pane に対応し、daemon のタスクと対応する workspace pane のないタスクはどこにも対応しない。
 - 対応した pane は、そのタスクが `ok` のホストで `wait` にある間、attention を持つ。ただし、このタブで解除した `wait_id` は除く。attention はフレームごとに、その時点のストアから読み取る。フレームからフレームへ持ち越さないので、まだ続いている待ちは再読込でもう一度表示される。
+- attention のある pane を含む workspace のタブは、その workspace が非アクティブの間だけ点滅する。その workspace を選択するか、pane の attention がなくなると消える。
 - **`ok` でないホストの待ちは attention を与えない。** そのホストのタスクは最後に観測したときのままで（「ホスト」の節）、観測が止まっていた間は、前に保持していたものになる（「ライフサイクル」の節）。再読込後のスナップショットでは全ホストが `pending` で、そこにある待ちはもう答え済みかもしれない。ホストが答えて、タスクがまだ `wait` にあれば表示する。ホストの `ok` のフレームは、そのホストで見つかった差分より前に届くので、終わっていた待ちが表示されるのは、その間のフレームの分だけ。
-- attention の解除は [Agent attention notifications](notifications.md#agent-attention-notifications) のとおり。pane は focus か click で、workspace の tab はその workspace の選択で解除する。加えて、タスクが `ok` のホストで `wait` でなくなったときも、どこで答えたかにかかわらず解除する。`busy`・`idle`・`run`・`unknown` への `changed` フレーム、`removed`、またはホストが `pending`・`connecting`・`error` になったとき。ほかにまだ待っているタスクを表示している pane は attention を保つ。`unknown` やホストの失敗で消えた attention は、タスクが同じ `wait_id` でまた `wait` に見えたときに戻る。その間にこのタブで解除していれば戻らない。
+- attention はユーザーの操作で解除する。pane は focus か click で、workspace の tab はその workspace の選択で解除する。加えて、タスクが `ok` のホストで `wait` でなくなったときも、どこで答えたかにかかわらず解除する。`busy`・`idle`・`run`・`unknown` への `changed` フレーム、`removed`、またはホストが `pending`・`connecting`・`error` になったとき。ほかにまだ待っているタスクを表示している pane は attention を保つ。`unknown` やホストの失敗で消えた attention は、タスクが同じ `wait_id` でまた `wait` に見えたときに戻る。その間にこのタブで解除していれば戻らない。
 - 人が attention を解除した `wait_id` は、下の通知済みの記録と同じ規則でタブの session storage に記録する。これにより、再読込で再び表示されない。
 
 #### ブラウザ通知
 
-- ユーザーがいま見ることのできない待ちは、[Agent attention notifications](notifications.md#agent-attention-notifications) の条件で `wait_id` ごとに 1 回通知する。待ちが見えているのは、ブラウザがアクティブで、その pane が画面にあるとき、またはタスクダッシュボードが画面にあってそのタスクを表示しているとき。したがって、どの pane にも対応しないタスクの待ちは、ダッシュボードでだけ見える。
+- ユーザーがいま見ることのできない待ちは、`wait_id` ごとに 1 回通知する。待ちが見えているのは、ブラウザがアクティブで、その pane が画面にあるとき、またはタスクダッシュボードが画面にあってそのタスクを表示しているとき。したがって、どの pane にも対応しないタスクの待ちは、ダッシュボードでだけ見える。
 - 待ちを通知するのは、ホストが `ok` の間に始まったときだけ。待ちを始めるフレームか、ホストが `ok` でその待ちを持つスナップショット。ホストが `ok` でないスナップショットにある待ちは通知せず、そのホストが答えたときにも判断し直さない。ホストの `ok` のフレームはそのホストで見つかった差分より前に届くので、その時点では待ちがまだ続いているかをタブは判断できない。観測が止まっていた間に始まった待ちは通知される。ホストが答えたとき、保持していたものからの変化として配信されるため。
 - タブがワークスペースを読み込む前に始まった待ちは、通知も記録もしない。その pane が画面に出ているかをまだ判断できないため。ページの読み込み・再読込の直後がこれにあたり、そのとき始まった待ちや、最初のスナップショットにある未通知の待ちを、このタブは通知しない。pane と workspace の attention は付ける。
 - **タブはそれぞれ自分で判断して通知し、タブ同士で調停しない。** 各タブは自分の画面で見えているかを判断するので、panemux を開いた 2 つのタブが同じ待ちをどちらも通知することがある。
@@ -185,11 +194,11 @@ panemux は、panemux のホストとすべての `ssh_connections` のホスト
 
 #### タスクダッシュボード
 
-ダッシュボードは [`GET /api/tasks`](tasks.md#get-apitasks) からタスクを並べる。そこには、ストリームが載せないもの（停止したセッション、git と pull request の詳細、記録、要約）が加わる。タスクの `state`、`waiting_for`、待ち、`status_since` は、ストリームが live でそのタスクがあればストリームから取るので、変化と新しい状態での経過時間は、ダッシュボードの次の収集を待たず、配信されたときに表示される。`status_since` を省略したフレームは時刻が不明という意味なので、ダッシュボードは以前の状態の収集時刻を出さず、時刻を表示しない。
+ダッシュボードは [`GET /api/tasks`](task-api.md#get-apitasks) からタスクを並べる。そこには、ストリームが載せないもの（停止したセッション、git と pull request の詳細、記録、要約）が加わる。タスクの `state`、`waiting_for`、待ち、`status_since` は、ストリームが live でそのタスクがあればストリームから取るので、変化と新しい状態での経過時間は、ダッシュボードの次の収集を待たず、配信されたときに表示される。`status_since` を省略したフレームは時刻が不明という意味なので、ダッシュボードは以前の状態の収集時刻を出さず、時刻を表示しない。
 
 ## Related Documents
 
-- タスクダッシュボードの収集と状態：[tasks.md](tasks.md)
-- 通知の条件と attention の表示：[notifications.md](notifications.md)
-- 収集のコマンドの安全性：[Task dashboard collection](../security/command-execution.md#task-dashboard-collection)
+- タスクダッシュボードの収集と状態：[task-collection.md](task-collection.md)
+- 通知の概要と permission を求めるタイミング：[notifications.md](notifications.md)
+- 収集のコマンドの安全性：[Task dashboard collection](../security/task-collection.md)
 - アーキテクチャ：[architecture.md](../architecture.md)

@@ -1,3 +1,9 @@
+---
+type: Security Requirement
+title: "Security: Agent Board"
+description: "Agent Board remote-write constraints and treatment of agent-reported values."
+---
+
 # Security: Agent Board
 
 > Part of the [security design](../security.md). The general command-execution and `gosec` rules
@@ -25,6 +31,12 @@ Remote commands must satisfy all of these rules:
   including the pinned installer, on both local and SSH hosts; never derive this value
   from `os.Getenv`. This overrides inherited opt-ins and prevents agmsg from treating
   panemux's calling session as the message sender for pane naming or `/rename` input;
+- unset `BASH_ENV` and `ENV` at that boundary before launching child shells, and remove
+  the pinned built-in drivers' pane markers plus Codex's thread identity as listed in
+  [the agmsg contract](../agent-board/agmsg-contract.md). An unresolved caller pane makes
+  self-rename return before durable marks; `off` alone can record a skip mark and alter
+  the agent's later naming behavior. Preserve HOME, PATH and storage settings, and never
+  remove or rewrite agent-owned marks as cleanup;
 - leave SQL escaping to agmsg and never construct SQL in panemux;
 - expand `~/` in the fixed `~/.agents/skills/agmsg` location to an absolute local or remote-home path before shell quoting.
 
@@ -76,7 +88,7 @@ Only the agmsg adapter chooses the fixed upstream repository, version and full c
 The panemux host fetches and verifies the exact commit, revalidates cached commit identity and uses
 `git archive` to produce the transferred tar. Source/cache ownership is trusted like other local
 application state. No request chooses repository, ref, archive bytes, command or installer arguments.
-See [the command boundary](command-execution.md#agmsg-source-and-installer).
+See [the command boundary](agmsg-install.md).
 
 Install / Update authorizes execution as the target user of the pinned upstream code verified by
 contract tests and human release review. The installer writes outside `~/.agents/skills` (Claude

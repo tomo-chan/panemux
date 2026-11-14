@@ -1,3 +1,9 @@
+---
+type: Specification
+title: "Behavior: Agent Board REST API"
+description: "Agent Board REST payloads, authorization, status codes, and operations."
+---
+
 # Behavior: Agent Board REST API
 
 > Part of the [behavior specification](../behavior.md).
@@ -24,7 +30,7 @@ shared browser request guard also applies before token disclosure. It returns
 `0.0.0.0`, or when any `X-Forwarded-For`, `X-Real-IP`, or `Forwarded` value is present. Forwarding
 headers are rejected regardless of the addresses they contain. Valid direct requests return `200`.
 The rationale and accepted reverse-proxy limitation are specified in
-[Auth token and transport encryption](../security/auth.md#auth-token-and-transport-encryption).
+[Auth token and transport encryption](../security/auth.md#loopback-token-bootstrap).
 
 The capability flags are independent. `agent_board_enabled` reflects top-level `agent_board.enabled`;
 `command_center_enabled` reflects command-center configuration. The frontend uses them to expose
