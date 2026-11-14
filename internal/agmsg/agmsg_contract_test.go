@@ -659,3 +659,20 @@ func TestAgmsgContract_TrailingNewlinesAreNormalized(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, "first\n世界", rows[0].Body)
 }
+
+func TestAgmsgContract_OptionLikeBodiesRoundTrip(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+	bodies := []string{"--force", "--body", "--body-file", "--", "--help", "--force\n'quoted' $(id) 世界"}
+	for _, body := range bodies {
+		require.NoError(t, client.Send(ctx, "contract", "orch@local", "impl@ssh:build", body))
+	}
+	rows, err := client.Since(ctx, "contract", "", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, len(bodies))
+	for i, row := range rows {
+		assert.Equal(t, bodies[i], row.Body)
+		assert.Equal(t, "orch@local", row.From)
+		assert.Equal(t, "impl@ssh:build", row.To)
+	}
+}

@@ -33,7 +33,11 @@ could suppress the sender's next enabled action. HOME, PATH and agmsg storage se
 remain available. A new terminal driver's identity mechanism must be reviewed when
 changing the supported agmsg version.
 
-The accepted body contract covers shell syntax, Unicode and embedded newlines as data.
+The accepted body contract covers option-like text (including `--force`, `--body`,
+`--body-file`, `--` and `--help`), shell syntax, Unicode and embedded newlines as data.
+The fixed wrapper decodes the base64 argument and passes the body on standard input
+through public `send.sh <team> <from> <to> --body - --force`; body text is never an option.
+`TestAgmsgContract_OptionLikeBodiesRoundTrip` checks these bodies against a real install.
 Trailing newlines follow the pinned upstream normalization, reproduced by
 `TestAgmsgContract_TrailingNewlinesAreNormalized`; see [limitations](limitations.md#external-dependency).
 This is the #505 acceptance interpretation agreed with the orchestrator, not a new encoding protocol.

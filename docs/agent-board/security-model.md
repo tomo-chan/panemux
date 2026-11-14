@@ -31,7 +31,8 @@ remains available to the other board. Terminal pane connections are separate.
   checked `name@local` and `name@ssh:key` addresses. Names and keys use `[A-Za-z0-9_.-]+`;
   qualified `_system` and malformed addresses are rejected.
 - Arbitrary message bodies are base64-encoded, checked against the encoded alphabet, passed as a
-  positional argument, and decoded by a fixed remote wrapper before `send.sh`.
+  positional argument, and decoded by a fixed remote wrapper into the public `send.sh --body -`
+  standard-input interface. Option-like bodies remain data.
 - agmsg's own validation occurs after the remote shell has parsed the command and cannot replace
   panemux's quoting and validation.
 - `send.sh` owns SQL escaping; panemux must not build SQL or add a competing SQL-escape layer.

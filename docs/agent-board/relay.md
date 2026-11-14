@@ -77,7 +77,9 @@ receiving a message does not authorize work or override an agent's approval rule
 During each poll, the relay reads a bounded newest window, selects rows after its opaque
 cursor, validates and records originals, forwards eligible messages, then advances the
 source cursor even after a forwarding failure. A managed tool-update pause leaves the
-source batch retryable before cache/ledger/cursor changes. A pass with cursor changes
+source batch retryable before cache/ledger/cursor changes. Lease admission first checks
+team, sender and recipient eligibility without consuming the own-send ledger; rejected
+rows never reserve a destination or prevent valid rows on their source host from advancing. A pass with cursor changes
 atomically persists one snapshot; a pass without changes performs no cursor-file write.
 
 ### Startup and recovery

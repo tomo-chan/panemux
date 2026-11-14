@@ -148,7 +148,7 @@ func verifyAgmsgStartup(t *testing.T, pool callerLogin, target host.Host) {
 		require.NoError(t, client.Send(context.Background(), "team", "from", "to", "body ' $(literal)"))
 		args, readErr := os.ReadFile(capture)
 		require.NoError(t, readErr)
-		require.Equal(t, "team\x00from\x00to\x00body ' $(literal)\x00--force\x00", string(args))
+		require.Equal(t, "team\x00from\x00to\x00--body\x00-\x00--force\x00", string(args))
 	})
 	t.Run("read", func(t *testing.T) {
 		_, readErr := client.Since(context.Background(), "team", "", 100)

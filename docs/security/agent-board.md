@@ -25,7 +25,8 @@ Remote commands must satisfy all of these rules:
   on that alphabet, optionally followed by `@local` or `@ssh:<key>` with the same
   key alphabet; reject qualified `_system`, extra separators and shell syntax;
 - base64-encode arbitrary message bodies, validate the encoded alphabet, and decode through a fixed
-  wrapper using positional parameters;
+  wrapper using positional parameters, then pass the decoded body as standard-input data
+  to the public `send.sh --body -` interface, never as an option-bearing argument;
 - never interpolate caller-controlled data into wrapper or probe script text;
 - export the compile-time literal `AGMSG_SELF_NAME=off` before invoking agmsg scripts,
   including the pinned installer, on both local and SSH hosts; never derive this value

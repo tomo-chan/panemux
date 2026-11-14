@@ -62,24 +62,31 @@ func TestSendBase64WrapperScript_RealShell_DecodesMetacharacterBody(t *testing.T
 
 	dir := t.TempDir()
 	capturePath := filepath.Join(dir, "captured-argv")
+	bodyPath := filepath.Join(dir, "captured-body")
 	sendStub := filepath.Join(dir, "send.sh")
 
 	// A stand-in for message transport's real send.sh: dumps its argv, NUL-separated,
-	// to capturePath so the test can inspect exactly what it received.
-	stubScript := "#!/bin/sh\nprintf '%s\\0' \"$@\" > " + shellQuoteForTest(capturePath) + "\n"
+	// and captures stdin separately so the test verifies data and options independently.
+	stubScript := "#!/bin/sh\nprintf '%s\\0' \"$@\" > " + shellQuoteForTest(capturePath) +
+		"\ncat > " + shellQuoteForTest(bodyPath) + "\n"
 	//nolint:gosec // G306: test fixture needs the exec bit
 	require.NoError(t, os.WriteFile(sendStub, []byte(stubScript), 0700))
 
 	body := `it's; $(evil) && ` + "`echo hi`" + ` | rm -rf / ; "double" 'single'` + "\n世界"
-	for _, ssh := range []bool{false, true} {
-		client := NewRemoteAgmsgClient("local", "/opt/agmsg", shellMessageRunner{stub: sendStub, ssh: ssh})
-		require.NoError(t, client.Send(context.Background(), "team-a", "from.1@ssh:build.1", "to.2@local", body))
+	for _, body := range []string{body, "--force", "--body", "--body-file", "--", "--help"} {
+		for _, ssh := range []bool{false, true} {
+			client := NewRemoteAgmsgClient("local", "/opt/agmsg", shellMessageRunner{stub: sendStub, ssh: ssh})
+			require.NoError(t, client.Send(context.Background(), "team-a", "from.1@ssh:build.1", "to.2@local", body))
 
-		captured, err := os.ReadFile(capturePath)
-		require.NoError(t, err)
-		fields := strings.Split(strings.TrimSuffix(string(captured), "\x00"), "\x00")
+			captured, err := os.ReadFile(capturePath)
+			require.NoError(t, err)
+			fields := strings.Split(strings.TrimSuffix(string(captured), "\x00"), "\x00")
 
-		require.Equal(t, []string{"team-a", "from.1@ssh:build.1", "to.2@local", body, "--force"}, fields)
+			require.Equal(t, []string{"team-a", "from.1@ssh:build.1", "to.2@local", "--body", "-", "--force"}, fields)
+			capturedBody, err := os.ReadFile(bodyPath)
+			require.NoError(t, err)
+			require.Equal(t, body, string(capturedBody))
+		}
 	}
 }
 

@@ -197,9 +197,12 @@ func (r *Relay) pollHost(ctx context.Context, host string, limit int) (bool, err
 	routing := r.routing()
 	leased := map[string]MessageClient{host: client}
 	for _, row := range rows {
-		target, _ := resolveRecipient(row.To, routing)
+		target, ok := resolveRecipient(row.To, routing)
 		dest := target.Host
-		if row.Team != r.team || row.From == SystemID || leased[dest] != nil || routing.Clients[dest] == nil {
+		if !ok || row.From == SystemID || !r.senderEligibleUsing(host, row, routing) ||
+			dest == "" || (dest == host && !strings.Contains(row.To, "@")) ||
+			leased[dest] != nil || routing.Clients[dest] == nil {
+
 			continue
 		}
 		c, done, err := leaseMessages(routing.Clients[dest])
@@ -307,12 +310,24 @@ func (r *Relay) validFrom(sourceHost string, row Row) bool {
 }
 
 func (r *Relay) validFromUsing(sourceHost string, row Row, routing Routing) bool {
+	if !r.senderEligibleUsing(sourceHost, row, routing) {
+		return false
+	}
+	if row.From == SystemID {
+		return r.ledger.Consume(sourceHost, row.Team, row.To, row.Body)
+	}
+	return true
+}
+
+// senderEligibleUsing is side-effect free so lease admission cannot consume a
+// system send's ledger entry before the batch is admitted.
+func (r *Relay) senderEligibleUsing(sourceHost string, row Row, routing Routing) bool {
 	id, err := ParseIdentity(row.From)
 	if row.Team != r.team || err != nil || id.Host != "" {
 		return false
 	}
 	if row.From == SystemID {
-		return r.ledger.Consume(sourceHost, row.Team, row.To, row.Body)
+		return true
 	}
 	owner, known := routing.PaneHosts[row.From]
 	return !known || owner == sourceHost
