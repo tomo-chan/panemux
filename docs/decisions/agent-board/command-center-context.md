@@ -11,4 +11,4 @@ and inherited settings can broaden an `--allowedTools` policy. The command cente
 persists its own session ID, disables ambient setting sources, uses an empty per-query directory,
 passes its instructions explicitly, restricts MCP configuration, and combines an allowlist with an
 explicit acting-tool denylist. The current security contract and evidence are in
-[security/command-center.md](../../security/command-center.md#session-settings-and-working-directory).
+[security/command-center.md](../../security/command-center.md#command-center-subprocess-execution).

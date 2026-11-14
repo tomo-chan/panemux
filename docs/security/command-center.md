@@ -57,8 +57,12 @@ These defaults were verified with CLI v2.1.233, not inferred from help. Empty se
 also suppress `CLAUDE.md` discovery. Instructions therefore use `--append-system-prompt`:
 `DefaultSystemPrompt` is a compile-time literal, and optional operator text from
 `~/.config/panemux/command-center/CLAUDE.md` is appended as text with no execution semantics.
-No operator settings file is accepted, including `~/.claude/settings.json` or a command-center
-settings file. Host settings assume a watched interactive request; the command center instead
+No settings file is accepted from any source — neither `~/.claude/settings.json` nor a
+command-center-specific file. Only the fixed `SubprocessSettings` literal reaches `--settings`.
+A single setting, `permissions.defaultMode: acceptEdits`, can nullify `--allowedTools` (see
+[Acting-tool denial](#acting-tool-denial)). This is ordinary interactive configuration, but
+inheriting it would silently unscope the command center. Host settings assume a watched
+interactive request; the command center instead
 accepts unattended input from any board-token holder. See the [context decision](../decisions/agent-board/command-center-context.md).
 
 #### Acting-tool denial

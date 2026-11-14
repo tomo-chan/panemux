@@ -25,7 +25,8 @@ reverse proxy, SSH tunnel or VPN. See the [security model](../agent-board/securi
 `bearerAuthMiddleware(authToken)` as `Mount`'s `boardAuth` argument. It guards only
 `/api/board` (`GET /status`, `GET /messages`, `POST /broadcast`, `GET /command/history`),
 not the other `/api/*` routes, `/ws/{sessionID}` or `/ws/tasks/events`. Widening bearer auth
-requires a matching frontend change; existing requests are unauthenticated.
+without a matching frontend change would break every existing unauthenticated request,
+so it remains a separate, larger change.
 Handler tests pass `nil` for `boardAuth` and do not establish the shipped auth posture.
 
 Production-router tests in `internal/server/board_routes_test.go` and `route_table_test.go`

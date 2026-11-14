@@ -60,9 +60,11 @@ the shim is written — is `"$HOME/.cache/panemux/bin"`, resolved by the remote 
 than by panemux, so no panemux-side value is interpolated at all. Locally the shim is written with
 `os.WriteFile` under `os.UserCacheDir()`; no shell parses it.
 
-The remote-write [rule](agent-board.md#agent-board-remote-writes) forbids installing the
-`panemux` server binary, which could start HTTP/WS listeners and a command center. This POSIX
-shim only writes an escape sequence to its invoking terminal: it has no network access,
+panemux writes a shell script to a remote host here. This session-layer installation is
+compatible with the [remote-write rule](agent-board.md#agent-board-remote-writes), which
+constrains `internal/agmsg`: that adapter must never install panemux or panemux helper scripts
+on a remote host. Unlike the panemux server, which could start HTTP/WS listeners and a command
+center, this POSIX shim only writes an escape sequence to its invoking terminal. It has no network access,
 persistence beyond its file or privileges beyond the pane user's. Install it in that user's
 cache directory with mode `0700`; every step is best-effort, so a read-only home leaves the
 pane working without interception. `url_open.browser_shim: false` disables the mechanism.
