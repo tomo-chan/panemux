@@ -39,9 +39,8 @@ passes, in all three packages. The cause is identical in each: the tests use `65
 boundary, and never `65535`, the boundary itself. `make coverage-blocks` lists none of those lines,
 and is right not to: the blocks execute. What is missing is not execution but an assertion.
 
-That the same blind spot appears three times, in three packages, written at three different times, is
-the part worth keeping. It is not an oversight in one test; it is a habit the existing gates cannot
-see.
+The same missing boundary assertion recurred at three sites across three packages and times;
+the existing execution gates could not detect it.
 
 ### Clearing the boundary-value class (issue #190)
 
@@ -79,11 +78,9 @@ has a test (`TestRegistryEndConnNeverDrivesTheCounterNegative`) rather than an e
 that catches this class: *if the mutant were reachable, would anything be wrong?* — "equivalent"
 survives that question, "unreachable" does not.
 
-**One property of the marker itself, which the `Kind` column above made easy to misread — now
-fixed.** `scripts/mutation.sh` used to decide an exemption by file and line, recording the mutant
-`$type` for the report and never comparing it, so a reason written about the boundary mutant waived
-*every* mutant gremlins produced on that line, `CONDITIONALS_NEGATION` included. The reason a reader
-saw and the set it actually covered were not the same set.
+The original marker waived every mutant on a line, even though its reason named only one type.
+Current type-scoped marker rules are authoritative in
+[Mutation testing](../development/mutation.md).
 
 Nothing was hidden by it, and that is measured rather than assumed. Running gremlins over
 `internal/board` and `internal/session` names every mutant on each of the eleven marked lines: all
@@ -94,41 +91,23 @@ useful data point rather than a counterexample: its negation mutant (`<= 0`) was
 existing suite the whole time, and what survived under the waiver was exactly the boundary mutant the
 reason was written for.
 
-So the gap was structural rather than live, and it mattered most for stage 4, when a survivor becomes
-a failure: a line-scoped waiver applied to a real finding of a different kind would then be the
-difference between a red gate and a green one, with nothing in the diff to show for it. **The marker
-now names the type it waives** — `//mutation:exempt[CONDITIONALS_BOUNDARY] <reason>`, with a
-comma-separated list for several and `[*]` for a deliberate, labelled line-wide waiver. An untyped
-marker exempts nothing, on the same grounds as a reasonless one; the eleven above were rewritten in
-the change that introduced it, each to the type the measurement above says it was always about. When
-a marker is present and a mutant of another type survives, the finding names the type the marker
-does claim, so the mismatch is on the screen instead of being silently absorbed.
+The measurement found a structural gap, not a hidden live survivor. Type-scoped waivers prevent
+a reason for one mutant from silently waiving a different finding when mutation is a failing gate.
+See [D9](../decisions/quality-gateway/mutation-verdicts.md) and the
+[marker contract](../development/mutation.md).
 
-This was the first real evidence for how much of G4(c)'s noise is irreducible rather than fixable,
-which is what item 6's fourth stage — whether to make `make mutation` fail — needed before it could
-be decided, and [decision D9](../decisions/quality-gateway/mutation-verdicts.md) records the decision it fed: **the "boundary value" row
-is not 45 missing tests.** Four of them cannot be killed by anyone, one only by a fabricated input,
-and that count is a floor rather than a census — it is what surfaced while working the sites #190
-named, not an audit of all 45. A gate failing on that group would demand tautologies in the very
-class the measurement called most actionable. The `endConn` correction is the counterweight: a
-reviewer who accepts an exemption's *reason* without asking which kind it claims will wave through
-real defects, so stage 4 needs the two words kept apart in the marker itself, not just in this
-table.
+The boundary row is not 45 missing tests: four cannot be killed by any input and one requires
+fabricated input. This is a floor from the #190 sites, not a census of all 45. The `endConn`
+correction shows why reviewers must distinguish equivalent from unreachable in the marker
+itself. These findings informed [D9](../decisions/quality-gateway/mutation-verdicts.md).
 
-**The red-check's first live verdict on a Go diff came from here too, and it is worth reading
-carefully.** G4(b) had never judged a real pull request — #185, #186, #187 and #189 all changed no Go
-implementation, so it correctly skipped every time. On this branch it ran, and **15 of 18 changed
-tests survived the revert**. Nothing was wrong with them. A branch that exists to pin behavior that
-is *already correct* cannot make those tests go red by reverting an implementation it never changed;
-that is arithmetic, not a weak assertion. Each carries a per-test `//efficacy:exempt` with that
-reason — the narrow marker `scripts/efficacy.sh` documents, not the branch-wide `efficacy-exempt`
-label — and the three tests around `resolveSweepInterval` went red exactly as they should.
-
-The lesson for stage 4 is not "the gate is too strict". It is that **G4(b) and G4(c) disagree about
-this branch by construction**: mutation says these tests are the fix, the red-check says they are
-out of its scope, and both are right. A rule of thumb falls out of it — a *high* survivor rate on a
-branch whose diff is nearly all tests is expected; the same rate on a branch that changed real
-behavior is the signal D4 was built for.
+The first live Go red-check ran here after #185, #186, #187, and #189 correctly skipped Go-free
+diffs. **15 of 18 changed tests survived the revert** because they pinned already-correct
+behavior; each used a per-test `//efficacy:exempt` reason, not the branch-wide `efficacy-exempt`
+label (`scripts/efficacy.sh`). The three `resolveSweepInterval` tests went red. Mutation and
+red-check therefore disagree correctly on this branch: a high survivor rate is expected for
+already-correct behavior, but warrants scrutiny on a branch changing behavior. See
+[Red-check](../development/red-check.md) and [D4](../decisions/quality-gateway/red-check.md).
 
 **One implementation change came out of it**, and it is the shape the repository already prefers.
 `New` in `internal/portforward/registry.go` decided three things at once about `Options.SweepInterval`
@@ -142,23 +121,14 @@ decision is the fix; adding a test that asserts the code's own constant back to 
 
 ### Relationship to issue #164
 
-[#164](https://github.com/tomo-chan/panemux/issues/164) proposed parsing the coverage profile per
-block and failing on blocks whose summed execution count is zero. That shares G4(c)'s goal with a
-different mechanism. Per-block coverage is cheap and exhaustive but still only reports *whether a
-block executed*; mutation reports *whether the tests would notice it changing*, at a much higher
-cost. The sensible order is therefore to land per-block coverage first and add mutation only for the
-tautologies that survive it — which is why order 6 sits last.
+[#164](https://github.com/tomo-chan/panemux/issues/164) proposed failing blocks whose summed
+execution count is zero. Block coverage cheaply checks execution; mutation more expensively
+checks assertions. The design introduces block coverage before mutation for surviving tautologies.
 
-**Landed** as `scripts/coverage_blocks.sh` / `make coverage-blocks` (row 8), with two changes from
-#164's sketch, both taken from measurement: the gate is scoped to the diff (D8), and it re-reads the
-profile `make coverage-go` already writes rather than running a second suite. #164's correctness
-point stands and is what the script's tests pin — counts must be summed per unique block, because a
-shared `-coverpkg` list emits each block once per test binary. Neither alternative #164 surveyed has
-moved: [golang/go#70306](https://github.com/golang/go/issues/70306) is still an undecided proposal
-and gobco still instruments one package at a time. This remains block coverage, not C1.
+`scripts/coverage_blocks.sh` / `make coverage-blocks` is diff-scoped (D8) and reuses
+`make coverage-go`'s profile. Its tests pin summation per unique block: shared `-coverpkg` emits
+each block once per test binary. This is block coverage, not C1. See
+[Coverage gates](../development/coverage.md) for the current contract.
 
-It closed item 6's first stage, not item 6. That item's completion condition — regression protection
-measured by whether the tests would *notice a change* — is untouched by a gate that reports whether a
-block *ran*. The step it unblocked was the measurement, which has now been taken: 108 mutants survive
-in code this gate reports as covered (see "Surviving mutants" above). The two are complementary, and
-the measurement is what sized G4(c)'s first shape.
+Per-block execution and mutation efficacy remain complementary: 108 mutants survived in code
+reported as covered by the block gate.

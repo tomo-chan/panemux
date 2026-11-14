@@ -12,9 +12,8 @@ description: "Running model checking and regenerating transition fixtures while 
 
 - `internal/board`'s `ownSendLedger` — the record of Send calls panemux itself issued, which the
   relay consults before believing a row that claims `From == SystemID` — has a TLA+ spec at
-  `spec/agentboard/OwnSendLedger.tla`. It is the pilot subsystem for [#168](https://github.com/tomo-chan/panemux/issues/168), picked because it is small,
-  self-contained, security-critical, and the place PR #167's second review round found a real
-  multiset-vs-set bug.
+  `spec/agentboard/OwnSendLedger.tla`. Pilot rationale and the multiset-vs-set bug are in
+  [the ledger pilot decision](../decisions/agent-board/ledger-model-pilot.md).
 - **Model checking alone proves the model, never the code.** The split that closes that gap is two
   tiers, mirroring [docs/agent-board.md](../agent-board.md)'s agmsg compatibility contract:
   - **Tier 1 — hermetic, inside `make check`.** `internal/board/ledger_conformance_test.go` attaches

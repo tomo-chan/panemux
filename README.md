@@ -187,7 +187,7 @@ cooldown; **Reconnect** clears that wait for both boards.
 
 **[agmsg](https://github.com/fujibee/agmsg) must be installed** on every host whose panes join
 the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux is tested against the
-[pinned agmsg version and commit](docs/maintenance.md#bumping-the-pinned-agmsg-version); it reads each host's `VERSION` on its first successful probe and logs a warning for anything else, without
+[pinned agmsg version and commit](docs/maintenance/agmsg-contract.md#bumping-the-pinned-agmsg-version); it reads each host's `VERSION` on its first successful probe and logs a warning for anything else, without
 blocking. agmsg promises compatibility only for reading through `scripts/api.sh`, while panemux also
 depends on `send.sh` for messaging and `install.sh` for managed Install / Update, so a different
 version may work or may misbehave.

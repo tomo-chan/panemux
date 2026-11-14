@@ -97,3 +97,19 @@ review there.
   Without the hook nothing changes.
 
 Host tools share [update coordination](host-tools.md#update-coordination).
+
+## Manually verifying a permission request
+
+1. Install the hook on the target host and trust it in that host's Codex `/hooks` review.
+2. Start Codex with `sandbox_mode = "workspace-write"` and `approval_policy = "on-request"`,
+   without a profile setting `approval_policy = "never"`. That policy suppresses approval prompts;
+   a permitted command also needs no request. Writes inside the checkout or `/tmp` do not verify
+   the hook under these defaults.
+3. Ask Codex to run `curl -sI https://example.com`: default workspace-write networking is disabled,
+   so it needs approval. If networking is enabled, ask it to run `touch ~/panemux-approval-test`
+   outside the writable roots instead, and remove that test file afterwards. Check the actual
+   host's grants and managed policy; an already permitted operation does not establish a request.
+4. Confirm the task becomes Waiting for input, then press `Input given`. The wait clears; another
+   request in the same turn waits again, and ending the turn clears it without that button.
+
+See [J51 and J53](../scenarios.md#j-the-task-dashboard) for the local and SSH manual walks.

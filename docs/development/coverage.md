@@ -10,7 +10,8 @@ description: "Coverage scope, thresholds, exclusions, and per-block verification
 
 ### Coverage
 
-- `make coverage-go` enforces at least 80% combined coverage across `internal/agent`, `internal/config`, `internal/api`, `internal/ws`, `internal/server`, `internal/board`, `internal/agmsg`, `internal/portforward`, `internal/commandcenter`, `internal/boardmcp`, `internal/fileops`, `internal/host`, `internal/hostexec`, `internal/hosttools`, `internal/codexhook`, `internal/homedir`, `internal/cachedir`, `internal/tasks`, `internal/taskevents`, `internal/requestsecurity`, `internal/preview`, `internal/testcap`, `scripts/docsokf`, and the root package. The `Makefile`'s `COVERAGE_PKGS` is the authority; this list follows it.
+- `make coverage-go` enforces at least 80% combined coverage across the packages in
+  `Makefile`'s authoritative `COVERAGE_PKGS`, including the root package.
 - `make coverage-frontend` enforces at least 80% coverage across `frontend/src/hooks/`, `frontend/src/schemas/`, and `frontend/src/utils/`.
 - **The threshold stays at 80%; what gets strengthened is the scope.** Raising it works, but the cheapest way to satisfy a higher number is to generate tautological tests, which lowers both protection against regressions and resistance to refactoring. See decision D1 in [Decision rationale](../decisions/quality-gateway/coverage-scope.md).
 - The gated package set is checked against `go list ./...` by `TestCoverageScopeCoversEveryPackage`, so a package added to the repository fails the suite until it is either gated or explicitly excluded with a reason. Do not widen the exclusion list to make that failure go away.

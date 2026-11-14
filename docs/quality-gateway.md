@@ -59,14 +59,10 @@ The order is intentional: cheaper checks should reject a defect before expensive
 
 ### Toolchain consistency
 
-Gate results use the exact Go and Node versions in `go.mod` and `.node-version` locally and
-in CI. The common runtime shell selects and verifies them before Makefile initialization and
-recipes; direct hooks, npm tasks, efficacy/mutation scripts, and browser fixture launchers
-use the same selector. Required SDK acquisition and startup failures stop the check. Node's
-verified cache install is locked and published atomically; damaged SDKs fail closed.
-`make test-go-toolchain` and `make test-node-toolchain`, included in `make check` and run
-explicitly in CI, protect selection, inheritance, and bootstrap failure behavior.
-See [the runtime contract](development/runtime.md).
+Gate results use the exact Go and Node versions in `go.mod` and `.node-version`.
+The [runtime contract](development/runtime.md) owns selection, verified acquisition, locking,
+and failure behavior. `make test-go-toolchain` and `make test-node-toolchain`, included in
+`make check` and run explicitly in CI, protect selection, inheritance, and bootstrap failures.
 
 ### The fixture agent's tagged build
 
@@ -99,7 +95,7 @@ The stand-ins' own behavior is tested by `make test-screenshots-check`.
 `make test-agmsg-automation` runs offline Python tests for release/SHA resolution,
 PR scope, fixture and pin updates, and proposal deduplication/retry. It runs in `make check`
 and CI. Actual scheduled App authentication and PR delivery need owner-provided secrets;
-these remain an operational check. See [maintenance](maintenance.md#the-agmsg-compatibility-contract-job).
+these remain an operational check. See [maintenance](maintenance/agmsg-contract.md#the-agmsg-compatibility-contract-job).
 
 ### Local verification execution
 
@@ -155,7 +151,7 @@ so CI (L4) is where they are verified. See D13 in
 |---|---|
 | Why the gates have this shape; decisions D1–D14 | [Design decisions](decisions/quality-gateway/index.md) |
 | First mutation findings and their classification | [Mutation findings](quality-gateway/mutants.md) |
-| Versioned benchmark and accessibility evidence | [Measurements](quality-gateway/measurements.md) |
+| Benchmark evidence and accessibility policy | [Measurements](quality-gateway/measurements.md), [Accessibility ceilings](quality-gateway/accessibility.md) |
 | Commands and exemptions for each mechanism | [Development deep dives](development/) |
 
 ## Sources

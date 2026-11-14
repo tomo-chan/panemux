@@ -56,7 +56,8 @@ See [Task collection and state](task-collection.md#wait-signature).
 See [Task collection and state](task-collection.md#codex-sessions).
 
 ### Codex permission requests
-See [Codex permission notifications](task-codex-permissions.md#codex-permission-requests).
+See [Codex permission notifications](task-codex-permissions.md#codex-permission-requests) and
+[manual verification](task-codex-permissions.md#manually-verifying-a-permission-request).
 
 ### Where a task runs
 See [Task navigation and terminals](task-navigation.md#where-a-task-runs).

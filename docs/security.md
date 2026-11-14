@@ -98,7 +98,7 @@ input is a bounded data-only JSON artifact: fixed capture filenames, JSON object
 provenance validated against independently resolved scope outputs. Reject code, paths, symlinks,
 extra files and oversized content. Trusted code applies constants and fixture data, then runs
 the package tests before minting the repository-scoped App token. See
-[maintenance](maintenance.md#github-app-setup-repository-owner) for permissions and setup.
+[maintenance](maintenance/agmsg-contract.md#github-app-setup-repository-owner) for permissions and setup.
 
 ## `gosec` Policy
 
