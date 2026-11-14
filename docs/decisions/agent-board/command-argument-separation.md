@@ -10,4 +10,4 @@ Adversarial testing against the real `claude` CLI found two independent argv def
 dash-prefixed prompt could be parsed as a flag, while ordinary prompts failed because of variadic
 flag placement. The runner now constructs a fixed option segment, uses the CLI's option terminator,
 and keeps the prompt in the operand position. Exact argv-shape tests are intentionally retained as
-a security contract. See [security/command-center.md](../../security/command-center.md).
+a security contract. See [security/command-center.md](../../security/command-center.md#arguments-and-cli-parsing).

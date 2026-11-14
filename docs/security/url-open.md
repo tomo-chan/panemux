@@ -10,9 +10,9 @@ description: "URL validation and execution boundaries for browser opening and lo
 
 ## Opening URLs From a Pane
 
-Two mechanisms sit behind [behavior.md](../behavior.md)'s "Opening URLs from a pane": loopback port
-forwarding (`internal/portforward`, `LoopbackDialer` in `internal/session/loopback.go`) and the
-browser-open shim (`internal/session/browseropen.go`). Read this section before changing either.
+Read this section before changing the two [URL-opening mechanisms](../behavior/url-open.md):
+loopback forwarding (`internal/portforward`, `LoopbackDialer` in `internal/session/loopback.go`)
+and the browser-open shim (`internal/session/browseropen.go`).
 
 ### Loopback port forwarding
 
@@ -39,19 +39,14 @@ The split preview's relays of an SSH host's localhost URLs are a different mecha
 bounds — a port chosen by the system rather than the URL's own, kept for the server's lifetime —
 described in [preview.md](preview.md#relays). Nothing above applies to them.
 
-What a forward does grant, stated plainly: while it is open, every process on the panemux host can
-reach that one port on the pane's host through `127.0.0.1:<port>`. That is the point of the feature
-(the browser is one such process), but it is a real widening of what a local process can reach, which
-is why the limits above are hard-coded rather than configurable.
+While a forward is open, every process on the panemux host can reach that port on the pane's
+host through `127.0.0.1:<port>`. This widens local access; the limits above are hard-coded,
+not configurable.
 
-`POST /api/sessions/{id}/open-url` is not behind `bearerAuthMiddleware`: it follows the same
-unauthenticated posture as every other `/api/*` route (see
-[auth.md](auth.md#auth-token-and-transport-encryption)). It is a stronger primitive than the routes
-around it — it opens listening sockets — so it is worth restating what bounds it in that posture: it
-only ever binds loopback, only ports the URL itself names, only for a pane that already exists, and
-only when that pane's shell runs on another host. Gating it would mean gating `/api/*` as a whole,
-which remains the separate, larger change recorded in
-[auth.md](auth.md#auth-token-and-transport-encryption).
+`POST /api/sessions/{id}/open-url` is outside bearer auth under the
+[core-route auth posture](auth.md#route-ownership-and-bearer-authentication). It binds only
+loopback ports named by the URL, for an existing pane whose shell runs on another host.
+Authenticating core `/api/*` routes remains the separate change described there.
 
 ### Browser-open interception
 
@@ -65,15 +60,14 @@ the shim is written — is `"$HOME/.cache/panemux/bin"`, resolved by the remote 
 than by panemux, so no panemux-side value is interpolated at all. Locally the shim is written with
 `os.WriteFile` under `os.UserCacheDir()`; no shell parses it.
 
-**panemux writes a shell script to a remote host here, which is new.** This is compatible with the
-rule in [agent-board.md](agent-board.md#agent-board-remote-writes) that the `panemux` binary is
-never installed on a remote host: that rule exists because `panemux` is itself a server, and a stray
-copy could start its own HTTP/WS listener and command center on an SSH-reached machine. The shim has
-no such capability — it is a few lines of POSIX shell that write an escape sequence to the terminal
-it was invoked from, with no network access, no persistence beyond the file itself, and no
-privileges beyond the pane user's own. It is installed under the pane user's cache directory with
-mode 0700, every install step is best-effort (a read-only home leaves the pane working without
-interception), and `url_open.browser_shim: false` turns the whole mechanism off.
+panemux writes a shell script to a remote host here. This session-layer installation is
+compatible with the [remote-write rule](agent-board.md#agent-board-remote-writes), which
+constrains `internal/agmsg`: that adapter must never install panemux or panemux helper scripts
+on a remote host. Unlike the panemux server, which could start HTTP/WS listeners and a command
+center, this POSIX shim only writes an escape sequence to its invoking terminal. It has no network access,
+persistence beyond its file or privileges beyond the pane user's. Install it in that user's
+cache directory with mode `0700`; every step is best-effort, so a read-only home leaves the
+pane working without interception. `url_open.browser_shim: false` disables the mechanism.
 
 **Terminal output is untrusted, and the OSC path treats it that way.** The shim's OSC sequence is
 just bytes on the pane's terminal stream: any process that can write to that terminal can emit it,
