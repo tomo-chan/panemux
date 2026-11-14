@@ -69,6 +69,12 @@ detected agents or reporting configured panes; pane-free identity presentation i
 
 ### External dependency
 
+NUL-containing bodies are unsupported by panemux's shell-variable wrapper and are rejected
+before host discovery or message execution. They are never reported as successfully sent
+with altered bytes. Broadcast returns a send error without marking the target delivered;
+relay failures are logged, retain the source original in history, and follow the existing
+best-effort cursor advancement rule. This restriction is panemux's, not upstream's.
+
 Pinned agmsg v1.7.1 (`f5898f49eb3d3c079c446dab4bca715b832da313`) normalizes trailing
 body newlines. This was observed through its real `send.sh` / public `api.sh` path and is
 reproduced by `TestAgmsgContract_TrailingNewlinesAreNormalized`; panemux's fixed shell

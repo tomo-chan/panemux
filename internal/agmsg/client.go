@@ -136,6 +136,9 @@ func (c *Client) since(ctx context.Context, team, after string, limit int) ([]bo
 	return rows, nil
 }
 func (c *Client) send(ctx context.Context, team, from, to, body string) error {
+	if err := validateMessageBody(body); err != nil {
+		return err
+	}
 	runner := c.sendRunner
 	if runner == nil {
 		runner = c.runner

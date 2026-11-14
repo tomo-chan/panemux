@@ -30,7 +30,8 @@ remains available to the other board. Terminal pane connections are separate.
 - `team` keeps the strict identifier allowlist; `from`/`to` additionally accept structurally
   checked `name@local` and `name@ssh:key` addresses. Names and keys use `[A-Za-z0-9_.-]+`;
   qualified `_system` and malformed addresses are rejected.
-- Arbitrary message bodies are base64-encoded, checked against the encoded alphabet, passed as a
+- NUL-containing bodies are rejected before host discovery or send execution. Supported
+  message bodies are base64-encoded, checked against the encoded alphabet, passed as a
   positional argument, and decoded by a fixed remote wrapper into the public `send.sh --body -`
   standard-input interface. Option-like bodies remain data.
 - agmsg's own validation occurs after the remote shell has parsed the command and cannot replace

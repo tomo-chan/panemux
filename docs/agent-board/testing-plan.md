@@ -32,6 +32,11 @@ Tests must protect these contracts rather than mirror implementation structure.
 - Broadcast validates all recipients before delivery and reports any partial delivery after a
   downstream failure.
 
+- The E2E/screenshot message fixture preserves stdin bodies for production sends and positional
+  bodies for seed rows. Production Client/Relay tests check `_system` body hashes through that fixture.
+- NUL-containing bodies fail before any host execution in direct, lazy and leased clients.
+  Broadcast reports no delivery; relay records the rejection and retains the source original.
+
 ### Execution and security
 
 - Every remote argument is shell-safe on both reads and writes.

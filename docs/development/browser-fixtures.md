@@ -22,6 +22,14 @@ defines stand-in process filtering and protection of real developer sessions.
 `frontend/e2e/stand-ins.sh` puts the CLI stand-ins first on PATH immediately before panemux
 starts and refuses the run if any resolves elsewhere.
 
+## Agent Board message fixture
+
+The shared E2E/screenshot agmsg fixture mirrors both public body interfaces used by the
+harness: a positional argument for initial rows and `--body -` with stdin for production
+Client sends. `TestE2EAgmsgFixtureBroadcastReachesRelayCache` runs the exact fixture through
+Client and Relay to protect ledger body matching before browser polling is involved.
+`TestE2EAgmsgFixturePositionalSeedingStillWorks` protects existing seed calls.
+
 ## Isolation checks
 
 `make test-screenshots-check` checks screenshot staging, both fixtures' tmux isolation, CLI

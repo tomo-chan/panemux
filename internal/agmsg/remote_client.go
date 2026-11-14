@@ -9,6 +9,7 @@ import (
 	"panemux/internal/host"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // execArguments forwards arguments through fixed script text; values never become script text.
@@ -67,6 +68,15 @@ func validateAgmsgIdentifier(label, value string) error {
 
 var _ board.MessageClient = (*RemoteAgmsgClient)(nil)
 
+// Shell variables cannot represent NUL bytes. Reject before executing a script
+// rather than silently sending altered text or breaking own-send ledger hashes.
+func validateMessageBody(body string) error {
+	if strings.IndexByte(body, 0) >= 0 {
+		return errors.New("agmsg: message body contains unsupported NUL byte")
+	}
+	return nil
+}
+
 // RemoteAgmsgClient runs agmsg's scripts on a remote host over the SSH exec
 // channel the shared host.Runner already exposes.
 type RemoteAgmsgClient struct {
@@ -86,10 +96,13 @@ func (c *RemoteAgmsgClient) HostID() string { return c.hostID }
 func (c *RemoteAgmsgClient) apiScript() string  { return c.agmsgPath + "/scripts/api.sh" }
 func (c *RemoteAgmsgClient) sendScript() string { return c.agmsgPath + "/scripts/send.sh" }
 
-// Send always passes --force (via sendBase64WrapperScript's fixed "exec ...
-// --force" tail) — see docs/agent-board.md's Integration with agmsg
+// Send always passes --force (via sendBase64WrapperScript's fixed
+// --force tail) — see docs/agent-board.md's Integration with agmsg
 // section for why every board-originated send does.
 func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body string) error {
+	if err := validateMessageBody(body); err != nil {
+		return err
+	}
 	if err := validateIdentifiers(team, from, to); err != nil {
 		return err
 	}

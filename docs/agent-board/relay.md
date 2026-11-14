@@ -91,7 +91,9 @@ empty-cache period after restart but cannot recover rows outside the backfill wi
 
 Cross-host forwarding is best-effort, not at-least-once. A missing destination client or failed
 send is logged, but the source row remains in dashboard history and its cursor advances, so that
-failure is not retried. Conversely, a crash after a successful forward but before cursor
+failure is not retried. Unsupported NUL-containing bodies are rejected before send execution;
+the rejection is logged, and Broadcast reports an error without a delivered target.
+See the [body contract](agmsg-contract.md). Conversely, a crash after a successful forward but before cursor
 persistence can duplicate a message. If more rows arrive between polls than the read limit, older
 overflow rows can be missed. These are accepted consequences of the current cursor and forwarding
 contracts, not exactly-once delivery.

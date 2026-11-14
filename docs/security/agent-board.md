@@ -24,7 +24,9 @@ Remote commands must satisfy all of these rules:
 - keep `team` on `[A-Za-z0-9_.-]+`; validate `from` and `to` structurally as a name
   on that alphabet, optionally followed by `@local` or `@ssh:<key>` with the same
   key alphabet; reject qualified `_system`, extra separators and shell syntax;
-- base64-encode arbitrary message bodies, validate the encoded alphabet, and decode through a fixed
+- reject NUL-containing message bodies before host discovery or send execution, rather than
+  silently changing bytes that participate in own-send ledger hashes;
+- base64-encode supported message bodies, validate the encoded alphabet, and decode through a fixed
   wrapper using positional parameters, then pass the decoded body as standard-input data
   to the public `send.sh --body -` interface, never as an option-bearing argument;
 - never interpolate caller-controlled data into wrapper or probe script text;
