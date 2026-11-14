@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1](https://github.com/tomo-chan/panemux/compare/v0.30.0...v0.30.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* bump pinned agmsg to v1.7.2 ([#535](https://github.com/tomo-chan/panemux/issues/535)) ([cb68e59](https://github.com/tomo-chan/panemux/commit/cb68e59afae332a9196021ca8bc68a812d08d619))
+
 ## [0.30.0](https://github.com/tomo-chan/panemux/compare/v0.29.0...v0.30.0) (2026-11-08)
 
 
