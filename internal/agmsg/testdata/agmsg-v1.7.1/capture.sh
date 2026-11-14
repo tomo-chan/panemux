@@ -27,6 +27,7 @@ trap 'rm -r -- "$work"' EXIT
 unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME
 unset CLAUDE_CONFIG_DIR CODEX_HOME AGMSG_STORAGE_PATH
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+export AGMSG_SELF_NAME=off
 export HOME="$work/home"
 mkdir -p "$HOME" "$work/sample-project"
 
@@ -50,6 +51,13 @@ mkdir -p "$project"
 "$s/api.sh" get teams                      > "$out/get_teams.jsonl"
 "$s/api.sh" get teams panemux members      > "$out/get_team_members.jsonl"
 "$s/api.sh" get teams panemux messages --limit 100 > "$out/get_team_messages.jsonl"
+
+# Pane-free, roster-free addresses preserve @, :, . and arbitrary body text.
+# Keep this separate from the historical four-row cursor capture.
+body=$'\'quoted\' $(id) `whoami`\n世界'
+"$s/send.sh" relay-contract orch.1@local worker.2@ssh:build.1 "$body" --force >/dev/null
+"$s/send.sh" relay-contract worker.2@ssh:build.1 orch.1@local "$body" --force >/dev/null
+"$s/api.sh" get teams relay-contract messages --limit 100 > "$out/get_qualified_messages.jsonl"
 
 "$s/version.sh" > "$out/VERSION.txt" 2>/dev/null || cat "$HOME/.agents/skills/agmsg/VERSION" > "$out/VERSION.txt"
 

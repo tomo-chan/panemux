@@ -168,6 +168,10 @@ See the [decision index](decisions/index.md) for topic listings.
 
 [Moved to agent-board](decisions/agent-board/index.md).
 
+### Pane-independent relay by source host (2026-11-07, #495 / #505)
+
+[Moved to pane-independent relay](decisions/agent-board/pane-independent-relay.md).
+
 ### Live pane eligibility after configuration edits (2026-10-29, #435 / PR #447 review)
 
 [Moved to live-pane-eligibility](decisions/agent-board/live-pane-eligibility.md).
@@ -376,3 +380,7 @@ See the [decision index](decisions/index.md) for topic listings.
 ### 2026-11-07: retire Agent Board PTY onboarding (#503, #495 S1)
 
 [Moved to retire-pty-onboarding](decisions/agent-board/retire-pty-onboarding.md).
+
+## 2026-11-15: Qualify all forwarded Agent Board senders (#505, PR #540)
+
+[Moved to qualified-forwarded-senders](decisions/agent-board/qualified-forwarded-senders.md).

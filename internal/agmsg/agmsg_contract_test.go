@@ -445,6 +445,25 @@ func TestAgmsgContract_SendThenSinceRoundTrip(t *testing.T) {
 		"the at timestamp must parse as RFC3339 — parseAgmsgMessageRows silently zeroes it otherwise")
 }
 
+func TestAgmsgContract_QualifiedIdentifiersRoundTrip(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+	const body = "'quoted' $(id) `whoami`\n世界"
+	for _, pair := range [][2]string{{"orch.1@local", "worker.2@ssh:build.1"}, {"worker.2@ssh:build.1", "orch.1@local"}} {
+		require.NoError(t, client.Send(ctx, "contract", pair[0], pair[1], body))
+	}
+	rows, err := client.Since(ctx, "contract", "", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	assert.Equal(t, "orch.1@local", rows[0].From)
+	assert.Equal(t, "worker.2@ssh:build.1", rows[0].To)
+	assert.Equal(t, "worker.2@ssh:build.1", rows[1].From)
+	assert.Equal(t, "orch.1@local", rows[1].To)
+	for _, row := range rows {
+		assert.Equal(t, body, row.Body)
+	}
+}
+
 // TestAgmsgContract_MessageIDsAreOpaque is the drift check for the
 // assumption that broke the relay: panemux used to compare agmsg's ids
 // numerically, which no id emitted by the event-log storage driver
@@ -628,4 +647,32 @@ func TestAgmsgContract_InstalledVersionDoesNotFalselyWarn(t *testing.T) {
 	assert.Empty(t, agmsg.VersionMismatchWarning("host-a", installed),
 		"an install of the pinned version must not be warned about, "+
 			"whatever provenance form install.sh wrote into VERSION (found %q)", installed)
+}
+
+//efficacy:exempt documents the pinned upstream transport's existing trailing-newline normalization
+func TestAgmsgContract_TrailingNewlinesAreNormalized(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+	require.NoError(t, client.Send(ctx, "contract", "pane-a", "pane-b", "first\n世界\n\n"))
+	rows, err := client.Since(ctx, "contract", "", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "first\n世界", rows[0].Body)
+}
+
+func TestAgmsgContract_OptionLikeBodiesRoundTrip(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+	bodies := []string{"--force", "--body", "--body-file", "--", "--help", "--force\n'quoted' $(id) 世界"}
+	for _, body := range bodies {
+		require.NoError(t, client.Send(ctx, "contract", "orch@local", "impl@ssh:build", body))
+	}
+	rows, err := client.Since(ctx, "contract", "", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, len(bodies))
+	for i, row := range rows {
+		assert.Equal(t, bodies[i], row.Body)
+		assert.Equal(t, "orch@local", row.From)
+		assert.Equal(t, "impl@ssh:build", row.To)
+	}
 }

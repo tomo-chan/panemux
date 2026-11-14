@@ -115,12 +115,15 @@ history entries.
 
 ### Relay invariants
 
-- A row is accepted only when its sender is a configured pane on the source host, or a
-  ledger-matched panemux send attributed to `_system`.
-- Status rows update the cache and are not forwarded to another host.
-- Same-host messages remain within that host's agmsg installation.
-- Cross-host messages are routed by configured pane ID; unknown senders or recipients are dropped
-  and logged.
+- Valid unqualified names originate at the host read through public `api.sh`, without a pane,
+  roster or task prerequisite. Qualified senders and pane IDs owned by another host are rejected.
+- `_system` senders require the unchanged own-send ledger.
+- Status is stored per host-qualified name in one configured team; the current pane API projects
+  matching pane/host reports without exposing a new identities list.
+- Bare ordinary destinations stay local. Qualified destinations select a configured BoardID and
+  are forwarded with a qualified sender, including when they name the source host.
+- Bare configured pane destinations preserve routing compatibility. Every forwarded sender is
+  qualified, including pane senders, so delayed copies are rejected after pane routing changes.
 - Dashboard sequence numbers are panemux-local and must never be confused with agmsg row IDs.
 
 The own-send ledger is a short-lived multiset. It records each panemux-originated send separately,

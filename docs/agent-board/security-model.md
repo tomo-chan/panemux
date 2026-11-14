@@ -27,9 +27,12 @@ own exec channel; cancelling one operation closes only that channel, and a healt
 remains available to the other board. Terminal pane connections are separate.
 
 - No caller-controlled argument may reach a remote shell unescaped, including read arguments.
-- `team`, `from`, and `to` use a strict identifier allowlist.
+- `team` keeps the strict identifier allowlist; `from`/`to` additionally accept structurally
+  checked `name@local` and `name@ssh:key` addresses. Names and keys use `[A-Za-z0-9_.-]+`;
+  qualified `_system` and malformed addresses are rejected.
 - Arbitrary message bodies are base64-encoded, checked against the encoded alphabet, passed as a
-  positional argument, and decoded by a fixed remote wrapper before `send.sh`.
+  positional argument, and decoded by a fixed remote wrapper into the public `send.sh --body -`
+  standard-input interface. Option-like bodies remain data.
 - agmsg's own validation occurs after the remote shell has parsed the command and cannot replace
   panemux's quoting and validation.
 - `send.sh` owns SQL escaping; panemux must not build SQL or add a competing SQL-escape layer.
@@ -54,18 +57,24 @@ host are therefore trusted; Agent Board does not provide end-to-end encryption.
 
 agmsg's `--force` permits arbitrary sender names. The relay accepts:
 
-- a pane sender only on the host that owns that configured pane: the local host for local
-  panes, or the exact `ssh_connections` key named by an SSH pane; a `~/.ssh/config`-only pane has
-  no board host and its rows are rejected as unknown senders;
+- any valid unqualified name read through public `api.sh` from its source host, without
+  requiring a roster, pane or task mapping;
 - `_system` only when the row matches a recent panemux-originated send in the own-send ledger.
 
-Ledger entries are recorded before sending to cover a fast poll, removed if the send fails, expire
-quickly, and are consumed once. This prevents a failed send from leaving a temporary impersonation
-credential and preserves identical repeated sends.
+Every qualified `from` is excluded from history, state and forwarding, as is an unqualified
+configured pane ID belonging to another host. Forwarding qualifies the sender with the read
+host's BoardID on every forwarded copy, including pane-to-pane traffic addressed by a bare
+pane ID. Rejecting qualified senders prevents duplicate history, false source-host attribution
+and re-forwarding even when panes are removed or moved before a delayed copy is read.
+Recipients reply to the received qualified sender. `local` and `ssh:local` identify different hosts.
 
-This check does not cryptographically authenticate local pane processes. Any same-user process with
-access to a host's agmsg installation can still impersonate another valid pane on that host; this is
-accepted under panemux's existing same-user trust model.
+Ledger entries are recorded before sending, removed if sending fails, expire quickly and are
+consumed once. The key uses the unqualified destination-visible recipient, with host/team/body
+hash as before. No forwarding ledger is added.
+
+This check does not cryptographically authenticate same-user processes. Any same-user process
+with access to a host's agmsg installation can impersonate another name on that host. Status is
+self-reported and host-scoped; a message is not permission to perform work or grant approval.
 
 ### Command center authority
 
@@ -81,8 +90,9 @@ rules continue to apply.
 Top-level enablement authorizes detection, display, and relay polling. Board never writes to a PTY
 or asks agents to join, claim an identity, or install project-local delivery hooks. Delivery mode is
 ignored. Existing agmsg registrations and hook files remain untouched after disablement.
-Sender validation accepts every configured pane on its owning host, including shells without a
-detected agent. The same-host, same-user trust boundary is unchanged. Visibility in the dashboard
+Sender validation accepts host-local unqualified names independently of pane detection or
+roster membership. Consent covers the local host and all configured SSH keys in one team.
+The same-host, same-user trust boundary is unchanged. Visibility in the dashboard
 grants no authority.
 
 Manual Install / Update requires trust in panemux's pinned agmsg code on the target host.

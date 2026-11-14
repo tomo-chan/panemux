@@ -12,36 +12,76 @@ description: "Cross-host message relay, deduplication, and delivery lifecycle."
 
 agmsg is host-local. Panemux reaches the local host and every `ssh_connections` key through
 the execution port shared with the task board. Polling needs no pane or live pane session.
-Local panes belong to the panemux host; SSH panes belong to the key matching their `connection`
-exactly. Names found only in `~/.ssh/config` have no board host, and their rows are unknown senders.
+The participant identity is `(host, team, name)`. Only `agent_board.team` is polled.
+Hosts use `BoardID()`: `local` or `ssh:<ssh_connections key>`. `ssh:local` is distinct
+from `local`; an OpenSSH alias alone does not add a Board host.
 
-During one poll, the relay processes each host/team pair in order:
+### Addresses and forwarding
 
-1. reads a bounded newest-message window;
-2. finds rows after its opaque persisted cursor in agmsg's returned order;
-3. validates the sender;
-4. for a row addressed to `_system`, records it in bounded history and updates status only when its
-   body is a valid status report;
-5. for other rows, resolves the recipient, drops an unknown recipient before recording, then records
-   the row and forwards it when the recipient is on another host;
-6. advances that host's cursor regardless of a forwarding failure.
+Names and SSH connection keys use `[A-Za-z0-9_.-]+`. A qualified address is exactly
+`<name>@local` or `<name>@ssh:<key>`. Empty parts, extra `@` or `:`, shell syntax,
+unknown Board hosts and qualified `_system` addresses are rejected before history or forwarding.
+Team validation retains its existing identifier allowlist.
 
-After all hosts have been processed, a poll that advanced at least one cursor atomically persists
-one snapshot containing every host cursor. A poll with no cursor change does not write the file.
-
-Same-host delivery remains entirely within agmsg. Unknown senders and recipients are dropped and
-logged.
+- An unqualified ordinary recipient stays on the source host. agmsg delivers it;
+  panemux records the original with source host/team and does not search other hosts.
+- A qualified recipient is sent to its configured host with `to=<name>` and
+  `from=<original name>@<source BoardID>`, even when it names the source host itself.
+  Neither a roster entry nor a pane is required on either host.
+- Compatibility: an unqualified recipient matching a configured pane on another host
+  is forwarded there. Every forwarded copy uses `from=<original name>@<source BoardID>`,
+  including configured pane senders. The receiver replies to that qualified sender.
+  Copy rejection therefore survives pane removal, host movement and delayed reads without
+  retaining retired pane ownership or adding a forwarding ledger.
+- Unqualified `_system` is the source host's panemux recipient. Ordinary and malformed
+  status bodies remain history; only valid `kind: "board_status"` bodies update status.
+  Reports are keyed by `name@BoardID` inside the cache, so equal names on different hosts
+  coexist. Existing pane status/participation API responses project only reports matching
+  that configured pane's host; pane-free identity listing is a separate API/UI change.
 
 ### Sender validation
 
-A normal row is accepted only if `from` names a configured pane on the source host. A row with
-`from == "_system"` is accepted only when it consumes a matching entry from panemux's short-lived
-own-send ledger. This prevents any process able to call `send.sh --force` from impersonating the
-command center merely by choosing the reserved name.
+The public `api.sh` read from host H establishes the source host. A valid unqualified
+name is accepted as originating at H without roster lookup or prior registration in panemux.
+The relay rejects every `from` containing `@`, including forwarded copies, and unqualified
+configured pane IDs belonging to another host. Rejected rows affect neither history, status,
+nor forwarding. A row for another team is rejected too.
 
-The ledger key includes destination host, team, recipient, and body hash. It is a multiset so two
-identical broadcasts remain two independently matchable sends. Failed sends remove their pending
-ledger entry.
+`from == "_system"` requires consuming one matching entry from the existing own-send
+ledger. The key remains `(destination host, team, unqualified recipient, body hash)`.
+It is a short-lived multiset: identical sends consume independently, failures cancel
+one entry, and unmatched/expired copies are rejected. Matched own sends are recorded
+without forwarding them again. No forwarding ledger or model transition change is needed.
+
+Core Broadcast accepts qualified IDs and legacy pane IDs, validates every recipient before
+sending any, and returns the original requested IDs delivered before its first send failure.
+It records the destination-visible, unqualified recipient in the ledger for `_system` sends.
+
+### Plugin send and reply contract
+
+For cross-host traffic use agmsg's public command, with your own unqualified name as sender:
+
+```sh
+bash ~/.agents/skills/agmsg/scripts/send.sh panemux worker orch@local 'ready for review' --force
+```
+
+Use the received `from` verbatim as the reply recipient, for example `worker@ssh:build`.
+`--force` is required because remote identities are absent from the local roster.
+Configured pane IDs remain valid initial destinations; replies use the received qualified `from`.
+Send a status JSON body to unqualified `_system` to report to panemux on the source host.
+Panemux neither registers proxy roster entries nor distributes a send wrapper.
+
+Source-host attribution is not same-user authentication: another process on H running as
+the same user can impersonate a name in H's agmsg installation. Reports are self-reports;
+receiving a message does not authorize work or override an agent's approval rules.
+
+During each poll, the relay reads a bounded newest window, selects rows after its opaque
+cursor, validates and records originals, forwards eligible messages, then advances the
+source cursor even after a forwarding failure. A managed tool-update pause leaves the
+source batch retryable before cache/ledger/cursor changes. Lease admission first checks
+team, sender and recipient eligibility without consuming the own-send ledger; rejected
+rows never reserve a destination or prevent valid rows on their source host from advancing. A pass with cursor changes
+atomically persists one snapshot; a pass without changes performs no cursor-file write.
 
 ### Startup and recovery
 
@@ -63,8 +103,7 @@ SSH connection establishment starts in the background: polling and bootstrap ret
 without waiting for the dial. Later polls retry, so a pane-less unreachable host cannot consume a
 relay pass's timeout before healthy hosts are polled. Repeated identical poll errors are logged only
 when the failure state changes; a successful pass resets that suppression. All configured keys
-remain available to board execution, including hosts without a board pane. Rows still require a
-known pane sender on the source host.
+remain available to board execution, including hosts without a board pane. Sender validation uses the source-host rules above, independently of panes.
 
 Operator sends wait for a missing SSH connection within the send context, including before the
 first poll and after reconnect or transport loss. Polling and bootstrap continue to use the

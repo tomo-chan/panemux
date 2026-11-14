@@ -94,39 +94,36 @@ func TestRelay_Poll_FromKnownLocalPane_ToKnownPaneSameHost_Appended(t *testing.T
 }
 
 func TestRelay_Poll_ToKnownPaneDifferentHost_RelaysAndAppendsOnce(t *testing.T) {
-	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "local", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review"},
 	}}
-	hostB := &fakeMessageClient{hostID: "host-b"}
+	hostB := &fakeMessageClient{hostID: "ssh:build"}
 	cache := NewBoardCache()
-	paneHosts := map[string]string{"claude-a": "host-a", "codex-b": "host-b"}
-	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA, "host-b": hostB}, paneHosts)
+	paneHosts := map[string]string{"claude-a": "local", "codex-b": "ssh:build"}
+	r := newTestRelay(cache, map[string]MessageClient{"local": hostA, "ssh:build": hostB}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 
 	rows := cache.MessagesSince(0)
-	require.Len(t, rows, 1, "the row must be appended exactly once, from host-a's own poll")
+	require.Len(t, rows, 1, "the row must be appended exactly once, from local's own poll")
 	assert.Equal(t, "please review", rows[0].Row.Body)
 
 	require.Len(t, hostB.sendCalls, 1)
-	want := sentMessage{Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review"}
+	want := sentMessage{Team: "panemux", From: "claude-a@local", To: "codex-b", Body: "please review"}
 	assert.Equal(t, want, hostB.sendCalls[0])
 }
 
 // TestRelay_Poll_RelayedRowNotDoubleCounted is the regression test for the
-// central correctness property of cross-host relay: a message relayed to
-// host B keeps its original From (not SystemID). When host B is next
-// polled and that row is read back, from-validation against host B's own
-// known panes must reject it — the original pane isn't local to host B —
-// so it is not re-appended to history a second time.
+// central correctness property of cross-host relay: a copy has a qualified
+// sender and is excluded on readback independently of pane ownership.
 func TestRelay_Poll_RelayedRowNotDoubleCounted(t *testing.T) {
-	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "local", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review"},
 	}}
-	hostB := &fakeMessageClient{hostID: "host-b"}
+	hostB := &fakeMessageClient{hostID: "ssh:build"}
 	cache := NewBoardCache()
-	paneHosts := map[string]string{"claude-a": "host-a", "codex-b": "host-b"}
-	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA, "host-b": hostB}, paneHosts)
+	paneHosts := map[string]string{"claude-a": "local", "codex-b": "ssh:build"}
+	r := newTestRelay(cache, map[string]MessageClient{"local": hostA, "ssh:build": hostB}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 	require.Len(t, hostB.sendCalls, 1)
@@ -134,7 +131,7 @@ func TestRelay_Poll_RelayedRowNotDoubleCounted(t *testing.T) {
 	// Simulate message transport on host B actually having stored the relayed row, now
 	// visible to a later poll of host B with a host-B-scoped message transport id.
 	hostB.sinceRows = append(hostB.sinceRows, Row{
-		ID: "1", Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review",
+		ID: "1", Team: "panemux", From: hostB.sendCalls[0].From, To: "codex-b", Body: "please review",
 	})
 
 	require.NoError(t, r.Poll(context.Background()))
@@ -197,7 +194,7 @@ func TestRelay_Poll_FromSystemIDWithExpiredLedgerEntry_DroppedAsForgery(t *testi
 	assert.Empty(t, cache.MessagesSince(0), "an expired ledger entry must no longer match")
 }
 
-func TestRelay_Poll_FromUnknownPane_DroppedAndNotCached(t *testing.T) {
+func TestRelay_Poll_FromUnknownName_Appended(t *testing.T) {
 	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "stranger", To: "pane-a", Body: "hi"},
 	}}
@@ -207,7 +204,7 @@ func TestRelay_Poll_FromUnknownPane_DroppedAndNotCached(t *testing.T) {
 
 	require.NoError(t, r.Poll(context.Background()))
 
-	assert.Empty(t, cache.MessagesSince(0))
+	assert.Len(t, cache.MessagesSince(0), 1)
 }
 
 func TestRelay_Poll_ToSystemID_StatusBody_RecordsStatusAndAppendsHistory(t *testing.T) {
@@ -221,8 +218,8 @@ func TestRelay_Poll_ToSystemID_StatusBody_RecordsStatusAndAppendsHistory(t *test
 	require.NoError(t, r.Poll(context.Background()))
 
 	snap := cache.StatusSnapshot()
-	require.Contains(t, snap, "pane-a")
-	assert.Equal(t, "working", snap["pane-a"].State)
+	require.Contains(t, snap, "pane-a@host-a")
+	assert.Equal(t, "working", snap["pane-a@host-a"].State)
 
 	rows := cache.MessagesSince(0)
 	require.Len(t, rows, 1, "status rows are still appended to history, per the design doc")
@@ -245,7 +242,7 @@ func TestRelay_Poll_ToSystemID_NonStatusBody_AppendedAsOrdinaryMessage(t *testin
 	assert.Equal(t, "just chatting", rows[0].Row.Body)
 }
 
-func TestRelay_Poll_ToUnknownPane_DroppedAndNotCached(t *testing.T) {
+func TestRelay_Poll_ToUnknownName_Appended(t *testing.T) {
 	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "pane-a", To: "no-such-pane", Body: "hi"},
 	}}
@@ -255,7 +252,7 @@ func TestRelay_Poll_ToUnknownPane_DroppedAndNotCached(t *testing.T) {
 
 	require.NoError(t, r.Poll(context.Background()))
 
-	assert.Empty(t, cache.MessagesSince(0))
+	assert.Len(t, cache.MessagesSince(0), 1)
 }
 
 func TestRelay_Poll_ClientSinceError_LoggedAndDoesNotStopOtherHosts(t *testing.T) {
@@ -756,18 +753,18 @@ func TestRelayUsesLiveRoutingForSenderAndDestination(t *testing.T) {
 	})
 	row := Row{Host: "host-a", Team: "team", From: "added", To: SystemID, Body: "hello"}
 	relay.processRow(context.Background(), "host-a", row)
-	require.Empty(t, cache.MessagesSince(0))
+	require.Len(t, cache.MessagesSince(0), 1)
 	panes = map[string]string{"added": "host-a"}
 	relay.processRow(context.Background(), "host-a", row)
-	require.Len(t, cache.MessagesSince(0), 1)
+	require.Len(t, cache.MessagesSince(0), 2)
 	_, err := relay.Broadcast(context.Background(), SystemID, []string{"added"}, "hi")
 	require.NoError(t, err)
 	panes = map[string]string{"added": "host-b"}
 	relay.processRow(context.Background(), "host-a", row)
-	require.Len(t, cache.MessagesSince(0), 1, "moving a pane revokes its old host")
+	require.Len(t, cache.MessagesSince(0), 2, "moving a pane revokes its old host")
 	panes = map[string]string{}
 	relay.processRow(context.Background(), "host-a", row)
-	require.Len(t, cache.MessagesSince(0), 1)
+	require.Len(t, cache.MessagesSince(0), 3, "unregistered names are valid again after pane removal")
 	_, err = relay.Broadcast(context.Background(), SystemID, []string{"added"}, "hi")
 	require.Error(t, err)
 }

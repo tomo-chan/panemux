@@ -13,9 +13,10 @@ description: "Participation, identity selection, and messaging through the offic
 Participation, identity selection, and reception belong to [agmsg's official workflow](https://github.com/fujibee/agmsg):
 its SessionStart/SessionEnd hooks, delivery settings, `/agmsg join` / `actas`, and `spawn.sh`.
 Follow agmsg's documentation for setup and lifecycle details; panemux does not duplicate those
-procedures or provide its own automatic participation hook. For Agent Board relay, status
-attribution, and broadcast addressing, join the configured `agent_board.team` with an agmsg name
-exactly equal to the configured pane ID on that host. Panemux does not set up this membership.
+procedures or provide its own automatic participation hook. Relay accepts valid names read
+from the configured `agent_board.team` on each host, independently of panes or roster lookup.
+Use `name@BoardID` for cross-host traffic and reply to the received sender with `--force`;
+see the [plugin contract](relay.md#plugin-send-and-reply-contract). Panemux does not set up membership.
 
 `internal/agmsg` implements the board-owned message and participation ports. It owns all script
 contracts, path resolution, parsing, versions, and availability checks. Panemux uses agmsg's public scripts and never reads its database or team files. The required
@@ -53,8 +54,10 @@ for conversations unrelated to Agent Board.
 Because `--force` also makes `from` forgeable, the relay must validate senders. A `_system` row is
 trusted only when it matches panemux's own-send ledger; the string alone grants no authority.
 
-Use agmsg's official participation workflow to establish that pane-ID identity; panemux does not
-invoke `join.sh` or choose the agent name. Messages from other names are rejected by the relay.
+Use agmsg's official participation workflow to choose names and configure reception; panemux
+does not invoke `join.sh`, choose names or install a sender wrapper. Qualified senders are
+forwarded copies or forgeries and never re-enter history, status or relay. Unknown unqualified
+names are accepted on the host read through `api.sh`.
 
 ### Discovery and paths
 

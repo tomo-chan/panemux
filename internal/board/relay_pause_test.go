@@ -46,3 +46,31 @@ func TestBroadcastWhilePausedDoesNotSend(t *testing.T) {
 	require.ErrorContains(t, err, "updating")
 	require.Empty(t, c.sendCalls)
 }
+
+// Invalid rows must not reserve their apparent destination or block valid siblings.
+func TestRelayRejectedRowsDoNotLeasePausedDestination(t *testing.T) {
+	for _, row := range []Row{
+		{Team: "panemux", From: "worker@ssh:build", To: "worker@ssh:build"},
+		{Team: "panemux", From: "$(id)", To: "worker@ssh:build"},
+		{Team: "panemux", From: "pane-b", To: "worker@ssh:build"},
+		{Team: "other", From: "worker", To: "worker@ssh:build"},
+		{Team: "panemux", From: "worker", To: "_system@ssh:build"},
+	} {
+		t.Run(row.Team+"/"+row.From+"/"+row.To, func(t *testing.T) {
+			row.ID = "1"
+			source := &fakeMessageClient{hostID: "local", sinceRows: []Row{row,
+				{ID: "2", Team: "panemux", From: "orch", To: SystemID, Body: `{"kind":"board_status","state":"working"}`},
+			}}
+			dest := &pausingClient{fakeMessageClient: &fakeMessageClient{hostID: "ssh:build"}, paused: true}
+			cache := NewBoardCache()
+			r := newTestRelay(cache, map[string]MessageClient{"local": source, "ssh:build": dest},
+				map[string]string{"pane-b": "ssh:build"})
+			// Polling the paused host itself still fails; local processing must succeed.
+			require.ErrorContains(t, r.Poll(context.Background()), "updating")
+			require.Equal(t, "2", r.cursors["local"])
+			require.Len(t, cache.MessagesSince(0), 1)
+			require.Equal(t, "working", cache.StatusSnapshot()["orch@local"].State)
+			require.Empty(t, dest.sendCalls)
+		})
+	}
+}

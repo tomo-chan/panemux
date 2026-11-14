@@ -25,8 +25,8 @@ export AGMSG_SELF_NAME=off
 
 const agmsgExecArguments = agmsgEnvironment + execArguments
 
-// validAgmsgIdentifier constrains team/from/to values (pane IDs, the
-// configured team name, or SystemID) to a safe, constrained alphabet before
+// validAgmsgIdentifier constrains team values to the existing safe alphabet.
+// From/to use board.ParseIdentity's structured name and BoardID validation before
 // they are ever placed in a Runner.Run argument list — the same
 // regex-allowlist-then-quote shape internal/session/ssh.go's
 // validRemotePath already applies to cwd.
@@ -46,12 +46,11 @@ var validBase64 = regexp.MustCompile(`^[A-Za-z0-9+/]*={0,2}$`)
 // tainted input: every piece of caller-supplied data ($1 through $5) is
 // delivered as a separate, already-quoted shell positional parameter by
 // Runner.Run/quoteArgs, never interpolated into this script text.
-// send.sh has no stdin option for its body argument (see
-// docs/agent-board.md's Integration with agmsg section), so this decodes
-// the base64-encoded body back to its original bytes remotely, immediately
-// before the one call site that needs the raw value.
+// Decode before invoking the public --body - interface so option-like bodies
+// remain stdin data. Command substitution retains upstream's trailing-newline
+// normalization, and a decode failure prevents sending.
 const sendBase64WrapperScript = `send="$1"; team="$2"; from="$3"; to="$4"; ` +
-	`body=$(printf '%s' "$5" | base64 -d) && exec "$send" "$team" "$from" "$to" "$body" --force`
+	`body=$(printf '%s' "$5" | base64 -d) && printf '%s' "$body" | "$send" "$team" "$from" "$to" --body - --force`
 
 // sendBase64WrapperScriptName is the dummy $0 value passed to the `sh -c`
 // invocation that runs sendBase64WrapperScript — it becomes the script's
@@ -128,11 +127,11 @@ func validateIdentifiers(team, from, to string) error {
 	if err := validateAgmsgIdentifier("team", team); err != nil {
 		return err
 	}
-	if err := validateAgmsgIdentifier("from", from); err != nil {
-		return err
+	if _, err := board.ParseIdentity(from); err != nil {
+		return fmt.Errorf("agmsg: invalid from: %w", err)
 	}
-	if err := validateAgmsgIdentifier("to", to); err != nil {
-		return err
+	if _, err := board.ParseIdentity(to); err != nil {
+		return fmt.Errorf("agmsg: invalid to: %w", err)
 	}
 	return nil
 }
