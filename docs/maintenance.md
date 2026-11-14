@@ -47,7 +47,8 @@ packages through that match; the thin CLI entrypoint lives in `scripts/docsokf/c
 - When updating workflows, resolve the intended tag to its exact commit SHA first, then commit the SHA-pinned reference.
 - Renovate manages scheduled GitHub Actions updates for this repository. Keep workflow `uses:` entries SHA-pinned so Renovate can advance them as explicit reviewable changes.
 
-SHA pins make workflow execution reproducible and supply-chain changes explicit in review.
+SHA pins make workflow execution reproducible, prevent a moved tag from changing what runs
+(supply-chain drift), and keep every change explicit in review.
 
 ## Runner Images
 

@@ -150,10 +150,13 @@ The tracked Makefile and launch scripts do not force `TMPDIR=/tmp` for ordinary 
 tmux socket path is too long. Generic Playwright uses TMPDIR for build cache, config staging, and
 build lock without forcing `/tmp`; these are separate from socket length.
 
-The short-path requirement concerns tmux sockets; limits, macOS path resolution, fixture roots,
-and the pre-staging length check are in
-[Socket and process isolation](screenshots.md#socket-and-process-isolation); E2E checks use
-`frontend/e2e/tmux-env.sh` with a unique root under TMPDIR.
+The short-path requirement concerns tmux sockets, not all temporary files.
+`frontend/e2e/tmux-env.sh` checks the resolved socket path before tmux starts, including macOS's
+`/private` prefix behind `/tmp` and `/var/folders`, against 103 usable bytes on macOS and 107 on Linux.
+The E2E root is unique under TMPDIR. The usual macOS TMPDIR fits the production fixture, but nested
+test isolation directories or a longer configured TMPDIR can exceed the limit.
+For screenshot roots and their pre-staging check, see
+[Socket and process isolation](screenshots.md#socket-and-process-isolation).
 
 Screenshot helper tests use `tmux_short_dir` (issue #343 / PR #351): it tries a unique directory
 under TMPDIR, then `/tmp` only when writable and short enough, and fails if neither fits. Reuse
