@@ -6,7 +6,7 @@ description: "Maintenance procedures for toolchains, dependencies, CI, releases,
 
 # Maintenance Guide
 
-This document captures repository maintenance rules that belong in durable project documentation rather than in the agent index.
+Use the [maintenance index](maintenance/index.md) for agmsg and release operating procedures.
 
 ## Runtime toolchains
 
@@ -47,11 +47,7 @@ packages through that match; the thin CLI entrypoint lives in `scripts/docsokf/c
 - When updating workflows, resolve the intended tag to its exact commit SHA first, then commit the SHA-pinned reference.
 - Renovate manages scheduled GitHub Actions updates for this repository. Keep workflow `uses:` entries SHA-pinned so Renovate can advance them as explicit reviewable changes.
 
-Why this matters:
-
-- it makes workflow execution reproducible
-- it narrows supply-chain drift
-- it keeps workflow changes explicit in code review
+SHA pins make workflow execution reproducible and supply-chain changes explicit in review.
 
 ## Runner Images
 
@@ -96,91 +92,16 @@ when a shell they need is missing, so a new such workflow needs the same step.
 - Review Renovate PRs like any other dependency bump and keep automerge disabled unless project policy changes.
 
 ## The agmsg Compatibility Contract Job
-
-`.github/workflows/agmsg-contract.yml` runs Tier 2 of the [agmsg compatibility contract](agent-board/agmsg-contract.md#agmsg-compatibility-contract): `make test-agmsg-contract` against a real agmsg install, which the hermetic `make check` suite deliberately cannot do.
-
-- **Daily (06:00 UTC / 15:00 JST)** scope resolves the newest stable `vN.N.N` tag with
-  `git ls-remote --tags`, excluding `app-v*` and prereleases. Annotated tags use the peeled
-  commit (`^{}`). All later checkout, installation and capture use that full SHA. Failure
-  leaves the current pin intact and produces no proposal.
-- **On every pull request** scope selects changes to `internal/agmsg/`,
-  `scripts/agmsg_contract*`, `Makefile`, or this workflow. Relevant PRs run against
-  `TestedAgmsgCommit` from the PR checkout; others report success without installation.
-- **Manual dispatch** accepts a stable tag or full SHA, defaults to the pinned SHA, and never
-  creates a PR. Tags are resolved once before installation.
-
-The daily poll suits agmsg's release cadence (the measured median gap across 22 releases in
-2026-06 through 2026-08 was 2.9 days). Successful verification is cached by **tag and commit
-SHA**, so a moved tag is rechecked. Failed verification is never cached. A cached success still
-retries proposal creation after missing credentials or transient GitHub failures. The proposal
-job depends on the contract job succeeding and cannot run after contract failure.
-
-The PR trigger has no `paths:` filter on purpose. A path-filtered workflow reports no status on the PRs it skips, and a required check that never reports blocks every one of them — hence the always-running `scope` job. The `contract` job likewise always runs and gates its expensive steps individually rather than skipping itself, so it always reports a real success or failure and never a `skipped` conclusion whose scoring branch protection would have to be trusted to get right.
-
-That is what makes **`agmsg-contract / contract`** safe to mark as a required check in branch protection — which is how the contract's "a bump of the pin cannot merge unverified" requirement is actually enforced. Marking it required is a repository setting, not something this workflow can do for itself; until someone sets it, the job still runs and still reports, it just does not block.
+See [agmsg compatibility maintenance](maintenance/agmsg-contract.md).
 
 ### Bumping the pinned agmsg version
-
-The pin is the pair `agmsg.TestedAgmsgVersion` (`internal/agmsg/agmsg_version.go`) and
-`agmsg.TestedAgmsgCommit` (`internal/agmsg/tool.go`). After scheduled verification succeeds,
-`scripts/agmsg_contract.py` prepares a `fix: bump pinned agmsg to vN.N.N` PR against main:
-
-1. Update both constants to the verified version and SHA, only for a newer release.
-2. Run `capture.sh` against the already checked-out SHA in an isolated HOME. This works on CI
-   with sqlite3 and Python 3; no manual capture is needed. The new versioned directory contains
-   raw JSONL, VERSION and COMMIT provenance. Project paths are sanitized to `/tmp/sample-project`.
-3. Fixture tests derive their directory from TestedAgmsgVersion and expected IDs/timestamps from
-   the captured data, so a bump changes no test code. Run the full agmsg and board packages.
-   Preserve the original v1.2.0 capture for the ID-order regression, because fresh captures need
-   not reproduce out-of-order UUIDs within one millisecond.
-4. Create branch `automation/agmsg-vN.N.N` and its PR using a GitHub App token. PR CI rechecks
-   the recorded SHA, independent of later tag movement.
-
-One tag has at most one proposal: open, closed and merged PRs on that branch suppress duplicates.
-A push that succeeded before PR creation failed is reused without force-pushing after its pin is
-checked. Preflight skips existing proposals before capture and resumes a pushed branch without
-rerunning upstream code. New tags receive
-separate PRs; older proposals stay open and unchanged for human comparison and closure. Deliberately
-closed proposals are not reopened. Scheduled runs are serialized by workflow concurrency. Moved
-tags are reverified but do not rewrite existing proposals; investigate upstream retagging manually.
-The automation never downgrades the pin or follows upstream main.
-
-Review upstream changes, the version/SHA pair, captures and CI, then merge the proposal. Its `fix:`
-title makes release-please propose a patch; publishing the draft remains manual. A failed canary
-calls for investigation, not an unverified bump.
+See [agmsg compatibility maintenance](maintenance/agmsg-contract.md#bumping-the-pinned-agmsg-version).
 
 ### GitHub App setup (repository owner)
-
-Create a GitHub App with repository permissions **Contents: read and write** and
-**Pull requests: read and write** (Metadata read is implicit), and install it on this repository.
-Actions/Workflows write is unnecessary: proposals change only `internal/agmsg/`. Register the App
-ID as repository Actions secret `AGMSG_BUMP_APP_ID` and its generated private key as
-`AGMSG_BUMP_APP_PRIVATE_KEY`. App creation, installation and secret registration are manual.
-
-`actions/create-github-app-token` mints a short-lived token scoped to this repository with those
-two write permissions. Unlike GITHUB_TOKEN, its events trigger ordinary PR CI. Upstream installation
-and capture run in a job with read-only repository permission and no App secrets. A separate fresh
-publication runner checks out trusted code and accepts only one bounded JSON artifact containing
-the three JSONL captures, VERSION and COMMIT. It checks names, regular-file status, sizes, JSON
-shape and provenance against the independently resolved tag/SHA; no uploaded source, scripts,
-paths, hooks or executable modes are applied. Trusted code writes the constants and data, then
-tests the full agmsg and board packages before minting the token. Scope needs contents/PR read;
-other jobs need only contents read until the App token. If either secret is absent, the workflow
-reports no proposal and succeeds after contract verification.
-The automation changes no App settings or secrets.
+See [agmsg compatibility maintenance](maintenance/agmsg-contract.md#github-app-setup-repository-owner).
 
 ### Running it locally
-
-```sh
-make test-agmsg-contract AGMSG_PATH=/tmp/agmsg-home/.agents/skills/agmsg
-make test-agmsg-automation
-```
-
-For the first command, clone agmsg into a temporary directory, check out the desired full SHA,
-and install with a throwaway HOME and cleared XDG/agent configuration overrides. Never install
-into the developer's own skills/settings. sqlite3 and an explicit installation are required;
-otherwise the contract skips. The second command uses Python 3 and offline fake process boundaries
-and temporary git repositories.
+See [agmsg compatibility maintenance](maintenance/agmsg-contract.md#running-it-locally).
 
 ## The Model-Checking Job
 
@@ -211,70 +132,19 @@ Never hand-edit a file under `internal/board/testdata/*-transitions.json`; the n
 `make test-model-check` (inside `make check`, and run by `ci.yml` on every pull request) tests the exporter this job depends on, against committed dot fixtures in `scripts/testdata/model-check/` — no JDK, no jar. It is what catches an exporter that would write a table smaller than the `.cfg` asked for, which is the failure that makes Tier 1 check less while still reporting green. `python3` is optional for it the way `jq` is for `make test-hooks`: without it those checks report themselves as skipped.
 
 ## Release Workflow
+See [Release maintenance](maintenance/releases.md).
 
 ### Recovering a failed release build
-
-The `release-please` workflow also accepts a manual `release_tag`, for example
-`gh workflow run release-please.yml --ref main -f release_tag=v0.27.0`. Recovery
-has a main-ref condition to prevent accidental dispatch from another branch;
-this is not a security boundary against writers who can edit a branch's workflow.
-Use it after the workflow fix has merged to main.
-
-Both push and recovery resolve the draft inside the GoReleaser job, using
-`contents: write` because draft visibility requires push access. They require a
-draft whose name and tag match the requested tag, whose asset list is empty, and
-whose `target_commitish` is a full commit SHA. Both check out that recorded SHA,
-even when release-please creates a draft for an earlier merge than the current
-push, and verify HEAD against it before creating a local tag. Both refuse an
-existing tag that points elsewhere; neither path moves tags. Metadata lookup,
-validation and upload share a per-tag concurrency group, preventing simultaneous
-uploads to that draft without blocking builds of other tags or release-please.
-GitHub keeps one active and one pending job per group: a newer job can replace
-an older pending recovery. Check a dispatch's outcome and dispatch again if it
-was superseded; active uploads are not cancelled.
-
-Recovery does not run release-please again or change the proposed next version.
-The current workflow
-provides runner setup, while the selected release commit provides the source,
-runtime pins, GoReleaser configuration and full `make check` gate.
-
-Manual recovery passes `--draft`: after GoReleaser succeeds, inspect the draft's
-four platform archives and `checksums.txt`, then publish it. The push path retains
-the default `release --clean` behavior, which publishes after a successful build;
-the manual inspection/publication step applies to recovery only.
-A recovery failure leaves the draft unpublished; inspect the failed check before
-retrying. Leftover assets are rejected before checkout, dependency setup or tests.
-If an upload partially succeeded,
-remove every asset left on that draft (including `checksums.txt`) with
-`gh release delete-asset <tag> <asset-name>` before retrying: the release
-configuration does not replace existing assets, and mixing builds would leave
-inconsistent checksums. Confirm it is still a draft before deleting any assets.
-Do not move an already published tag.
+See [Release maintenance](maintenance/releases.md#recovering-a-failed-release-build).
 
 ### release-please handling
-
-- Never manually close a release-please PR.
-- Closing it leaves the `release-please--branches--main` tracking branch stale.
-- On the next push to `main`, release-please may recreate a PR with incorrect release notes that include historical commits.
-- The release PR bumps `.release-please-manifest.json` itself and, through `extra-files` in `release-please-config.json`, three version fields: `$.version` in `frontend/package.json`, and `$.version` and `$.packages[""].version` in `frontend/package-lock.json`. Add any other file that records the release version to `extra-files`.
+See [Release maintenance](maintenance/releases.md#release-please-handling).
 
 ### Overriding a proposed version
-
-If release-please proposes the wrong version:
-
-- add the `release-as: x.y.z` label to the existing release PR before merging, or
-- include `Release-As: x.y.z` in the footer of a commit message on `main`
+See [Release maintenance](maintenance/releases.md#overriding-a-proposed-version).
 
 ### Recovering from a stale internal branch
-
-If the internal release-please branch becomes stale:
-
-```sh
-gh pr close <release-pr-number>
-git push origin origin/main:refs/heads/release-please--branches--main --force
-```
-
-Close the incorrect PR first, then reset the tracking branch.
+See [Release maintenance](maintenance/releases.md#recovering-from-a-stale-internal-branch).
 
 ## E2E Failure Traces
 
@@ -306,7 +176,7 @@ CI runs Playwright with one retry, and `playwright.config.ts` records a trace on
 Enablement, mode and the agmsg automatic-update preference are instance-wide in config.yaml.
 The agmsg adapter pins both `TestedAgmsgVersion` and `TestedAgmsgCommit`; acquisition verifies the
 exact commit and archives it through the shared input execution lane. Keep the pair consistent
-when updating the tested upstream source. The automatic pin-bump workflow belongs to #437.
+when updating the tested upstream source. See [pin proposal maintenance](maintenance/agmsg-contract.md#bumping-the-pinned-agmsg-version).
 
 Host management owns prerequisite checks, drain/pause and background automatic updates at startup,
 on opt-in and after a new host is persisted. Automatic results are process-local; failures remain visible for manual Update,

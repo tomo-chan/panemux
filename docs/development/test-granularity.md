@@ -43,38 +43,25 @@ Example: `Config.sshConfigPath` uses `sshconfig.DefaultPath()` only when the ove
 in a test with `homedir.SetForTest(t, dir)` or `homedir.SetFailingForTest(t, err)`. Do **not** call
 `os.UserHomeDir()` — `.golangci.yml`'s `forbidigo` rule fails the build on it outside that package —
 and do not reach for `t.Setenv("HOME", ...)`, which mutates the process environment every goroutine
-and subprocess in the binary shares, and does nothing on Windows, where `os.UserHomeDir` reads
-`USERPROFILE`. Note what the seam does **not** fix: `homedir.dirFn` is one unsynchronized package
-variable, so substituting it is no safer under `t.Parallel` than `$HOME` was — `t.Setenv` at least
-panics there, while the seam races silently. Substitute it only from non-parallel tests. It is one
-package rather than one variable per caller because
-the callers do not line up with the tests: `internal/api`'s handler tests drive tilde expansion that
-happens inside `internal/config`, `internal/server`'s integration tests drive config, api and session
-at once, and the root package's tests drive `internal/commandcenter`'s default paths — none of which
-a package-private variable can reach. See issue [#212](https://github.com/tomo-chan/panemux/issues/212).
+and subprocess in the binary shares, and does nothing on Windows (`USERPROFILE` is used).
+Substitute the unsynchronized `homedir.dirFn` only from non-parallel tests; unlike `t.Setenv`,
+it races silently under `t.Parallel`. Cross-package callers need the shared seam rather than
+package-private overrides; see [filesystem seams](../decisions/architecture/filesystem-seams.md)
+and [#212](https://github.com/tomo-chan/panemux/issues/212).
 
 **The cache directory has its own seam, and it is `internal/cachedir`.** Same shape — `cachedir.Dir()`,
 `cachedir.SetForTest(t, dir)`, `cachedir.SetFailingForTest(t, err)`, and a `forbidigo` rule on
-`os.UserCacheDir()` outside that package — and a *separate* package rather than a second function in
-`internal/homedir`, because it is a different global with different platform behavior:
-`os.UserCacheDir` never consults `os.UserHomeDir`, reading `$XDG_CACHE_HOME` (falling back to
-`$HOME/.cache`) on non-darwin Unix but `$HOME/Library/Caches` on darwin, where `XDG_CACHE_HOME` is
-ignored outright. Substituting the home directory therefore cannot influence it, and neither
-environment variable alone covers it — `internal/server`'s integration helpers had to set **both**,
-and CI, being Linux-only, would have stayed green had one been dropped while a Mac developer's real
-`~/Library/Caches` collected files from a test run. Keeping the packages apart also keeps each
-`forbidigo` exclusion to one function, so a stray `os.UserHomeDir` inside the cache seam is still
-caught. See issue [#226](https://github.com/tomo-chan/panemux/issues/226).
+`os.UserCacheDir()` outside that package — and a separate package with different platform behavior: `os.UserCacheDir` never calls
+`os.UserHomeDir`. Non-darwin Unix uses `$XDG_CACHE_HOME`, falling back to `$HOME/.cache`; darwin
+uses `$HOME/Library/Caches` and ignores `XDG_CACHE_HOME`. Substituting home therefore cannot
+influence cache lookup, and neither environment variable alone covers both platforms. Separate
+packages keep each `forbidigo` exclusion to one function and catch a stray `os.UserHomeDir` in
+the cache seam. See [#226](https://github.com/tomo-chan/panemux/issues/226).
 
-**Neither seam is safe under `t.Parallel`, and that is a decision rather than an oversight.** Each is
-one unsynchronized package variable, so two parallel tests substituting it race and the loser
-silently reads the other's directory — where `t.Setenv` would have panicked. A mutex would remove the
-race without making it correct (restore stays last-writer-wins, so one test's `Cleanup` can still
-restore over another's live substitution), which buys the appearance of a guarantee; the only real
-fix is per-test injection with no global at all, which means changing exported signatures across six
-packages for a suite that today has **zero** `t.Parallel` calls and runs in seconds. So: substitute
-the seams only from non-parallel tests, and if a concrete need for `t.Parallel` ever appears, take the
-per-test-injection route for the packages that need it rather than adding a lock. See issue
+**Neither seam is safe under `t.Parallel`.** Substitute them only from non-parallel tests.
+A mutex would remove the data race while leaving cleanup last-writer-wins. If parallel tests
+are needed, use per-test injection without globals for the affected packages rather than a lock.
+See [filesystem seams](../decisions/architecture/filesystem-seams.md) and
 [#227](https://github.com/tomo-chan/panemux/issues/227).
 
 **Persisted files are written through one seam, and it is `internal/fileops`.** `fileops.AtomicWrite`

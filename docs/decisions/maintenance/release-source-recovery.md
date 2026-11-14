@@ -14,5 +14,5 @@ retrying until green, or overlaying new scripts on old source.
 The [upstream correction](https://github.com/uutils/coreutils/commit/bf423f388d543b9180db6b7283d82b301f138913)
 explains the defect. Draft metadata needs publisher write permission; per-tag serialization and
 rejecting existing assets protect recovery uploads. A main-ref condition is not a boundary against
-workflow writers. See [release maintenance](../../maintenance.md#recovering-a-failed-release-build)
+workflow writers. See [release maintenance](../../maintenance/releases.md#recovering-a-failed-release-build)
 for the authoritative procedure. The tool-lock limitation remains [#480](https://github.com/tomo-chan/panemux/issues/480).

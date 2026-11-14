@@ -78,6 +78,7 @@ Git history remains the authority for line-level chronology.
 * [decisions/](decisions/) - Individual design decisions and topic indexes.
 * [development/](development/) - Development and verification contracts, fixtures, and operational procedures.
 * [images/](images/) - Documentation screenshots captured from the product with placeholder content.
+* [maintenance/](maintenance/) - agmsg compatibility proposals and release recovery procedures.
 * [models/](models/) - Formal models of terminal replay behavior.
 * [quality-gateway/](quality-gateway/) - Quality gate decisions and dated measurements.
 * [security/](security/) - Security requirements grouped by execution sink and trust boundary.

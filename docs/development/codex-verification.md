@@ -145,27 +145,21 @@ the execution tool's session completion to obtain its status; periodic log tails
 are unnecessary. `make` may translate a failing recipe's exit code to its own
 nonzero status, but the wrapper preserves the status of its child `make`.
 
-The tracked Makefile and launch scripts do not prepend `TMPDIR=/tmp` to ordinary
-verification. The recommendation in [documentation screenshots](screenshots.md#socket-and-process-isolation) is conditional
-on the screenshot tmux path being too long. The generic Playwright launcher
-uses TMPDIR for its build cache, config staging and build lock without forcing
-`/tmp`; these are separate from the socket length calculation.
+The tracked Makefile and launch scripts do not force `TMPDIR=/tmp` for ordinary checks.
+[The screenshot recommendation](screenshots.md#socket-and-process-isolation) applies only when its
+tmux socket path is too long. Generic Playwright uses TMPDIR for build cache, config staging, and
+build lock without forcing `/tmp`; these are separate from socket length.
 
-The short-path requirement concerns tmux sockets, not all temporary files.
-`frontend/e2e/tmux-env.sh` checks the resolved socket path, including macOS's
-`/private` prefix behind `/tmp` and `/var/folders`, against the OS limit (103
-usable bytes on macOS, 107 on Linux). The E2E root is unique under TMPDIR;
-screenshots use `$TMPDIR/panemux-screenshots/tmux`. The usual macOS TMPDIR fits
-the production fixture, but nested test isolation directories or a longer
-configured path can exceed the limit.
+The short-path requirement concerns tmux sockets; limits, macOS path resolution, fixture roots,
+and the pre-staging length check are in
+[Socket and process isolation](screenshots.md#socket-and-process-isolation); E2E checks use
+`frontend/e2e/tmux-env.sh` with a unique root under TMPDIR.
 
-The screenshot helper tests already use `tmux_short_dir` (issue #343 / PR #351):
-it tries a unique socket directory under TMPDIR, then under `/tmp` only if that
-candidate is writable and fits, and fails when neither fits. The rest of the
-tests' temporary files stay under the original TMPDIR. Reuse this helper;
-do not prepend `TMPDIR=/tmp` to the whole unit check. A production E2E/screenshots
-run with a custom long TMPDIR still needs a shorter permitted TMPDIR chosen
-before launching that fixture. Its path check happens before staging.
+Screenshot helper tests use `tmux_short_dir` (issue #343 / PR #351): it tries a unique directory
+under TMPDIR, then `/tmp` only when writable and short enough, and fails if neither fits. Reuse
+it; keep other temporary files under the original TMPDIR and do not prepend `TMPDIR=/tmp` to
+the whole unit check. A production E2E/screenshots fixture with a long custom TMPDIR still needs
+a shorter permitted TMPDIR chosen before launch.
 
 Fixed screenshot paths `/tmp/sample-project` and `/tmp/panemux-screenshots-agmsg`
 are links into the capture's own root; the screenshot lock is separate. Their

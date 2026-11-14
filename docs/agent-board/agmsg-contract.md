@@ -128,7 +128,7 @@ CI runs it:
 
 The scheduled canary proposes a version/SHA pin and fixture bump only after success.
 The App-authenticated `fix:` PR must pass ordinary CI and be reviewed before merging; draft
-release publication remains manual. See [maintenance](../maintenance.md#bumping-the-pinned-agmsg-version).
+release publication remains manual. See [maintenance](../maintenance/agmsg-contract.md#bumping-the-pinned-agmsg-version).
 The job remains outside `make check` because it installs and executes an external project. Local
 runs skip when no explicit agmsg path is supplied.
 

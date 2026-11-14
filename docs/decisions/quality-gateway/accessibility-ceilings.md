@@ -13,4 +13,4 @@ affected content. Counts are stable only for fixed pages: other E2E mutators cha
 accessibility spec owns its server/fixture. Separate comparator unit tests exercise rejection arms
 that healthy runs never reach; runner suffixes prevent Playwright/Vitest matcher collisions.
 Lower counts pass with a concrete manual edit. Failing on improvement makes a brittle ratchet
-two-sided and discourages fixes. See [accessibility](../../quality-gateway/measurements.md#accessibility).
+two-sided and discourages fixes. See [accessibility](../../quality-gateway/accessibility.md).

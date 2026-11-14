@@ -136,7 +136,7 @@ follow [Red-check](docs/development/red-check.md) for justified exemptions and s
 - Optional test tools: `python3` for model-check exporter and agmsg automation tests, `jq` for
   hook tests. Missing tools skip those checks locally; missing Python fails agmsg automation in CI.
 - `make bench` measures without thresholds; see [measurements](docs/quality-gateway/measurements.md).
-- Follow the [accessibility ceiling procedure](docs/quality-gateway/measurements.md#accessibility)
+- Follow the [accessibility ceiling procedure](docs/quality-gateway/accessibility.md)
   after fixes; counts must not rise.
 - `make lint-go`, `make lint-frontend`, and `make lint` run lint checks. Go lint includes
   gofmt, vet, and the pinned golangci-lint; its cache is checkout-local `.cache/golangci-lint/`

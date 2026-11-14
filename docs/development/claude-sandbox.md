@@ -36,6 +36,26 @@ matching probe): unavailable capabilities skip locally and fail with CI set.
 - Lint cache handling follows the [quality-gate commands](../../DEVELOPMENT.md#quality-gate).
 - Temporary files follow the [repository rule](../../DEVELOPMENT.md#temporary-file-discipline).
 
+## Protected hook files and worktree switching
+
+Claude Code protects the session checkout's `.claude/hooks/` (and directories such as
+`.claude/skills/`) from sandbox writes. Repository `.claude/settings.json` cannot remove this
+protection. Switching with `git switch` or `git checkout` to a commit that changes those files
+can stop partway through: HEAD can advance while the hook files remain at the old version and
+appear as `M` in `git status`. Tests would then exercise the new tests against old hooks.
+
+- Before verifying a switch across hook changes, check HEAD and `git status`; do not treat a
+  partial switch as the requested tree.
+- For review and verification, extract `git archive <PR HEAD>` into a unique directory allocated
+  with an explicit `mktemp -d "${TMPDIR:-/tmp}/panemux-review.XXXXXX"` template, stopping if allocation
+  fails, and unpack the archive there. This avoids switching protected files in the session checkout.
+- Edit hooks outside the sandbox with the required approval for each edit.
+- `git worktree remove` can also fail to remove `.git/worktrees/<name>` and leave a `prunable`
+  entry. Request the normal outside-sandbox approval for removal; do not assume cleanup succeeded.
+
+See [#370](https://github.com/tomo-chan/panemux/issues/370) for the observed partial switches and
+[D13](../decisions/quality-gateway/capability-probes.md) for capability limits during verification.
+
 After changing sandbox settings, verify `make check`, `make test-e2e`, and `make test-hooks`
 from Claude Code with sandboxing active. Runs from another agent or outside the sandbox verify
 the suites but do not establish that Claude Code sandbox permissions work. Record any remaining
