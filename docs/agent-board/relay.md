@@ -29,9 +29,10 @@ Team validation retains its existing identifier allowlist.
   `from=<original name>@<source BoardID>`, even when it names the source host itself.
   Neither a roster entry nor a pane is required on either host.
 - Compatibility: an unqualified recipient matching a configured pane on another host
-  is forwarded there. `from` remains unqualified only when the sender is itself a
-  configured pane on the source host. A pane-free sender is qualified on this route too,
-  so the receiver can reply and the forwarded copy cannot enter history twice.
+  is forwarded there. Every forwarded copy uses `from=<original name>@<source BoardID>`,
+  including configured pane senders. The receiver replies to that qualified sender.
+  Copy rejection therefore survives pane removal, host movement and delayed reads without
+  retaining retired pane ownership or adding a forwarding ledger.
 - Unqualified `_system` is the source host's panemux recipient. Ordinary and malformed
   status bodies remain history; only valid `kind: "board_status"` bodies update status.
   Reports are keyed by `name@BoardID` inside the cache, so equal names on different hosts
@@ -66,7 +67,7 @@ bash ~/.agents/skills/agmsg/scripts/send.sh panemux worker orch@local 'ready for
 
 Use the received `from` verbatim as the reply recipient, for example `worker@ssh:build`.
 `--force` is required because remote identities are absent from the local roster.
-Configured pane-to-pane compatibility retains its old unqualified reply addresses.
+Configured pane IDs remain valid initial destinations; replies use the received qualified `from`.
 Send a status JSON body to unqualified `_system` to report to panemux on the source host.
 Panemux neither registers proxy roster entries nor distributes a send wrapper.
 

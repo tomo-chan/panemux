@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,8 +32,8 @@ func TestRelay_IdentityRoutes(t *testing.T) {
 		{"local", "same", "same@local", "local", "same@local", "same"},
 		{"local", "same", "same@ssh:local", "ssh:local", "same@local", "same"},
 		{"ssh:local", "same", "same@local", "local", "same@ssh:local", "same"},
-		{"local", "pane-a", "pane-b", "ssh:build", "pane-a", "pane-b"},
-		{"ssh:build", "pane-b", "pane-a", "local", "pane-b", "pane-a"},
+		{"local", "pane-a", "pane-b", "ssh:build", "pane-a@local", "pane-b"},
+		{"ssh:build", "pane-b", "pane-a", "local", "pane-b@ssh:build", "pane-a"},
 	} {
 		t.Run(tc.source+"/"+tc.to, func(t *testing.T) {
 			r, cache, hosts := identityRelay()
@@ -181,4 +182,75 @@ func TestRelay_QualifiedDestinationPausePreservesSourceBatch(t *testing.T) {
 	assert.Len(t, dest.sendCalls, 1)
 	assert.Len(t, cache.MessagesSince(0), 1)
 	assert.Equal(t, "1", r.cursors["local"])
+}
+
+func TestRelayDelayedPaneCopySurvivesRoutingChanges(t *testing.T) {
+	for _, sourceOwner := range []string{"", "ssh:build"} {
+		for _, recipientOwner := range []string{"ssh:build", "local"} {
+			for _, restart := range []bool{false, true} {
+				t.Run(fmt.Sprintf("source=%s/recipient=%s/restart=%v", sourceOwner, recipientOwner, restart), func(t *testing.T) {
+					r, cache, hosts := identityRelay()
+					panes := map[string]string{"pane-a": "local", "pane-b": "ssh:build"}
+					cfg := RelayConfig{Team: "panemux", Clients: r.clients, CurrentRouting: func() Routing {
+						return Routing{PaneHosts: panes, Clients: r.clients}
+					}, Limit: 100, BackfillLimit: 1000}
+					r = NewRelay(cache, cfg)
+					hosts["local"].sinceRows = []Row{{ID: "original", Team: "panemux", From: "pane-a", To: "pane-b", Body: "pending"}}
+					hosts["ssh:build"].sinceErr = errors.New("disconnected")
+					require.ErrorContains(t, r.Poll(context.Background()), "disconnected")
+					require.Len(t, hosts["ssh:build"].sendCalls, 1)
+					forwarded := hosts["ssh:build"].sendCalls[0]
+					// Only now does the previously unread destination copy become readable.
+					hosts["ssh:build"].sinceRows = []Row{{
+						ID: "copy", Team: forwarded.Team, From: forwarded.From, To: forwarded.To, Body: forwarded.Body,
+					}}
+					hosts["ssh:build"].sinceErr = nil
+					delete(panes, "pane-a")
+					if sourceOwner != "" {
+						panes["pane-a"] = sourceOwner
+					}
+					panes["pane-b"] = recipientOwner
+					if restart {
+						cursors := r.Cursors()
+						r = NewRelay(cache, cfg)
+						r.LoadCursors(cursors)
+					}
+					require.NoError(t, r.Poll(context.Background()))
+					require.NoError(t, r.Poll(context.Background()))
+					history := cache.MessagesSince(0)
+					require.Len(t, history, 1, "a delayed copy must not become an original after pane changes")
+					assert.Equal(t, "local", history[0].Row.Host)
+					assert.Empty(t, hosts["local"].sendCalls, "the copy must not bounce to the moved recipient")
+					assert.Len(t, hosts["ssh:build"].sendCalls, 1)
+					assert.Empty(t, cache.StatusSnapshot())
+					assert.Equal(t, "copy", r.cursors["ssh:build"], "rejected copies still advance the cursor")
+					assert.Equal(t, "pane-a@local", forwarded.From)
+				})
+			}
+		}
+	}
+}
+
+func TestRelayBarePaneRecipientReplyUsesQualifiedSender(t *testing.T) {
+	for _, sender := range []string{"pane-a", "worker"} {
+		t.Run(sender, func(t *testing.T) {
+			r, cache, hosts := identityRelay()
+			hosts["local"].sinceRows = []Row{{ID: "1", Team: "panemux", From: sender, To: "pane-b", Body: "request"}}
+			require.NoError(t, r.Poll(context.Background()))
+			require.Len(t, hosts["ssh:build"].sendCalls, 1)
+			forwarded := hosts["ssh:build"].sendCalls[0]
+			require.Equal(t, sender+"@local", forwarded.From)
+			require.Equal(t, "pane-b", forwarded.To, "bare pane destination routing is preserved")
+			hosts["ssh:build"].sinceRows = []Row{
+				{ID: "copy", Team: forwarded.Team, From: forwarded.From, To: forwarded.To, Body: forwarded.Body},
+				{ID: "reply", Team: "panemux", From: "pane-b", To: forwarded.From, Body: "reply"},
+			}
+			require.NoError(t, r.Poll(context.Background()))
+			require.Equal(t, []sentMessage{{"panemux", "pane-b@ssh:build", sender, "reply"}}, hosts["local"].sendCalls)
+			history := cache.MessagesSince(0)
+			require.Len(t, history, 2)
+			assert.Equal(t, "local", history[0].Row.Host)
+			assert.Equal(t, "ssh:build", history[1].Row.Host)
+		})
+	}
 }

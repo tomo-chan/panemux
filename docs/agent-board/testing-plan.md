@@ -24,9 +24,10 @@ Tests must protect these contracts rather than mirror implementation structure.
   retried after the cursor advances; overflow preserves the documented bounded-loss behavior.
 - Pane-free unqualified senders are accepted; qualified senders, wrong-host pane senders and
   unmatched `_system` senders are rejected. Qualified and bare same-name recipients cannot collide.
-- Qualified forwarding strips the recipient host and adds the source host to the sender. Bare
-  pane-to-pane compatibility preserves the sender; pane-free senders are qualified even when
-  addressing a bare pane ID. Copies enter neither history, state nor forwarding again.
+- Qualified forwarding strips the recipient host and adds the source host to every sender.
+  Bare pane-ID destinations retain routing while pane senders are qualified too. Replies to the
+  received sender reach the original host. Delayed copies enter neither history, state nor
+  forwarding after source-pane removal, pane movement or relay restart with saved cursors.
 - The own-send ledger preserves duplicate occurrences, expires entries, and removes failed sends.
 - Broadcast validates all recipients before delivery and reports any partial delivery after a
   downstream failure.

@@ -30,3 +30,4 @@
 * [Usage remains outside the Agent Board status contract (2026-08)](usage-contract-boundary.md) - Keep provider account usage outside cooperative status while leaving direct transcript usage reading separate.
 * [Version coverage normalizes install provenance (2026-08, PR #176)](version-provenance.md) - Historically normalize provenance and tolerate later patches before stricter pin checks replaced that warning policy.
 * [Pane-independent relay by source host](pane-independent-relay.md) - Attribute names to their reading host without requiring panes or changing ledger semantics.
+* [Qualify every forwarded sender (2026-11-15, #495 / #505 / PR #540)](qualified-forwarded-senders.md) - Make copy rejection independent of pane changes and preserve option-like bodies through public stdin.

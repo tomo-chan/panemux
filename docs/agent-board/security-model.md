@@ -63,9 +63,10 @@ agmsg's `--force` permits arbitrary sender names. The relay accepts:
 
 Every qualified `from` is excluded from history, state and forwarding, as is an unqualified
 configured pane ID belonging to another host. Forwarding qualifies the sender with the read
-host's BoardID. Only configured pane-to-pane traffic using a bare destination preserves its
-unqualified sender. A pane-free sender to a bare pane ID is qualified too, preventing duplicate
-history and allowing replies. `local` and `ssh:local` identify different hosts.
+host's BoardID on every forwarded copy, including pane-to-pane traffic addressed by a bare
+pane ID. Rejecting qualified senders prevents duplicate history, false source-host attribution
+and re-forwarding even when panes are removed or moved before a delayed copy is read.
+Recipients reply to the received qualified sender. `local` and `ssh:local` identify different hosts.
 
 Ledger entries are recorded before sending, removed if sending fails, expire quickly and are
 consumed once. The key uses the unqualified destination-visible recipient, with host/team/body

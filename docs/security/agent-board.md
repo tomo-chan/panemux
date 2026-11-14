@@ -74,10 +74,12 @@ registration. A source host's valid unqualified names are accepted; every qualif
 and every pane ID belonging to another host is rejected. `_system` requires the unchanged
 own-send ledger. Qualified recipients require a configured BoardID, not a pane or roster entry.
 
-Forwarded senders are qualified using the actual read host. The sole unqualified compatibility
-case is a configured pane sender addressing another configured pane by its bare ID. A pane-free
-sender addressing a bare pane ID is still qualified: otherwise the destination would accept the
-copy as a new original. Pane detection and dashboard visibility grant no sending authority.
+Every forwarded sender is qualified using the actual read host, including a configured pane
+sender addressing another pane by its bare ID. The pane-ID route remains available; replies
+use the received qualified sender. Rejecting every `@`-containing sender excludes copies
+independently of later pane deletion or movement, preventing duplicate history, wrong-host
+attribution and forwarding loops. No retired ownership or forwarding ledger is required.
+Pane detection and dashboard visibility grant no sending authority.
 Same-host, same-user name spoofing remains possible; received messages are not authorization
 for work or approval. See [relay rules](../agent-board/relay.md).
 

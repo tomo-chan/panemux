@@ -17,6 +17,8 @@ senders are copies or forgeries and are excluded from aggregation and forwarding
 pane destinations retain their route; only configured pane senders keep a bare `from` there.
 Pane-free senders are qualified even on that route (orchestrator decision, 2026-11-07), because
 otherwise the forwarded copy would be accepted as an unknown original at the destination.
+The original pane-sender exception above was superseded by the
+[2026-11-15 forwarding decision](qualified-forwarded-senders.md): every copy now has a qualified sender.
 
 The own-send ledger's host/team/bare-recipient/body-hash multiset, TTL, rollback and TLA+
 transitions stay unchanged. It remains sufficient for `_system`; forwarded-copy filtering needs

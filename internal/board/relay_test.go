@@ -94,39 +94,36 @@ func TestRelay_Poll_FromKnownLocalPane_ToKnownPaneSameHost_Appended(t *testing.T
 }
 
 func TestRelay_Poll_ToKnownPaneDifferentHost_RelaysAndAppendsOnce(t *testing.T) {
-	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "local", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review"},
 	}}
-	hostB := &fakeMessageClient{hostID: "host-b"}
+	hostB := &fakeMessageClient{hostID: "ssh:build"}
 	cache := NewBoardCache()
-	paneHosts := map[string]string{"claude-a": "host-a", "codex-b": "host-b"}
-	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA, "host-b": hostB}, paneHosts)
+	paneHosts := map[string]string{"claude-a": "local", "codex-b": "ssh:build"}
+	r := newTestRelay(cache, map[string]MessageClient{"local": hostA, "ssh:build": hostB}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 
 	rows := cache.MessagesSince(0)
-	require.Len(t, rows, 1, "the row must be appended exactly once, from host-a's own poll")
+	require.Len(t, rows, 1, "the row must be appended exactly once, from local's own poll")
 	assert.Equal(t, "please review", rows[0].Row.Body)
 
 	require.Len(t, hostB.sendCalls, 1)
-	want := sentMessage{Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review"}
+	want := sentMessage{Team: "panemux", From: "claude-a@local", To: "codex-b", Body: "please review"}
 	assert.Equal(t, want, hostB.sendCalls[0])
 }
 
 // TestRelay_Poll_RelayedRowNotDoubleCounted is the regression test for the
-// central correctness property of cross-host relay: a message relayed to
-// host B keeps its original From (not SystemID). When host B is next
-// polled and that row is read back, from-validation against host B's own
-// known panes must reject it — the original pane isn't local to host B —
-// so it is not re-appended to history a second time.
+// central correctness property of cross-host relay: a copy has a qualified
+// sender and is excluded on readback independently of pane ownership.
 func TestRelay_Poll_RelayedRowNotDoubleCounted(t *testing.T) {
-	hostA := &fakeMessageClient{hostID: "host-a", sinceRows: []Row{
+	hostA := &fakeMessageClient{hostID: "local", sinceRows: []Row{
 		{ID: "1", Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review"},
 	}}
-	hostB := &fakeMessageClient{hostID: "host-b"}
+	hostB := &fakeMessageClient{hostID: "ssh:build"}
 	cache := NewBoardCache()
-	paneHosts := map[string]string{"claude-a": "host-a", "codex-b": "host-b"}
-	r := newTestRelay(cache, map[string]MessageClient{"host-a": hostA, "host-b": hostB}, paneHosts)
+	paneHosts := map[string]string{"claude-a": "local", "codex-b": "ssh:build"}
+	r := newTestRelay(cache, map[string]MessageClient{"local": hostA, "ssh:build": hostB}, paneHosts)
 
 	require.NoError(t, r.Poll(context.Background()))
 	require.Len(t, hostB.sendCalls, 1)
@@ -134,7 +131,7 @@ func TestRelay_Poll_RelayedRowNotDoubleCounted(t *testing.T) {
 	// Simulate message transport on host B actually having stored the relayed row, now
 	// visible to a later poll of host B with a host-B-scoped message transport id.
 	hostB.sinceRows = append(hostB.sinceRows, Row{
-		ID: "1", Team: "panemux", From: "claude-a", To: "codex-b", Body: "please review",
+		ID: "1", Team: "panemux", From: hostB.sendCalls[0].From, To: "codex-b", Body: "please review",
 	})
 
 	require.NoError(t, r.Poll(context.Background()))

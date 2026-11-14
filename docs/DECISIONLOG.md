@@ -380,3 +380,7 @@ See the [decision index](decisions/index.md) for topic listings.
 ### 2026-11-07: retire Agent Board PTY onboarding (#503, #495 S1)
 
 [Moved to retire-pty-onboarding](decisions/agent-board/retire-pty-onboarding.md).
+
+## 2026-11-15: Qualify all forwarded Agent Board senders (#505, PR #540)
+
+[Moved to qualified-forwarded-senders](decisions/agent-board/qualified-forwarded-senders.md).

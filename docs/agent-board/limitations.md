@@ -28,8 +28,10 @@ description: "Current Agent Board availability, recovery, and deployment limitat
 
 Relay accepts host-local agmsg names without panes or roster lookups. Qualified recipients
 select a configured BoardID, including hosts without panes. Unqualified names stay local except
-for the legacy configured pane-ID route. Bare sender compatibility is limited to configured pane
-senders; pane-free senders are qualified even on that route. The current UI still lists only
+for the legacy configured pane-ID route. All forwarded copies have qualified senders, including
+pane senders; consumers must reply to the received qualified `from` instead of assuming a bare
+pane reply address. Copy exclusion does not depend on the pane map staying unchanged.
+The current UI still lists only
 detected agents or reporting configured panes; pane-free identity presentation is separate.
 
 ### Delivery guarantees

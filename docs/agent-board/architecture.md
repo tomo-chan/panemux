@@ -122,8 +122,8 @@ history entries.
   matching pane/host reports without exposing a new identities list.
 - Bare ordinary destinations stay local. Qualified destinations select a configured BoardID and
   are forwarded with a qualified sender, including when they name the source host.
-- Bare configured pane destinations preserve routing compatibility; bare senders are retained only
-  for configured pane senders. Pane-free senders are qualified on this route too.
+- Bare configured pane destinations preserve routing compatibility. Every forwarded sender is
+  qualified, including pane senders, so delayed copies are rejected after pane routing changes.
 - Dashboard sequence numbers are panemux-local and must never be confused with agmsg row IDs.
 
 The own-send ledger is a short-lived multiset. It records each panemux-originated send separately,

@@ -265,19 +265,15 @@ func (r *Relay) processRowUsing(ctx context.Context, sourceHost string, row Row,
 		return
 	}
 
-	from := row.From
 	if target.Host == "" {
 		// Ordinary unqualified names are local to agmsg; never search other hosts.
 		return
 	}
-	_, paneSender := routing.PaneHosts[row.From]
 	qualified := strings.Contains(row.To, "@")
 	if !qualified && target.Host == sourceHost {
 		return
 	}
-	if qualified || !paneSender {
-		from = (Identity{Name: row.From, Host: sourceHost}).String()
-	}
+	from := (Identity{Name: row.From, Host: sourceHost}).String()
 
 	client := routing.Clients[target.Host]
 	if client == nil {
