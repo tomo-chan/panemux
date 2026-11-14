@@ -57,6 +57,7 @@ requires all three checks:
    This rejects genuinely remote clients even on a non-loopback listener.
 2. `r.Host` must be a loopback authority. DNS rebinding can produce a genuinely loopback peer
    while retaining the attacker's domain in Host; the Host check rejects that combination.
+   Regression: `TestGetBoardSessionToken_DNSRebindingHost_Forbidden`.
 3. Any `X-Forwarded-For`, `X-Real-IP` or `Forwarded` header rejects the request. A loopback proxy
    otherwise makes relayed requests indistinguishable from direct local connections. This is a
    fail-closed heuristic: a proxy that strips or omits all three headers defeats it.
