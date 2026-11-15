@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.31.0](https://github.com/tomo-chan/panemux/compare/v0.30.0...v0.31.0) (2026-11-15)
+
+
+### Features
+
+* **board:** expose host-qualified identities through API and MCP ([#544](https://github.com/tomo-chan/panemux/issues/544)) ([8f1ed97](https://github.com/tomo-chan/panemux/commit/8f1ed97536c73d0c594f2cd0b468a2c600bdeb4f))
+* **board:** relay host-qualified agmsg identities without panes ([#540](https://github.com/tomo-chan/panemux/issues/540)) ([5a6f44d](https://github.com/tomo-chan/panemux/commit/5a6f44d80f7482c8904943802865b8caaad8861c))
+
+
+### Bug Fixes
+
+* bump pinned agmsg to v1.7.2 ([#535](https://github.com/tomo-chan/panemux/issues/535)) ([cb68e59](https://github.com/tomo-chan/panemux/commit/cb68e59afae332a9196021ca8bc68a812d08d619))
+* bump pinned agmsg to v1.7.3 ([#545](https://github.com/tomo-chan/panemux/issues/545)) ([9e4f519](https://github.com/tomo-chan/panemux/commit/9e4f519801c2e916508901999e3ad689a8fe4ed6))
+
 ## [0.30.0](https://github.com/tomo-chan/panemux/compare/v0.29.0...v0.30.0) (2026-11-08)
 
 
