@@ -28,6 +28,9 @@ Tests must protect these contracts rather than mirror implementation structure.
   Bare pane-ID destinations retain routing while pane senders are qualified too. Replies to the
   received sender reach the original host. Delayed copies enter neither history, state nor
   forwarding after source-pane removal, pane movement or relay restart with saved cursors.
+- SSH key matrices cover ASCII, `._-`, `+`, Unicode and mixed keys for pane sends and replies.
+  Whitespace, `@` and control characters exclude both source and destination routing with
+  a warning at startup or live addition, without failing configuration loading.
 - The own-send ledger preserves duplicate occurrences, expires entries, and removes failed sends.
 - Broadcast validates all recipients before delivery and reports any partial delivery after a
   downstream failure.

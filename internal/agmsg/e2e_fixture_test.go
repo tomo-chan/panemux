@@ -154,3 +154,41 @@ func TestRelayNULBodyRejectionIsRecorded(t *testing.T) {
 	require.Equal(t, "local", rows[0].Row.Host)
 	require.Equal(t, 1, calls, "destination is read but must never receive a send")
 }
+
+func TestPaneRelaySSHKeySendAndReply(t *testing.T) {
+	for _, key := range []string{"build1", "build.1_x-y", "build+1", "開発機", "開発+1_x-y.dev", "de\u0301v"} {
+		t.Run(key, func(t *testing.T) {
+			_, localRoot := e2eFixtureClient(t)
+			_, remoteRoot := e2eFixtureClient(t)
+			pool := hostexec.New(hostexec.Options{})
+			t.Cleanup(pool.Close)
+			runner := host.Bind(pool, host.Local)
+			local := agmsg.NewRemoteAgmsgClient("local", localRoot, runner)
+			remoteID := host.Host(key).BoardID()
+			remote := agmsg.NewRemoteAgmsgClient(remoteID, remoteRoot, runner)
+			cache := board.NewBoardCache()
+			relay := board.NewRelay(cache, board.RelayConfig{Team: "panemux-e2e", Limit: 100, BackfillLimit: 1000,
+				Clients:   map[string]board.MessageClient{"local": local, remoteID: remote},
+				PaneHosts: map[string]string{"pane-a": "local", "pane-b": remoteID}})
+			ctx := context.Background()
+			require.NoError(t, local.Send(ctx, "panemux-e2e", "pane-a", "pane-b", "request"))
+			require.NoError(t, relay.Poll(ctx))
+			received, err := remote.Since(ctx, "panemux-e2e", "", 100)
+			require.NoError(t, err)
+			require.Len(t, received, 1)
+			require.Equal(t, "pane-a@local", received[0].From)
+			require.Equal(t, "pane-b", received[0].To)
+			require.Equal(t, "request", received[0].Body)
+			require.NoError(t, remote.Send(ctx, "panemux-e2e", "pane-b", received[0].From, "reply"))
+			require.NoError(t, relay.Poll(ctx))
+			returned, err := local.Since(ctx, "panemux-e2e", "", 100)
+			require.NoError(t, err)
+			require.Len(t, returned, 2, "the remote reply must be delivered, not dropped by sender validation")
+			require.Equal(t, "pane-b@"+remoteID, returned[1].From)
+			require.Equal(t, "pane-a", returned[1].To)
+			require.Equal(t, "reply", returned[1].Body)
+			require.NoError(t, relay.Poll(ctx))
+			require.Len(t, cache.MessagesSince(0), 2)
+		})
+	}
+}

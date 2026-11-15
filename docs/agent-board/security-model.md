@@ -28,7 +28,8 @@ remains available to the other board. Terminal pane connections are separate.
 
 - No caller-controlled argument may reach a remote shell unescaped, including read arguments.
 - `team` keeps the strict identifier allowlist; `from`/`to` additionally accept structurally
-  checked `name@local` and `name@ssh:key` addresses. Names and keys use `[A-Za-z0-9_.-]+`;
+  checked `name@local` and `name@ssh:key` addresses. Names keep `[A-Za-z0-9_.-]+`;
+  keys allow Unicode letters, marks and numbers plus `._-+`, without normalization;
   qualified `_system` and malformed addresses are rejected.
 - NUL-containing bodies are rejected before host discovery or send execution. Supported
   message bodies are base64-encoded, checked against the encoded alphabet, passed as a
@@ -92,7 +93,9 @@ Top-level enablement authorizes detection, display, and relay polling. Board nev
 or asks agents to join, claim an identity, or install project-local delivery hooks. Delivery mode is
 ignored. Existing agmsg registrations and hook files remain untouched after disablement.
 Sender validation accepts host-local unqualified names independently of pane detection or
-roster membership. Consent covers the local host and all configured SSH keys in one team.
+roster membership. Consent covers the local host and configured SSH keys in one team. Keys outside the
+Board address alphabet are excluded from polling and forwarding with a startup/live-routing
+warning; they do not make configuration loading fail.
 The same-host, same-user trust boundary is unchanged. Visibility in the dashboard
 grants no authority.
 

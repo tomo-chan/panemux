@@ -676,3 +676,32 @@ func TestAgmsgContract_OptionLikeBodiesRoundTrip(t *testing.T) {
 		assert.Equal(t, "impl@ssh:build", row.To)
 	}
 }
+
+func TestAgmsgContract_SSHKeyCharactersSendAndHistory(t *testing.T) {
+	root := contractInstall(t)
+	scripts := filepath.Join(root, "scripts")
+	runScript(t, scripts, "join.sh", "contract", "pane-a", "claude-code", t.TempDir(), "--force")
+	pool := hostexec.New(hostexec.Options{})
+	t.Cleanup(pool.Close)
+	client := agmsg.NewRemoteAgmsgClient("local", root, host.Bind(pool, host.Local))
+	for _, key := range []string{"build1", "build.1_x-y", "build+1", "開発機", "開発+1_x-y.dev", "de\u0301v"} {
+		t.Run(key, func(t *testing.T) {
+			remote := "pane-b@ssh:" + key
+			// Establish the public script's transport capability independently of panemux.
+			runScript(t, scripts, "send.sh", "contract", remote, "pane-a@local", "public request", "--force")
+			runScript(t, scripts, "send.sh", "contract", "pane-a@local", remote, "public reply", "--force")
+			history := runScript(t, scripts, "history.sh", "contract", remote, "100")
+			require.Contains(t, history, remote)
+			require.Contains(t, history, "public request")
+			require.Contains(t, history, "public reply")
+			t.Logf("public send/history preserve key %q in both directions", key)
+			require.NoError(t, client.Send(contractCtx(t), "contract", remote, "pane-a@local", "client request"))
+			require.NoError(t, client.Send(contractCtx(t), "contract", "pane-a@local", remote, "client reply"))
+			rows, err := client.Since(contractCtx(t), "contract", "", 100)
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, len(rows), 4)
+			require.Equal(t, remote, rows[len(rows)-2].From)
+			require.Equal(t, remote, rows[len(rows)-1].To)
+		})
+	}
+}

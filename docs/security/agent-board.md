@@ -22,8 +22,9 @@ Remote commands must satisfy all of these rules:
 - pass every value as an argument and quote every argument at the single SSH command-construction
   boundary;
 - keep `team` on `[A-Za-z0-9_.-]+`; validate `from` and `to` structurally as a name
-  on that alphabet, optionally followed by `@local` or `@ssh:<key>` with the same
-  key alphabet; reject qualified `_system`, extra separators and shell syntax;
+  on that alphabet, optionally followed by `@local` or `@ssh:<key>`; keys allow only
+  Unicode letters, marks and numbers plus `._-+` and retain their exact spelling; reject
+  qualified `_system`, whitespace, control characters, extra separators and shell syntax;
 - reject NUL-containing message bodies before host discovery or send execution, rather than
   silently changing bytes that participate in own-send ledger hashes;
 - base64-encode supported message bodies, validate the encoded alphabet, and decode through a fixed
@@ -71,10 +72,13 @@ security sink and requires dedicated validation.
 ### Global enablement and sender scope
 
 `agent_board.enabled` is instance-wide consent to relay for the configured team on the
-local host and all configured SSH keys, without requiring panes, detected tasks, or roster
+local host and configured SSH keys with supported BoardIDs, without requiring panes, detected tasks, or roster
 registration. A source host's valid unqualified names are accepted; every qualified `from`
 and every pane ID belonging to another host is rejected. `_system` requires the unchanged
 own-send ledger. Qualified recipients require a configured BoardID, not a pane or roster entry.
+Unsupported hand-written SSH keys are excluded from both source polling and destination
+routing, with a reason-bearing warning at startup and on live additions. They must not
+prevent configuration loading or change terminal availability.
 
 Every forwarded sender is qualified using the actual read host, including a configured pane
 sender addressing another pane by its bare ID. The pane-ID route remains available; replies

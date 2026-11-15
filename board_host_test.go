@@ -424,3 +424,70 @@ func TestBootstrapSkipsHostRemovedBetweenParticipationSnapshots(t *testing.T) {
 	require.Empty(t, sess.writes)
 	require.False(t, cache.ParticipationSnapshot()["agent"].Instructed)
 }
+
+func TestBoardRoutingSSHKeyEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		key     string
+		allowed bool
+	}{
+		{"build1", true}, {"build.1_x-y", true}, {"build+1", true}, {"開発機", true},
+		{"開発+1_x-y.dev", true}, {"my server", false}, {"build@1", false}, {"build\t1", false},
+		{"build:1", false}, {"", false},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			logs := captureBootstrapLog(t)
+			cfg := boardEnabledConfig(paneConfig("pane-a"), &config.PaneConfig{ID: "pane-b", Type: "ssh", Connection: tc.key})
+			cfg.SSHConnections = map[string]config.SSHConnection{tc.key: {Host: "example.invalid"}}
+			pool := hostexec.New(hostexec.Options{})
+			t.Cleanup(pool.Close)
+			routing := newBoardRouting(func(visit func(*config.Config)) { visit(cfg) }, pool, nil)
+			first := routing()
+			_ = routing()
+			id := "ssh:" + tc.key
+			if tc.allowed {
+				require.Contains(t, first.Clients, id, "the source host can relay replies")
+				require.Equal(t, id, first.PaneHosts["pane-b"], "pane-ID sends route to this host")
+				require.Empty(t, logs.String())
+			} else {
+				require.NotContains(t, first.Clients, id, "excluded hosts are never polled for replies")
+				require.NotContains(t, first.PaneHosts, "pane-b", "pane-ID sends cannot target an excluded host")
+				require.Contains(t, logs.String(), "unsupported BoardID")
+				require.Equal(t, 1, strings.Count(logs.String(), "unsupported BoardID"), "warn once, not on every poll")
+			}
+		})
+	}
+}
+
+func TestSetupBoardWarnsUnsupportedHostWithoutPane(t *testing.T) {
+	isolatedHome(t)
+	logs := captureBootstrapLog(t)
+	cfg := boardEnabledConfig(paneConfig("pane-a"))
+	cfg.SSHConnections = map[string]config.SSHConnection{"my server": {Host: "example.invalid"}}
+	pool := hostexec.New(hostexec.Options{})
+	t.Cleanup(pool.Close)
+	_, relay, _ := setupBoard(cfg, session.NewManager(), pool, nil)
+	require.Contains(t, logs.String(), "my server")
+	require.Contains(t, logs.String(), "unsupported BoardID")
+	require.True(t, relay.HasClients())
+	require.Equal(t, 1, strings.Count(logs.String(), "unsupported BoardID"))
+}
+
+func TestBoardRoutingWarnsUnsupportedHostAddedAfterStartup(t *testing.T) {
+	logs := captureBootstrapLog(t)
+	cfg := boardEnabledConfig(paneConfig("pane-a"))
+	cfg.SSHConnections = map[string]config.SSHConnection{}
+	pool := hostexec.New(hostexec.Options{})
+	t.Cleanup(pool.Close)
+	routing := newBoardRouting(func(visit func(*config.Config)) { visit(cfg) }, pool, nil)
+	_ = routing()
+	require.Empty(t, logs.String())
+	cfg.SSHConnections["my server"] = config.SSHConnection{Host: "example.invalid"}
+	_ = routing()
+	_ = routing()
+	require.Equal(t, 1, strings.Count(logs.String(), "unsupported BoardID"))
+	delete(cfg.SSHConnections, "my server")
+	_ = routing()
+	cfg.SSHConnections["my server"] = config.SSHConnection{Host: "example.invalid"}
+	_ = routing()
+	require.Equal(t, 2, strings.Count(logs.String(), "unsupported BoardID"), "a re-added invalid key is a new exclusion")
+}

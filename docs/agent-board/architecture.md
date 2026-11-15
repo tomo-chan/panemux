@@ -41,6 +41,8 @@ flowchart TB
 
 Panemux runs on one host. Both boards address that host and the `ssh_connections` keys through
 the same execution port and per-host command connection, even without a pane on that host.
+Board polling and forwarding exclude SSH keys outside the
+[supported BoardID alphabet](relay.md#addresses-and-forwarding), with a startup/live warning.
 Pane sessions keep separate connections. Panemux never installs or runs itself remotely. The command center uses
 the same authenticated API as the browser, through a narrow MCP server, and never calls agmsg
 directly.
