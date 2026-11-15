@@ -37,7 +37,7 @@ type boardStatusResponse struct {
 // No MessageClient call happens on this request — the relay is what keeps
 // the cache current (see docs/agent-board.md's Architecture section).
 func (h *Handler) GetBoardStatus(w http.ResponseWriter, r *http.Request) {
-	snapshot := h.boardCache.StatusSnapshot()
+	snapshot := h.boardCache.PaneStatusSnapshot()
 	resp := boardStatusResponse{
 		Statuses:      make(map[string]boardStatusEntry, len(snapshot)),
 		Participation: h.boardCache.ParticipationSnapshot(),

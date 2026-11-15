@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -498,21 +499,20 @@ func responseError(t *testing.T, rec *httptest.ResponseRecorder) string {
 	return body[responseErrorKey]
 }
 
-// A name written by hand in config.yaml can carry characters the new-entry
-// rule refuses; the dialog sends it URL-escaped, and the routes still find it.
+// Supported non-ASCII and plus keys are URL-escaped by the dialog; routes
+// must preserve the exact key for edits and deletes.
 func TestConfigSSHConnectionRoutes_FindEscapedNames(t *testing.T) {
 	for _, tt := range []struct{ name, escaped string }{
-		{"deploy@prod", "deploy%40prod"},
-		{"h:22", "h%3A22"},
-		{"a/b", "a%2Fb"},
-		{"a b", "a%20b"},
+		{"build+1", "build%2B1"},
+		{"開発機", url.PathEscape("開発機")},
+		{"de\u0301v", url.PathEscape("de\u0301v")},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newSSHConnectionsEnv(t, fromSSHConfigBlock)
-			e.cfg.SSHConnections = map[string]config.SSHConnection{
-				"used":  {Host: "used.invalid"}, // one-ssh's connection, so the config reloads
-				tt.name: {Host: "x.invalid"},
-			}
+			body, err := json.Marshal(map[string]string{"name": tt.name, "host": "x.invalid"})
+			require.NoError(t, err)
+			created := e.do(t, http.MethodPost, sshConnectionsPath, string(body))
+			require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 
 			rec := e.do(t, http.MethodPut, sshConnectionsPath+"/"+tt.escaped, `{"host":"y.invalid"}`)
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -653,4 +653,48 @@ func TestDeleteConfigSSHConnection_IgnoresALocalPanesConnection(t *testing.T) {
 
 	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 	assert.NotContains(t, e.cfg.SSHConnections, "used")
+}
+
+func TestConfigSSHConnectionKeyRuleAtWriteBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		key   string
+		valid bool
+	}{{"build1", true}, {"build.1_x-y", true}, {"build+1", true}, {"開発機", true}, {"de\u0301v", true},
+		{"my server", false}, {"build@1", false}, {"build\t1", false}, {"build:1", false}, {"build/1", false}} {
+		key := tc.key
+		for _, method := range []string{http.MethodPost, http.MethodPut} {
+			t.Run(method+"/"+key, func(t *testing.T) {
+				e := newSSHConnectionsEnv(t, fromSSHConfigBlock)
+				before, err := os.ReadFile(e.path)
+				require.NoError(t, err)
+				path := sshConnectionsPath
+				if method == http.MethodPut {
+					if tc.valid {
+						e.cfg.SSHConnections[key] = config.SSHConnection{Host: "before.invalid"}
+					}
+					// Invalid path keys must fail validation even though no loaded entry can have them.
+					path += "/" + url.PathEscape(key)
+				}
+				body, err := json.Marshal(map[string]string{"name": key, "host": "after.invalid"})
+				require.NoError(t, err)
+				rec := e.do(t, method, path, string(body))
+				if tc.valid {
+					expected := http.StatusCreated
+					if method == http.MethodPut {
+						expected = http.StatusOK
+					}
+					require.Equal(t, expected, rec.Code, rec.Body.String())
+					require.Equal(t, key, decodeSSHConnectionEntry(t, rec).Name)
+					require.Equal(t, "after.invalid", e.reload(t)[key].Host)
+				} else {
+					require.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
+					require.Contains(t, responseError(t, rec), fmt.Sprintf("%q", key))
+					require.Contains(t, responseError(t, rec), "Unicode")
+					after, err := os.ReadFile(e.path)
+					require.NoError(t, err)
+					require.Equal(t, before, after, "rejection must not persist an invalid key")
+				}
+			})
+		}
+	}
 }

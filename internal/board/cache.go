@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -77,8 +78,8 @@ func newCacheEpoch() string {
 	return hex.EncodeToString(buf[:])
 }
 
-// RecordStatus stores s as paneID's latest self-reported status, overwriting
-// any previous status for that pane. UpdatedAt is set here, not by the
+// RecordStatus stores s under its host-qualified identity, overwriting
+// any previous status for that identity. UpdatedAt is set here, not by the
 // caller, to when the write actually happened.
 func (c *BoardCache) RecordStatus(paneID string, s Status) {
 	c.mu.Lock()
@@ -107,13 +108,34 @@ func (c *BoardCache) AppendMessage(r Row) {
 	}
 }
 
-// StatusSnapshot returns a copy of the current pane-ID -> Status map.
+// StatusSnapshot returns a copy of the host-qualified identity -> Status map.
 func (c *BoardCache) StatusSnapshot() map[string]Status {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	out := make(map[string]Status, len(c.status))
 	for k, v := range c.status {
 		out[k] = v
+	}
+	return out
+}
+
+// PaneStatusSnapshot projects host-qualified reports onto configured panes for
+// the existing API. Pane-free identities remain internal until the API migration.
+func (c *BoardCache) PaneStatusSnapshot() map[string]Status {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.paneStatusesLocked()
+}
+
+func (c *BoardCache) paneStatusesLocked() map[string]Status {
+	out := make(map[string]Status)
+	for key, status := range c.status {
+		name, host, qualified := strings.Cut(key, "@")
+		if !qualified {
+			out[key] = status
+		} else if pane, ok := c.participation[name]; ok && pane.Host == host {
+			out[name] = status
+		}
 	}
 	return out
 }

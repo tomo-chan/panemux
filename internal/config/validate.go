@@ -55,6 +55,12 @@ func (c *Data) validate(sshConfigPath string) error {
 	errs = append(errs, validateDisplay(c.Display)...)
 	errs = append(errs, validateTaskDashboard(c.TaskDashboard)...)
 
+	for _, name := range slices.Sorted(maps.Keys(c.SSHConnections)) {
+		if err := ValidateSSHConnectionName(name); err != nil {
+			errs = append(errs, "ssh_connections: "+err.Error())
+		}
+	}
+
 	// A copy, not c.SSHConnections itself: the ~/.ssh/config hosts added
 	// below count as defined connections for panes only. Adding them to the
 	// config's own map would make each one a task dashboard host and write

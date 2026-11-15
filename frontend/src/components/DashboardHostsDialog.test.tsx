@@ -128,7 +128,6 @@ describe('DashboardHostsDialog', () => {
 
   it.each([
     [{ Name: '' }, 'Enter a name.'],
-    [{ Name: 'a b', Host: 'h' }, 'A name can contain only letters'],
     [{ Name: 'x' }, 'Enter a host. ~/.ssh/config has no Host block named "x"'],
     [{ Name: 'x', Host: 'h', 'Port (optional)': '0' }, 'Port must be a whole number from 1 to 65535.'],
     [{ Name: 'x', Host: 'h', 'Port (optional)': '22.5' }, 'Port must be a whole number from 1 to 65535.'],
@@ -144,6 +143,25 @@ describe('DashboardHostsDialog', () => {
 
     expect(state.create).not.toHaveBeenCalled()
     expect(screen.getByRole('alert').textContent).toContain(message)
+  })
+
+  it.each(['build+1', '開発機', 'de\u0301v'])('delegates the accepted key %s to the server', async (name) => {
+    const { state } = renderDialog()
+    await click('Add host')
+    fill({ Name: name, Host: 'host.invalid' })
+    await click('Save host')
+    expect(state.create).toHaveBeenCalledWith({ name, host: 'host.invalid' })
+  })
+
+  it('shows the authoritative key validation error from the server', async () => {
+    const reason = 'key "my server": use Unicode letters, combining marks, numbers and ._-+'
+    const state = makeState({ create: vi.fn().mockResolvedValue(reason) })
+    renderDialog(state)
+    await click('Add host')
+    fill({ Name: 'my server', Host: 'host.invalid' })
+    await click('Save host')
+    expect(state.create).toHaveBeenCalledWith({ name: 'my server', host: 'host.invalid' })
+    expect(screen.getByRole('alert').textContent).toContain(reason)
   })
 
   it('shows the server refusal and keeps the form', async () => {

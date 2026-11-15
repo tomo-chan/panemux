@@ -316,7 +316,7 @@ has a `Host` block of the same name, whose values fill in the fields the entry l
 - `POST /api/config/ssh-connections` — adds an entry. Body: `name` and any of `host`, `user`, `port`,
   `key_file`, `known_hosts_file`, `password`. `201` with the entry; `400` for invalid JSON or an
   unknown field; `409` when the name is already an entry; `422` for a missing or malformed name
-  (`^[a-zA-Z0-9_.\-]+$`), `clear_password`, or a field error (below).
+  (the [connection-key rule](ssh.md#defining-connections-in-ssh_connections)), `clear_password`, or a field error (below).
 - `PUT /api/config/ssh-connections/{name}` — replaces the entry's fields with the body's: a field
   left out is removed. The password is the exception: an empty or absent `password` keeps the saved
   one, a non-empty one replaces it, and `clear_password: true` removes it. `name` in the body, if
@@ -329,8 +329,8 @@ has a `Host` block of the same name, whose values fill in the fields the entry l
   covers a pane that uses the entry by name with no `~/.ssh/config` `Host` block of that name to fall
   back to, and a pane or host whose `~/.ssh/config` `ProxyJump` goes through the entry.
 
-`{name}` is URL-escaped, so an entry written by hand in `config.yaml` with a character such as `@`,
-`:` or `/` in its name can be edited and deleted.
+`{name}` is URL-escaped, preserving Unicode and plus signs. Creation and editing validate
+keys with the same rule as configuration loading; disallowed keys cannot be loaded or written.
 
 Field errors (`422`): `port` outside 1–65535 (0 or absent means unset); a control character in
 `host`, `user`, `key_file` or `known_hosts_file`; a `key_file` or `known_hosts_file` that is neither

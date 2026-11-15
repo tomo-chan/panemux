@@ -12,9 +12,10 @@ optional conversational command center. This guide summarizes the current design
 
 ## What it does
 
-- Globally enabled agent panes report status through an agmsg instance.
+- Globally enabled host-local agmsg names report status and exchange cross-host messages,
+  independently of panes.
 - Panemux aggregates reports and bounded message history across connected hosts.
-- Panes exchange messages through agmsg, without PTY injection.
+- Names use `name@BoardID` for cross-host sends and replies through agmsg, without PTY injection.
 - The browser provides a read-only dashboard.
 - An optional headless Claude command center reads the board and broadcasts through three scoped
   MCP tools.

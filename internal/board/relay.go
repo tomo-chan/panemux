@@ -197,8 +197,12 @@ func (r *Relay) pollHost(ctx context.Context, host string, limit int) (bool, err
 	routing := r.routing()
 	leased := map[string]MessageClient{host: client}
 	for _, row := range rows {
-		dest := routing.PaneHosts[row.To]
-		if row.To == SystemID || dest == host || leased[dest] != nil || routing.Clients[dest] == nil {
+		target, ok := resolveRecipient(row.To, routing)
+		dest := target.Host
+		if !ok || row.From == SystemID || !r.senderEligibleUsing(host, row, routing) ||
+			dest == "" || (dest == host && !strings.Contains(row.To, "@")) ||
+			leased[dest] != nil || routing.Clients[dest] == nil {
+
 			continue
 		}
 		c, done, err := leaseMessages(routing.Clients[dest])
@@ -235,72 +239,94 @@ func lastRowID(rows []Row, prev string) string {
 	return rows[len(rows)-1].ID
 }
 
-// processRow applies the row-processing algorithm documented in
-// docs/agent-board.md's Cross-host relay section:
-//  1. from-validation fails -> drop+log, never cached.
-//  2. to == SystemID -> always appended to history; a board_status body also
-//     updates the status cache; never relayed further (status stays local).
-//  3. to doesn't resolve to a known pane -> drop+log, never cached (same as
-//     an invalid from).
-//  4. to resolves to a known pane -> appended to history; relayed via
-//     MessageClient.Send only when the destination host
-//     differs from sourceHost.
-//
-// A row this method relays to another host keeps its original From (the
-// real pane ID, not SystemID). When that host is polled next, from-
-// validation for that row is evaluated against *that host's* own known
-// panes — the original pane is not local there, so the row is correctly
-// dropped rather than re-appended to history a second time. This is
-// intentional, not a bug: see the relay design notes in the project's
-// implementation plan.
+// processRow records accepted originals at their source host. Qualified senders
+// are copies (or forgeries), so they never enter history, status or relay again.
 func (r *Relay) processRow(ctx context.Context, sourceHost string, row Row) {
 	r.processRowUsing(ctx, sourceHost, row, r.routing())
 }
 
 func (r *Relay) processRowUsing(ctx context.Context, sourceHost string, row Row, routing Routing) {
-	if !r.validFrom(sourceHost, row) {
-		log.Printf("agent board relay: dropping row from host %q: invalid from %q", sourceHost, row.From)
+	target, ok := resolveRecipient(row.To, routing)
+	if !ok || !r.validFromUsing(sourceHost, row, routing) {
+		log.Printf("agent board relay: dropping invalid row from host %q: from %q to %q", sourceHost, row.From, row.To)
 		return
 	}
 
+	row.Host = sourceHost
+	r.cache.AppendMessage(row)
 	if row.To == SystemID {
-		r.cache.AppendMessage(row)
 		if status, ok := IsStatusRow(row); ok {
-			r.cache.RecordStatus(row.From, status)
+			r.cache.RecordStatus((Identity{Name: row.From, Host: sourceHost}).String(), status)
 		}
 		return
 	}
-
-	destHost, ok := routing.PaneHosts[row.To]
-	if !ok {
-		log.Printf("agent board relay: dropping row from host %q: unknown to %q", sourceHost, row.To)
+	if row.From == SystemID {
+		// A ledger match is an already delivered Broadcast, not a relay request.
 		return
 	}
 
-	r.cache.AppendMessage(row)
-
-	if destHost == sourceHost {
+	if target.Host == "" {
+		// Ordinary unqualified names are local to agmsg; never search other hosts.
 		return
 	}
+	qualified := strings.Contains(row.To, "@")
+	if !qualified && target.Host == sourceHost {
+		return
+	}
+	from := (Identity{Name: row.From, Host: sourceHost}).String()
 
-	client, ok := routing.Clients[destHost]
-	if !ok {
-		log.Printf("agent board relay: no client for host %q while relaying to pane %q", destHost, row.To)
+	client := routing.Clients[target.Host]
+	if client == nil {
+		log.Printf("agent board relay: no client for host %q while relaying to pane %q", target.Host, row.To)
 		return
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, r.opTimeout)
 	defer cancel()
-	if err := client.Send(sendCtx, row.Team, row.From, row.To, row.Body); err != nil {
-		log.Printf("agent board relay: relaying to host %q failed: %v", destHost, err)
+	if err := client.Send(sendCtx, row.Team, from, target.Name, row.Body); err != nil {
+		log.Printf("agent board relay: relaying to host %q failed: %v", target.Host, err)
 	}
 }
 
+// resolveRecipient preserves unqualified pane routing for compatibility. A
+// qualified address needs only a configured host, never a pane or roster entry.
+func resolveRecipient(raw string, routing Routing) (Identity, bool) {
+	id, err := ParseIdentity(raw)
+	if err != nil {
+		return Identity{}, false
+	}
+	if id.Host != "" {
+		return id, routing.Clients[id.Host] != nil
+	}
+	id.Host = routing.PaneHosts[id.Name]
+	return id, true
+}
+
 func (r *Relay) validFrom(sourceHost string, row Row) bool {
+	return r.validFromUsing(sourceHost, row, r.routing())
+}
+
+func (r *Relay) validFromUsing(sourceHost string, row Row, routing Routing) bool {
+	if !r.senderEligibleUsing(sourceHost, row, routing) {
+		return false
+	}
 	if row.From == SystemID {
 		return r.ledger.Consume(sourceHost, row.Team, row.To, row.Body)
 	}
-	owner, ok := r.routing().PaneHosts[row.From]
-	return ok && owner == sourceHost
+	return true
+}
+
+// senderEligibleUsing is side-effect free so lease admission cannot consume a
+// system send's ledger entry before the batch is admitted.
+func (r *Relay) senderEligibleUsing(sourceHost string, row Row, routing Routing) bool {
+	id, err := ParseIdentity(row.From)
+	if row.Team != r.team || err != nil || id.Host != "" {
+		return false
+	}
+	if row.From == SystemID {
+		return true
+	}
+	owner, known := routing.PaneHosts[row.From]
+	return !known || owner == sourceHost
 }
 
 // Run polls every interval until ctx is canceled, running one immediate
@@ -341,16 +367,16 @@ func (r *Relay) pollLogged(ctx context.Context) {
 	}
 }
 
-// UnknownPaneError is returned by Broadcast when one or more `to` pane IDs
-// don't resolve to a known board-enabled pane.
+// UnknownPaneError retains the existing API error type for unresolved recipients,
+// including malformed qualified addresses or unknown Board hosts.
 type UnknownPaneError struct{ IDs []string }
 
 func (e *UnknownPaneError) Error() string {
 	return "agent board: unknown pane id(s): " + strings.Join(e.IDs, ", ")
 }
 
-// Broadcast sends body from `from` to every pane ID in `to`. All `to` IDs
-// are validated against known board-enabled panes before any Send is
+// Broadcast sends body from `from` to qualified identities or legacy pane IDs.
+// All recipients are resolved before any Send is
 // issued (all-or-nothing): an unknown pane returns *UnknownPaneError naming
 // every unresolved ID, and no Send happens at all. When from == SystemID,
 // an own-send-ledger entry is recorded for each target immediately before
@@ -366,15 +392,15 @@ func (e *UnknownPaneError) Error() string {
 // oversight).
 func (r *Relay) Broadcast(ctx context.Context, from string, to []string, body string) ([]string, error) {
 	routing := r.routing()
-	hosts := make(map[string]string, len(to))
+	targets := make(map[string]Identity, len(to))
 	var unknown []string
 	for _, pane := range to {
-		host, ok := routing.PaneHosts[pane]
-		if !ok {
+		target, ok := resolveRecipient(pane, routing)
+		if !ok || target.Host == "" {
 			unknown = append(unknown, pane)
 			continue
 		}
-		hosts[pane] = host
+		targets[pane] = target
 	}
 	if len(unknown) > 0 {
 		return nil, &UnknownPaneError{IDs: unknown}
@@ -382,7 +408,8 @@ func (r *Relay) Broadcast(ctx context.Context, from string, to []string, body st
 
 	delivered := make([]string, 0, len(to))
 	for _, pane := range to {
-		host := hosts[pane]
+		target := targets[pane]
+		host := target.Host
 		client, ok := routing.Clients[host]
 		if !ok {
 			return delivered, fmt.Errorf("agent board: no client for host %q (pane %q)", host, pane)
@@ -392,13 +419,13 @@ func (r *Relay) Broadcast(ctx context.Context, from string, to []string, body st
 			return delivered, err
 		}
 		if from == SystemID {
-			r.ledger.Record(host, r.team, pane, body)
+			r.ledger.Record(host, r.team, target.Name, body)
 		}
-		err = client.Send(ctx, r.team, from, pane, body)
+		err = client.Send(ctx, r.team, from, target.Name, body)
 		release()
 		if err != nil {
 			if from == SystemID {
-				r.ledger.Forget(host, r.team, pane, body)
+				r.ledger.Forget(host, r.team, target.Name, body)
 			}
 			return delivered, fmt.Errorf("agent board: broadcast to %q failed: %w", pane, err)
 		}

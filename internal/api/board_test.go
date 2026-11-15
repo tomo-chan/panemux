@@ -291,6 +291,25 @@ func TestGetBoardStatus_PopulatedCache_ReturnsEntries(t *testing.T) {
 	assert.Equal(t, "feature/x", resp.Statuses["pane-a"].Branch)
 }
 
+func TestGetBoardStatus_HostScopedReportsPreservePaneContract(t *testing.T) {
+	cache := board.NewBoardCache()
+	cache.SyncParticipation(map[string]string{"pane-a": "local"})
+	cache.RecordStatus("pane-a@local", board.Status{State: "working"})
+	cache.RecordStatus("pane-a@ssh:build", board.Status{State: "wrong-host"})
+	cache.RecordStatus("worker@local", board.Status{State: "hidden-until-S3b"})
+	r := setupRouterWithHandler(setupBoardRouter(cache, nil))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/board/status", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp boardStatusResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Statuses, 1)
+	assert.Equal(t, "working", resp.Statuses["pane-a"].State)
+	require.Len(t, resp.Participation, 1)
+	assert.Equal(t, "local", resp.Participation["pane-a"].Host)
+	assert.NotNil(t, resp.Participation["pane-a"].LastReport)
+}
+
 func TestGetBoardMessages_EmptyCache_ReturnsEmptyArray(t *testing.T) {
 	h := setupBoardRouter(board.NewBoardCache(), nil)
 	r := setupRouterWithHandler(h)

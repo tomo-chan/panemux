@@ -5,6 +5,7 @@
 # on:
 #
 #   send.sh <team> <from> <to> <body> [--force]
+#   send.sh <team> <from> <to> --body - [--force]
 #
 # It appends one message_sent JSONL record to the same store api.sh reads.
 # IDs come from a counter file seeded with the install-time epoch second, so
@@ -17,7 +18,19 @@ set -eu
 team="$1"
 from="$2"
 to="$3"
-body="$4"
+shift 3
+case "${1:-}" in
+    --body)
+        [ "$#" -eq 2 ] || { [ "$#" -eq 3 ] && [ "$3" = --force ]; } || exit 2
+        [ "$2" = - ] || exit 2
+        body="$(cat)"
+        ;;
+    --*) exit 2 ;;
+    *)
+        [ "$#" -eq 1 ] || { [ "$#" -eq 2 ] && [ "$2" = --force ]; } || exit 2
+        body="$1"
+        ;;
+esac
 
 STORE_DIR="$(dirname "$0")/.."
 STORE="$STORE_DIR/messages.jsonl"

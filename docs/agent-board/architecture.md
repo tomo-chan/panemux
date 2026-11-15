@@ -41,6 +41,9 @@ flowchart TB
 
 Panemux runs on one host. Both boards address that host and the `ssh_connections` keys through
 the same execution port and per-host command connection, even without a pane on that host.
+Configuration loading and API writes enforce the
+[shared connection-key rule](../behavior/ssh.md#defining-connections-in-ssh_connections),
+so every configured host can be represented in a BoardID without a routing exclusion.
 Pane sessions keep separate connections. Panemux never installs or runs itself remotely. The command center uses
 the same authenticated API as the browser, through a narrow MCP server, and never calls agmsg
 directly.
@@ -98,7 +101,7 @@ port; it does not resolve paths or construct participation text.
 |---|---|
 | `internal/board` | messaging and participation ports, relay, cache, cursors, participation snapshots, and own-send ledger |
 | `internal/agmsg` | agmsg adapter: script calls, paths, versions, parsing, availability checks, and agent type mapping |
-| `internal/host` | I/O-free host identity and fixed-script execution port |
+| `internal/host` | I/O-free host identity, shared connection-key validation and fixed-script execution port |
 | `internal/hostexec` | local execution and shared per-host SSH connections, retry and disposal |
 | `internal/session` | terminal sessions, agent detection, and the SSH command transport adapter |
 | `internal/api`, `internal/ws`, `internal/server` | authenticated board REST and WebSocket surfaces |
@@ -115,12 +118,15 @@ history entries.
 
 ### Relay invariants
 
-- A row is accepted only when its sender is a configured pane on the source host, or a
-  ledger-matched panemux send attributed to `_system`.
-- Status rows update the cache and are not forwarded to another host.
-- Same-host messages remain within that host's agmsg installation.
-- Cross-host messages are routed by configured pane ID; unknown senders or recipients are dropped
-  and logged.
+- Valid unqualified names originate at the host read through public `api.sh`, without a pane,
+  roster or task prerequisite. Qualified senders and pane IDs owned by another host are rejected.
+- `_system` senders require the unchanged own-send ledger.
+- Status is stored per host-qualified name in one configured team; the current pane API projects
+  matching pane/host reports without exposing a new identities list.
+- Bare ordinary destinations stay local. Qualified destinations select a configured BoardID and
+  are forwarded with a qualified sender, including when they name the source host.
+- Bare configured pane destinations preserve routing compatibility. Every forwarded sender is
+  qualified, including pane senders, so delayed copies are rejected after pane routing changes.
 - Dashboard sequence numbers are panemux-local and must never be confused with agmsg row IDs.
 
 The own-send ledger is a short-lived multiset. It records each panemux-originated send separately,

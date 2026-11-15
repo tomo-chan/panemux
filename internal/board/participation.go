@@ -26,7 +26,7 @@ func (c *BoardCache) ParticipationSnapshot() map[string]PaneParticipation {
 	for id, state := range c.participation {
 		result[id] = state
 	}
-	for id, status := range c.status {
+	for id, status := range c.paneStatusesLocked() {
 		state := result[id]
 		state.PaneID = id
 		at := status.UpdatedAt

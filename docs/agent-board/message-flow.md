@@ -49,14 +49,16 @@ sequenceDiagram
     AgmsgA-->>Relay: new rows
     Relay->>Cache: record latest status and history
 
-    AgentA->>AgmsgA: message to pane B
+    AgentA->>AgmsgA: message to worker@ssh:build
     Relay->>AgmsgA: bounded poll
     Relay->>AgmsgB: forward validated cross-host row
     AgmsgB-->>AgentB: agmsg delivery
 ```
 
-The relay keeps only the latest status per pane for the status view, while retaining status rows in
-bounded history with an `is_status` marker. The dashboard filters those rows from conversation
+The relay keeps the latest status per `name@BoardID` in the configured team, retaining source
+host/team in bounded history with an `is_status` marker. Equal names on different hosts cannot
+overwrite each other. Unqualified `_system` targets the read host; qualified `_system` is rejected.
+The current status API projects matching reports back to configured pane-ID keys. The dashboard filters those rows from conversation
 history.
 
 Self-reporting is cooperative: stale or missing reports remain visible as stale or missing rather
