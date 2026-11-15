@@ -26,24 +26,39 @@ type boardIdentityEntry struct {
 }
 
 type boardTaskObservation struct {
-	at    *time.Time
-	tasks []tasks.Task
+	at         *time.Time
+	tasks      []tasks.Task
+	generation uint64
+}
+
+// beginBoardTaskCollection orders full and live collection starts with a logical
+// clock. A full collection uses one generation for all of its host results.
+func (h *Handler) beginBoardTaskCollection() uint64 {
+	h.boardTasksMu.Lock()
+	defer h.boardTasksMu.Unlock()
+	h.boardTaskGeneration++
+	return h.boardTaskGeneration
 }
 
 // recordBoardTasks consumes existing collections only; status requests do no I/O.
 // Replacing a host observation also removes tasks no longer observed. A failed or
 // pending collection removes task priority without discarding self-reports.
-func (h *Handler) recordBoardTasks(result tasks.HostResult, list []tasks.Task) {
+// Keep its generation even without tasks so late older results cannot restore it.
+func (h *Handler) recordBoardTasks(generation uint64, result tasks.HostResult, list []tasks.Task) {
 	h.boardTasksMu.Lock()
 	defer h.boardTasksMu.Unlock()
 	if h.boardTasks == nil {
 		h.boardTasks = make(map[string]boardTaskObservation)
 	}
-	if result.Status != tasks.HostOK {
-		delete(h.boardTasks, result.Name)
+	if generation < h.boardTasks[result.Name].generation {
 		return
 	}
-	h.boardTasks[result.Name] = boardTaskObservation{at: result.CollectedAt, tasks: append([]tasks.Task(nil), list...)}
+	observation := boardTaskObservation{generation: generation}
+	if result.Status == tasks.HostOK {
+		observation.at = result.CollectedAt
+		observation.tasks = append([]tasks.Task(nil), list...)
+	}
+	h.boardTasks[result.Name] = observation
 }
 
 func statusEntry(s board.Status) boardStatusEntry {

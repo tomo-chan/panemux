@@ -279,8 +279,9 @@ type taskEventSource struct{ h *Handler }
 func (s taskEventSource) Hosts() []string { return s.h.tasks.Hosts() }
 
 func (s taskEventSource) CollectHostLive(ctx context.Context, name string) (tasks.HostResult, []tasks.Task) {
+	generation := s.h.beginBoardTaskCollection()
 	result, list := s.h.tasks.CollectHostLive(ctx, name)
-	s.h.recordBoardTasks(result, list)
+	s.h.recordBoardTasks(generation, result, list)
 	return result, list
 }
 
@@ -309,6 +310,7 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	if refuseCrossSite(w, r) {
 		return
 	}
+	generation := h.beginBoardTaskCollection()
 	snapshot := h.tasks.Collect(r.Context())
 	for _, result := range snapshot.Hosts {
 		var list []tasks.Task
@@ -317,7 +319,7 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 				list = append(list, task)
 			}
 		}
-		h.recordBoardTasks(result, list)
+		h.recordBoardTasks(generation, result, list)
 	}
 	h.pendingTaskLabels.Apply(snapshot, h.addTaskLabels)
 

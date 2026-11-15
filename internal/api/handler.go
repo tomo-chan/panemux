@@ -51,6 +51,7 @@ type Handler struct {
 	boardCache             *board.BoardCache
 	boardTasks             map[string]boardTaskObservation
 	boardTasksMu           sync.RWMutex
+	boardTaskGeneration    uint64
 	gitInfoCacheBySession  map[string]gitInfoCacheEntry
 	tasks                  *tasks.Service
 	execution              *hostexec.Pool

@@ -124,8 +124,13 @@ fall back to self-report or unreported, as does a failed or pending latest host 
 
 Task observations come only from existing `/api/tasks` and task-event collections. Without
 such a collection there is no task priority. Successful collections replace that host’s
-observations; status reads do not refresh them. `task_observed_at` shows their age, and there
-is no added polling or expiry timer. Panes without observations or detected agents are omitted.
+observations; status reads do not refresh them. Full and live collections receive a monotonic
+in-process generation when collection starts (one generation for a full multi-host collection).
+Each host retains its newest applied generation, including failed or pending results with no tasks.
+Older results, whether successful or failed, are ignored, so a slow host cannot let an older
+full collection restore local task priority after a newer live failure. Wall-clock timestamps
+are display metadata and do not determine this ordering. `task_observed_at` shows observation age.
+There is no added polling or expiry timer. Panes without observations or detected agents are omitted.
 
 For example, `worker@local` and `worker@ssh:build` are independent entries, both with
 `pane_id: null` unless a configured pane named `worker` exists on that same host. Neither

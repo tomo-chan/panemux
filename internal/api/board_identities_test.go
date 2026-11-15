@@ -78,7 +78,7 @@ func TestBoardIdentitiesTaskPriorityAndFallback(t *testing.T) {
 		Location: tasks.Location{Kind: tasks.LocationOutside,
 			PaneID: "pane-a"}}
 	result := tasks.HostResult{Name: "", Status: tasks.HostOK, CollectedAt: &observed}
-	h.recordBoardTasks(result, []tasks.Task{task})
+	h.recordBoardTasks(h.beginBoardTaskCollection(), result, []tasks.Task{task})
 	got := readIdentities(t, h)["pane-a@local"]
 	assert.Equal(t, "task", got.Source)
 	require.NotNil(t, got.State)
@@ -88,10 +88,10 @@ func TestBoardIdentitiesTaskPriorityAndFallback(t *testing.T) {
 	assert.Equal(t, observed, *got.TaskObservedAt)
 	assert.Equal(t, "pane-a", *got.PaneID)
 	assert.Equal(t, "working", got.SelfReport.State)
-	h.recordBoardTasks(result, []tasks.Task{task, task})
+	h.recordBoardTasks(h.beginBoardTaskCollection(), result, []tasks.Task{task, task})
 	assert.Equal(t, "self_report", readIdentities(t, h)["pane-a@local"].Source)
-	h.recordBoardTasks(result, []tasks.Task{task})
-	h.recordBoardTasks(tasks.HostResult{Name: "", Status: tasks.HostError}, nil)
+	h.recordBoardTasks(h.beginBoardTaskCollection(), result, []tasks.Task{task})
+	h.recordBoardTasks(h.beginBoardTaskCollection(), tasks.HostResult{Name: "", Status: tasks.HostError}, nil)
 	assert.Equal(t, "self_report", readIdentities(t, h)["pane-a@local"].Source)
 }
 
@@ -113,7 +113,7 @@ func TestBoardIdentitiesAmbiguousTaskWithoutReportIsUnreported(t *testing.T) {
 	h := setupBoardRouter(board.NewBoardCache(), nil)
 	defer h.Close()
 	task := tasks.Task{State: tasks.StateBusy, Location: tasks.Location{Kind: tasks.LocationOutside, PaneID: "main"}}
-	h.recordBoardTasks(tasks.HostResult{Status: tasks.HostOK}, []tasks.Task{task, task})
+	h.recordBoardTasks(h.beginBoardTaskCollection(), tasks.HostResult{Status: tasks.HostOK}, []tasks.Task{task, task})
 	got := readIdentities(t, h)
 	require.Contains(t, got, "main@local")
 	assert.Equal(t, "unreported", got["main@local"].Source)
@@ -156,9 +156,7 @@ func TestBoardIdentitiesMatchOnlyCurrentPaneOnSameHost(t *testing.T) {
 			defer h.Close()
 			h.cfg.SSHConnections = map[string]config.SSHConnection{"build": {}, "other": {}}
 			p := h.cfg.Layout.Children[0].Pane
-			p.Type = tc.paneType
-			p.Connection = tc.paneHost
-			p.TmuxSession = tc.paneSession
+			p.Type, p.Connection, p.TmuxSession = tc.paneType, tc.paneHost, tc.paneSession
 			state := tc.state
 			if state == "" {
 				state = tasks.StateIdle
@@ -168,7 +166,8 @@ func TestBoardIdentitiesMatchOnlyCurrentPaneOnSameHost(t *testing.T) {
 				Location: tasks.Location{Kind: tasks.LocationKind(tc.kind),
 					PaneID:      tc.claim,
 					TmuxSession: tc.session}}
-			h.recordBoardTasks(tasks.HostResult{Name: tc.taskHost, Status: tasks.HostOK}, []tasks.Task{task})
+			h.recordBoardTasks(h.beginBoardTaskCollection(),
+				tasks.HostResult{Name: tc.taskHost, Status: tasks.HostOK}, []tasks.Task{task})
 			got := readIdentities(t, h)
 			if tc.want {
 				require.Len(t, got, 1)
@@ -378,7 +377,7 @@ func TestBoardIdentitiesDetectedAndIneligiblePanes(t *testing.T) {
 				assert.Empty(t, got)
 			}
 			task := tasks.Task{State: tasks.StateBusy, Location: tasks.Location{Kind: tasks.LocationOutside, PaneID: tc.paneID}}
-			h.recordBoardTasks(tasks.HostResult{Status: tasks.HostOK}, []tasks.Task{task})
+			h.recordBoardTasks(h.beginBoardTaskCollection(), tasks.HostResult{Status: tasks.HostOK}, []tasks.Task{task})
 			got = readIdentities(t, h)
 			if tc.want {
 				assert.Equal(t, "task", got["main@local"].Source)

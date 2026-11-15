@@ -17,6 +17,12 @@ in the API; status reads add no host I/O or polling. Failure clears that host’
 multiple live matches fall back instead of choosing a session arbitrarily. The collection time
 makes retained observations visible as observations rather than promises of freshness.
 
+Full and live collections are ordered by a monotonic generation assigned when collection starts.
+A full collection shares one generation across hosts; each host independently retains its applied
+generation even for failed or pending outcomes. This watermark prevents a delayed full snapshot
+from restoring a local success older than a live failure, or an older failure from erasing a newer
+success. Success timestamps alone cannot order failures or identical wall-clock timestamps.
+
 History-only names last only as long as their existing bounded rows. No independent name
 cache, roster dependency, or new authorization rule is introduced. Self-reports keep their
 existing lifetime and remain separately labelled when task state takes priority.
