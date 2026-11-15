@@ -622,10 +622,8 @@ describe('discriminated union coverage', () => {
     expect(emitted).toEqual(['busy', 'done', 'error', 'line'])
     expect(declaredVariants(schemas.BoardCommandFrameSchema).filter((v) => !emitted.includes(v))).toEqual([])
   })
-})
 
-// The populated fixture must exercise every identity source, not merely an empty map.
-describe('board identities captured from Go', () => {
+  // The populated fixture must exercise every identity source, not merely an empty map.
   it('captures task priority, supplemental reports, and equal names on different hosts', () => {
     const captured = readFixture('board-status')
     const parsed = schemas.BoardStatusResponseSchema.parse(captured)
