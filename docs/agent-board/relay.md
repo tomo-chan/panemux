@@ -10,7 +10,7 @@ description: "Cross-host message relay, deduplication, and delivery lifecycle."
 
 ## Cross-host relay
 
-agmsg is host-local. Panemux reaches the local host and each supported `ssh_connections` key through
+agmsg is host-local. Panemux reaches the local host and every `ssh_connections` key through
 the execution port shared with the task board. Polling needs no pane or live pane session.
 The participant identity is `(host, team, name)`. Only `agent_board.team` is polled.
 Hosts use `BoardID()`: `local` or `ssh:<ssh_connections key>`. `ssh:local` is distinct
@@ -25,12 +25,10 @@ preserved without normalization. A qualified address is exactly
 unknown Board hosts and qualified `_system` addresses are rejected before history or forwarding.
 Team validation retains its existing identifier allowlist.
 
-Hand-written configuration may contain other SSH keys. A key outside the Board alphabet
-(including whitespace, `@`, control characters or additional separators) excludes that host
-and its panes from Board polling and forwarding. Startup logs the key and reason, including
-hosts without panes; live routing warns once when a newly unsupported key appears, and again
-if it is removed and later re-added. Configuration loading and terminal operation remain
-available. The existing status API has no exclusion-reason field; this diagnostic is in the log.
+The [connection-key rule](../behavior/ssh.md#defining-connections-in-ssh_connections) is
+shared by configuration loading, API creation/editing and BoardID parsing. Disallowed keys
+make configuration loading fail with the key and allowed characters in the error, even if
+Agent Board is disabled. Routing needs no character-based host exclusion or warning policy.
 
 - An unqualified ordinary recipient stays on the source host. agmsg delivers it;
   panemux records the original with source host/team and does not search other hosts.
@@ -120,7 +118,7 @@ other, and no additional listener is created.
 SSH connection establishment starts in the background: polling and bootstrap return a connecting state
 without waiting for the dial. Later polls retry, so a pane-less unreachable host cannot consume a
 relay pass's timeout before healthy hosts are polled. Repeated identical poll errors are logged only
-when the failure state changes; a successful pass resets that suppression. All keys with supported BoardIDs
+when the failure state changes; a successful pass resets that suppression. All configured keys
 remain available to board execution, including hosts without a board pane. Sender validation uses the source-host rules above, independently of panes.
 
 Operator sends wait for a missing SSH connection within the send context, including before the

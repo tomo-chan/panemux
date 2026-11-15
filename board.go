@@ -9,7 +9,6 @@ import (
 	"panemux/internal/hostexec"
 	"panemux/internal/hosttools"
 	"panemux/internal/session"
-	"sort"
 	"sync"
 	"time"
 )
@@ -38,8 +37,6 @@ func setupBoard(
 	var liveRouting func() board.Routing
 	if cfg.AgentBoard.Enabled {
 		liveRouting = routing
-		// Emit eligibility warnings at startup, even for hosts with no panes.
-		routing()
 	}
 	relay := board.NewRelay(cache, board.RelayConfig{
 		Team: cfg.AgentBoard.Team, CurrentRouting: liveRouting, PaneHosts: paneHosts,
@@ -75,12 +72,6 @@ func configuredBoardPanes(cfg *config.Config, warn bool) map[string]string {
 		if !cfg.AgentBoard.Enabled {
 			continue
 		}
-		if (pane.Type == string(session.TypeSSH) || pane.Type == string(session.TypeSSHTmux)) &&
-			!board.ValidBoardID("ssh:"+pane.Connection) {
-
-			// The host-level routing warning explains this exclusion once.
-			continue
-		}
 		target, ok := boardHostForPane(cfg, pane)
 		if !ok {
 			if warn {
@@ -100,37 +91,18 @@ func newBoardRouting(
 ) func() board.Routing {
 	var clientsMu sync.Mutex
 	clients := map[host.Host]*agmsg.Client{}
-	warnedUnsupported := map[string]bool{}
 	return func() board.Routing {
 		result := board.Routing{PaneHosts: map[string]string{}, Clients: map[string]board.MessageClient{}}
 		targets := []host.Host{}
-		unsupported := map[string]bool{}
 		readConfig(func(current *config.Config) {
 			targets = append(targets, host.Local)
 			for name := range current.SSHConnections {
-				if !board.ValidBoardID("ssh:" + name) {
-					unsupported[name] = true
-					continue
-				}
 				targets = append(targets, host.Host(name))
 			}
 			result.PaneHosts = configuredBoardPanes(current, false)
 		})
 		clientsMu.Lock()
 		defer clientsMu.Unlock()
-		unsupportedKeys := make([]string, 0, len(unsupported))
-		for key := range unsupported {
-			unsupportedKeys = append(unsupportedKeys, key)
-		}
-		sort.Strings(unsupportedKeys)
-		for _, key := range unsupportedKeys {
-			if !warnedUnsupported[key] {
-				log.Printf("Warning: agent board: SSH connection %q is excluded: unsupported BoardID; "+
-					"keys require Unicode letters, marks, numbers or . _ - +; "+
-					"whitespace, @ and control characters are not allowed", key)
-			}
-		}
-		warnedUnsupported = unsupported
 		for _, target := range targets {
 			if clients[target] == nil {
 				var begin func() (func(), error)

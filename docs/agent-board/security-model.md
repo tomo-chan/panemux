@@ -94,8 +94,8 @@ or asks agents to join, claim an identity, or install project-local delivery hoo
 ignored. Existing agmsg registrations and hook files remain untouched after disablement.
 Sender validation accepts host-local unqualified names independently of pane detection or
 roster membership. Consent covers the local host and configured SSH keys in one team. Keys outside the
-Board address alphabet are excluded from polling and forwarding with a startup/live-routing
-warning; they do not make configuration loading fail.
+shared connection-key alphabet fail configuration loading; API writes and BoardID parsing
+use that same rule, without an exclusion-based routing fallback.
 The same-host, same-user trust boundary is unchanged. Visibility in the dashboard
 grants no authority.
 

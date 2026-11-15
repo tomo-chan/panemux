@@ -12,6 +12,19 @@ description: "SSH connection configuration, session behavior, and remote host as
 
 ### Defining connections in `ssh_connections`
 
+Connection keys must be non-empty and contain only Unicode letters, combining marks,
+numbers or `._-+`. Exact spelling is preserved without normalization. Whitespace, `@`,
+control characters and other punctuation are rejected. This is the same key rule used by
+BoardID addresses such as `worker@ssh:開発+1`.
+
+Configuration loading validates every key, even when Agent Board is disabled. A disallowed
+key makes loading fail and prevents startup; the error quotes that key and lists the allowed
+characters. API creation and editing use the same validation function. The Hosts dialog
+submits character validation to the server and displays its error rather than defining a
+second alphabet. This rule applies to entries under `ssh_connections`, not to unrelated
+OpenSSH `Host` aliases.
+
+
 An entry under `ssh_connections` can be just a name. Its connection details then come from the
 `~/.ssh/config` `Host` block of the same name (see [Using `~/.ssh/config` hosts](#using-sshconfig-hosts)):
 

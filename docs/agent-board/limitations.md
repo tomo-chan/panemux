@@ -27,10 +27,11 @@ description: "Current Agent Board availability, recovery, and deployment limitat
   row back. The visible lag is at most one poll interval under normal operation.
 
 Relay accepts host-local agmsg names without panes or roster lookups. Qualified recipients
-select a configured BoardID, including hosts without panes. SSH keys may contain Unicode
-letters, marks and numbers or `._-+`. Other keys (such as whitespace or `@`) keep their
-terminal configuration but are excluded from Board polling and forwarding with a startup
-warning and a warning on live addition. See the [key contract](relay.md#addresses-and-forwarding). Unqualified names stay local except
+select a configured BoardID, including hosts without panes. SSH keys must follow the
+[shared connection-key rule](../behavior/ssh.md#defining-connections-in-ssh_connections).
+Disallowed keys prevent configuration loading and startup, even with Agent Board disabled;
+rename the key and its pane references before starting. This makes every configured host
+usable in a qualified reply address. Unqualified names stay local except
 for the legacy configured pane-ID route. All forwarded copies have qualified senders, including
 pane senders; consumers must reply to the received qualified `from` instead of assuming a bare
 pane reply address. Copy exclusion does not depend on the pane map staying unchanged.
@@ -99,7 +100,7 @@ range warns and continues.
 SSH connection establishment starts in the background: polling and bootstrap return a connecting state
 without waiting for the dial. Later polls retry, so a pane-less unreachable host cannot consume a
 relay pass's timeout before healthy hosts are polled. Repeated identical poll errors are logged only
-when the failure state changes; a successful pass resets that suppression. All keys with supported BoardIDs
+when the failure state changes; a successful pass resets that suppression. All configured keys
 remain available to board execution, including hosts without a board pane. Rows use source-host attribution independently of pane presence.
 
 Operator sends wait for a missing SSH connection within the send context, including before the

@@ -3,29 +3,16 @@ package config
 import (
 	"errors"
 	"fmt"
-	"regexp"
+	"panemux/internal/host"
 	"sort"
 	"strings"
 	"unicode"
 )
 
-// sshConnectionNameRe is the name rule POST /api/ssh-config/hosts already
-// applies to a ~/.ssh/config alias, so a name accepted for one is accepted for
-// the other — which is what lets an ssh_connections entry be just the name of
-// a Host block.
-var sshConnectionNameRe = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
-
-// ValidateSSHConnectionName checks a name for a new ssh_connections entry.
-//
-// It is applied to entries created through the API only. A name already in
-// config.yaml is not re-checked, so an entry written by hand under a name this
-// rule would refuse still loads, and can still be edited and deleted.
+// ValidateSSHConnectionName applies the shared key rule at load and API boundaries.
 func ValidateSSHConnectionName(name string) error {
-	if name == "" {
-		return errors.New("name is required")
-	}
-	if !sshConnectionNameRe.MatchString(name) {
-		return errors.New("name must contain only alphanumeric characters, hyphens, underscores, or dots")
+	if err := host.ValidateConnectionKey(name); err != nil {
+		return fmt.Errorf("invalid connection key: %w", err)
 	}
 	return nil
 }

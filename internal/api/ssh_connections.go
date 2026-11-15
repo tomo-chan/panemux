@@ -72,8 +72,7 @@ func (h *Handler) sshConnections() map[string]config.SSHConnection {
 
 // connectionNameParam is the {name} path parameter, unescaped. chi matches
 // on the escaped path when there is one and hands the parameter back still
-// escaped, so a name written by hand in config.yaml with an @, : or / in it
-// would otherwise never be found.
+// escaped, including percent-encoded Unicode and plus signs in supported keys.
 func connectionNameParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	name, err := url.PathUnescape(chi.URLParam(r, "name"))
 	if err != nil {
@@ -146,6 +145,11 @@ func (h *Handler) PutConfigSSHConnection(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if err := config.ValidateSSHConnectionName(name); err != nil {
+		writeValidationError(w, err.Error())
+		return
+	}
+
 	req, ok := decodeSSHConnectionRequest(w, r)
 	if !ok {
 		return

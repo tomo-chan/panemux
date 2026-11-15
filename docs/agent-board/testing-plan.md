@@ -29,8 +29,9 @@ Tests must protect these contracts rather than mirror implementation structure.
   received sender reach the original host. Delayed copies enter neither history, state nor
   forwarding after source-pane removal, pane movement or relay restart with saved cursors.
 - SSH key matrices cover ASCII, `._-`, `+`, Unicode and mixed keys for pane sends and replies.
-  Whitespace, `@` and control characters exclude both source and destination routing with
-  a warning at startup or live addition, without failing configuration loading.
+  Whitespace, `@` and control characters prevent configuration loading and API creation/editing.
+  Test the loading rule with Agent Board both enabled and disabled; errors identify the key
+  and allowed characters.
 - The own-send ledger preserves duplicate occurrences, expires entries, and removes failed sends.
 - Broadcast validates all recipients before delivery and reports any partial delivery after a
   downstream failure.

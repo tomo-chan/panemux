@@ -72,13 +72,14 @@ security sink and requires dedicated validation.
 ### Global enablement and sender scope
 
 `agent_board.enabled` is instance-wide consent to relay for the configured team on the
-local host and configured SSH keys with supported BoardIDs, without requiring panes, detected tasks, or roster
+local host and all configured SSH keys, without requiring panes, detected tasks, or roster
 registration. A source host's valid unqualified names are accepted; every qualified `from`
 and every pane ID belonging to another host is rejected. `_system` requires the unchanged
 own-send ledger. Qualified recipients require a configured BoardID, not a pane or roster entry.
-Unsupported hand-written SSH keys are excluded from both source polling and destination
-routing, with a reason-bearing warning at startup and on live additions. They must not
-prevent configuration loading or change terminal availability.
+Configuration loading and API creation/editing must reject disallowed keys using the same
+validator as BoardID parsing. Report the offending key and allowed characters, and stop
+startup on an invalid configuration even when Agent Board is disabled. Do not retain an
+exclusion-and-warning fallback for keys that cannot be safely addressed.
 
 Every forwarded sender is qualified using the actual read host, including a configured pane
 sender addressing another pane by its bare ID. The pane-ID route remains available; replies

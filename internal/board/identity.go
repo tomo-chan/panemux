@@ -2,6 +2,7 @@ package board
 
 import (
 	"fmt"
+	"panemux/internal/host"
 	"regexp"
 	"strings"
 )
@@ -13,14 +14,18 @@ type Identity struct {
 	Host string
 }
 
-// Agent names retain their ASCII alphabet. SSH keys also allow Unicode letters,
-// marks and numbers plus a literal plus, without introducing address separators.
+// Agent names retain their ASCII alphabet; host keys use host.ValidateConnectionKey.
 var identityName = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
-var identityHost = regexp.MustCompile(`^(local|ssh:[\p{L}\p{M}\p{N}_.+-]+)$`)
 
 // ValidBoardID checks the protocol host identifier without normalizing a key.
-// It is shared by address parsing and composition-root host eligibility.
-func ValidBoardID(raw string) bool { return identityHost.MatchString(raw) }
+// Connection keys use the same validator as configuration loading and API writes.
+func ValidBoardID(raw string) bool {
+	if raw == host.Local.BoardID() {
+		return true
+	}
+	key, qualified := strings.CutPrefix(raw, "ssh:")
+	return qualified && host.ValidateConnectionKey(key) == nil
+}
 
 func ParseIdentity(raw string) (Identity, error) {
 	name, host, qualified := strings.Cut(raw, "@")

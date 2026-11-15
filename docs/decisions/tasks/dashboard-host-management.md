@@ -16,3 +16,7 @@ Review found a map-only lock let layout saves persist rolled-back host changes. 
 lock covers snapshots through writes and readers. Existing hand-written names stay editable;
 invalid saved ports must not make the list unreadable.
 See [SSH connection management API](../../behavior/rest-api.md#apiconfigssh-connections) and [SSH security](../../security/task-collection.md#collection-and-metadata-execution).
+
+The [2026-11-15 shared key decision](../agent-board/ssh-key-validation.md) supersedes the
+permissive handwritten-name policy: disallowed keys now fail configuration loading and API
+writes. The existing field validation, password and deletion contracts remain.

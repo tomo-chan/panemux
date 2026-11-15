@@ -31,3 +31,4 @@
 * [Version coverage normalizes install provenance (2026-08, PR #176)](version-provenance.md) - Historically normalize provenance and tolerate later patches before stricter pin checks replaced that warning policy.
 * [Pane-independent relay by source host](pane-independent-relay.md) - Attribute names to their reading host without requiring panes or changing ledger semantics.
 * [Qualify every forwarded sender (2026-11-15, #495 / #505 / PR #540)](qualified-forwarded-senders.md) - Make copy rejection independent of pane changes and preserve option-like bodies through public stdin.
+* [Validate SSH connection keys at load and API boundaries (2026-11-15, #495 / #505 / PR #540)](ssh-key-validation.md) - Use one safe key alphabet and stop startup on disallowed keys instead of excluding hosts.

@@ -200,8 +200,8 @@ export const SSHConnectionEntrySchema = z.object({
   name: z.string().min(1),
   host: z.string().optional(),
   user: z.string().optional(),
-  // Not range-checked: config.yaml is not checked on load, and a hand-written
-  // port out of range must still list so it can be corrected here.
+  // Port fields are not range-checked on load; a hand-written port out of
+  // range must still list so it can be corrected here. Connection keys are validated.
   port: z.number().int().optional(),
   key_file: z.string().optional(),
   known_hosts_file: z.string().optional(),

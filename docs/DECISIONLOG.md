@@ -384,3 +384,7 @@ See the [decision index](decisions/index.md) for topic listings.
 ## 2026-11-15: Qualify all forwarded Agent Board senders (#505, PR #540)
 
 [Moved to qualified-forwarded-senders](decisions/agent-board/qualified-forwarded-senders.md).
+
+## 2026-11-15: Validate SSH connection keys before startup (#505, PR #540)
+
+[Moved to ssh-key-validation](decisions/agent-board/ssh-key-validation.md).

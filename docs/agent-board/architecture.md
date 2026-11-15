@@ -41,8 +41,9 @@ flowchart TB
 
 Panemux runs on one host. Both boards address that host and the `ssh_connections` keys through
 the same execution port and per-host command connection, even without a pane on that host.
-Board polling and forwarding exclude SSH keys outside the
-[supported BoardID alphabet](relay.md#addresses-and-forwarding), with a startup/live warning.
+Configuration loading and API writes enforce the
+[shared connection-key rule](../behavior/ssh.md#defining-connections-in-ssh_connections),
+so every configured host can be represented in a BoardID without a routing exclusion.
 Pane sessions keep separate connections. Panemux never installs or runs itself remotely. The command center uses
 the same authenticated API as the browser, through a narrow MCP server, and never calls agmsg
 directly.
@@ -100,7 +101,7 @@ port; it does not resolve paths or construct participation text.
 |---|---|
 | `internal/board` | messaging and participation ports, relay, cache, cursors, participation snapshots, and own-send ledger |
 | `internal/agmsg` | agmsg adapter: script calls, paths, versions, parsing, availability checks, and agent type mapping |
-| `internal/host` | I/O-free host identity and fixed-script execution port |
+| `internal/host` | I/O-free host identity, shared connection-key validation and fixed-script execution port |
 | `internal/hostexec` | local execution and shared per-host SSH connections, retry and disposal |
 | `internal/session` | terminal sessions, agent detection, and the SSH command transport adapter |
 | `internal/api`, `internal/ws`, `internal/server` | authenticated board REST and WebSocket surfaces |

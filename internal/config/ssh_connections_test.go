@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,6 +20,9 @@ func TestValidateSSHConnectionName(t *testing.T) {
 		wantErr string
 	}{
 		{name: "letters digits and punctuation", input: "gpu-box_2.lan"},
+		{name: "plus", input: "build+1"},
+		{name: "Unicode", input: "開発機"},
+		{name: "combining mark", input: "de\u0301v"},
 		{name: "empty", input: "", wantErr: "name is required"},
 		{name: "space", input: "gpu box", wantErr: "name must contain only"},
 		{name: "slash", input: "gpu/box", wantErr: "name must contain only"},
@@ -156,4 +161,38 @@ func TestSaveSSHConnections_PersistsAndReloads(t *testing.T) {
 	reloaded, err := Load(path)
 	require.NoError(t, err)
 	assert.Equal(t, cfg.SSHConnections, reloaded.SSHConnections)
+}
+
+func TestLoadSSHConnectionKeyAlphabet(t *testing.T) {
+	for _, key := range []string{"build1", "build.1_x-y", "build+1", "開発機", "de\u0301v", "開発+1_x-y.dev",
+		"", "my server", "build@1", "build\t1", "build\n1", "build\x00x", "build:1", "build/1"} {
+		for _, enabled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%q/board=%v", key, enabled), func(t *testing.T) {
+				homedir.SetForTest(t, t.TempDir())
+				path := filepath.Join(t.TempDir(), "config.yaml")
+				content := fmt.Sprintf(`server: {port: 8080, host: 127.0.0.1}
+ssh_connections:
+  %q: {host: example.invalid}
+agent_board: {enabled: %t}
+layout:
+  direction: horizontal
+  children:
+    - size: 100
+      pane: {id: local-pane, type: local}
+`, key, enabled)
+				require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+				cfg, err := Load(path)
+				switch key {
+				case "build1", "build.1_x-y", "build+1", "開発機", "de\u0301v", "開発+1_x-y.dev":
+					require.NoError(t, err)
+					require.Contains(t, cfg.SSHConnections, key, "keep the exact spelling")
+				default:
+					require.Error(t, err, "an invalid key must prevent startup even without Agent Board")
+					require.Contains(t, err.Error(), strconv.Quote(key))
+					require.Contains(t, err.Error(), "Unicode")
+					require.Contains(t, err.Error(), "._-+")
+				}
+			})
+		}
+	}
 }

@@ -20,9 +20,6 @@ export interface DashboardHostsDialogProps {
   onClose: () => void
 }
 
-// The name rule the server applies to a new entry (config.ValidateSSHConnectionName).
-const NAME_RE = /^[A-Za-z0-9_.-]+$/
-
 interface FormValues {
   name: string
   host: string
@@ -127,7 +124,7 @@ export const DashboardHostsDialog: React.FC<DashboardHostsDialogProps> = ({ isOp
 
     if (form.mode === 'add') {
       if (name === '') return fail('Enter a name.')
-      if (!NAME_RE.test(name)) return fail('A name can contain only letters, digits, hyphens, underscores and dots.')
+      // The server owns the shared SSH/BoardID key alphabet and reports its validation error.
       if (connections?.some((c) => c.name === name)) {
         return fail(`A dashboard host named "${name}" already exists. Edit it instead, or choose another name.`)
       }
