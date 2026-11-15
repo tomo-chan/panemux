@@ -155,6 +155,13 @@ func (s *Pool) Reconnect(name string) error {
 		return fmt.Errorf("%w: %q", ErrUnknownHost, name)
 	}
 
+	s.Forget(name)
+	return nil
+}
+
+// Forget discards a connection or pending dial without consulting membership.
+// Configuration writers may call it while holding their membership lock.
+func (s *Pool) Forget(name string) {
 	s.mu.Lock()
 	var stale Conn
 	if h := s.hosts[name]; h != nil {
@@ -167,7 +174,6 @@ func (s *Pool) Reconnect(name string) error {
 	if stale != nil {
 		_ = stale.Close()
 	}
-	return nil
 }
 
 func (s *Pool) Close() {

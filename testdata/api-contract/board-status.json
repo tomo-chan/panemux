@@ -1,12 +1,87 @@
 {
-  "participation": {
-    "pane-build": {
-      "agent_type": "",
-      "host": "",
-      "instructed": false,
-      "last_report": "2026-01-01T00:00:00Z",
-      "pane_id": "pane-build"
+  "identities": {
+    "pane-build@local": {
+      "host": "local",
+      "last_message_at": null,
+      "name": "pane-build",
+      "pane_id": null,
+      "self_report": {
+        "state": "idle",
+        "updated_at": "2026-01-01T00:00:00Z"
+      },
+      "source": "self_report",
+      "state": "idle",
+      "status_since": null,
+      "task_observed_at": null,
+      "team": "panemux",
+      "waiting_for": null
     },
+    "pane-detected@ssh:build": {
+      "host": "ssh:build",
+      "last_message_at": null,
+      "name": "pane-detected",
+      "pane_id": "pane-detected",
+      "self_report": null,
+      "source": "unreported",
+      "state": null,
+      "status_since": null,
+      "task_observed_at": null,
+      "team": "panemux",
+      "waiting_for": null
+    },
+    "pane-editor@local": {
+      "host": "local",
+      "last_message_at": null,
+      "name": "pane-editor",
+      "pane_id": "pane-editor",
+      "self_report": {
+        "branch": "feature/contract-fixtures",
+        "cwd": "/workspace/user/project",
+        "last_tool": "Edit",
+        "pr_url": "https://example.invalid/user/project/pull/1",
+        "repo": "user/project",
+        "state": "working",
+        "summary": "Adding the schema round-trip",
+        "updated_at": "2026-01-01T00:00:00Z"
+      },
+      "source": "task",
+      "state": "wait",
+      "status_since": "2026-01-01T00:00:00Z",
+      "task_observed_at": "2026-01-01T00:00:00Z",
+      "team": "panemux",
+      "waiting_for": "input needed"
+    },
+    "worker@local": {
+      "host": "local",
+      "last_message_at": null,
+      "name": "worker",
+      "pane_id": null,
+      "self_report": {
+        "state": "working",
+        "updated_at": "2026-01-01T00:00:00Z"
+      },
+      "source": "self_report",
+      "state": "working",
+      "status_since": null,
+      "task_observed_at": null,
+      "team": "panemux",
+      "waiting_for": null
+    },
+    "worker@ssh:build": {
+      "host": "ssh:build",
+      "last_message_at": "2026-01-01T00:00:00Z",
+      "name": "worker",
+      "pane_id": null,
+      "self_report": null,
+      "source": "unreported",
+      "state": null,
+      "status_since": null,
+      "task_observed_at": null,
+      "team": "panemux",
+      "waiting_for": null
+    }
+  },
+  "participation": {
     "pane-detected": {
       "agent_type": "codex",
       "host": "ssh:build",
@@ -28,10 +103,6 @@
     }
   },
   "statuses": {
-    "pane-build": {
-      "state": "idle",
-      "updated_at": "2026-01-01T00:00:00Z"
-    },
     "pane-editor": {
       "branch": "feature/contract-fixtures",
       "cwd": "/workspace/user/project",

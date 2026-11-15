@@ -18,14 +18,27 @@ long-running agent daemon or PTY is introduced.
 
 The model receives exactly three MCP tools:
 
-- `board_status`;
-- `board_messages`;
-- `board_broadcast`.
+- `board_status`: returns the REST identity list, including pane-free names and state sources,
+  plus the compatible pane status/participation maps;
+- `board_messages`: returns original source host/team/from/to and the existing sequence/epoch;
+  combine sender name and source BoardID for a qualified reply address;
+- `board_broadcast`: accepts `name@local`, `name@ssh:<connection-key>` and legacy pane IDs,
+  without requiring the qualified name to have a pane or roster entry.
 
 These tools call panemux's authenticated loopback REST API. The command center never calls agmsg,
 composes shell commands, or routes hosts itself, and therefore does not require a local agmsg
 installation. Broadcasts use the reserved `_system` sender and the same relay path as browser
 broadcasts.
+
+The tools forward REST JSON without discarding host information. Tool descriptions and the default system prompt explain
+qualified addresses and distinguish observed task state from supplemental self-report.
+Names are observations, not proof of registration, liveness or delivery.
+
+Argument type errors retain JSON-RPC invalid-params responses. REST validation failures
+(`422`, including NUL bodies) and downstream failures (`502`) retain MCP `isError: true`;
+the text includes the HTTP code and REST body, including partial `delivered` recipients.
+Validation sends nothing; a later send failure preserves earlier deliveries.
+See the [REST contract](../behavior/board-api.md#post-apiboardbroadcast) before retrying.
 
 ### Process lifecycle
 

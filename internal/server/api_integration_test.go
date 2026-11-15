@@ -748,7 +748,7 @@ var apiCases = map[string]apiCase{
 			assert.Equal(t, http.StatusUnprocessableEntity, rr.Code)
 			// The message comes from board.UnknownPaneError, so the request
 			// reached the real relay through the real handler.
-			assert.Contains(t, rr.Body.String(), "unknown pane id(s): pane-1")
+			assert.Contains(t, rr.Body.String(), "invalid or unknown recipient(s): pane-1")
 		},
 	},
 

@@ -511,6 +511,10 @@ func (s *Service) Reconnect(name string) error {
 	return s.execution.Reconnect(name) //nolint:wrapcheck // transparent shared pool operation
 }
 
+// ForgetHost invalidates pooled execution for a config writer, including a
+// removed host. It deliberately avoids calling the Hosts membership callback.
+func (s *Service) ForgetHost(name string) { s.execution.Forget(name) }
+
 // Close stops probes and summaries, and closes only an execution pool it created.
 // The caller retains ownership of an injected pool shared with Agent Board.
 func (s *Service) Close() {

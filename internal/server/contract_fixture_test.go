@@ -549,7 +549,24 @@ var contractFixtures = map[string]contractFixture{
 		// One pane reporting everything an agent can report, one reporting
 		// only what it must, so the fixture covers both ends of a schema
 		// whose fields are all optional but one.
-		e.cache.RecordStatus("pane-editor", board.Status{
+		e.cfg.AgentBoard.Team = "panemux"
+		e.cfg.SSHConnections = map[string]config.SSHConnection{"build": {}}
+		e.cfg.Workspaces.Items[0].Layout = config.LayoutNode{Children: []config.LayoutChild{
+			{Pane: &config.PaneConfig{ID: "pane-editor", Type: "tmux", TmuxSession: "task-7c21"}},
+			{Pane: &config.PaneConfig{ID: "pane-detected", Type: "ssh", Connection: "build"}},
+		}}
+		e.srv.api.SetTaskService(tasks.New(tasks.Options{
+			Now:      func() time.Time { return time.Date(2026, 11, 15, 2, 0, 0, 0, time.UTC) },
+			RunLocal: func(context.Context, string) ([]byte, error) { return []byte(fixtureLocalTaskCollection), nil },
+		}))
+		_, _ = e.srv.api.TaskEventSource().CollectHostLive(context.Background(), "")
+		e.cache.RecordStatus("worker@local", board.Status{State: "working"})
+		e.cache.AppendMessage(board.Row{Host: "ssh:build",
+			Team: "panemux",
+			From: "worker",
+			To:   "pane-editor@local",
+			At:   time.Now()})
+		e.cache.RecordStatus("pane-editor@local", board.Status{
 			State:    "working",
 			CWD:      "/workspace/user/project",
 			Branch:   "feature/contract-fixtures",
@@ -558,7 +575,7 @@ var contractFixtures = map[string]contractFixture{
 			LastTool: "Edit",
 			Summary:  "Adding the schema round-trip",
 		})
-		e.cache.RecordStatus("pane-build", board.Status{State: "idle"})
+		e.cache.RecordStatus("pane-build@local", board.Status{State: "idle"})
 		e.cache.RecordParticipation("pane-editor", "local", "claude", true)
 		e.cache.RecordParticipation("pane-detected", "ssh:build", "codex", false)
 		e.cache.RecordParticipation("pane-shell", "local", "", false)
