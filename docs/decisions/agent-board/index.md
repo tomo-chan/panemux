@@ -32,3 +32,5 @@
 * [Pane-independent relay by source host](pane-independent-relay.md) - Attribute names to their reading host without requiring panes or changing ledger semantics.
 * [Qualify every forwarded sender (2026-11-15, #495 / #505 / PR #540)](qualified-forwarded-senders.md) - Make copy rejection independent of pane changes and preserve option-like bodies through public stdin.
 * [Validate SSH connection keys at load and API boundaries (2026-11-15, #495 / #505 / PR #540)](ssh-key-validation.md) - Use one safe key alphabet and stop startup on disallowed keys instead of excluding hosts.
+
+* [Observed identities extend the pane response contract](identity-response-contract.md) - Preserve pane keys while exposing qualified names and existing task observations without extra polling.

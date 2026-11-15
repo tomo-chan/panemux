@@ -176,6 +176,7 @@ const fixtureless: Record<string, string> = {
   SSHConnectionEntrySchema: 'component of SSHConnectionEntriesResponseSchema',
   SSHConfigHostSchema: 'component of SSHConfigHostsResponseSchema',
   DirectoryEntrySchema: 'component of DirectoryBrowserResponseSchema',
+  BoardIdentitySchema: 'component of BoardStatusResponseSchema',
   BoardStatusEntrySchema: 'component of BoardStatusResponseSchema',
   BoardMessageSchema: 'component of BoardMessagesResponseSchema',
   BoardCommandHistoryEntrySchema: 'component of BoardCommandHistoryResponseSchema',

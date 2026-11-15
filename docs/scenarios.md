@@ -104,6 +104,11 @@ Verification column values:
 | D8 | Closing the panel | Escape, backdrop click and the close button all return focus where it was | `auto`: `frontend/e2e/agent-board.spec.ts` (three tests) |
 | D9 | A stale report | `stale` pill, card dimmed, still shown | `auto`: `frontend/src/components/BoardDashboardPanel.test.tsx`, `frontend/src/utils/boardStatusColors.test.ts` |
 
+| D10 | API identities for equal names on different hosts and names without panes | Qualified keys keep hosts separate; nullable fields and source labels are explicit; compatible pane maps remain intact | `auto`: `internal/api` — `TestBoardIdentitiesSeparateHostsAndSources`, `TestGetBoardStatus_HostScopedReportsPreservePaneContract`; `frontend/src/schemas/index.test.ts`, `frontend/src/schemas/contract.test.ts` |
+| D11 | Task observations correspond to a board pane | Exactly one live task on the same host and matching pane location wins; ambiguous or failed observations fall back to self-report/unreported without new collection on status reads | `auto`: `internal/api` — `TestBoardIdentitiesTaskPriorityAndFallback`, `TestBoardIdentitiesAmbiguousTaskWithoutReportIsUnreported`, `TestBoardIdentitiesMatchOnlyCurrentPaneOnSameHost`, `TestBoardIdentitiesExistingCollectorsPublishAndClearObservations` |
+| D12 | Validated message-only senders appear in API identities | Rejected copies and forged senders introduce no names; history-only names disappear with the bounded ring | `auto`: `internal/api` — `TestBoardIdentitiesUseOnlyRelayAcceptedSendersAndBoundedHistory` |
+| D13 | REST/MCP qualified broadcast and failures | Qualified names need no pane/roster; mixed invalid recipients and NUL send nothing; partial failure preserves delivered addresses and MCP errors | `auto`: `internal/api` — `TestBoardBroadcastQualifiedRecipientsAndPartialFailure`, `TestBoardBroadcastRejectsNULBeforeCallingRelay`; `internal/boardmcp` — `TestServerExplainsQualifiedRecipientsAndObservedIdentities`, `TestServerQualifiedBroadcastPreservesPartialDeliveryError`; `internal/commandcenter` — `TestSystemPromptExplainsQualifiedNamesAndObservationLimits` |
+
 ## E. Command center
 
 | # | Scenario | Expected | Verification |

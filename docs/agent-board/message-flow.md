@@ -58,9 +58,10 @@ sequenceDiagram
 The relay keeps the latest status per `name@BoardID` in the configured team, retaining source
 host/team in bounded history with an `is_status` marker. Equal names on different hosts cannot
 overwrite each other. Unqualified `_system` targets the read host; qualified `_system` is rejected.
-The current status API projects matching reports back to configured pane-ID keys. The dashboard filters those rows from conversation
+The status API exposes qualified identities and also projects matching reports back to
+configured pane-ID keys for compatibility. See the [identity contract](../behavior/board-api.md#identity-entries)
+for primary task observations and supplemental self-reports. The dashboard filters those rows from conversation
 history.
 
-Self-reporting is cooperative: stale or missing reports remain visible as stale or missing rather
-than being replaced by inferred state. This trades passive but fragile transcript inference for an
-explicit, auditable agent report.
+Self-reporting is cooperative: stale or missing reports remain visible as stale or missing.
+A corresponding task observation can supply the primary state without replacing that report.

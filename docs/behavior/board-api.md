@@ -42,7 +42,8 @@ for this process; see [Bootstrap flow](../agent-board/bootstrap.md#bootstrap-flo
 
 ### `GET /api/board/status`
 
-Returns the current in-memory status and participation snapshots without contacting agmsg.
+Returns the current in-memory identity, status and participation snapshots without contacting agmsg
+or collecting tasks.
 `participation` is keyed by pane ID and includes host, detected registry agent type (empty when none),
 `instructed` (always false, retained for compatibility), and optional `last_report`.
 Detection follows the current pane session. Reports can outlive a session.
@@ -72,12 +73,62 @@ The dashboard lists a pane when its agent type is non-empty or a status report e
 ```
 
 Fields other than `updated_at` are omitted when unreported. An empty cache returns `200` with
-`{"participation":{},"statuses":{}}`, never `null`.
+`{"identities":{},"participation":{},"statuses":{}}`, never `null`.
+
+#### Identity entries
+
+`identities` is always present and maps `name@BoardID` to the following fields. The team is
+the single configured `agent_board.team`; `local` and `ssh:local` are distinct hosts.
+
+| Field | Type and meaning |
+|---|---|
+| `host`, `team`, `name` | Strings identifying the observed name and its source |
+| `pane_id` | Current matching pane ID, or null; never an invented pane link |
+| `source` | `task`, `self_report`, or `unreported` |
+| `state` | Task state or arbitrary self-reported state string, or null |
+| `waiting_for` | Observed task waiting reason, or null |
+| `status_since` | Observed task StatusSince as RFC3339, or null |
+| `task_observed_at` | Successful task collection time as RFC3339, or null |
+| `last_message_at` | Latest source message time among retained history rows, or null |
+| `self_report` | Latest self-report with the same fields as a `statuses` entry, or null |
+
+All nullable fields are emitted, including null values. A report with no state has
+`source: "self_report"` and `state: null`. Its `updated_at` is the cache reception time,
+not the start of that state. Self-reported text is untrusted and does not prove liveness.
+
+The list combines host-qualified status reports, senders in the validated bounded history,
+and current panes with a detected agent or a corresponding task observation. Rejected rows,
+qualified `from` values and `_system` never introduce identities; a recipient alone does not
+introduce an identity. A name observed only in history disappears when its last row leaves
+the existing 2000-row ring. Reports retain their existing in-memory lifetime. No roster is read.
+
+A matching pane requires the same host and name equal to its current configured pane ID.
+Task priority additionally requires its location to match that pane: the same tmux session and
+pane kind, or an outside task claiming that local/SSH pane on the same connection. No new
+agmsg-name-to-session mapping is inferred. Exactly one live matching task supplies State,
+WaitingFor and StatusSince; its self-report remains supplemental. Multiple matching live tasks
+fall back to self-report or unreported, as does a failed or pending latest host collection.
+
+Task observations come only from existing `/api/tasks` and task-event collections. Without
+such a collection there is no task priority. Successful collections replace that host’s
+observations; status reads do not refresh them. `task_observed_at` shows their age, and there
+is no added polling or expiry timer. Panes without observations or detected agents are omitted.
+
+For example, `worker@local` and `worker@ssh:build` are independent entries, both with
+`pane_id: null` unless a configured pane named `worker` exists on that same host. Neither
+listing nor absence is authorization, registration, reachability, or delivery assurance.
 
 ### `GET /api/board/messages?since=<seq>`
 
 Returns cached rows after the panemux-local sequence `since`, which defaults to `0`. This sequence
 is unrelated to agmsg's opaque, host-local message ID.
+
+The original `host`, `team`, `from` and `to` are preserved. For a normal sender, combine
+`from` with the source `host` to obtain its qualified reply identity. A qualified `to` already
+names its host. An ordinary unqualified recipient is host-local, except for the existing pane-ID
+compatibility route to that pane’s owning host. `_system` remains a reserved endpoint.
+History does not snapshot past pane ownership: after a pane moves, its old unqualified
+recipient host cannot always be reconstructed. No additional identity fields are inferred.
 
 ```json
 {
@@ -106,20 +157,24 @@ after a panemux restart. The epoch is opaque and equality-only.
 
 ### `POST /api/board/broadcast`
 
-Sends one message directly to each resolved pane's host without PTY injection:
+Sends one message to each resolved recipient’s host without PTY injection:
 
 ```json
-{ "to": ["pane-a", "pane-b"], "body": "please review" }
+{ "to": ["pane-a", "worker@local", "worker@ssh:build"], "body": "please review" }
 ```
 
+Qualified recipients need only a configured Board host, without a pane or roster entry.
+Unqualified recipients must remain existing pane IDs; arbitrary bare names are not resolved
+by broadcast. Parsing and resolution use the shared relay rules and SSH-key validator.
 Every recipient is resolved before delivery starts. After that validation, delivery is fail-fast but
 not transactional: a later host failure may follow successful earlier sends. History reflects the
 message after relay polling reads it back.
 
 - `400`: malformed JSON.
-- `422`: empty recipients or body, or any unknown pane ID.
+- `422`: empty recipients or body, NUL in the body, or any invalid/unknown recipient
+  (including unknown hosts and qualified `_system`). No send starts.
 - `502`: downstream send failure, with `{"error":"...","delivered":[...]}`.
-- `200`: `{"delivered":[...]}` containing every reached pane ID.
+- `200`: `{"delivered":[...]}` containing every reached recipient in its input spelling and input order.
 
 ### `GET /api/board/command/history`
 

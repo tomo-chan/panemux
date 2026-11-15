@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useBoardStatus } from './useBoardStatus'
 
 function statusResponse(statuses: Record<string, unknown> = {}) {
-  return { ok: true, json: () => Promise.resolve({ participation: {}, statuses }) } as Response
+  return { ok: true, json: () => Promise.resolve({ identities: {}, participation: {}, statuses }) } as Response
 }
 
 function messagesResponse(messages: unknown[] = [], epoch = 'epoch-1') {
@@ -239,6 +239,7 @@ describe('useBoardStatus', () => {
     })
   })
 
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('sets an error and preserves prior state when the response fails schema validation', async () => {
     vi.useFakeTimers()
     window.fetch = fetchRouter({
@@ -251,7 +252,7 @@ describe('useBoardStatus', () => {
     expect(result.current.participation).toEqual({})
 
     window.fetch = fetchRouter({
-      status: () => ({ ok: true, json: () => Promise.resolve({ participation: {}, statuses: 'not-a-map' }) } as Response),
+      status: () => ({ ok: true, json: () => Promise.resolve({ identities: {}, participation: {}, statuses: 'not-a-map' }) } as Response),
     })
     // Re-render is not needed: advance the existing interval instead so the
     // hook's own poll loop (not a fresh mount) performs the failing fetch.

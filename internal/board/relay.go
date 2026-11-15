@@ -372,7 +372,7 @@ func (r *Relay) pollLogged(ctx context.Context) {
 type UnknownPaneError struct{ IDs []string }
 
 func (e *UnknownPaneError) Error() string {
-	return "agent board: unknown pane id(s): " + strings.Join(e.IDs, ", ")
+	return "agent board: invalid or unknown recipient(s): " + strings.Join(e.IDs, ", ")
 }
 
 // Broadcast sends body from `from` to qualified identities or legacy pane IDs.

@@ -49,6 +49,8 @@ type Handler struct {
 	commandHistoryFn       func() ([]commandcenter.HistoryEntry, error)
 	commandCenterAvailable bool
 	boardCache             *board.BoardCache
+	boardTasks             map[string]boardTaskObservation
+	boardTasksMu           sync.RWMutex
 	gitInfoCacheBySession  map[string]gitInfoCacheEntry
 	tasks                  *tasks.Service
 	execution              *hostexec.Pool

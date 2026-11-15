@@ -1217,9 +1217,10 @@ describe('BoardStatusEntrySchema', () => {
     expect(result.success).toBe(true)
   })
 
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('keeps every other pane readable when one pane reports a very long summary', () => {
     const result = BoardStatusResponseSchema.safeParse({
-      participation: {}, statuses: {
+      identities: {}, participation: {}, statuses: {
         chatty: { updated_at: '2026-08-14T12:00:00Z', summary: 'x'.repeat(10000) },
         quiet: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' },
       },
@@ -1229,21 +1230,24 @@ describe('BoardStatusEntrySchema', () => {
 })
 
 describe('BoardStatusResponseSchema', () => {
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('accepts an empty statuses map', () => {
-    const result = BoardStatusResponseSchema.safeParse({ participation: {}, statuses: {} })
+    const result = BoardStatusResponseSchema.safeParse({ identities: {}, participation: {}, statuses: {} })
     expect(result).toMatchObject({ success: true, data: { participation: {} } })
   })
 
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('accepts a populated statuses map keyed by pane id', () => {
     const result = BoardStatusResponseSchema.safeParse({
-      participation: {}, statuses: { main: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' } },
+      identities: {}, participation: {}, statuses: { main: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' } },
     })
     expect(result).toMatchObject({ success: true, data: { participation: {} } })
   })
 
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('rejects statuses given as an array instead of a map', () => {
     const result = BoardStatusResponseSchema.safeParse({
-      participation: {}, statuses: [{ updated_at: '2026-08-14T12:00:00Z' }],
+      identities: {}, participation: {}, statuses: [{ updated_at: '2026-08-14T12:00:00Z' }],
     })
     expect(result.success).toBe(false)
     expect(BoardStatusResponseSchema.safeParse({ statuses: {} }).success).toBe(false)
@@ -1628,5 +1632,30 @@ describe('TasksResponseSchema agent capabilities', () => {
     for (const response of bad) {
       expect(TasksResponseSchema.safeParse(response).success, JSON.stringify(response)).toBe(false)
     }
+  })
+})
+
+describe('board identity contract', () => {
+  const entry = {
+    host: 'local', team: 'panemux', name: 'worker', pane_id: null,
+    source: 'unreported', state: null, waiting_for: null, status_since: null,
+    task_observed_at: null, last_message_at: '2026-11-15T02:00:00Z', self_report: null,
+  }
+  it('requires identities even for an empty board', () => {
+    expect(BoardStatusResponseSchema.safeParse({ statuses: {}, participation: {} }).success).toBe(false)
+    expect(BoardStatusResponseSchema.safeParse({ statuses: {}, participation: {}, identities: {} }).success).toBe(true)
+  })
+  it('preserves nullable fields and separates equal names on different hosts', () => {
+    const identities = {
+      'worker@local': entry,
+      'worker@ssh:build': { ...entry, host: 'ssh:build', source: 'self_report', state: 'something-new',
+        self_report: { updated_at: '2026-11-15T02:00:00Z', summary: 'hello' } },
+    }
+    expect(BoardStatusResponseSchema.parse({ statuses: {}, participation: {}, identities }).identities).toEqual(identities)
+  })
+  it.each([
+    { source: 'invented' }, { pane_id: 1 }, { status_since: 1 }, { self_report: {} },
+  ])('rejects an invalid identity field %o', (patch) => {
+    expect(BoardStatusResponseSchema.safeParse({ statuses: {}, participation: {}, identities: { 'worker@local': { ...entry, ...patch } } }).success).toBe(false)
   })
 })

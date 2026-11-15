@@ -10,7 +10,7 @@ function fetchRouter(handlers: {
     const url = String(input)
     if (url.startsWith('/api/board/status')) {
       return Promise.resolve(
-        handlers.status ? handlers.status() : ({ ok: true, json: async () => ({ participation: {}, statuses: {} }) } as Response),
+        handlers.status ? handlers.status() : ({ ok: true, json: async () => ({ identities: {}, participation: {}, statuses: {} }) } as Response),
       )
     }
     if (url.startsWith('/api/board/messages')) {
@@ -38,12 +38,13 @@ describe('BoardDashboardPanel', () => {
   })
 
   //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('renders a pane status card from the statuses fixture', async () => {
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
         ok: true,
         json: async () => ({
-          participation: {}, statuses: {
+          identities: {}, participation: {}, statuses: {
             main: {
               updated_at: new Date().toISOString(),
               state: 'working',
@@ -68,11 +69,12 @@ describe('BoardDashboardPanel', () => {
 
 
   //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('renders a card with every optional field omitted without crashing', async () => {
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
         ok: true,
-        json: async () => ({ participation: {}, statuses: { main: { updated_at: new Date().toISOString() } } }),
+        json: async () => ({ identities: {}, participation: {}, statuses: { main: { updated_at: new Date().toISOString() } } }),
       } as Response),
     }))
 
@@ -82,12 +84,13 @@ describe('BoardDashboardPanel', () => {
   })
 
   //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('renders an unrecognized state string without crashing', async () => {
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
         ok: true,
         json: async () => ({
-          participation: {}, statuses: { main: { updated_at: new Date().toISOString(), state: 'something-new' } },
+          identities: {}, participation: {}, statuses: { main: { updated_at: new Date().toISOString(), state: 'something-new' } },
         }),
       } as Response),
     }))
@@ -98,12 +101,13 @@ describe('BoardDashboardPanel', () => {
   })
 
   //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('shows a stale pill for a status older than 5 minutes', async () => {
     const old = new Date(Date.now() - 10 * 60 * 1000).toISOString()
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
         ok: true,
-        json: async () => ({ participation: {}, statuses: { main: { updated_at: old, state: 'idle' } } }),
+        json: async () => ({ identities: {}, participation: {}, statuses: { main: { updated_at: old, state: 'idle' } } }),
       } as Response),
     }))
 
@@ -113,11 +117,12 @@ describe('BoardDashboardPanel', () => {
   })
 
   //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('does not show a stale pill for a recent status', async () => {
     vi.stubGlobal('fetch', fetchRouter({
       status: () => ({
         ok: true,
-        json: async () => ({ participation: {}, statuses: { main: { updated_at: new Date().toISOString(), state: 'idle' } } }),
+        json: async () => ({ identities: {}, participation: {}, statuses: { main: { updated_at: new Date().toISOString(), state: 'idle' } } }),
       } as Response),
     }))
 
@@ -215,6 +220,7 @@ describe('BoardDashboardPanel', () => {
   })
 
   //efficacy:exempt response fixtures now include participation; this existing presentation behavior is unchanged
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('restores focus to the previously focused element when it closes', async () => {
     const trigger = document.createElement('button')
     document.body.appendChild(trigger)
@@ -246,7 +252,7 @@ describe('BoardDashboardPanel connection and activity', () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) =>
       Promise.resolve({
         ok: true,
-        json: async () => (String(url).includes('/status') ? { participation: {}, statuses } : { messages: [], epoch: 'e' }),
+        json: async () => (String(url).includes('/status') ? { identities: {}, participation: {}, statuses } : { messages: [], epoch: 'e' }),
       }),
     ))
     render(<BoardDashboardPanel isOpen token="tok" boardPanes={boardPanes} onClose={vi.fn()} />)
@@ -285,6 +291,7 @@ describe('BoardDashboardPanel connection and activity', () => {
     expect(await screen.findByText('ghost')).toBeDefined()
   })
 
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('keeps the empty state when no pane is board-enabled', async () => {
     renderPanel({}, [])
     expect(await screen.findByText('No agent detected or status reported yet.')).toBeDefined()
@@ -305,7 +312,7 @@ describe('BoardDashboardPanel work summaries', () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) =>
       Promise.resolve({
         ok: true,
-        json: async () => (String(url).includes('/status') ? { participation: {}, statuses } : { messages: [], epoch: 'e' }),
+        json: async () => (String(url).includes('/status') ? { identities: {}, participation: {}, statuses } : { messages: [], epoch: 'e' }),
       }),
     ))
     render(<BoardDashboardPanel isOpen token="tok" boardPanes={boardPanes} onClose={vi.fn()} />)

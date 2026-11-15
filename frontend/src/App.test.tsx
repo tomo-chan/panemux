@@ -1066,10 +1066,11 @@ describe('App workspace deletion', () => {
     expect(screen.queryByRole('button', { name: 'Open agent board' })).toBeNull()
   })
 
+  //efficacy:exempt Only board response mocks gain required identities; App behavior is unchanged.
   it('shows the Agent Board button and opens the panel when agent_board is enabled with a token', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ statuses: {}, messages: [] }),
+      json: async () => ({ identities: {}, participation: {}, statuses: {}, messages: [] }),
     }))
     mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: false, agentBoardEnabled: true })
 
@@ -1081,10 +1082,11 @@ describe('App workspace deletion', () => {
     expect(screen.getByRole('dialog', { name: 'Agent board' })).toBeInTheDocument()
   })
 
+  //efficacy:exempt Only board response mocks gain required identities; App behavior is unchanged.
   it('toggles the agent board panel with Cmd/Ctrl+Shift+B even while a pane has focus', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ statuses: {}, messages: [] }),
+      json: async () => ({ identities: {}, participation: {}, statuses: {}, messages: [] }),
     }))
     mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: false, agentBoardEnabled: true })
 
@@ -1468,8 +1470,9 @@ describe('App task dashboard layer', () => {
   // The palette, the history panel and the board live in the workspace
   // layer, which is inert while the dashboard is shown: opened there they
   // would be drawn above the dashboard and take no input.
+  //efficacy:exempt Only board response mocks gain required identities; App behavior is unchanged.
   it('does not open the palette or the board over the dashboard, and closes them when it opens', () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ statuses: {}, messages: [] }) }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ identities: {}, participation: {}, statuses: {}, messages: [] }) }))
     mockUseBoardSessionToken.mockReturnValue({ token: 'tok', commandCenterEnabled: true, agentBoardEnabled: true })
     render(<App />)
 

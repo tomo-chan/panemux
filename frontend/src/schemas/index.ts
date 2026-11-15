@@ -370,7 +370,24 @@ export const BoardParticipationSchema = z.object({
 })
 export type BoardParticipation = z.infer<typeof BoardParticipationSchema>
 
+// Host-qualified names are observations, never proof of membership or delivery.
+export const BoardIdentitySchema = z.object({
+  host: z.string(),
+  team: z.string(),
+  name: z.string(),
+  pane_id: z.string().nullable(),
+  source: z.enum(['task', 'self_report', 'unreported']),
+  state: z.string().nullable(),
+  waiting_for: z.string().nullable(),
+  status_since: z.string().nullable(),
+  task_observed_at: z.string().nullable(),
+  last_message_at: z.string().nullable(),
+  self_report: BoardStatusEntrySchema.nullable(),
+})
+export type BoardIdentity = z.infer<typeof BoardIdentitySchema>
+
 export const BoardStatusResponseSchema = z.object({
+  identities: z.record(z.string(), BoardIdentitySchema),
   participation: z.record(z.string(), BoardParticipationSchema),
   statuses: z.record(z.string(), BoardStatusEntrySchema),
 })

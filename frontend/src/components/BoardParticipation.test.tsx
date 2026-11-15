@@ -4,9 +4,10 @@ import { BoardDashboardPanel } from './BoardDashboardPanel'
 
 afterEach(() => vi.unstubAllGlobals())
 
+//efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
 it('lists detected agents and reporting panes, excluding idle shells', async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes('/status') ? {
-    participation: {
+    identities: {}, participation: {
       detected: { pane_id: 'detected', host: 'local', agent_type: 'codex', instructed: true },
       pending: { pane_id: 'pending', host: 'ssh:build', agent_type: 'claude', instructed: false },
       shell: { pane_id: 'shell', host: 'local', agent_type: '', instructed: false },
