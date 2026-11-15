@@ -34,8 +34,10 @@ The [task API](task-api.md#get-apitasks) defines task fields; [records](task-rec
   as its error.
 - The hosts can be added, edited and deleted from the dashboard's **Hosts…** dialog
   ([`/api/config/ssh-connections`](rest-api.md#apiconfigssh-connections)). A host added there is
-  collected from at the next collection; an edited one has its connection dropped and a dial of it
-  still in flight discarded, so the next collection dials it with the new details.
+  collected from at the next collection. After a successful create, edit or delete, the affected
+  key’s pooled connection and pending dial are discarded under the configuration lock, before
+  Board observation invalidation. Recreating the same key therefore cannot reuse the old target’s
+  connection. Unchanged entries and failed saves retain their connections.
 - Each SSH host gets **one** command connection shared by the task and agent boards, opened with the same dialer panes use
   (ProxyJump, ProxyCommand and `known_hosts` verification included) and reused by every later
   collection and Agent Board polling or sending. Each operation uses its own exec channel; cancelling
@@ -57,8 +59,9 @@ The [task API](task-api.md#get-apitasks) defines task fields; [records](task-rec
   panemux host the script runs in a process group of its own, and the whole group — the script and
   every probe it started — is killed when the collection's time is up or the request is abandoned.
 - A host removed from `ssh_connections` is refused by the execution port before another dial or
-  command, even if OpenSSH still knows the name. Its connection is closed on the next collection. Every
-  connection is closed when panemux shuts down.
+  command, even if OpenSSH still knows the name. Successful removal through the configuration API
+  closes its pooled connection immediately; collection also prunes hosts no longer configured.
+  Every connection is closed when panemux shuts down.
 - One host failing never hides another host's tasks.
 
 ## Collection

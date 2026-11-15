@@ -135,9 +135,12 @@ full collection restore local task priority after a newer live failure. Wall-clo
 are display metadata and do not determine this ordering. `task_observed_at` shows observation age.
 There is no added polling or expiry timer. Panes without observations or detected agents are omitted.
 
-Successfully adding, deleting or changing an `ssh_connections` entry clears that key’s task
-observations and advances its generation watermark. In-flight results from before the change
-cannot repopulate the cache, including after deletion and re-addition of the same target.
+Successfully adding, deleting or changing an `ssh_connections` entry first discards that key’s
+pooled execution connection and any pending dial, then clears its task observations and advances
+its generation watermark. Both steps occur under the configuration lock after saving succeeds,
+so later collections can only open or reuse connections for the current target. In-flight results
+from before the change cannot repopulate the cache, including after deletion and re-addition of
+the same target.
 Unchanged entries and failed configuration saves preserve their observations. A removed host’s
 results are ignored. Task priority resumes only after a new successful collection for the current
 configuration; self-reports retain their existing independent lifetime.

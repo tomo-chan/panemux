@@ -26,9 +26,12 @@ generation even for failed or pending outcomes. This watermark prevents a delaye
 from restoring a local success older than a live failure, or an older failure from erasing a newer
 success. Success timestamps alone cannot order failures or identical wall-clock timestamps.
 
-Successful connection creation, removal or value changes clear the affected key’s task
-observations and advance its watermark. An old in-flight result cannot restore the previous
-target’s tasks after the key is reused. Unchanged entries and failed saves preserve observations.
+Successful connection creation, removal or value changes first discard the affected key’s
+pooled execution connection and pending dial, then clear task observations and advance its
+watermark, within the same configuration lock. This also covers immediate deletion/recreation
+without an intervening collection. Pool invalidation does not consult membership, because that
+callback would re-enter the held configuration lock; ordinary reconnect still validates membership.
+An old in-flight result cannot restore the previous target’s tasks after the key is reused. Unchanged entries and failed saves preserve observations.
 Live collection side effects are committed only after the publisher accepts the result, so a
 result discarded after removal or observation shutdown cannot update the Board cache.
 

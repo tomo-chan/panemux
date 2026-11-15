@@ -73,26 +73,15 @@ func (h *Handler) recordBoardTasks(generation uint64, result tasks.HostResult, l
 
 // invalidateBoardConnections runs under cfgMu after a successful save. Keep
 // tombstone generations so an in-flight result cannot repopulate an old target.
-func (h *Handler) invalidateBoardConnections(previous, next map[string]config.SSHConnection) {
+func (h *Handler) invalidateBoardConnections(names []string) {
 	h.boardTasksMu.Lock()
 	defer h.boardTasksMu.Unlock()
 	if h.boardTasks == nil {
 		h.boardTasks = make(map[string]boardTaskObservation)
 	}
-	invalidate := func(name string) {
+	for _, name := range names {
 		h.boardTaskGeneration++
 		h.boardTasks[name] = boardTaskObservation{generation: h.boardTaskGeneration}
-	}
-	for name, old := range previous {
-		current, exists := next[name]
-		if !exists || current != old {
-			invalidate(name)
-		}
-	}
-	for name := range next {
-		if _, exists := previous[name]; !exists {
-			invalidate(name)
-		}
 	}
 }
 

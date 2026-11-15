@@ -185,9 +185,6 @@ func (h *Handler) PutConfigSSHConnection(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	// The dashboard's open connection was made with the old details; the
-	// next collection dials again with the new ones.
-	_ = h.tasks.Reconnect(name)
 	writeJSON(w, saved)
 }
 
@@ -307,8 +304,30 @@ func (h *Handler) replaceSSHConnections(w http.ResponseWriter, next map[string]c
 		writeJSONError(w, http.StatusInternalServerError, "failed to save ssh_connections")
 		return false
 	}
-	h.invalidateBoardConnections(previous, next)
+	changed := changedSSHConnectionKeys(previous, next)
+	// Drop ready connections and in-flight dials before advancing the watermark,
+	// all under cfgMu. ForgetHost does not re-enter the membership callback.
+	for _, name := range changed {
+		h.tasks.ForgetHost(name)
+	}
+	h.invalidateBoardConnections(changed)
 	return true
+}
+
+func changedSSHConnectionKeys(previous, next map[string]config.SSHConnection) []string {
+	var changed []string
+	for name, old := range previous {
+		current, exists := next[name]
+		if !exists || current != old {
+			changed = append(changed, name)
+		}
+	}
+	for name := range next {
+		if _, exists := previous[name]; !exists {
+			changed = append(changed, name)
+		}
+	}
+	return changed
 }
 
 func (h *Handler) sshConnectionEntry(
