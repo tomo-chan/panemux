@@ -509,10 +509,10 @@ func TestConfigSSHConnectionRoutes_FindEscapedNames(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			e := newSSHConnectionsEnv(t, fromSSHConfigBlock)
-			e.cfg.SSHConnections = map[string]config.SSHConnection{
-				"used":  {Host: "used.invalid"}, // one-ssh's connection, so the config reloads
-				tt.name: {Host: "x.invalid"},
-			}
+			body, err := json.Marshal(map[string]string{"name": tt.name, "host": "x.invalid"})
+			require.NoError(t, err)
+			created := e.do(t, http.MethodPost, sshConnectionsPath, string(body))
+			require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 
 			rec := e.do(t, http.MethodPut, sshConnectionsPath+"/"+tt.escaped, `{"host":"y.invalid"}`)
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -669,9 +669,10 @@ func TestConfigSSHConnectionKeyRuleAtWriteBoundaries(t *testing.T) {
 				require.NoError(t, err)
 				path := sshConnectionsPath
 				if method == http.MethodPut {
-					// Exercise the update boundary even for an injected in-memory bad key;
-					// such a key can no longer enter through configuration loading.
-					e.cfg.SSHConnections[key] = config.SSHConnection{Host: "before.invalid"}
+					if tc.valid {
+						e.cfg.SSHConnections[key] = config.SSHConnection{Host: "before.invalid"}
+					}
+					// Invalid path keys must fail validation even though no loaded entry can have them.
 					path += "/" + url.PathEscape(key)
 				}
 				body, err := json.Marshal(map[string]string{"name": key, "host": "after.invalid"})
