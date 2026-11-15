@@ -52,7 +52,7 @@ func (h *Handler) recordBoardTasks(generation uint64, result tasks.HostResult, l
 	}
 	// Starts mint distinct generations under boardTasksMu. GetTasks records once
 	// per unique host from the config map; CollectHostLive records its host once.
-	//mutation:exempt[CONDITIONALS_BOUNDARY] EQUIVALENT: neither caller can record one generation twice for one host.
+	// Equal generations replace previous outcomes; only strictly older results are stale.
 	if generation < h.boardTasks[result.Name].generation {
 		return
 	}

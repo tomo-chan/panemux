@@ -166,3 +166,31 @@ func TestBoardIdentitiesOrderAllHostOutcomesByCollectionStart(t *testing.T) {
 		})
 	}
 }
+
+func TestBoardIdentitiesSameGenerationReplacesPreviousOutcome(t *testing.T) {
+	for _, status := range []tasks.HostStatus{tasks.HostOK, tasks.HostError, tasks.HostConnecting} {
+		t.Run(string(status), func(t *testing.T) {
+			h := setupBoardRouter(board.NewBoardCache(), nil)
+			defer h.Close()
+			generation := h.beginBoardTaskCollection()
+			firstAt := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
+			nextAt := firstAt.Add(time.Minute)
+			task := tasks.Task{State: tasks.StateWait, WaitingFor: "old wait",
+				Location: tasks.Location{Kind: tasks.LocationOutside, PaneID: "main"}}
+			h.recordBoardTasks(generation, tasks.HostResult{Status: tasks.HostOK, CollectedAt: &firstAt}, []tasks.Task{task})
+			require.Equal(t, "task", readIdentities(t, h)["main@local"].Source)
+			task.State = tasks.StateIdle
+			task.WaitingFor = ""
+			h.recordBoardTasks(generation, tasks.HostResult{Status: status, CollectedAt: &nextAt}, []tasks.Task{task})
+			got := readIdentities(t, h)
+			if status == tasks.HostOK {
+				require.Contains(t, got, "main@local")
+				assert.Equal(t, "idle", *got["main@local"].State)
+				assert.Nil(t, got["main@local"].WaitingFor)
+				assert.Equal(t, nextAt, *got["main@local"].TaskObservedAt)
+			} else {
+				assert.NotContains(t, got, "main@local")
+			}
+		})
+	}
+}
