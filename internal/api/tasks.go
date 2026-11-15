@@ -279,10 +279,18 @@ type taskEventSource struct{ h *Handler }
 func (s taskEventSource) Hosts() []string { return s.h.tasks.Hosts() }
 
 func (s taskEventSource) CollectHostLive(ctx context.Context, name string) (tasks.HostResult, []tasks.Task) {
+	result, list, accept := s.CollectHostLiveDeferred(ctx, name)
+	accept()
+	return result, list
+}
+
+// CollectHostLiveDeferred lets the publisher discard results before board cache writes.
+func (s taskEventSource) CollectHostLiveDeferred(
+	ctx context.Context, name string,
+) (tasks.HostResult, []tasks.Task, func()) {
 	generation := s.h.beginBoardTaskCollection()
 	result, list := s.h.tasks.CollectHostLive(ctx, name)
-	s.h.recordBoardTasks(generation, result, list)
-	return result, list
+	return result, list, func() { s.h.recordBoardTasks(generation, result, list) }
 }
 
 // TaskEventSource is the task collector as the task event publisher

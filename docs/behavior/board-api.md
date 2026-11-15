@@ -118,9 +118,12 @@ the existing 2000-row ring. Reports retain their existing in-memory lifetime. No
 A matching pane requires the same host and name equal to its current configured pane ID.
 Task priority additionally requires its location to match that pane: the same tmux session and
 pane kind, or an outside task claiming that local/SSH pane on the same connection. No new
-agmsg-name-to-session mapping is inferred. Exactly one live matching task supplies State,
-WaitingFor and StatusSince; its self-report remains supplemental. Multiple matching live tasks
+agmsg-name-to-session mapping is inferred. Task priority requires exactly one live task for
+that pane and exactly one matching pane for that task across all workspaces on the same host.
+Only this one-to-one match supplies State, WaitingFor and StatusSince; its self-report remains
+supplemental. Multiple tasks matching one pane, or multiple panes sharing a task’s tmux session,
 fall back to self-report or unreported, as does a failed or pending latest host collection.
+Equal tmux session names on different hosts do not make a match ambiguous.
 
 Task observations come only from existing `/api/tasks` and task-event collections. Without
 such a collection there is no task priority. Successful collections replace that host’s
@@ -131,6 +134,16 @@ Older results, whether successful or failed, are ignored, so a slow host cannot 
 full collection restore local task priority after a newer live failure. Wall-clock timestamps
 are display metadata and do not determine this ordering. `task_observed_at` shows observation age.
 There is no added polling or expiry timer. Panes without observations or detected agents are omitted.
+
+Successfully adding, deleting or changing an `ssh_connections` entry clears that key’s task
+observations and advances its generation watermark. In-flight results from before the change
+cannot repopulate the cache, including after deletion and re-addition of the same target.
+Unchanged entries and failed configuration saves preserve their observations. A removed host’s
+results are ignored. Task priority resumes only after a new successful collection for the current
+configuration; self-reports retain their existing independent lifetime.
+
+The task-event publisher stages Board cache updates until it accepts a live result. Results it
+discards because observation stopped or the host was removed do not update Board task priority.
 
 For example, `worker@local` and `worker@ssh:build` are independent entries, both with
 `pane_id: null` unless a configured pane named `worker` exists on that same host. Neither

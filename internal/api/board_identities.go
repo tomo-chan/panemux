@@ -45,6 +45,13 @@ func (h *Handler) beginBoardTaskCollection() uint64 {
 // pending collection removes task priority without discarding self-reports.
 // Keep its generation even without tasks so late older results cannot restore it.
 func (h *Handler) recordBoardTasks(generation uint64, result tasks.HostResult, list []tasks.Task) {
+	h.cfgMu.RLock()
+	defer h.cfgMu.RUnlock()
+	if result.Name != "" {
+		if _, ok := h.cfg.SSHConnections[result.Name]; !ok {
+			return
+		}
+	}
 	h.boardTasksMu.Lock()
 	defer h.boardTasksMu.Unlock()
 	if h.boardTasks == nil {
@@ -62,6 +69,31 @@ func (h *Handler) recordBoardTasks(generation uint64, result tasks.HostResult, l
 		observation.tasks = append([]tasks.Task(nil), list...)
 	}
 	h.boardTasks[result.Name] = observation
+}
+
+// invalidateBoardConnections runs under cfgMu after a successful save. Keep
+// tombstone generations so an in-flight result cannot repopulate an old target.
+func (h *Handler) invalidateBoardConnections(previous, next map[string]config.SSHConnection) {
+	h.boardTasksMu.Lock()
+	defer h.boardTasksMu.Unlock()
+	if h.boardTasks == nil {
+		h.boardTasks = make(map[string]boardTaskObservation)
+	}
+	invalidate := func(name string) {
+		h.boardTaskGeneration++
+		h.boardTasks[name] = boardTaskObservation{generation: h.boardTaskGeneration}
+	}
+	for name, old := range previous {
+		current, exists := next[name]
+		if !exists || current != old {
+			invalidate(name)
+		}
+	}
+	for name := range next {
+		if _, exists := previous[name]; !exists {
+			invalidate(name)
+		}
+	}
 }
 
 func statusEntry(s board.Status) boardStatusEntry {
@@ -199,11 +231,21 @@ func (b *boardIdentityBuilder) addTasks(observations map[string]boardTaskObserva
 		}
 		id.Host = b.paneHosts[name]
 		e := b.entry(id)
-		if len(matching) == 1 {
+		if len(matching) == 1 && b.matchingPaneCount(matching[0]) == 1 {
 			applyBoardTask(&e, matching[0], observation.at)
 		}
 		b.entries[id.String()] = e
 	}
+}
+
+func (b *boardIdentityBuilder) matchingPaneCount(task tasks.Task) int {
+	count := 0
+	for name, pane := range b.panes {
+		if b.paneHosts[name] == host.Host(task.Host).BoardID() && boardTaskMatchesPane(task, pane) {
+			count++
+		}
+	}
+	return count
 }
 
 func applyBoardTask(e *boardIdentityEntry, task tasks.Task, at *time.Time) {
@@ -218,8 +260,8 @@ func applyBoardTask(e *boardIdentityEntry, task tasks.Task, at *time.Time) {
 	}
 }
 
-// Keep the Q1 mapping aligned with findTaskPane: tmux session and pane kind,
-// or the outside process pane claim and pane kind, always on the same host.
+// Share findTaskPane's location predicate. Board priority additionally requires
+// one task per pane and one pane per task, rather than selecting the first pane.
 func boardTaskMatchesPane(task tasks.Task, pane *config.PaneConfig) bool {
 	switch task.Location.Kind {
 	case tasks.LocationTmux:

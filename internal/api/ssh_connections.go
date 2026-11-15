@@ -307,6 +307,7 @@ func (h *Handler) replaceSSHConnections(w http.ResponseWriter, next map[string]c
 		writeJSONError(w, http.StatusInternalServerError, "failed to save ssh_connections")
 		return false
 	}
+	h.invalidateBoardConnections(previous, next)
 	return true
 }
 
