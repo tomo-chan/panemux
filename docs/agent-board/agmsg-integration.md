@@ -27,7 +27,7 @@ contract is:
 | list teams | `api.sh get teams` |
 | list members | `api.sh get teams <team> members` |
 | read messages | `api.sh get teams <team> messages [--agent <name>] [--limit N] [--before-id <id>]` |
-| send | `send.sh <team> <from> <to> <body> --force` |
+| send | `send.sh <team> <from> <to> --body - --force` with the decoded body on stdin |
 
 `api.sh` returns JSONL oldest-first and does not mark messages as read. Message IDs are opaque
 strings: they are matched for equality only, never parsed, sorted, or compared across hosts.

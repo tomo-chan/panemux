@@ -76,6 +76,13 @@ bash ~/.agents/skills/agmsg/scripts/send.sh panemux worker orch@local 'ready for
 
 Use the received `from` verbatim as the reply recipient, for example `worker@ssh:build`.
 `--force` is required because remote identities are absent from the local roster.
+For option-like body text, use public stdin input so `send.sh` cannot interpret it as a flag:
+
+```sh
+printf '%s' '--force is message text' |
+  bash ~/.agents/skills/agmsg/scripts/send.sh panemux worker orch@local --body - --force
+```
+
 Configured pane IDs remain valid initial destinations; replies use the received qualified `from`.
 Send a status JSON body to unqualified `_system` to report to panemux on the source host.
 Panemux neither registers proxy roster entries nor distributes a send wrapper.
