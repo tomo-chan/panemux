@@ -623,3 +623,21 @@ describe('discriminated union coverage', () => {
     expect(declaredVariants(schemas.BoardCommandFrameSchema).filter((v) => !emitted.includes(v))).toEqual([])
   })
 })
+
+// The populated fixture must exercise every identity source, not merely an empty map.
+describe('board identities captured from Go', () => {
+  it('captures task priority, supplemental reports, and equal names on different hosts', () => {
+    const captured = readFixture('board-status')
+    const parsed = schemas.BoardStatusResponseSchema.parse(captured)
+    expect(parsed).toEqual(captured)
+    const entries = Object.values(parsed.identities)
+    expect(new Set(entries.map((e) => e.source))).toEqual(new Set(['task', 'self_report', 'unreported']))
+    expect(parsed.identities['worker@local'].host).toBe('local')
+    expect(parsed.identities['worker@ssh:build'].host).toBe('ssh:build')
+    const task = parsed.identities['pane-editor@local']
+    expect(task.state).toBe('wait')
+    expect(task.waiting_for).toBe('input needed')
+    expect(task.self_report?.state).toBe('working')
+    expect(task.pane_id).toBe('pane-editor')
+  })
+})

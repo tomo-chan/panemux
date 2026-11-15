@@ -51,6 +51,19 @@ The dashboard lists a pane when its agent type is non-empty or a status report e
 
 ```json
 {
+  "identities": {
+    "pane-a@local": {
+      "host": "local", "team": "panemux", "name": "pane-a", "pane_id": "pane-a",
+      "source": "self_report", "state": "working", "waiting_for": null,
+      "status_since": null, "task_observed_at": null, "last_message_at": null,
+      "self_report": {
+        "updated_at": "2026-08-10T12:00:00Z", "state": "working",
+        "cwd": "/workspace/user/project", "branch": "feature/x", "repo": "owner/repo",
+        "pr_url": "https://github.com/owner/repo/pull/123",
+        "last_tool": "Edit internal/api/handler.go", "summary": "Fixing the failing relay tests"
+      }
+    }
+  },
   "participation": {
     "pane-a": {
       "pane_id": "pane-a", "host": "local", "agent_type": "codex", "instructed": false,
