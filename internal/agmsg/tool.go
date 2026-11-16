@@ -13,7 +13,7 @@ import (
 
 const updateFlag = "--update"
 
-const TestedAgmsgCommit = "9fea22e477aece18bd80ab4346b17d1c986731e1"
+const TestedAgmsgCommit = "bba2f5f94c3821d0b32e3a477ebe99d2b1711c34"
 
 // The marker matches v1.2.0 install.sh's own alternate-install discovery.
 const toolProbe = `for d in "$HOME"/.agents/skills/*/; do
