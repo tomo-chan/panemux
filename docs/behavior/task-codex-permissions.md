@@ -17,7 +17,7 @@ watched from the host's menu ([Opening a host](task-navigation.md#opening-a-host
 review there.
 
 - **`Codex input notifications` in the host menu.** The menu checks the host when it opens
-  ([`GET /api/tasks/codex-hook`](task-api.md#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update)) and shows one of:
+  ([`GET /api/tasks/codex-hook`](../api/tasks.md#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update)) and shows one of:
 
   | Host | Shown |
   |---|---|
@@ -87,7 +87,7 @@ review there.
   when the record was made at or after the turn's start. A turn that has ended, or any
   other turn, ignores the record: the wait clears by itself when the turn is over.
 - **`Input given`.** The detail panel of such a task offers `Input given`, which
-  [`POST /api/tasks/input-given`](task-api.md#post-apitasksinput-given) sends. panemux keeps the answered
+  [`POST /api/tasks/input-given`](../api/tasks.md#post-apitasksinput-given) sends. panemux keeps the answered
   requests in memory only; the next request in the same turn waits again. The pane running the task
   and the Type in pane popup on it offer the same button, on a strip below their header
   ([Codex permission requests in a pane](task-events.md#codex-permission-requests-in-a-pane)).

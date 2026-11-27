@@ -59,7 +59,7 @@ The relay keeps the latest status per `name@BoardID` in the configured team, ret
 host/team in bounded history with an `is_status` marker. Equal names on different hosts cannot
 overwrite each other. Unqualified `_system` targets the read host; qualified `_system` is rejected.
 The status API exposes qualified identities and also projects matching reports back to
-configured pane-ID keys for compatibility. See the [identity contract](../behavior/board-api.md#identity-entries)
+configured pane-ID keys for compatibility. See the [identity contract](../api/agent-board.md#identity-entries)
 for primary task observations and supplemental self-reports. The dashboard filters those rows from conversation
 history.
 

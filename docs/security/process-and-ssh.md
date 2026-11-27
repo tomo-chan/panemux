@@ -31,7 +31,7 @@ enabled; see [New `ssh_tmux` sessions](preview-and-urls.md#new-ssh_tmux-sessions
 ### Task dashboard temporary attach (`POST /api/tasks/attach`)
 
 Only `NewTmuxLocalAttach` and `NewTmuxSSHAttach` reach tmux for task attaches
-([API](../behavior/task-api.md#post-apitasksattach)):
+([API](../api/tasks.md#post-apitasksattach)):
 
 - The request supplies only a task ID; `tasks.Service.FindTask` resolves host and tmux name from a
   fresh collection.

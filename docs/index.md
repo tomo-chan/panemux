@@ -23,7 +23,8 @@ apply, and where to continue. They do not narrate how the model evolved.
 | How is the system arranged? | [Architecture](architecture.md) |
 | What does the running product do? | [Behavior specification](behavior.md) |
 | Which security rules constrain a change? | [Security overview](security/overview.md) |
-| How should the interface behave and look? | [UI design](ui-design.md) |
+| How should the interface behave and look? | [UI overview](ui/overview.md), [UI index](ui/index.md) |
+| What are the REST and WebSocket wire contracts? | [API index](api/index.md) |
 | Which agents are known, and how is one added? | [Agent registry](agent-registry.md), [Adding an agent](agent-registry/adding-an-agent.md) |
 | How does Agent Board work? | [Agent Board](agent-board.md) |
 | What must the test system protect? | [Quality gates](engineering/quality-gates.md) |
@@ -37,8 +38,9 @@ it is also the day-to-day command reference.
 
 Topic guides link to focused deep dives when the summary is not enough:
 
-- [UI details](ui-design/) - Workspace and pane chrome, layout editing, dialogs, previews, attention,
-  task dashboard surfaces, and Agent Board presentation.
+- [UI details](ui/) - Shared UI principles, frontend runtime, modals, workspace and pane chrome,
+  layout editing, previews, task dashboard, attention, and Agent Board presentation.
+- [API contracts](api/) - Workspace, task dashboard, and Agent Board REST and WebSocket protocols.
 - [Behavior details](behavior/) - REST, WebSocket, frontend, SSH, notifications, URL opening, and the
   task dashboard.
 - [Security details](security/) - requirements grouped by command or trust boundary.
@@ -65,10 +67,10 @@ remains the authority for line-level chronology.
 * [Behavior Specification](behavior.md) - Startup, configuration, operational assumptions, and routes to runtime contracts.
 * [Application Overview](overview.md) - Product purpose, capabilities, operating model, and current boundaries.
 * [Scenario Coverage](scenarios.md) - User-facing acceptance scenarios and the automated or manual verification for each.
-* [UI Design](ui-design.md) - Shared interface principles and routes to screen and interaction contracts.
 * [agent-board/](agent-board/) - Agent Board architecture, messaging, integration, and command center contracts.
 * [agent-registry/](agent-registry/) - Agent integration procedures and capability requirements.
-* [ui-design/](ui-design/) - Screen and interaction contracts linked from the shared UI principles.
+* [api/](api/) - REST API and WebSocket wire contracts grouped by domain.
+* [ui/](ui/) - Shared UI principles, frontend runtime, and domain screen contracts.
 * [behavior/](behavior/) - Runtime behavior, API contracts, task events, and task dashboard details.
 * [decisions/](decisions/) - Design decisions grouped into topic documents.
 * [engineering/](engineering/) - Quality gates, testing contracts, runtimes, sandboxes, screenshots, CI, releases, and agmsg maintenance.

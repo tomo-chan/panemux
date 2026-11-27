@@ -60,7 +60,7 @@ An agent declares any subset of these. A capability is a declaration of what pan
 the agent, not a statement that it works on a given host right now. Whether `collect`, `launch` and
 `resume` work on a host is found out per host and kept inside `internal/tasks` as
 [agent availability](behavior/task-collection.md#agent-availability): a probe for the agent's CLI, and what the
-collection could not read. [`GET /api/tasks`](behavior/task-api.md#get-apitasks) carries the registered
+collection could not read. [`GET /api/tasks`](api/tasks.md#get-apitasks) carries the registered
 agents with their declarations (`agents`), each host's availability, and each task's actions with why
 one cannot be taken, so the dashboard offers what the registry and the host allow rather than what an
 agent's name suggests.

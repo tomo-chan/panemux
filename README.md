@@ -125,7 +125,7 @@ Codex command-approval waits need the host's
 A waiting task highlights its pane frame and inactive workspace tab. With browser notification
 permission granted, a wait that is not visible can also notify; clicking it reveals the pane or
 opens the task dashboard. Permission is requested on the first browser interaction. See
-[notifications and attention](docs/behavior/notifications.md) for visibility, clearing and
+[notifications and attention](docs/ui/tasks.md#attention-indicators-and-browser-notifications) for visibility, clearing and
 per-tab deduplication rules across reloads and reconnects.
 
 ### Task dashboard

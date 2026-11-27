@@ -13,7 +13,7 @@ independently of panes. A pane is the window used to watch or answer a task. A t
 state never says whether its work is done: done and labels are records a person sets.
 
 Use the focused contracts below. [Task events](task-events.md) owns live state delivery and
-receiver behavior; [UI design](../ui-design/task-dashboard.md) owns presentation. Command safety
+receiver behavior; [UI design](../ui/tasks.md) owns presentation. Command safety
 is authoritative in the per-boundary concepts listed in the [security map](../security/overview.md#boundary-map).
 
 ## Document map
@@ -24,7 +24,7 @@ is authoritative in the per-boundary concepts listed in the [security map](../se
 - [Task summaries](task-summaries.md) — Summary scheduling, conversation excerpts, persistence, and agent-specific behavior.
 - [Task navigation and terminals](task-navigation.md) — Task locations, pane navigation, temporary terminals, and dashboard view-state behavior.
 - [Codex permission notifications](task-codex-permissions.md) — Permission hook installation, automatic updates, records, and answered waits.
-- [Task and host terminal REST API](task-api.md) — Task and host terminal payloads, response fields, status codes, and failure contracts.
+- [Task Dashboard REST and Event Stream API](../api/tasks.md) — Task and host terminal payloads, response fields, status codes, failure contracts, and `/ws/tasks/events` frames.
 - [Host tool management](host-tools.md) — Host tool update coordination and manual and automatic agmsg management.
 
 ## Former sections
@@ -93,37 +93,37 @@ See [Task navigation and terminals](task-navigation.md#opening-a-task).
 See [Task navigation and terminals](task-navigation.md#opening-a-host).
 
 ### `GET /api/tasks`
-See [Task and host terminal REST API](task-api.md#get-apitasks).
+See [Task Dashboard REST and Event Stream API](../api/tasks.md#get-apitasks).
 
 ### `POST /api/tasks/hosts/{name}/reconnect`
-See [Task and host terminal REST API](task-api.md#post-apitaskshostsnamereconnect).
+See [Task Dashboard REST and Event Stream API](../api/tasks.md#post-apitaskshostsnamereconnect).
 
 ### `PUT /api/tasks/records`
-See [Task and host terminal REST API](task-api.md#put-apitasksrecords).
+See [Task Dashboard REST and Event Stream API](../api/tasks.md#put-apitasksrecords).
 
 ### `POST /api/tasks`
-See [Task and host terminal REST API](task-api.md#post-apitasks).
+See [Task Dashboard REST and Event Stream API](../api/tasks.md#post-apitasks).
 
 ### `POST /api/tasks/resume`
-See [Task and host terminal REST API](task-api.md#post-apitasksresume).
+See [Task Dashboard REST and Event Stream API](../api/tasks.md#post-apitasksresume).
 
 ### `POST /api/tasks/attach`
-See [Task and host terminal REST API](task-api.md#post-apitasksattach).
+See [Task Dashboard REST and Event Stream API](../api/tasks.md#post-apitasksattach).
 
 ### `POST /api/tasks/summary`
-See [Task and host terminal REST API](task-api.md#post-apitaskssummary).
+See [Task Dashboard REST and Event Stream API](../api/tasks.md#post-apitaskssummary).
 
 ### `POST /api/tasks/input-given`
-See [Task and host terminal REST API](task-api.md#post-apitasksinput-given).
+See [Task Dashboard REST and Event Stream API](../api/tasks.md#post-apitasksinput-given).
 
 ### `GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`
-See [Task and host terminal REST API](task-api.md#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update).
+See [Task Dashboard REST and Event Stream API](../api/tasks.md#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update).
 
 ### `POST /api/hosts/session-name`
-See [Task and host terminal REST API](task-api.md#post-apihostssession-name).
+See [Task Dashboard REST and Event Stream API](../api/tasks.md#post-apihostssession-name).
 
 ### `POST /api/hosts/terminal`
-See [Task and host terminal REST API](task-api.md#post-apihoststerminal).
+See [Task Dashboard REST and Event Stream API](../api/tasks.md#post-apihoststerminal).
 
 ### Manual agmsg host tool
 See [Host tool management](host-tools.md#manual-agmsg-host-tool).

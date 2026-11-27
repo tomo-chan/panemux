@@ -18,7 +18,7 @@ every `ssh_connections` host without letting request, config, or host text becom
   subscribers, at most once concurrently and no faster than every 5 seconds per host.
 - Execution runs `sh -s` with the script on stdin (local `HOME` from `internal/homedir` and
   process-group kill on context cancellation). Hosts are dial data via the guarded
-  [SSH connection API](../behavior/rest-api.md#apiconfigssh-connections) (rejecting control
+  [SSH connection API](../api/workspace.md#apiconfigssh-connections) (rejecting control
   characters, never returning passwords, no `ProxyCommand`/`ProxyJump` fields).
 - Remote Git inspection validates host-reported CWD with `validRemotePath` + `shellQuotePath`;
   local Git uses `sanitizeGitExecDir` + `cmd.Dir`; `gh pr view` uses discrete argv and constant

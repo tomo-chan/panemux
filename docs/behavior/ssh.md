@@ -86,7 +86,7 @@ added with **Add SSH Host**, which writes `~/.ssh/config` — can be a pane's `c
 collected from until its name is listed under `ssh_connections`.
 
 The entries can also be managed from the task dashboard's **Hosts…** dialog, which writes
-`config.yaml` ([`/api/config/ssh-connections`](rest-api.md#apiconfigssh-connections)). It never
+`config.yaml` ([`/api/config/ssh-connections`](../api/workspace.md#apiconfigssh-connections)). It never
 shows a saved password; leaving the password empty when editing keeps it. An entry cannot be renamed,
 and one cannot be deleted while a pane or another dashboard host would no longer resolve without it:
 one that uses it by name with no `Host` block of that name to fall back to, or one whose `ProxyJump`
@@ -140,4 +140,4 @@ see [New remote tmux sessions](url-open.md#new-remote-tmux-sessions).
 ### Persistence behavior
 
 Layout/workspace persistence and per-workspace maximize state are specified in
-[Frontend persistence behavior](frontend.md#persistence-behavior).
+[Frontend persistence behavior](../ui/overview.md#resize-persistence-and-layout-operations).

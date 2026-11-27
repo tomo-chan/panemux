@@ -41,7 +41,7 @@ description: "Pane worktree resolution, repository and PR links, polling, and ca
 - If the resolved repository origin can be converted into a browser URL, the header shows the repository name as a link to that repository page.
 - For SCP-style SSH origins such as `git@alias:owner/repo.git`, panemux uses `~/.ssh/config` `Host` aliases to resolve both the browser link hostname and GitHub PR lookup repo host when a matching alias exists; otherwise it treats the SSH host token as the hostname directly.
 - If the resolved branch has a GitHub pull request, the header shows a PR link labeled `#<number>`.
-- When the active agent (including its subagents) has diverged into more than one distinct sibling worktree of the same repository, panemux shows all of them instead of just one, deduplicated by the worktree's repository root; the pane's own base directory is shown only when nothing has diverged from it. Each distinct worktree gets its own independent GitHub PR lookup, so more than one PR link can be shown at once. See [Pane Header](../ui-design/panes.md#multiple-worktrees) for its presentation.
+- When the active agent (including its subagents) has diverged into more than one distinct sibling worktree of the same repository, panemux shows all of them instead of just one, deduplicated by the worktree's repository root; the pane's own base directory is shown only when nothing has diverged from it. Each distinct worktree gets its own independent GitHub PR lookup, so more than one PR link can be shown at once. See [Pane Header](../ui/workspace.md#multiple-worktrees) for its presentation.
 
 ## Polling and caching
 

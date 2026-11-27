@@ -10,27 +10,9 @@ description: "Agent Board configuration and API ownership with links to exact pa
 
 ## API additions
 
-Exact payloads and status codes live in [Agent Board REST API](../behavior/board-api.md#agent-board-rest-api).
-
-| Endpoint | Contract |
-|---|---|
-| `GET /api/board/status` | Read qualified identities and compatible pane snapshots without host I/O |
-| `GET /api/board/messages?since=<seq>` | Read cache history after a panemux-local sequence |
-| `POST /api/board/broadcast` | Send to qualified names or compatible pane IDs on their owning hosts |
-| `WS /ws/board/command` | Run and stream one command-center query |
-| `GET /api/board/command/history` | Read captured command-center history |
-| `GET /api/session-token` | Loopback-only browser bootstrap for the token and capability flags |
-
-All `/api/board/*` routes require the bearer token. `/ws/board/command` carries the same token by
-WebSocket subprotocol. `/api/session-token` is deliberately outside the authenticated subtree and
-uses the guarded unauthenticated contract in [Agent Board REST API](../behavior/board-api.md#get-apisession-token).
-All other existing `/api/*` routes and `/ws/{sessionID}` remain unauthenticated; changing that
-boundary requires a separate frontend and server change.
-
-Names and hosts are exposed in `identities`; existing `statuses` and `participation` retain
-their pane-ID keys and meanings. Identity states prefer unambiguous matching task observations,
-with a separately labelled self-report. See the [identity contract](../behavior/board-api.md#identity-entries)
-for nulls, observation lifetime, and fallback rules. Listing a name is never a send prerequisite.
+All Agent Board REST routes, `/api/session-token` bootstrap, `/ws/board/command` WebSocket frames,
+authentication boundaries, and `identities` payload contracts are authoritative in
+[Agent Board API](../api/agent-board.md).
 
 ## Config additions
 

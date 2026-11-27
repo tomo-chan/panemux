@@ -69,7 +69,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | task event store (`useTaskEvents`, `utils/taskEvents`) | Hold one `/ws/tasks/events` connection per tab and the tasks and hosts it reports, validated and in `seq` order; reconnect from a fresh snapshot on any gap or close, 2 to 30 seconds apart with no limit. |
 | attention and notifications (`App`, `utils/taskEvents`) | Project the task event store and visibility changes into pane/workspace indicators, browser notifications and the task dashboard's state column, matching tasks to panes with `utils/taskBoard` and recording the `wait_id`s each tab notified, and those whose attention a person cleared, in its session storage. |
 | Agent Board hooks and panels | Poll status/message APIs, stream command-center output, and present dashboard, palette, and history overlays. |
-| `TaskDashboard` and `useTasks` | Own dashboard collection/presentation, records, launch/resume dialogs, pane matching, temporary task and host terminals, destination selection, and host tool actions. Shared terminal components use `useTerminal`; task reconnect recreates the attach. See [Task navigation](behavior/task-navigation.md), [task API](behavior/task-api.md), and [host tools](behavior/host-tools.md). |
+| `TaskDashboard` and `useTasks` | Own dashboard collection/presentation, records, launch/resume dialogs, pane matching, temporary task and host terminals, destination selection, and host tool actions. Shared terminal components use `useTerminal`; task reconnect recreates the attach. See [Task navigation](behavior/task-navigation.md), [task API](api/tasks.md), and [host tools](behavior/host-tools.md). |
 | Preview Mermaid runtime | A separate classic bundle draws fenced Mermaid blocks inside the preview’s opaque origin, retains source and per-block errors, and sanitizes final SVG after Mermaid measures a temporary drawing in that same preview origin. It is embedded with frontend assets and served by content hash, independently of the dashboard bundle. |
 | Zod schemas | Runtime-validate structured success payloads and control frames for which schemas are defined. Generated TypeScript types derive from these schemas. |
 
@@ -138,7 +138,7 @@ The visible dashboard polls tasks through `internal/tasks` and the handler-owned
 pool. The API enriches collection with repository metadata, records and enabled summaries; the
 browser matches tasks to panes. Launch/resume and temporary task/host terminals reuse that host
 boundary but have separate lifecycle contracts. See the [task document map](behavior/tasks.md),
-[REST API](behavior/task-api.md) and [adapter contracts](agent-registry/adapters.md).
+[task API](api/tasks.md) and [adapter contracts](agent-registry/adapters.md).
 
 ### Task event flow
 
@@ -219,7 +219,8 @@ Their lifetime is independent of terminal sessions. See [Split preview](behavior
 - [Security details](security/) — requirements grouped by execution and trust boundary.
 - [Agent registry](agent-registry.md) — agent IDs, aliases, detection rules, capabilities, and session keys.
 - [Agent Board details](agent-board/) — messaging, relay, bootstrap, command center, and limitations.
-- [UI design](ui-design.md) — workspace, pane, modal, attention, and Agent Board interactions.
+- [API contracts](api/) — REST and WebSocket wire contracts for workspace, tasks, and Agent Board.
+- [UI overview](ui/overview.md) — workspace, pane, modal, attention, and Agent Board interactions.
 - [Quality gates](engineering/quality-gates.md) — how architectural contracts are verified.
 - [Decision log](decisions/index.md) — tradeoffs and superseded approaches removed from this guide.
 
