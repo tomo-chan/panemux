@@ -33,9 +33,10 @@ of adding another gate.
 Recorded 2026-08-28. TDD chronology cannot be reconstructed reliably, so changed tests are verified
 by passing at `HEAD` and failing when the implementation diff for their stack is reverted. Per-case
 verdicts (via Go test names and frontend JSON reports) stop one honest test from vouching for
-tautological siblings. Benchmarks, unbuildable `HEAD`, skipped selected tests, and unavailable
-worktrees fail; implementation-only refactors warn; per-test and PR-label exemptions remain
-explicit and visible. See [Red-check](../development/red-check.md).
+tautological siblings. Benchmarks are excluded (a branch with only benchmarks warns rather than
+proving anything); unbuildable `HEAD`, runs where every selected test is skipped or unrunnable,
+missing prerequisites, and unavailable worktrees fail; implementation-only refactors warn; per-test
+and PR-label exemptions remain explicit and visible. See [Red-check](../development/red-check.md).
 
 ## D5: The author does not grade its own work
 

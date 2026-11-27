@@ -15,13 +15,13 @@ Current-state contracts are kept separate from chronology and rejected alternati
 not reconstruct behavior from rollout narration. `docs/` is validated as an OKF v0.2 bundle
 (`make check-docs-okf`) alongside link/anchor validation (`make check-docs-links`).
 
-Following #518, one-decision-per-file splitting produced 114 small decision files plus large
-compatibility stubs (`DECISIONLOG.md`, `quality-gateway/decisions.md`), and mixing concern-based
-and feature-based directories scattered specifications across up to five trees. Issue #553
-consolidates decisions into topic files under `docs/decisions/`, removes compatibility stubs and
-parallel translations (standardizing on English), and sets out follow-up reorganization (#555–#558)
-to eliminate double `docs/<topic>.md` + `docs/<topic>/index.md` entrances and group specifications
-by layer and cross-cutting concern.
+Following #518, one-decision-per-file splitting produced 104 small decision files across 9
+subdirectories (114 files including indexes) plus large compatibility stubs (`DECISIONLOG.md`,
+`quality-gateway/decisions.md`), and mixing concern-based and feature-based directories scattered
+specifications across up to five trees. Issue #553 consolidates decisions into topic files under
+`docs/decisions/`, removes compatibility stubs and parallel translations (standardizing on English),
+and sets out follow-up reorganization (#555–#558) to eliminate double `docs/<topic>.md` +
+`docs/<topic>/index.md` entrances and group specifications by layer and cross-cutting concern.
 
 ## Screenshots are generated from fixtures and checked by diff (2026-10-03, issue #285)
 
