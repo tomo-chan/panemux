@@ -11,7 +11,7 @@ Part of the [task dashboard](tasks.md).
 ## Update coordination
 
 Tool management uses the shared host execution port. Successful task collections notify it;
-[Codex hook routes](task-api.md#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update)
+[Codex hook routes](../api/tasks.md#get-and-post-apitaskscodex-hook-post-apitaskscodex-hookauto-update)
 remain the host menu contract.
 
 Tool updates announce a pause for that tool on that host before waiting for active management

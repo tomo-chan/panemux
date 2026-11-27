@@ -30,7 +30,7 @@ panes, and the Type in pane popup of any task. In an `ssh` or `ssh_tmux` pane, a
 task on an SSH host, the file is read from that host ([Panes on an SSH host](#panes-on-an-ssh-host)).
 
 Clicking one opens the split. A relative path is resolved on the server
-([`POST /api/sessions/{id}/preview`](rest-api.md#post-apisessionsidpreview)) against:
+([`POST /api/sessions/{id}/preview`](../api/workspace.md#post-apisessionsidpreview)) against:
 
 - the shell's current working directory, then
 - each worktree the pane's coding agent is working in (the same candidates the pane header's Git
@@ -235,7 +235,7 @@ The files it loads beside it are not bounded.
 
 ### The preview header
 
-[Split Preview UI](../ui-design/preview.md#split-preview) defines the header and divider presentation.
+[Split Preview UI](../ui/workspace.md#split-preview) defines the header and divider presentation.
 The header identifies `local` or the SSH connection name and the absolute file path or clicked URL.
 Reload rereads the file or URL; **Open in new tab** opens the same page in an independent tab;
 **Close** gives the terminal its whole body again. Tabs keep working while panemux runs, even after

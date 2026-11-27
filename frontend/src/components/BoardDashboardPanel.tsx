@@ -24,8 +24,8 @@ interface BoardDashboardPanelProps {
 }
 
 // BoardDashboardPanel is the read-only status/history view for Agent Board
-// — see docs/agent-board.md's Architecture section and docs/ui-design/agent-board.md's
-// Agent Board UI section. Structure and styling deliberately mirror
+// — see docs/agent-board.md's Architecture section and docs/ui/agent-board.md's
+// Dashboard section. Structure and styling deliberately mirror
 // CommandHistoryPanel.tsx (same right-docked overlay pattern), not a new
 // visual language. Broadcast sending is out of scope by design (see the
 // implementation plan's "Scope外" section) — this panel only ever reads

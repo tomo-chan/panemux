@@ -150,4 +150,4 @@ superseded by [shared SSH key validation](agent-board.md#validate-ssh-connection
 Clicking a host chip opens a fresh `ssh`/`ssh_tmux` terminal via a destination popover with
 server-generated names rather than guessing an existing task session.
 See [Opening a host](../behavior/task-navigation.md#opening-a-host) and
-[SSH connection management API](../behavior/rest-api.md#apiconfigssh-connections).
+[SSH connection management API](../api/workspace.md#apiconfigssh-connections).

@@ -21,7 +21,7 @@ A task is one agent session:
   `codex --help` of codex-cli 0.157.0) is not a task. Options that take a value are skipped with it,
   and `-i/--image` with every argument up to the next option, so `codex -i a.png review` is a task.
 
-The [task API](task-api.md#get-apitasks) defines task fields; [records](task-records.md) and
+The [task API](../api/tasks.md#get-apitasks) defines task fields; [records](task-records.md) and
 [summaries](task-summaries.md) add operator metadata without changing observed state.
 
 ## Hosts and connections
@@ -33,7 +33,7 @@ The [task API](task-api.md#get-apitasks) defines task fields; [records](task-rec
   A name-only entry with no `Host` block of that name reports `ssh connection "<name>" has no host`
   as its error.
 - The hosts can be added, edited and deleted from the dashboard's **Hosts…** dialog
-  ([`/api/config/ssh-connections`](rest-api.md#apiconfigssh-connections)). A host added there is
+  ([`/api/config/ssh-connections`](../api/workspace.md#apiconfigssh-connections)). A host added there is
   collected from at the next collection. After a successful create, edit or delete, the affected
   key’s pooled connection and pending dial are discarded under the configuration lock, before
   Board observation invalidation. Recreating the same key therefore cannot reuse the old target’s
@@ -150,7 +150,7 @@ A filename without a pid is always reported. Its live process remains the pid-on
 described above. Crash/forced-kill cleanup by Claude is unconfirmed.
 The server logs unreadable/reason-change/recovery/disappearance once per host and full filename,
 with quoted filename/detail; names differing beyond truncation remain distinct files.
-The dashboard aggregates all hosts in one warning; [diagnostic UI](../ui-design/dashboard-hosts.md#host-tools-and-diagnostics)
+The dashboard aggregates all hosts in one warning; [diagnostic UI](../ui/tasks.md#host-tools-and-diagnostics)
 owns presentation. Details and tab-separated Copy details include host, filename, reason/detail,
 pid and location (unknown without a pid). The dialog auto-closes at zero files and does not reopen
 on a later failure. API/log text replaces control/invisible format characters with U+FFFD and
@@ -165,7 +165,7 @@ the agent rewrites: use *Copy details* to report the changed format for parser s
 
 ## Agent availability
 
-Each host's `availability` in [GET tasks](task-api.md#get-apitasks) records agent, capability,
+Each host's `availability` in [GET tasks](../api/tasks.md#get-apitasks) records agent, capability,
 status, reason/detail and newest observed version, with changes logged. Status rules are:
 
 | Capability | Status / reason | When |

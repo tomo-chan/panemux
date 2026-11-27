@@ -126,7 +126,7 @@ See [SSH connections](../behavior/ssh.md#defining-connections-in-ssh_connections
 
 `GET /api/board/status` retains pane-keyed maps and adds required `identities` keyed by name and
 BoardID (enforced strictly in frontend schemas and mocks; see
-[identity entries](../behavior/board-api.md#identity-entries)). Retained task and task-event
+[identity entries](../api/agent-board.md#identity-entries)). Retained task and task-event
 observations take priority only under bidirectional uniqueness (one live task per pane and one
 configured pane per task on the same host) without adding host polling. Monotonic collection
 generations per host prevent stale snapshots from overwriting newer failures or successes, and

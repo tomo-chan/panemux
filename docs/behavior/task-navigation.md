@@ -139,7 +139,7 @@ and scroll, and returns focus to the task's surviving button or to the dashboard
 The popup's Go to pane or Open closes it and navigates as described above.
 
 **The board's temporary attach.** What Type in pane uses: a terminal on a task's tmux session that
-is not a pane. [`POST /api/tasks/attach`](task-api.md#post-apitasksattach) opens a tmux client on the running
+is not a pane. [`POST /api/tasks/attach`](../api/tasks.md#post-apitasksattach) opens a tmux client on the running
 session, which the browser reads and writes over `/ws/{session_id}` like a pane's, and the layout
 never holds it.
 
@@ -160,7 +160,7 @@ never holds it.
 
 ### Dashboard view state
 
-[Dashboard UI](../ui-design/task-dashboard.md#navigation-and-top-bar) owns layer controls.
+[Dashboard UI](../ui/tasks.md#navigation-and-top-bar) owns layer controls.
 The search text, host and label filters, Group mode, Cards/Table view, sort and Show done setting belong to App's
 in-memory `TaskDashboardViewState` and survive switching to any workspace and back in the same
 browser tab. The dashboard is still unmounted when leaving, ending its temporary terminal
@@ -168,7 +168,7 @@ attachments and timers; selection, details, popups and scroll position are not r
 Reloading resets search, host and label filters and Show done to empty search, All hosts,
 All labels and off. Group (None / Host / Label / Repository), Cards/Table and sort are restored from
 versioned localStorage, independently of these transient filters. No API or config file stores display preferences.
-[Dashboard UI design](../ui-design/task-dashboard.md#lists-and-filters) defines columns and group
+[Dashboard UI design](../ui/tasks.md#lists-filters-and-cards) defines columns and group
 presentation. [Architecture](../architecture.md#state-and-ownership) owns selection, input continuity and
 scroll retention across list switches, including Cards' collection order.
 Defaults are Cards / None / State ascending. Unknown enums (including unavailable Session group),
@@ -193,7 +193,7 @@ Elapsed uses the same status timestamp and numeric seconds as display, with no f
 time: invalid or missing timestamps are unknown, future timestamps are zero. Every sort uses one
 reference time; display ticks alone need not re-sort. Missing values stay last in either direction;
 ties use fixed task-ID order, also when descending. New keys start ascending except Elapsed (longest
-first); selecting the current column heading reverses direction. Labels and Actions are not sortable; [UI design](../ui-design/task-dashboard.md#lists-and-filters)
+first); selecting the current column heading reverses direction. Labels and Actions are not sortable; [UI design](../ui/tasks.md#lists-filters-and-cards)
 owns header ARIA, group presentation and scrolling.
 Each notification jump scrolls and focuses the task selection button once in the active list.
 In grouped Cards, the card is uncovered below its group's variable-height sticky header band.
@@ -218,11 +218,11 @@ Under its actions, the connection menu carries the host's
 [`Codex input notifications`](task-codex-permissions.md#codex-permission-requests) item. The panemux host's menu has the item
 and `Close` only.
 
-The connection menu is a dialog under the chip ([UI](../ui-design/dashboard-hosts.md)). It offers
+The connection menu is a dialog under the chip ([UI](../ui/tasks.md#dashboard-hosts)). It offers
 `ssh` (the default) or `ssh_tmux`, and three actions:
 
 - **`ssh_tmux` session name.** Choosing `ssh_tmux` asks the server for a new tmux session name
-  ([`POST /api/hosts/session-name`](task-api.md#post-apihostssession-name)) once per menu, and shows it; `Open`
+  ([`POST /api/hosts/session-name`](../api/tasks.md#post-apihostssession-name)) once per menu, and shows it; `Open`
   and `Type in pane` stay disabled until it arrives. The name is the connection name with every
   character outside `[a-zA-Z0-9_.-]` replaced by `-`, then `-` and 8 random hex digits
   (`gpu-box-1a2b3c4d`). A failed request is shown in the menu.
@@ -232,7 +232,7 @@ The connection menu is a dialog under the chip ([UI](../ui-design/dashboard-host
   It never moves to a pane the host already has; every press adds one. An `ssh_tmux` pane creates
   the named session (`tmux new-session -A`).
 - **`Type in pane`** (the emphasised action) opens a popup over the board holding a host terminal
-  ([`POST /api/hosts/terminal`](task-api.md#post-apihoststerminal)), like a task's Type in pane: it does not
+  ([`POST /api/hosts/terminal`](../api/tasks.md#post-apihoststerminal)), like a task's Type in pane: it does not
   switch workspaces or add a pane, and every press opens a new terminal. Closing it (`Close`,
   `Cmd/Ctrl+Shift+Esc`, the dashboard leaving, or a reload's `pagehide`) sends
   `DELETE /api/hosts/terminal/{session_id}`: an `ssh` terminal logs out; an `ssh_tmux` terminal ends

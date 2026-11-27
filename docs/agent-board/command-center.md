@@ -38,7 +38,7 @@ Argument type errors retain JSON-RPC invalid-params responses. REST validation f
 (`422`, including NUL bodies) and downstream failures (`502`) retain MCP `isError: true`;
 the text includes the HTTP code and REST body, including partial `delivered` recipients.
 Validation sends nothing; a later send failure preserves earlier deliveries.
-See the [REST contract](../behavior/board-api.md#post-apiboardbroadcast) before retrying.
+See the [REST contract](../api/agent-board.md#post-apiboardbroadcast) before retrying.
 
 ### Process lifecycle
 
@@ -82,7 +82,7 @@ normal confirmation policy remains in force.
 `WS /ws/board/command` accepts a prompt and streams Claude's structured output. Non-fatal problems,
 such as failure to persist history after an otherwise successful query, appear as warnings on the
 terminal `done` or `error` frame. Exact frame shapes are specified in
-[WebSocket protocols](../behavior/command-websocket.md#command-center-websocket-protocol).
+[WebSocket protocol](../api/agent-board.md#get-wsboardcommand).
 
 Panemux stores the streamed lines it already observed rather than parsing Claude's private
 transcripts. Because Claude's stream does not echo the prompt, panemux adds one `panemux_prompt`

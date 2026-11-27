@@ -1,7 +1,7 @@
 ---
 type: Specification
 title: "Behavior: task events"
-description: "Task event observation, WebSocket delivery, and receiver responsibilities."
+description: "Task event observation, lifecycle, and browser receiver responsibilities."
 ---
 
 # Behavior: task events
@@ -34,7 +34,7 @@ the same stream ([Receiver](#receiver)).
 #### Tasks
 
 A task is one running agent session, identified by the task `id` of
-[`GET /api/tasks`](task-api.md#get-apitasks): `local:<agent>:<key>` on the panemux host and
+[`GET /api/tasks`](../api/tasks.md#get-apitasks): `local:<agent>:<key>` on the panemux host and
 `ssh:<host>:<agent>:<key>` on a connection. The key is normally the session ID, so the id is stable
 for as long as the session runs. Two cases change it, and both are published as one task removed and
 another added rather than joined by a guess:
@@ -50,7 +50,8 @@ calling any of them `stop` would be a guess.
 
 #### What counts as a change
 
-Each observed task is reduced to its *view* — the fields of the [task frame](#task-view) — and a
+Each observed task is reduced to its *view* — the fields of the
+[task frame](../api/tasks.md#task-view) — and a
 change is a view that differs from the previous one in anything but `status_since`. `status_since`
 is converted from the host's clock on every collection and can move by up to a second while nothing
 changed ([States](task-collection.md#states)), so it is carried, as of the change, but never compared. A task's
@@ -64,7 +65,7 @@ wait it has already handled from a new one.
 | The task | `wait_id` |
 |---|---|
 | is in `wait` and has a [wait signature](task-collection.md#wait-signature) | the `wait_signature` itself (`w1-…`), the same across collections, reloads and server restarts |
-| is in `wait` without one (the agent did not record when the wait began) | `e1-<epoch>-<seq>`: the [stream position](#ordering-epoch-and-seq) at which the wait was first observed. It stays the same while the task stays in that wait with the same `waiting_for`, and is valid until the server restarts |
+| is in `wait` without one (the agent did not record when the wait began) | `e1-<epoch>-<seq>`: the [stream position](../api/tasks.md#ordering-epoch-and-seq) at which the wait was first observed. It stays the same while the task stays in that wait with the same `waiting_for`, and is valid until the server restarts |
 | is in any other state | none |
 
 The second form records when panemux *observed* the wait. It is not a wait start and never becomes a
@@ -95,100 +96,10 @@ Unreadable, missing or unknown agent files never produce a wait: the collection 
 as `unknown` or `run`, without a signature ([Wait signature](task-collection.md#wait-signature)), and that is
 what is published.
 
-### `GET /ws/tasks/events`
+### Wire protocol
 
-The task event stream. The server sends JSON text frames; anything the client sends is ignored.
-
-- **Not authenticated**, like [`/ws/{sessionID}`](websocket.md#websocket-protocol) and
-  [`GET /api/tasks`](task-api.md#get-apitasks): no bearer token.
-- **Cross-authority requests return `403` before upgrading or collecting**, under the
-  [shared browser request guard](../security/auth.md#shared-browser-request-guard), plus the
-  WebSocket upgrade's Origin check as on `/ws/{sessionID}`. This protects host dialing as a side
-  effect; header-free CLI compatibility remains.
-- A frame the client sends is limited to 512 bytes; a larger one closes the connection.
-
-#### Frames
-
-Every frame has `type`, `epoch` and `seq`.
-
-The first frame on every connection is a snapshot of everything currently known:
-
-```json
-{
-  "type": "snapshot",
-  "epoch": "9f2c41d07ab35e88",
-  "seq": 120,
-  "hosts": [
-    { "name": "", "status": "ok" },
-    { "name": "gpu-box", "status": "error", "error": "connect to gpu-box: dial tcp: i/o timeout" }
-  ],
-  "tasks": [
-    {
-      "id": "local:claude:7c21e0a4",
-      "host": "",
-      "agent": "claude",
-      "session_id": "7c21e0a4",
-      "cwd": "/workspace/user/panemux",
-      "state": "wait",
-      "waiting_for": "input needed",
-      "wait_id": "w1-6728c5554228dcb7cc58711bbf3636eb24a57f8348e865de9855773e17b9bb47",
-      "status_since": "2026-10-02T09:59:58Z",
-      "location": { "kind": "tmux", "tmux_session": "task-7c21", "attachable": true }
-    }
-  ]
-}
-```
-
-After it, one frame per change, in order:
-
-```json
-{ "type": "task", "epoch": "9f2c41d07ab35e88", "seq": 121,
-  "op": "changed", "prev_state": "busy",
-  "task": { "id": "ssh:gpu-box:codex:0199a6…", "host": "gpu-box", "agent": "codex", "state": "wait", "…": "…" } }
-
-{ "type": "host", "epoch": "9f2c41d07ab35e88", "seq": 122,
-  "op": "changed",
-  "host": { "name": "gpu-box", "status": "error", "error": "…" } }
-```
-
-| `type` | `op` | Carries |
-|---|---|---|
-| `snapshot` | — | `hosts`, `tasks` (running tasks, `[]` when none) |
-| `task` | `added` | `task`: the new task's view |
-| `task` | `changed` | `task`: the new view; `prev_state`: the state before |
-| `task` | `removed` | `task`: the view last observed; `prev_state`: its state |
-| `host` | `added`, `changed`, `removed` | `host` |
-
-A state transition is a `changed` frame whose `prev_state` differs from `task.state`; a `changed`
-frame with the same state is a change of something else (its `wait_id`, `waiting_for`, `cwd` or
-location). A task that appears already waiting is an `added` frame in `wait`.
-
-#### Task view
-
-| Field | Meaning |
-|---|---|
-| `id`, `host`, `agent`, `session_id`, `cwd` | As in [`GET /api/tasks`](task-api.md#get-apitasks) |
-| `state` | `busy`, `wait`, `idle`, `run` or `unknown` |
-| `waiting_for` | What a `wait` task waits for, as the agent wrote it; only on `wait` |
-| `wait_id` | [The wait ID](#the-wait-id); only on `wait` |
-| `status_since` | When the task entered its state, converted to the server's clock as of this frame; not compared ([What counts as a change](#what-counts-as-a-change)) |
-| `location` | `kind`, `tmux_session`, `pane_id`, `attachable`, exactly as in [Where a task runs](task-navigation.md#where-a-task-runs) |
-
-No frame carries conversation text, a prompt, a command line or a process ID.
-
-#### Host view
-
-`name` (`""` for the panemux host), `status` ([Hosts](#hosts)), and `error` when `error`.
-
-#### Ordering: `epoch` and `seq`
-
-`epoch` is chosen when the server starts and changes only with a restart. `seq` counts every frame
-published in that epoch, for all hosts and tasks together. A snapshot's `seq` is the last change it
-includes, so the next frame on the same connection is `seq + 1`.
-
-A receiver that sees a gap in `seq`, a `seq` going back, a different `epoch` or a `type` it does not
-know discards what it holds and reconnects: **recovery is always a fresh snapshot.** The server keeps
-no history to replay.
+The endpoint, request guard, frame schemas, task/host views, and `epoch`/`seq` ordering contract
+live in [`GET /ws/tasks/events`](../api/tasks.md#get-wstasksevents).
 
 ### Lifecycle
 
@@ -318,7 +229,7 @@ offers `Review in Tasks` instead, which opens the dashboard on the first of them
 
 #### Task dashboard
 
-The dashboard lists tasks from [`GET /api/tasks`](task-api.md#get-apitasks), which adds what the stream
+The dashboard lists tasks from [`GET /api/tasks`](../api/tasks.md#get-apitasks), which adds what the stream
 does not carry: stopped sessions, git and pull request details, records and summaries. A task's
 `state`, `waiting_for`, wait and `status_since` come from the stream whenever the stream is live and
 has that task, so a change, and the time spent in the new state, shows as soon as it is published
@@ -328,6 +239,7 @@ not known, so the dashboard shows none rather than the collected time of an earl
 ## Related Documents
 
 - Task dashboard collection and states: [task-collection.md](task-collection.md)
-- Notification overview and permission prompt timing: [notifications.md](notifications.md)
+- Task API and event stream wire contract: [api/tasks.md](../api/tasks.md)
+- Attention indicators and browser notification UI: [ui/tasks.md](../ui/tasks.md#attention-indicators-and-browser-notifications)
 - Collection command safety: [Task dashboard collection](../security/tasks.md#task-collection)
 - Architecture: [architecture.md](../architecture.md)

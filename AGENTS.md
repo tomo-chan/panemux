@@ -25,8 +25,8 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
 3. Read [docs/overview.md](docs/overview.md) for the product purpose and current boundaries.
 4. Read [docs/architecture.md](docs/architecture.md) for current component ownership and trust boundaries.
 5. Read [docs/security/overview.md](docs/security/overview.md) before implementing changes that affect command execution, shell argument handling, SSH path handling, or `gosec` posture. It carries the rules that always apply and a map into [docs/security/](docs/security/), where each sink's requirements live.
-6. Read [docs/behavior.md](docs/behavior.md) for runtime behavior, API behavior, and operational assumptions; per-surface detail is in [docs/behavior/](docs/behavior/).
-7. Read [docs/ui-design.md](docs/ui-design.md) when changing frontend interaction or presentation.
+6. Read [docs/behavior.md](docs/behavior.md) for startup, configuration, and runtime behavior; per-surface detail is in [docs/behavior/](docs/behavior/).
+7. Read [docs/ui/overview.md](docs/ui/overview.md) and [docs/ui/](docs/ui/) when changing frontend interaction or presentation, and [docs/api/](docs/api/) when changing REST or WebSocket contracts.
 8. Read [docs/engineering/ci-and-releases.md](docs/engineering/ci-and-releases.md) when touching CI, release automation, or GitHub workflow operations.
 9. Read [docs/agent-board.md](docs/agent-board.md) before implementing cross-pane Claude
    messaging/status features (the `internal/board` package), then use its document map to reach the
@@ -85,8 +85,9 @@ same name beside it, and the index's own document map routes by section name.
 - Product overview: [docs/overview.md](docs/overview.md)
 - Current architecture: [docs/architecture.md](docs/architecture.md)
 - Security requirements for implementation: [docs/security/overview.md](docs/security/overview.md) → [docs/security/](docs/security/)
-- Behavior and API specification: [docs/behavior.md](docs/behavior.md) → [docs/behavior/](docs/behavior/)
-- UI intent and interaction design: [docs/ui-design.md](docs/ui-design.md) → [docs/ui-design/](docs/ui-design/)
+- Runtime behavior specification: [docs/behavior.md](docs/behavior.md) → [docs/behavior/](docs/behavior/)
+- API contracts (REST and WebSocket): [docs/api/index.md](docs/api/index.md) → [docs/api/](docs/api/)
+- UI intent, runtime, and interaction design: [docs/ui/overview.md](docs/ui/overview.md) → [docs/ui/](docs/ui/)
 - CI, releases, and agmsg maintenance: [docs/engineering/ci-and-releases.md](docs/engineering/ci-and-releases.md), [docs/engineering/agmsg-maintenance.md](docs/engineering/agmsg-maintenance.md)
 - Agent registry, capabilities and session keys: [docs/agent-registry.md](docs/agent-registry.md) → [docs/agent-registry/](docs/agent-registry/)
 - Cross-pane Claude messaging design: [docs/agent-board.md](docs/agent-board.md) → [docs/agent-board/](docs/agent-board/)

@@ -94,7 +94,8 @@ backend and UI are released together.
 ## Where to continue
 
 - [Architecture](architecture.md) — components, ownership, and trust boundaries.
-- [Behavior specification](behavior.md) — startup, configuration, APIs, and browser behavior.
+- [Behavior specification](behavior.md) — startup, configuration, and runtime behavior.
 - [Security overview](security/overview.md) — implementation requirements by sensitive sink.
-- [UI design](ui-design.md) — interaction and presentation rules.
+- [UI overview](ui/overview.md) — interaction, frontend runtime, and presentation rules.
+- [API contracts](api/index.md) — REST and WebSocket wire specifications.
 - [Decision log](decisions/index.md) — why the present design replaced earlier approaches.
