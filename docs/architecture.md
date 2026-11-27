@@ -8,7 +8,7 @@ description: "System structure, component ownership, data flow, and trust bounda
 
 This guide is the concise map of the current system. It identifies component ownership and the
 boundaries a change must preserve. Runtime contracts live in [Behavior specification](behavior.md),
-security requirements in [Security design](security.md), and historical rationale in the
+security requirements in [Security overview](security/overview.md), and historical rationale in the
 [Decision log](decisions/index.md).
 
 ## System structure
@@ -166,7 +166,7 @@ in [Task events](behavior/task-events.md).
 Pane-side URL detection or the browser shim reports a URL to panemux. Ordinary URLs open in the
 browser. Eligible loopback callback URLs may create a temporary local listener backed by SSH
 `direct-tcpip`. Full behavior and constraints are in [Opening URLs from a pane](behavior/url-open.md)
-and [URL-open security](security/url-open.md).
+and [URL-open security](security/preview-and-urls.md#opening-urls-from-a-pane).
 
 New `ssh_tmux` sessions on tmux 3.3 or newer receive shim settings through session-local `-e`
 operands, with a fixed initial-pane bootstrap for PATH and the configured shell/command. Their shim
@@ -182,7 +182,7 @@ the same opener and split; SSH-host URLs use dedicated loopback relay ports.
 Remote files use a preview-owned SSH connection per pane connection target, dialed with the pane's
 connection settings, and read only through SFTP. Relays use that connection's direct-tcpip channels.
 Their lifetime is independent of terminal sessions. See [Split preview](behavior/preview.md) and
-[preview security](security/preview.md).
+[preview security](security/preview-and-urls.md).
 
 ## Trust boundaries
 
@@ -198,7 +198,7 @@ Their lifetime is independent of terminal sessions. See [Split preview](behavior
   token itself; it accepts only requests whose remote address and `Host` are loopback. Non-loopback
   use of the authenticated routes also requires transport encryption.
 - User-controlled values never select an arbitrary executable. Shell paths, tmux names, remote
-  paths, and subprocess operands follow the per-sink rules in [Security design](security.md).
+  paths, and subprocess operands follow the per-sink rules in [Security overview](security/overview.md).
 - Panemux runs no copy of itself on remote hosts. The task and agent boards share a per-host
   command connection through `internal/host` and `internal/hostexec`, running trusted fixed scripts
   with variable values in positional arguments. Terminal panes keep their own SSH sessions. The
@@ -207,7 +207,7 @@ Their lifetime is independent of terminal sessions. See [Split preview](behavior
 - Previewed HTML and Markdown are untrusted content. They are served under `/preview/<token>/` in a
   sandboxed opaque origin, so their requests to `/api/*` and `/ws/*` are cross-site and refused; the
   token, issued only by the guarded API, is what grants access to a file
-  ([preview security](security/preview.md)). A relayed localhost page of an SSH host runs in the
+  ([preview security](security/preview-and-urls.md)). A relayed localhost page of an SSH host runs in the
   origin of its relay port on `127.0.0.1`, another loopback port, which the request guard refuses.
 - The browser is untrusted input to Go handlers. Structured backend payloads with declared frontend
   schemas remain untrusted until validation succeeds; other input paths apply their own parsing and

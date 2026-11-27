@@ -51,7 +51,7 @@ HTTP/WebSocket tests and Playwright can reach local servers without per-develope
   settings as policy permits (see
   [Claude Code sandboxing documentation](https://code.claude.com/docs/en/sandboxing#a-command-fails-to-reach-a-server-on-localhost)).
 - **Remaining limits and probes**: Per
-  [development sandbox permissions](../security.md#development-sandbox-permissions), macOS still
+  [development sandbox permissions](../security/overview.md#development-sandbox-permissions), macOS still
   denies PTYs, tmux servers, `ps`, `dscl`, and writes to Git config and user caches. Tests needing
   these probe via `internal/testcap` (skip locally, fail when `CI` is set;
   [D13](../decisions/quality-gateway.md#d13-capability-probes-skip-locally-and-fail-in-ci)).

@@ -173,7 +173,7 @@ follow [Red-check](docs/engineering/quality-gates.md#red-check-make-efficacy) fo
 
 ### Security-sensitive implementation
 
-- When code changes affect command execution, shell argument handling, SSH path handling, host key handling, or `gosec` posture, read [docs/security.md](docs/security.md) before implementation and follow it during the change.
+- When code changes affect command execution, shell argument handling, SSH path handling, host key handling, or `gosec` posture, read [docs/security/overview.md](docs/security/overview.md) before implementation and follow it during the change.
 - Prefer structural fixes over `//nolint:gosec` in shipped code.
 
 ### Temporary-file discipline

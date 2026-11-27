@@ -137,7 +137,7 @@ func TestEnsureAuthTokenMintsPersistsAndReuses(t *testing.T) {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), info.Mode().Perm(),
-		"the token is a credential on disk; docs/security.md requires 0600")
+		"the token is a credential on disk; docs/security/auth.md requires 0600")
 
 	next := &Config{authTokenPath: path}
 	next.EnsureAuthToken()
@@ -216,7 +216,7 @@ func TestValidateRejectsAnSSHPaneWithNoConnection(t *testing.T) {
 // isLoopbackHost decides whether server.auth_token is required. A hostname
 // that is not an IP at all is emphatically not loopback: treating an
 // unparsable value as local would let a non-loopback bind skip the token
-// requirement that docs/security.md makes the whole board's gate.
+// requirement that docs/security/auth.md makes the whole board's gate.
 func TestIsLoopbackHostTreatsANonIPHostAsRemote(t *testing.T) {
 	assert.False(t, isLoopbackHost("panemux.example.com"))
 	assert.False(t, isLoopbackHost("0.0.0.0"), "a wildcard bind reaches every interface")

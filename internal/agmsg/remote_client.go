@@ -39,8 +39,7 @@ var validAgmsgIdentifier = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 // regex-allowlisted directly the way an identifier or path can — encoding
 // it to a fixed alphabet first, then allowlisting the *encoded* string,
 // mirrors validRemotePath's accepted shape for a value that couldn't
-// otherwise take it. See docs/security.md and docs/agent-board.md's
-// Security model section.
+// otherwise take it. See docs/security/agent-board.md.
 var validBase64 = regexp.MustCompile(`^[A-Za-z0-9+/]*={0,2}$`)
 
 // sendBase64WrapperScript is a fixed script string, never built from

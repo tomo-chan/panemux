@@ -46,7 +46,7 @@ func TestSetupCommandCenterReportsAnUnresolvableHomeDirectory(t *testing.T) {
 
 // The MCP config is built per query rather than at setup, because it embeds
 // the bearer token in a temp file that must not outlive the subprocess that
-// reads it (docs/security.md). Nothing had exercised that closure, so this
+// reads it (docs/security/auth.md). Nothing had exercised that closure, so this
 // runs one query far enough to prove it succeeds — the query then fails at
 // the missing claude binary, which is the point: the failure reported must
 // be the exec, not the config.

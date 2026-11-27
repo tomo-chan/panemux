@@ -95,6 +95,6 @@ backend and UI are released together.
 
 - [Architecture](architecture.md) — components, ownership, and trust boundaries.
 - [Behavior specification](behavior.md) — startup, configuration, APIs, and browser behavior.
-- [Security design](security.md) — implementation requirements by sensitive sink.
+- [Security overview](security/overview.md) — implementation requirements by sensitive sink.
 - [UI design](ui-design.md) — interaction and presentation rules.
 - [Decision log](decisions/index.md) — why the present design replaced earlier approaches.

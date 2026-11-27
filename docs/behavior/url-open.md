@@ -70,7 +70,7 @@ tab and, in a pane, the same-port forward. Each button acts once on
 the request it was shown for, so a second press opens nothing more. The request is a live event:
 a sequence that arrives in replayed scrollback is ignored, so reconnecting a pane never re-raises a
 request that was already opened or dismissed. Terminal output is
-untrusted — see [security.md](../security.md) — and the browser also requires a user gesture to open a
+untrusted — see [security/preview-and-urls.md](../security/preview-and-urls.md#opening-urls-from-a-pane) — and the browser also requires a user gesture to open a
 tab, so the approval step is both a safety and a functional requirement.
 
 Two limitations are inherent to the mechanism:

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Stub stand-in for agmsg's own scripts/api.sh, used only by panemux's e2e
 # harness. agmsg (github.com/fujibee/agmsg) is a separate, operator-installed
-# tool that panemux never installs itself (see docs/security.md), so a
+# tool that panemux never installs itself (see docs/security/agent-board.md), so a
 # machine running this suite has no real installation to read from. This stub
 # implements just the one call internal/board's LocalAgmsgClient makes:
 #

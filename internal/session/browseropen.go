@@ -33,7 +33,7 @@ var browserShimAliases = []string{"xdg-open", "open"}
 // caller-supplied value is ever interpolated into it. It turns a
 // browser-open request made on the pane's host into an OSC sequence written
 // to the pane's terminal, which reaches panemux over the PTY stream that
-// already exists. See docs/security.md "Browser-open interception".
+// already exists. See docs/security/preview-and-urls.md "Browser-open interception".
 const browserShimScript = `#!/bin/sh
 # panemux browser shim. A browser-open request made on this host is handed to
 # the browser showing the panemux dashboard instead of being opened here.

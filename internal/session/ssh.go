@@ -1504,7 +1504,7 @@ func runRemoteClaudeProjectProbe(
 
 	// The answer came back from the host and is about to be built into further
 	// commands, so it goes through the same regex allowlist every other remote
-	// path does before reaching an exec sink (see docs/security.md's "Remote
+	// path does before reaching an exec sink (see docs/security/process-and-ssh.md's "Remote
 	// path arguments"). Quoting alone is not what this repository accepts.
 	if !validRemotePath.MatchString(found) {
 		log.Printf("%s ignoring an unusable claude transcript path from the host: %q", logScope, found)

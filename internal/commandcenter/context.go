@@ -71,7 +71,7 @@ const operatorInstructionsFile = "CLAUDE.md"
 // sandbox confines the tools that *are* permitted. It is a no-op where the
 // OS cannot provide it (verified: the setting is ignored, the query still
 // succeeds, is_error stays false), so passing it unconditionally costs
-// nothing on an unsupported host. See docs/security.md for what this was and
+// nothing on an unsupported host. See docs/security/agent-board.md for what this was and
 // was not verified to do.
 const SubprocessSettings = `{"sandbox":{"enabled":true}}`
 

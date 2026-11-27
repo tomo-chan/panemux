@@ -22,7 +22,7 @@ apply, and where to continue. They do not narrate how the model evolved.
 |---|---|
 | How is the system arranged? | [Architecture](architecture.md) |
 | What does the running product do? | [Behavior specification](behavior.md) |
-| Which security rules constrain a change? | [Security design](security.md) |
+| Which security rules constrain a change? | [Security overview](security/overview.md) |
 | How should the interface behave and look? | [UI design](ui-design.md) |
 | Which agents are known, and how is one added? | [Agent registry](agent-registry.md), [Adding an agent](agent-registry/adding-an-agent.md) |
 | How does Agent Board work? | [Agent Board](agent-board.md) |
@@ -65,9 +65,8 @@ remains the authority for line-level chronology.
 * [Behavior Specification](behavior.md) - Startup, configuration, operational assumptions, and routes to runtime contracts.
 * [Application Overview](overview.md) - Product purpose, capabilities, operating model, and current boundaries.
 * [Scenario Coverage](scenarios.md) - User-facing acceptance scenarios and the automated or manual verification for each.
-* [Security Design](security.md) - Implementation security invariants, development trust boundaries, and routes to sink requirements.
 * [UI Design](ui-design.md) - Shared interface principles and routes to screen and interaction contracts.
-* [agent-board/](agent-board/) - Agent Board architecture, messaging, integration, and security contracts.
+* [agent-board/](agent-board/) - Agent Board architecture, messaging, integration, and command center contracts.
 * [agent-registry/](agent-registry/) - Agent integration procedures and capability requirements.
 * [ui-design/](ui-design/) - Screen and interaction contracts linked from the shared UI principles.
 * [behavior/](behavior/) - Runtime behavior, API contracts, task events, and task dashboard details.

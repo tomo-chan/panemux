@@ -33,11 +33,11 @@ in the repository or in the diff itself.
 3. `AGENTS.md`, then whichever documents it indexes are relevant to the files
    the diff touches. `DEVELOPMENT.md` always is, and so is the file under
    `docs/engineering/` that carries the long form of whichever of its rules the
-   diff engages. `docs/security.md` is whenever the diff touches command
+   diff engages. `docs/security/overview.md` is whenever the diff touches command
    execution, shell arguments, SSH paths, host keys, or `gosec` posture — and
-   it carries the boundary map: read the per-boundary files listed there that
-   own the sinks the diff touches. `command-execution.md` links to shared rules
-   and boundary contracts; follow those links, not the entrance alone.
+   it carries the boundary map: read the per-boundary files under `docs/security/`
+   listed there that own the sinks the diff touches. Follow those links, not the
+   entrance alone.
 4. The surrounding code the diff does not touch, wherever a finding depends on
    how the change fits what is already there.
 
@@ -51,8 +51,8 @@ Only two things:
 - **A stated requirement it violates.** A rule written in this repository that
   the diff breaks. Quote the rule and cite the file. `DEVELOPMENT.md`'s TDD
   rule, its test-granularity rules and its path-sanitization rule, and the
-  command-execution rules in `docs/security.md`, `docs/security/command-execution.md`
-  and the per-boundary security files they link are the ones that bite most often.
+  command-execution rules in `docs/security/overview.md`
+  and the per-boundary security files it links are the ones that bite most often.
 
 Two shapes deserve particular attention, because they are the ones this
 repository's own gates cannot see (`docs/engineering/quality-gates.md`, "Quality model and principles"):
@@ -85,7 +85,7 @@ so.
 Verify before you report. A finding you cannot demonstrate is a hypothesis, and
 labelling it as one is part of the finding. Where you can, run the code: this
 repository separates verified claims from unverified ones everywhere else
-(`docs/security.md` is the model), and a review is held to the same standard.
+(`docs/security/overview.md` is the model), and a review is held to the same standard.
 
 For each finding: the file and line, what breaks, the concrete case that breaks
 it, and whether you confirmed it or only suspect it. Order them by severity.

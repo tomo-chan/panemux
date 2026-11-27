@@ -8,7 +8,7 @@
 // sandboxed by Content-Security-Policy without allow-same-origin: the page
 // runs in an opaque origin, so the browser sends its requests to /api and
 // /ws as cross-site, and internal/requestsecurity refuses them. See
-// docs/security/preview.md.
+// docs/security/preview-and-urls.md.
 package preview
 
 import (

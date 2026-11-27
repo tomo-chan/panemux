@@ -82,7 +82,7 @@ Exact request/response behavior lives in [Agent Board REST API](behavior/board-a
 | How are agent panes detected? | [Bootstrap](agent-board/bootstrap.md) |
 | How does the headless coordinator work? | [Command center](agent-board/command-center.md) |
 | What are the exact API and config surfaces? | [API and config](agent-board/api-and-config.md) |
-| Which threats and trust assumptions apply? | [Security model](agent-board/security-model.md) |
+| Which threats and trust assumptions apply? | [Security model](security/agent-board.md) |
 | What remains intentionally unsupported? | [Known limitations](agent-board/limitations.md) |
 | How is compatibility with agmsg verified? | [agmsg contract](agent-board/agmsg-contract.md) |
 | Which state-machine property is modeled? | [State-machine model checking](engineering/testing.md#state-machine-model-checking) |
@@ -93,6 +93,6 @@ Exact request/response behavior lives in [Agent Board REST API](behavior/board-a
 
 - [Architecture](architecture.md) — whole-system component ownership.
 - [Behavior specification](behavior.md) — runtime and protocol contracts.
-- [Security design](security.md) — implementation requirements.
+- [Security overview](security/overview.md) — implementation requirements.
 - [UI design](ui-design/agent-board.md#agent-board-ui) — dashboard, palette, and history interactions.
 - [Decision log](decisions/agent-board.md) — chronological reasoning and superseded designs.

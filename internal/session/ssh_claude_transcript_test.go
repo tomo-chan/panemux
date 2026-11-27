@@ -199,7 +199,7 @@ func TestActiveRemoteWorkdir_ProbeFindsNothing_IsQuietAndBounded(t *testing.T) {
 // TestActiveRemoteWorkdir_ProbeAnswerIsValidatedBeforeItReachesACommand is the
 // security half: the answer comes back from the remote host and is then used
 // to build further commands, so it goes through validRemotePath first — the
-// same regex-allowlist-before-the-sink discipline docs/security.md requires
+// same regex-allowlist-before-the-sink discipline docs/security/process-and-ssh.md requires
 // for every other remote path.
 func TestActiveRemoteWorkdir_ProbeAnswerIsValidatedBeforeItReachesACommand(t *testing.T) {
 	for _, answer := range []string{

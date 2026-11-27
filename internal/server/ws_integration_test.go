@@ -411,7 +411,7 @@ func TestWSIntegration_BoardCommandPane_DoesNotCollide(t *testing.T) {
 // ── /ws/board/command ─────────────────────────────────────────────────────
 
 // The command center's route is absent, not present-and-rejecting, when no
-// runner is configured — see docs/security.md's "Auth token and transport
+// runner is configured — see docs/security/auth.md's "Auth token and transport
 // encryption". A 404 here and a 401 in the tests below is the difference
 // between "there is nothing to probe" and "there is something here".
 //
@@ -545,7 +545,7 @@ const fixtureStreamJSONLine = `{"type":"assistant","subtype":"text",` +
 // internal/commandcenter's own tests can substitute one. That is the right
 // boundary for that package — and it means an integration test in this one
 // reaches the subprocess path the same way production does, through
-// RunnerConfig.ClaudeBin, which docs/security.md already documents as the
+// RunnerConfig.ClaudeBin, which docs/security/agent-board.md already documents as the
 // operator's own override.
 func fixtureClaudeScript(t *testing.T, prelude string) string {
 	t.Helper()

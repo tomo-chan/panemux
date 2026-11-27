@@ -1,5 +1,5 @@
 @DEVELOPMENT.md
-@docs/security.md
+@docs/security/overview.md
 
 # AGENTS.md
 
@@ -24,7 +24,7 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
    to the change.
 3. Read [docs/overview.md](docs/overview.md) for the product purpose and current boundaries.
 4. Read [docs/architecture.md](docs/architecture.md) for current component ownership and trust boundaries.
-5. Read [docs/security.md](docs/security.md) before implementing changes that affect command execution, shell argument handling, SSH path handling, or `gosec` posture. It carries the rules that always apply and a map into [docs/security/](docs/security/), where each sink's requirements live.
+5. Read [docs/security/overview.md](docs/security/overview.md) before implementing changes that affect command execution, shell argument handling, SSH path handling, or `gosec` posture. It carries the rules that always apply and a map into [docs/security/](docs/security/), where each sink's requirements live.
 6. Read [docs/behavior.md](docs/behavior.md) for runtime behavior, API behavior, and operational assumptions; per-surface detail is in [docs/behavior/](docs/behavior/).
 7. Read [docs/ui-design.md](docs/ui-design.md) when changing frontend interaction or presentation.
 8. Read [docs/engineering/ci-and-releases.md](docs/engineering/ci-and-releases.md) when touching CI, release automation, or GitHub workflow operations.
@@ -84,7 +84,7 @@ same name beside it, and the index's own document map routes by section name.
 - Documentation index and reader routes: [docs/index.md](docs/index.md)
 - Product overview: [docs/overview.md](docs/overview.md)
 - Current architecture: [docs/architecture.md](docs/architecture.md)
-- Security requirements for implementation: [docs/security.md](docs/security.md) → [docs/security/](docs/security/)
+- Security requirements for implementation: [docs/security/overview.md](docs/security/overview.md) → [docs/security/](docs/security/)
 - Behavior and API specification: [docs/behavior.md](docs/behavior.md) → [docs/behavior/](docs/behavior/)
 - UI intent and interaction design: [docs/ui-design.md](docs/ui-design.md) → [docs/ui-design/](docs/ui-design/)
 - CI, releases, and agmsg maintenance: [docs/engineering/ci-and-releases.md](docs/engineering/ci-and-releases.md), [docs/engineering/agmsg-maintenance.md](docs/engineering/agmsg-maintenance.md)
@@ -105,7 +105,7 @@ same name beside it, and the index's own document map routes by section name.
 - Put enduring product, architecture, behavior, UI, and maintenance guidance under `docs/`.
 - Keep topic guides focused on the current state; put chronology and superseded approaches in
   `docs/decisions/`.
-- Put implementation-time security requirements in `docs/security.md` and treat it as required reading for security-sensitive changes.
+- Put implementation-time security requirements in `docs/security/` (starting at `docs/security/overview.md`) and treat it as required reading for security-sensitive changes.
 - Follow [the OKF writing rules](docs/index.md#writing-rules) for `docs/` metadata, directory
   indexes, cohesive file granularity, English-only prose, topic-grouped decisions under
   `docs/decisions/<topic>.md`, and direct reference updates without redirect stubs.

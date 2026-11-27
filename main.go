@@ -279,7 +279,7 @@ func openChrome(url string) {
 		return
 	}
 	// The first argument is a variable rather than a literal, which is a
-	// shape docs/security.md tracks deliberately — see its "Launching the
+	// shape docs/security/process-and-ssh.md tracks deliberately — see its "Launching the
 	// operator's browser" section. browserOpenArgv is the only source of
 	// both values, it returns one of three compile-time literals for the
 	// name, and url is panemux's own listen address; every element travels

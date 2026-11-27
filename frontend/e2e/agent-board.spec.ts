@@ -10,7 +10,7 @@ import {
 // Runs against the agent-board.yml fixture (playwright.config.ts's
 // chromium-agent-board project): global enablement with no agmsg under its fake HOME
 // installation. That is the realistic first-run state — panemux never
-// installs agmsg itself (see docs/security.md) — so the board cache stays
+// installs agmsg itself (see docs/security/agent-board.md) — so the board cache stays
 // empty and the dashboard renders its empty states, against a real server.
 //
 // The populated counterpart is agent-board-agmsg.spec.ts.

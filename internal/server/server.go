@@ -118,7 +118,7 @@ func registerRoutes(
 	// auth gate itself was never contingent on that. Retrofitting auth
 	// onto the rest of the table, which the frontend already relies on
 	// being unauthenticated, is a separate, larger change. See
-	// docs/security.md.
+	// docs/security/auth.md.
 	apiHandler.Mount(r, bearerAuthMiddleware(authToken))
 	r.Get("/ws/{sessionID}", wsHandler.ServeHTTP)
 	// The task event stream is unauthenticated like /ws/{sessionID} and

@@ -120,7 +120,7 @@ The UI explains installer consent and asks for agents to restart afterwards. Pan
 agent-owned scripts during replacement. The pinned installer can write outside `~/.agents/skills`,
 including Claude commands, other agents' skills and Codex sandbox settings. It runs as the target
 user; operator trust covers the fixed upstream code, verified through contract tests and human
-release review, not a restricted installation sandbox. See [the security model](security-model.md).
+release review, not a restricted installation sandbox. See [Agent Board security](../security/agent-board.md#agmsg-acquisition-and-installation).
 
 ## Automatic updating
 
