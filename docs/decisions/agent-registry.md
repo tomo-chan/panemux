@@ -69,4 +69,4 @@ without hidden flags in shipped binaries. Tagged test invocations assert require
 renaming cannot silently shrink coverage; mutation measures the default build and names ignored
 tagged files. Browser E2E uses real tagged collection with fake CLIs and `ps`/`lsof` stand-ins that
 expose only fixture descendants so local developer sessions are never read.
-See [the fixture agent's tagged build](../quality-gateway.md#the-fixture-agents-tagged-build).
+See [the fixture agent's tagged build](../engineering/quality-gates.md#the-fixture-agents-tagged-build).

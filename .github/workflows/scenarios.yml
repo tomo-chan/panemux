@@ -1,6 +1,6 @@
 name: scenarios
 
-# Gate G0 in docs/quality-gateway.md: a user-visible change must update the
+# Gate G0 in docs/engineering/quality-gates.md: a user-visible change must update the
 # acceptance ledger in the same pull request.
 #
 # docs/scenarios.md states that "a row whose verification is `manual` is a

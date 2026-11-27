@@ -25,7 +25,7 @@ import (
 	"panemux/internal/tasks"
 )
 
-// This file is the /ws half of gate G3(a) in docs/quality-gateway.md, and
+// This file is the /ws half of gate G3(a) in docs/engineering/quality-gates.md, and
 // issue #191's item (a). api_integration_test.go closed the /api half: every
 // HTTP route is driven through the router server.New() actually builds. The
 // two WebSocket routes had nothing equivalent — route_table_test.go reported

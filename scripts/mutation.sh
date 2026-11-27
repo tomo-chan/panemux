@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Diff-scoped mutation testing: gate G4(c) in docs/quality-gateway.md, roadmap
+# Diff-scoped mutation testing: gate G4(c) in docs/engineering/quality-gates.md, roadmap
 # item 6 of issue #180.
 #
 # The other three G4 gates each answer a different question, and this one
@@ -35,7 +35,7 @@
 # unreachable without fault injection. A test that killed the buffer-size
 # mutants would pin a constant and assert nothing: a tautology, the exact thing
 # G4 exists to catch. Failing on those from day one would have made this gate
-# wrong more often than right, and principle 4 in docs/quality-gateway.md is
+# wrong more often than right, and principle 4 in docs/engineering/quality-gates.md is
 # that a gate which cries wolf gets routed around, taking the gates that do work
 # with it.
 #

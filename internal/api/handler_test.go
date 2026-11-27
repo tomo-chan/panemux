@@ -95,7 +95,7 @@ func setupRouterWithHandler(h *Handler) *chi.Mux {
 	// rather than a hand-maintained copy of them. boardAuth is nil here:
 	// whether the bearer token is enforced is internal/server's contract,
 	// covered by its own tests against the router the binary really serves.
-	// See docs/quality-gateway.md's gate G3, and issue #178.
+	// See docs/engineering/quality-gates.md's gate G3, and issue #178.
 	h.Mount(r, nil)
 	return r
 }
@@ -1565,7 +1565,7 @@ func TestPostSSHConfigHost_PortOutOfRange_422(t *testing.T) {
 // which is why the low bound is 0 here and 1 in internal/config). Issue #190.
 // Nothing under this test changed on this branch, so the red-check could never
 // see it go red: it pins behavior that was already correct and merely
-// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+// unasserted. See docs/decisions/quality-gateway.md (D9).
 //
 //efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestPostSSHConfigHost_PortRangeBoundaries(t *testing.T) {
@@ -2305,7 +2305,7 @@ func TestLookupPRInfo_TimesOutAndFallsBack(t *testing.T) {
 // could run — with the suite still green. Issue #190.
 // Nothing under this test changed on this branch, so the red-check could never
 // see it go red: it pins behavior that was already correct and merely
-// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+// unasserted. See docs/decisions/quality-gateway.md (D9).
 //
 //efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestLookupPRInfo_NonPositiveTimeout_FallsBackToAWorkableBudget(t *testing.T) {

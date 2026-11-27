@@ -6,8 +6,8 @@ description: "Design rationale for documentation structure, screenshot capture, 
 
 # Engineering and maintenance decisions
 
-Current procedures live in [Documentation index](../index.md), [Maintenance guide](../maintenance.md),
-and [Documentation screenshots](../development/screenshots.md).
+Current procedures live in [Documentation index](../index.md), [CI and releases](../engineering/ci-and-releases.md),
+and [Documentation screenshots](../engineering/screenshots.md).
 
 ## Documentation structure: current state, OKF bundle, and layer/cross-cutting layout (2026-09-23–2026-11-27, issues #518, #553)
 
@@ -69,5 +69,5 @@ Failed release drafts must rebuild from their recorded source SHA rather than si
 later commits. Ubuntu 26.04's uutils `mkdir` accepted `EEXIST` without `-p`, breaking the Node
 bootstrap's exclusive lock; keeping release builds on Ubuntu 24.04's GNU coreutils preserves
 correct locking without ignoring cleanup errors or overlaying newer scripts on old release source.
-See [Recovering a failed release build](../maintenance/releases.md#recovering-a-failed-release-build)
+See [Recovering a failed release build](../engineering/ci-and-releases.md#recovering-a-failed-release-build)
 and [issue #480](https://github.com/tomo-chan/panemux/issues/480).

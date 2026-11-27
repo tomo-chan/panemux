@@ -133,7 +133,7 @@ test-screenshots-check:
 # ── Performance observation (not a gate) ──────────────────────────────────────
 #
 # Performance efficiency is one of the two ISO 25010 characteristics
-# docs/quality-gateway.md records as completely unprotected. These benchmarks
+# docs/engineering/quality-gates.md records as measurement-only. These benchmarks
 # are the first measurement of it: terminal output throughput and replay-buffer
 # cost (internal/session), and the relay's continuous polling cost
 # (internal/board).
@@ -247,7 +247,7 @@ test-efficacy:
 #
 # The gate speaks only about blocks covering a line the branch changed. The
 # repository has ~275 unexecuted blocks today, so a gate over all of them would
-# start red — and docs/quality-gateway.md principle 4 is that a gate which
+# start red — and docs/engineering/quality-gates.md principle 4 is that a gate which
 # starts red gets routed around, taking the working gates with it. Diff-scoped,
 # it starts green and stays cheap. Same reasoning as decision D2 (docs/decisions/quality-gateway.md).
 #
@@ -319,7 +319,7 @@ mutation: build-frontend
 test-mutation:
 	sh scripts/mutation_test.sh
 
-# The agent-side gates themselves (docs/quality-gateway.md's G1 and G2, run as
+# The agent-side gates themselves (docs/engineering/quality-gates.md's G1 and G2, run as
 # Claude Code hooks from .claude/). Included in `make test` because a hook that
 # silently stops working reports the discipline as enforced while enforcing
 # nothing — and because a hook that blocks a healthy change is worse still, so

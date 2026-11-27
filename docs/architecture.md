@@ -220,7 +220,7 @@ Their lifetime is independent of terminal sessions. See [Split preview](behavior
 - [Agent registry](agent-registry.md) — agent IDs, aliases, detection rules, capabilities, and session keys.
 - [Agent Board details](agent-board/) — messaging, relay, bootstrap, command center, and limitations.
 - [UI design](ui-design.md) — workspace, pane, modal, attention, and Agent Board interactions.
-- [Quality gateway](quality-gateway.md) — how architectural contracts are verified.
+- [Quality gates](engineering/quality-gates.md) — how architectural contracts are verified.
 - [Decision log](decisions/index.md) — tradeoffs and superseded approaches removed from this guide.
 
 Agent Board enablement is instance-wide; delivery mode is deprecated and ignored. Its relay accepts valid unqualified

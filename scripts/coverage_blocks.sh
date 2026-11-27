@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Per-block coverage: issue #164, gate G4(d) in docs/quality-gateway.md.
+# Per-block coverage: issue #164, gate G4(d) in docs/engineering/quality-gates.md.
 #
 # `make coverage-go` gates on a statement percentage over a set of packages.
 # That number cannot see an entire `if err != nil { ... }` body that no test
@@ -39,7 +39,7 @@
 # repository has ~275 unexecuted blocks out of 1801 (~375 statements of 2772);
 # the figure moves by three between runs of the identical command, which is a
 # finding in its own right — see decision D8 (docs/decisions/quality-gateway.md).
-# A gate that failed on all of them would start red, and docs/quality-gateway.md
+# A gate that failed on all of them would start red, and docs/engineering/quality-gates.md
 # principle 4 says what happens to a gate that starts red: it gets routed
 # around, taking the gates that do work with it. So the gate only speaks about
 # blocks covering a line THIS BRANCH changed. It starts green, it never argues

@@ -155,7 +155,7 @@ func TestManager_Subscribe_ClosedSessionReturnsSnapshotAndClosedStream(t *testin
 // filled it, with the suite still green. Issue #190.
 // Nothing under this test changed on this branch, so the red-check could never
 // see it go red: it pins behavior that was already correct and merely
-// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+// unasserted. See docs/decisions/quality-gateway.md (D9).
 //
 //efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestManagedSession_Publish_ReplayBufferBound(t *testing.T) {
@@ -223,7 +223,7 @@ func TestManagedSession_Publish_ReplayBufferBound(t *testing.T) {
 // reaches it — pump() writes 4 KiB at a time.
 // Nothing under this test changed on this branch, so the red-check could never
 // see it go red: it pins behavior that was already correct and merely
-// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+// unasserted. See docs/decisions/quality-gateway.md (D9).
 //
 //efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestManagedSession_Publish_ReplayBufferBoundAcrossChunks(t *testing.T) {
@@ -287,7 +287,7 @@ func TestManagedSession_SubscribeStillWorksWhilePublishWaitsOnSlowSubscriber(t *
 // allocate.
 //
 // It asserts a shape (zero allocations), not a duration, so it is not a
-// benchmark in disguise: docs/quality-gateway.md's principle 4 rules out gating
+// benchmark in disguise: docs/engineering/quality-gates.md's principle 4 rules out gating
 // on timings measured in a shared container, and the spread there is 2.9×.
 // Allocation counts have no such spread.
 func TestManagedSession_Publish_SteadyStateDoesNotCopyTheReplayWindow(t *testing.T) {

@@ -36,7 +36,7 @@ Because `send.sh --force` does not authenticate the free-text `from` field, pane
 attributed to `_system` only when they match a recent send recorded in the own-send ledger. The
 ledger was chosen as the TLA+ model-checking pilot because it is the smallest self-contained state
 machine and previously suffered a multiset-versus-set defect.
-See [Model checking](../agent-board/model-checking.md).
+See [State-machine model checking](../engineering/testing.md#state-machine-model-checking).
 
 ## Browser token bootstrap and independent dashboard capability (2026-08-14–2026-08-22, PRs #170, #171)
 

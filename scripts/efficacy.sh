@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# red-check: gate G4(b) in docs/quality-gateway.md.
+# red-check: gate G4(b) in docs/engineering/quality-gates.md.
 #
 # The rule this enforces is decision D4 (docs/decisions/quality-gateway.md). DEVELOPMENT.md requires tests to be
 # written first and confirmed failing, and that rule is stuck at rung L0 of the
@@ -66,7 +66,7 @@ if ! git rev-parse --verify --quiet "$base" > /dev/null; then
 	echo "efficacy: ERROR — base ref '$base' does not exist."
 	echo "  Without it there is no diff to take, so the gate cannot run at all."
 	echo "  This exits 1 rather than skipping: see Principle 4 in"
-	echo "  docs/quality-gateway.md. In CI this usually means the checkout lost"
+	echo "  docs/engineering/quality-gates.md. In CI this usually means the checkout lost"
 	echo "  'fetch-depth: 0'. Locally, 'git fetch origin main' or set"
 	echo "  EFFICACY_BASE to a ref you have."
 	exit 1
