@@ -41,8 +41,8 @@ Topic guides link to focused deep dives when the summary is not enough:
 - [UI details](ui/) - Shared UI principles, frontend runtime, modals, workspace and pane chrome,
   layout editing, previews, task dashboard, attention, and Agent Board presentation.
 - [API contracts](api/) - Workspace, task dashboard, and Agent Board REST and WebSocket protocols.
-- [Behavior details](behavior/) - REST, WebSocket, frontend, SSH, notifications, URL opening, and the
-  task dashboard.
+- [Behavior details](behavior/) - SSH, split preview, URL opening, task events, and the task
+  dashboard.
 - [Security details](security/) - requirements grouped by command or trust boundary.
 - [Agent Board details](agent-board/) - architecture, relay, bootstrap, command center, integration,
   and limitations.
@@ -71,7 +71,7 @@ remains the authority for line-level chronology.
 * [agent-registry/](agent-registry/) - Agent integration procedures and capability requirements.
 * [api/](api/) - REST API and WebSocket wire contracts grouped by domain.
 * [ui/](ui/) - Shared UI principles, frontend runtime, and domain screen contracts.
-* [behavior/](behavior/) - Runtime behavior, API contracts, task events, and task dashboard details.
+* [behavior/](behavior/) - Runtime behavior, task events, and task dashboard details.
 * [decisions/](decisions/) - Design decisions grouped into topic documents.
 * [engineering/](engineering/) - Quality gates, testing contracts, runtimes, sandboxes, screenshots, CI, releases, and agmsg maintenance.
 * [images/](images/) - Documentation screenshots captured from the product with placeholder content.

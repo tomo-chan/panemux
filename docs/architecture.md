@@ -215,7 +215,7 @@ Their lifetime is independent of terminal sessions. See [Split preview](behavior
 
 ## Deep dives
 
-- [Behavior details](behavior/) — API, WebSocket, frontend, SSH, notifications, and URL-open contracts.
+- [Behavior details](behavior/) — SSH, split preview, URL opening, task events, and task dashboard contracts.
 - [Security details](security/) — requirements grouped by execution and trust boundary.
 - [Agent registry](agent-registry.md) — agent IDs, aliases, detection rules, capabilities, and session keys.
 - [Agent Board details](agent-board/) — messaging, relay, bootstrap, command center, and limitations.

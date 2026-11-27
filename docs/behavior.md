@@ -89,7 +89,8 @@ Path behavior:
 ## Document map
 
 This document keeps the whole-process behavior: startup, configuration, operational assumptions, and
-distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), grouped by area:
+distribution. Per-surface runtime behavior lives in [`docs/behavior/`](behavior/), API wire
+contracts in [`docs/api/`](api/), and UI and frontend runtime contracts in [`docs/ui/`](ui/):
 
 | Sections | Document |
 |---|---|
@@ -100,18 +101,18 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 | Frontend Runtime Behavior | [ui/overview.md](ui/overview.md#frontend-runtime) |
 | Pane Git and PR metadata | [pane-metadata.md](behavior/pane-metadata.md) |
 | Opening URLs from a Pane | [url-open.md](behavior/url-open.md) |
-| Split Preview; Panes on an SSH host; Localhost URLs of an SSH host; `POST /api/sessions/{id}/preview` | [preview.md](behavior/preview.md) |
+| Split Preview; Panes on an SSH host; Localhost URLs of an SSH host | [preview.md](behavior/preview.md) |
 | Task dashboard model and document map | [tasks.md](behavior/tasks.md) |
 | Collection, state, availability and wait signatures | [task-collection.md](behavior/task-collection.md) |
 | Repository metadata, done and labels | [task-records.md](behavior/task-records.md) |
 | Launch and resume | [task-launch.md](behavior/task-launch.md) |
 | Task summaries and persistence | [task-summaries.md](behavior/task-summaries.md) |
 | Task locations, navigation and temporary terminals | [task-navigation.md](behavior/task-navigation.md) |
-| Task and host terminal REST & event stream contracts | [api/tasks.md](api/tasks.md) |
+| Task and host terminal REST API; `GET /ws/tasks/events` | [api/tasks.md](api/tasks.md) |
 | Codex permission hook | [task-codex-permissions.md](behavior/task-codex-permissions.md) |
 | Shared host tool coordination and agmsg management | [host-tools.md](behavior/host-tools.md) |
 | Task summaries: what they cost (measurements) | [task-summary-cost.md](behavior/task-summary-cost.md) |
-| Task Events; `GET /ws/tasks/events` | [task-events.md](behavior/task-events.md) |
+| Task Events (observation, lifecycle, and browser receiver) | [task-events.md](behavior/task-events.md) |
 
 ## Operational Assumptions
 

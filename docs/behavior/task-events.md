@@ -1,7 +1,7 @@
 ---
 type: Specification
 title: "Behavior: task events"
-description: "Task event observation, WebSocket delivery, and receiver responsibilities."
+description: "Task event observation, lifecycle, and browser receiver responsibilities."
 ---
 
 # Behavior: task events
