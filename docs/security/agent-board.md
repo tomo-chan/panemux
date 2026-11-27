@@ -117,11 +117,15 @@ list drift as the CLI adds tools is an accepted weakness.
 ### Sandbox scope and verification limits
 
 `SubprocessSettings` contains only narrowing keys (`{"sandbox":{"enabled":true}}`), enforced by
-`TestSubprocessSettingsOnlyNarrows` and `TestRunnerSendsOnlyPanemuxOwnSettings`. Never set
-`autoAllowBashIfSandboxed`, and leave `network.allowedDomains`/`deniedDomains` unset (they do not
-guard the MCP child's loopback call). **Sandbox confinement remains unverified**: on the tested
-host the setting was ignored harmlessly (`CLAUDE_CODE_SANDBOXED` unset); verify on a host where
-`/sandbox` reports availability before claiming confinement.
+`TestSubprocessSettingsOnlyNarrows` (forbidding widening keys such as `permissions`, `hooks`,
+`apiKeyHelper`, `statusLine`, `env`, `enabledPlugins`, `additionalDirectories`, and `mcpServers`)
+and `TestRunnerSendsOnlyPanemuxOwnSettings`. Never set `autoAllowBashIfSandboxed`, and leave
+`network.allowedDomains`/`deniedDomains` unset (they do not guard the MCP child's loopback call).
+Because `Bash` is denied by argv, the sandbox confines nothing on its own today and is not confirmed
+to wrap the stdio MCP child process—it exists only as defense-in-depth if either argv tool list is
+ever relaxed. **Sandbox confinement remains unverified**: on the tested host the setting was ignored
+harmlessly (`CLAUDE_CODE_SANDBOXED` unset); verify on a host where `/sandbox` reports availability
+before claiming confinement.
 
 ### MCP environment sink
 

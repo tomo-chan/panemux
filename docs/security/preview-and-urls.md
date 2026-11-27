@@ -35,16 +35,21 @@ navigation or popups. `PreviewSplit` repeats `sandbox="allow-scripts"` on the if
 ### Localhost pages
 
 Localhost URLs on the panemux host are framed directly (never fetched by panemux) inside a
-script-free `srcdoc` wrapper (`localhostFrameDocument`) whose CSP restricts `frame-src` to
+script-free `srcdoc` wrapper (`localhostFrameDocument`) whose CSP is
+`default-src 'none'; style-src 'unsafe-inline'; frame-src ...` restricting `frame-src` to
 `http`/`https` on `localhost`, `127.0.0.1`, and the URL's IPv4 loopback address (blocking `302` or
-script redirects to external sites). Because CSP cannot name `[::1]`, IPv6 loopback URLs are framed
-as `localhost` (sharing `localhost` cookies/storage; Open in new tab uses `[::1]`).
+script redirects to external sites). Because the outer frame carries `allow-same-origin`, the
+`srcdoc` wrapper itself runs in the **dashboard's own origin**: the URL enters only as an escaped
+HTML attribute value (`escapeAttribute`), and `default-src 'none'` forbids any script in the wrapper
+document. Because CSP cannot name `[::1]`, IPv6 loopback URLs are framed as `localhost` (sharing
+`localhost` cookies/storage; Open in new tab uses `[::1]`).
 
-Both frames use `sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"`,
-keeping the dev server in **its own** loopback origin (never the dashboard's, which denies framing
-via `X-Frame-Options: DENY` and refuses cross-port `/api/*` and `/ws/*` via the request guard).
-Only loopback `http`/`https` URLs on the panemux host are framed, after operator approval for
-terminal-emitted requests.
+Both frames use `sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"`
+(never `allow-top-navigation` or `allow-popups-to-escape-sandbox`, so the framed page cannot
+navigate the dashboard and windows it opens stay sandboxed), keeping the dev server in **its own**
+loopback origin (never the dashboard's, which denies framing via `X-Frame-Options: DENY` and refuses
+cross-port `/api/*` and `/ws/*` via the request guard). Only loopback `http`/`https` URLs on the
+panemux host are framed, after operator approval for terminal-emitted requests.
 
 ### Markdown and Mermaid rendering
 
@@ -59,11 +64,12 @@ terminal-emitted requests.
   unknown names, no filesystem lookup or SPA fallback, no `unsafe-eval`/`allow-same-origin`).
   Goldmark emits escaped code; the renderer reads `textContent`, rejects all diagram frontmatter
   and directives, uses strict security with HTML labels off, never invokes `bindFunctions`, and
-  sanitizes final SVG with DOMPurify (forbidding executable/HTML/image/link elements and unsafe
-  CSS). **Network caveat**: Mermaid measures unsanitized SVG in the preview DOM before final
-  sanitization, so image shapes can issue external fetches under `img-src * data:` that final
-  sanitization cannot retract; preview is not a network-isolated viewer. Limits: 10 MiB document,
-  10 diagrams, 20,000 UTF-16 code units/diagram, 50,000/document, 100 edges (not a preemptive CPU
+  sanitizes final SVG with DOMPurify (forbidding executable/HTML/image/link elements, nonlocal
+  `href` references, and unsafe CSS). **Network caveat**: Mermaid measures unsanitized SVG in the
+  preview DOM before final sanitization, so image shapes can issue external fetches under
+  `img-src * data:` that final sanitization cannot retract; preview is not a network-isolated
+  viewer. Limits: 10 MiB document, 10 diagrams, 20,000 UTF-16 code units/diagram, 50,000/document,
+  100 edges (rejected source also consumes the document text budget; limits are not a preemptive CPU
   deadline).
 
 ### Paths, symbolic links, tokens, and size
@@ -97,7 +103,8 @@ terminal-emitted requests.
   are keyed per `(Remote, host, port)`, and live until server shutdown. Any local process on the
   panemux host can reach the relayed port. Relayed pages run in `http://127.0.0.1:<relay port>`,
   framed in the same `srcdoc` localhost wrapper; the request guard blocks their cross-port calls to
-  `/api/*` and `/ws/*`.
+  `/api/*` and `/ws/*`. Because browsers scope cookies by host name, relayed pages share
+  `127.0.0.1`'s cookies with each other; panemux itself sets none.
 
 ## Opening URLs from a pane
 
@@ -115,8 +122,10 @@ terminal-emitted requests.
 ### Browser-open interception
 
 The shim (`internal/session/browseropen.go`) is a fixed string literal (`browserShimScript`,
-written locally via `os.WriteFile` or remotely via `shellQuotePath` into `"$HOME/.cache/panemux/bin"`
-mode `0700`, best-effort, disabled by `url_open.browser_shim: false`). It only emits an OSC escape
+best-effort, disabled by `url_open.browser_shim: false`). Locally it is written with `os.WriteFile`
+under `os.UserCacheDir()` (via `internal/cachedir`, mode `0700`; no shell parses it). Remotely it is
+written via `shellQuotePath` into `"$HOME/.cache/panemux/bin"` (mode `0700`), resolved by the remote
+shell itself so no panemux-side path value is interpolated. It only emits an OSC escape
 sequence to its invoking terminal—compatible with `internal/agmsg`'s remote-write rule—and falls
 through via `PANEMUX_SHIM_FALLBACK_PATH` while refusing to exec targets inside its own directory.
 

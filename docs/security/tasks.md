@@ -75,12 +75,18 @@ and double-quoted variables; session IDs and tmux names are single-quoted.
 
 - **Shell handover**: Only literal `claude` and `codex` are resolved to absolute executable files
   (Codex's binary dir appended **last** to `PATH` after rc). `tmux new-session -d -s <name> --`
-  launches a fixed `sh -c` starter that reads and deletes the `mktemp` (`umask 077`) prompt file,
-  then either runs the agent directly or invokes an absolute executable `bash`/`zsh`/`sh` via `-lic`
-  with one constant command expanding `PANEMUX_LAUNCH_*` variables (immune to rc `set --`/`shift`)
-  and unsetting them before exec. `sh` is resolved before rc; CWD changes via `cd -- "$4"` / `cd --
-  "$1"` (never `tmux -c`, which expands `#` formats). Panemux never passes auth keys in argv, files,
-  or `tmux -e`.
+  launches a fixed `sh -c` starter that reads and deletes the `mktemp` (`umask 077`) prompt file
+  (kept out of `tmux` arguments because the tmux server retains a new session's initial client
+  arguments for its lifetime), then either runs the agent directly or invokes an absolute executable
+  `bash`/`zsh`/`sh` via `-lic` with one constant command expanding `PANEMUX_LAUNCH_*` variables
+  (immune to rc `set --`/`shift`) and unsetting them before exec. `sh` is resolved before rc; CWD
+  changes via `cd -- "$4"` / `cd -- "$1"` (never `tmux -c`, which expands `#` formats). Panemux
+  never passes auth keys in argv, files, or `tmux -e`.
+  - **Accepted residual exposure**: The prompt still enters the agent's own process arguments (and
+    briefly the starter `sh`'s argv and shell environment during handover), so same-user `ps` can
+    read it as with a manual CLI invocation. The user's own rc files execute inside that shell and
+    can read or modify `PANEMUX_LAUNCH_*` (including the prompt) or exit/exec another shell before
+    the agent starts, which leaves `tmux new-session` reporting success with no collected task.
 - **Fixed agent commands**:
   - New Claude: `exec "$2" "--session-id=$3" -- "$1"`
   - New Codex: `PATH=$PATH:${2%/*}; export PATH; exec "$2" --no-daemon -c check_for_update_on_startup=false -- "$1"`
@@ -114,6 +120,9 @@ excerpt on stdin, compile-time instruction after `--`) with:
   attachments): 4 KiB first message, 24 KiB recent messages (≤2 KiB each). Secrets in text are
   unmasked (hence opt-in). Output is bounded to 1 KiB summary and 10×300B remaining-work items;
   failures use fixed messages; runners have a 2-minute process-group timeout and max concurrency 2.
+  **Prompt-injection boundary**: Untrusted conversation text can still steer the summary text,
+  remaining-work list, or done-candidate label, so the UI renders every field as plain text and
+  marking a task done always requires an explicit human click (never automatic).
 - `SummaryStore` writes metadata + answer (never logs/excerpts) to
   `~/.config/panemux/task-summaries.json` mode `0600` via `fileops.AtomicWrite`, renaming
   unparseable or invalid files aside unread.
@@ -131,7 +140,7 @@ check under deadline, 64 KiB cap) before applying the same 1 KiB / 10×300B limi
 `buildCodexTranscriptScript` reads `~/.codex/sessions/*/*/*/rollout-*-<UUID>.jsonl` (UUID-only),
 pins the collected basename/version, verifies `session_meta.id`, and `buildCodexExcerpt` keeps only
 message `input_text`/`output_text` (excluding calls, reasoning, attachments, `event_msg` mirrors,
-and leading AGENTS/environment wrappers). Codex never falls back to Claude.
+developer instructions, and leading AGENTS/environment wrappers). Codex never falls back to Claude.
 
 ## Codex permission hook
 
@@ -141,8 +150,12 @@ only hex-and-dash `session_id`/`turn_id`, writes atomically under `umask 077` in
 exits `0` (never allow/deny). Go requires UUIDs when reading.
 
 `GET`/`POST /api/tasks/codex-hook` accept only local or `ssh_connections` keys (`checkHost`),
-running literal `sh -s` with fixed `codexHookReadScript` / `codexHookWriteScript` (32-hex random
-quoted heredoc tag, Go-merged `hooks.json` so no `jq` is required; refuses malformed `hooks.json`;
-never alters Codex `/hooks` trust). `POST /api/tasks/codex-hook/auto-update` persists hosts in
-`~/.config/panemux/codex-hook.json` via `fileops.AtomicWrite`, updating at most once per host per
-process only when `outdated` (never `missing`).
+running literal `sh -s` with fixed `codexHookReadScript` / `codexHookWriteScript` (32-hex
+`crypto/rand` quoted heredoc tag, fixed `yes`/`no`, embedded hook, and Go-merged `hooks.json` so no
+`jq` is required). Quoted heredoc terminators prevent expansion; `registerCodexHook` emits
+two-space-indented JSON so every line is indented or contains a bracket or quoted string and can
+never match a bare terminator, and already-registered hooks never send the host's own `hooks.json`
+back (`writeJSON="no"`). Malformed `hooks.json` is refused, and panemux never alters Codex `/hooks`
+trust. `POST /api/tasks/codex-hook/auto-update` persists hosts in `~/.config/panemux/codex-hook.json`
+via `fileops.AtomicWrite`, updating at most once per host per process only when `outdated` (never
+`missing`).

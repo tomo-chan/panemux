@@ -161,6 +161,8 @@ func TestQueryReportsAFailureToMintASessionID(t *testing.T) {
 // the config's cleanup still runs when a later step fails — otherwise the
 // token-bearing temp file that BuildMCPConfig writes (docs/security/auth.md) would
 // outlive the query that needed it.
+//
+//efficacy:exempt documentation link update only; test and covered implementation are unchanged.
 func TestQueryReportsAFailureToCreateTheWorkDirAndStillCleansUpTheMCPConfig(t *testing.T) {
 	f := newRunnerFixture(t, "")
 	cleaned := false
