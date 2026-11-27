@@ -111,7 +111,8 @@ fixture descendants and verify a detached simulated developer session is never l
 
 ## Mutation testing (`make mutation`)
 
-- `MUTATION_BASE=origin/main make mutation` runs pinned `gremlins` (`v0.6.0`, installed separately)
+- `MUTATION_BASE=origin/main make mutation` runs pinned `gremlins` (`v0.6.0`, installed separately
+  via `go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0`)
   scoped to changed Go lines ([D2](../decisions/quality-gateway.md#d2-mutation-testing-is-scoped-to-the-diff-and-to-pull-requests),
   [D9](../decisions/quality-gateway.md#d9-mutation-findings-require-complete-actionable-verdicts)),
   building `frontend/dist` first and pinning `--timeout-coefficient` and `--workers` to avoid

@@ -51,7 +51,7 @@ func filledCache(rows int) *BoardCache {
 // Nor is there anything for it to find. The trim is c.history = c.history[n:],
 // a pointer bump; the only real cost is append's amortized regrow, which an
 // empty cache and a full one pay alike. An earlier revision of
-// docs/engineering/quality-gates.md claimed a ~270 vs ~730 ns/op contrast between them.
+// the quality gateway doc claimed a ~270 vs ~730 ns/op contrast between them.
 // That was noise being read as signal.
 func BenchmarkBoardCacheAppendMessage(b *testing.B) {
 	c := filledCache(defaultBoardCacheHistoryLimit)

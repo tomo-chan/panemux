@@ -228,4 +228,4 @@ git worktree remove /tmp/<repo>-<feature>
 Use the [engineering index](docs/engineering/index.md) for quality gates, testing contracts,
 runtime selection, sandbox setup, screenshots, Codex verification, CI, and releases.
 The [documentation index](docs/index.md) routes to product, architecture, behavior, security,
-UI, maintenance, scenarios, quality-gateway, and decision documents.
+UI, engineering, scenarios, and decision documents.

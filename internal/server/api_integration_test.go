@@ -853,7 +853,7 @@ func TestServer_APIIntegration_DocumentedGaps(t *testing.T) {
 // thorough: registerRoutes has an `if commandRunner != nil` block, so an /api
 // route registered inside it is one the frontend can reach and one this
 // table's exhaustiveness check would never see. Walking only the disabled
-// router made the file header above — and quality-gates.md's rollout row —
+// router made the file header above — and the original quality-gateway doc —
 // claim more than the code delivered. route_table_test.go pins both states
 // for the same reason.
 func registeredAPIRoutes(t *testing.T) []string {

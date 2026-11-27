@@ -290,6 +290,8 @@ func TestManagedSession_SubscribeStillWorksWhilePublishWaitsOnSlowSubscriber(t *
 // benchmark in disguise: docs/engineering/quality-gates.md's principle 4 rules out gating
 // on timings measured in a shared container, and the spread there is 2.9×.
 // Allocation counts have no such spread.
+//
+//efficacy:exempt documentation link update only; test and covered implementation are unchanged
 func TestManagedSession_Publish_SteadyStateDoesNotCopyTheReplayWindow(t *testing.T) {
 	entry := &managedSession{subscribers: map[int]chan []byte{}}
 	chunk := make([]byte, 4096)
