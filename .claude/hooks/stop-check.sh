@@ -4,13 +4,13 @@
 # Stop hook: before a turn is allowed to end, verify what this turn changed.
 #
 # **This is deliberately not `make check`** — decision D6:
-# docs/decisions/quality-gateway/fast-stop-hook.md. Putting the whole
+# docs/decisions/quality-gateway.md (D6). Putting the whole
 # gate here would run the frontend build, the -race suite and eventually E2E on
 # every single turn, and a gate that sacrifices fast feedback is a gate that
 # gets bypassed. G3 onward stays with CI and `make check` run by hand, which is
 # where the expensive checks belong; .githooks/pre-push runs only the pushed
 # change's own checks (decision D14):
-# docs/decisions/quality-gateway/selective-pre-push.md.
+# docs/decisions/quality-gateway.md (D14).
 #
 # Exit codes are the Claude Code hook contract: 0 = the turn may end, 2 =
 # blocking, reason on stderr. Anything that cannot be checked exits 0 (design

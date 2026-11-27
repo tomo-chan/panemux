@@ -78,7 +78,7 @@ processes only, Linux reads NUL-separated `/proc/<pid>/environ` with `tr`/`grep`
 A sole space-prefixed occurrence inside another environment value can still supply the ID on
 macOS, including when the space follows a newline (`AAA='x PANEMUX_PANE_ID=<id>'`). Directly after
 a newline without a space it is not read; Linux accepts neither embedded form. This is
-[an accepted limitation](../decisions/tasks/macos-pane-identity.md):
+[an accepted limitation](../decisions/tasks.md#opening-an-agent-outside-tmux-through-panemux_pane_id-2026-09-262026-09-27-issues-254-263):
 the same user could set the actual variable anyway. Go additionally requires
 `^[A-Za-z0-9_.-]{1,128}$` (`validPaneID`); the value never reaches a command. `Go to pane` can
 only focus an existing `local` or `ssh` pane of the task's host in the browser's workspaces.

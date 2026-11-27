@@ -113,7 +113,7 @@ distribution. Per-surface behavior lives in [`docs/behavior/`](behavior/), group
 | Codex permission hook | [task-codex-permissions.md](behavior/task-codex-permissions.md) |
 | Shared host tool coordination and agmsg management | [host-tools.md](behavior/host-tools.md) |
 | Task summaries: what they cost (measurements) | [task-summary-cost.md](behavior/task-summary-cost.md) |
-| Task Events; `GET /ws/tasks/events` | [task-events.md](behavior/task-events.md) (Japanese: [task-events.ja.md](behavior/task-events.ja.md)) |
+| Task Events; `GET /ws/tasks/events` | [task-events.md](behavior/task-events.md) |
 
 ## Operational Assumptions
 

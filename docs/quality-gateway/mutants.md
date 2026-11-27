@@ -93,13 +93,13 @@ reason was written for.
 
 The measurement found a structural gap, not a hidden live survivor. Type-scoped waivers prevent
 a reason for one mutant from silently waiving a different finding when mutation is a failing gate.
-See [D9](../decisions/quality-gateway/mutation-verdicts.md) and the
+See [D9](../decisions/quality-gateway.md#d9-mutation-findings-require-complete-actionable-verdicts) and the
 [marker contract](../development/mutation.md).
 
 The boundary row is not 45 missing tests: four cannot be killed by any input and one requires
 fabricated input. This is a floor from the #190 sites, not a census of all 45. The `endConn`
 correction shows why reviewers must distinguish equivalent from unreachable in the marker
-itself. These findings informed [D9](../decisions/quality-gateway/mutation-verdicts.md).
+itself. These findings informed [D9](../decisions/quality-gateway.md#d9-mutation-findings-require-complete-actionable-verdicts).
 
 The first live Go red-check ran here after #185, #186, #187, and #189 correctly skipped Go-free
 diffs. **15 of 18 changed tests survived the revert** because they pinned already-correct
@@ -107,7 +107,7 @@ behavior; each used a per-test `//efficacy:exempt` reason, not the branch-wide `
 label (`scripts/efficacy.sh`). The three `resolveSweepInterval` tests went red. Mutation and
 red-check therefore disagree correctly on this branch: a high survivor rate is expected for
 already-correct behavior, but warrants scrutiny on a branch changing behavior. See
-[Red-check](../development/red-check.md) and [D4](../decisions/quality-gateway/red-check.md).
+[Red-check](../development/red-check.md) and [D4](../decisions/quality-gateway.md#d4-verify-the-test-came-first-after-the-fact-red-check).
 
 **One implementation change came out of it**, and it is the shape the repository already prefers.
 `New` in `internal/portforward/registry.go` decided three things at once about `Options.SweepInterval`

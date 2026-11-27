@@ -8,7 +8,7 @@ description: "Product and test quality characteristics, verification gates, and 
 
 This guide defines the current quality model and the gates that enforce it. Use
 [DEVELOPMENT.md](../DEVELOPMENT.md) for commands and workflow, [Scenario coverage](scenarios.md) for
-the user-facing acceptance ledger, and [Quality decision index](decisions/quality-gateway/index.md)
+the user-facing acceptance ledger, and [Quality gateway decisions](decisions/quality-gateway.md)
 for the history and rationale behind decisions D1–D14.
 
 ## What the tests protect
@@ -143,13 +143,13 @@ or a JDK use explicit opt-in commands or dedicated CI jobs.
 Inside the Claude Code sandbox, the tests and gates that need a pseudo-terminal, a tmux server, `ps`
 or `dscl` probe for it and report themselves skipped; with `CI` set the same probe failing fails them,
 so CI (L4) is where they are verified. See D13 in
-[Decision rationale](decisions/quality-gateway/capability-probes.md).
+[Decision rationale](decisions/quality-gateway.md#d13-capability-probes-skip-locally-and-fail-in-ci).
 
 ## Deep dives
 
 | Topic | Document |
 |---|---|
-| Why the gates have this shape; decisions D1–D14 | [Design decisions](decisions/quality-gateway/index.md) |
+| Why the gates have this shape; decisions D1–D14 | [Design decisions](decisions/quality-gateway.md) |
 | First mutation findings and their classification | [Mutation findings](quality-gateway/mutants.md) |
 | Benchmark evidence and accessibility policy | [Measurements](quality-gateway/measurements.md), [Accessibility ceilings](quality-gateway/accessibility.md) |
 | Commands and exemptions for each mechanism | [Development deep dives](development/) |

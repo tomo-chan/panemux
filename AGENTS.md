@@ -35,8 +35,9 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
    maps each use case to where it is verified, and every feature change is expected to update it.
 11. Read [docs/quality-gateway.md](docs/quality-gateway.md) when changing what the test suite,
     coverage gates, or CI checks are responsible for. It defines the quality characteristics tests
-    must protect and the current layered gates. The numbered design decisions and measurements are
-    in [docs/quality-gateway/](docs/quality-gateway/).
+    must protect and the current layered gates. The numbered design decisions live in
+    [docs/decisions/quality-gateway.md](docs/decisions/quality-gateway.md), and dated measurements
+    and accessibility ceilings live in [docs/quality-gateway/](docs/quality-gateway/).
 12. Read [decision index](docs/decisions/index.md) when the reason, sequence, or rejected alternative
     behind the current specification matters.
 
@@ -60,9 +61,9 @@ being left to memory. `.claude/` holds the agent-side half:
   of it fails.
 - Neither hook runs `make check`, and neither does `.githooks/pre-push`, which runs only the checks
   the pushed change touches. The whole suite is CI's, and `make check` run by hand.
-  See [decision D6](docs/decisions/quality-gateway/fast-stop-hook.md).
+  See [decision D6](docs/decisions/quality-gateway.md#d6-the-stop-hook-does-not-run-everything).
 - `.claude/agents/diff-reviewer.md` reviews a branch's diff in a fresh context.
-  It does not block, and it is not meant to: see [decision D5](docs/decisions/quality-gateway/independent-review.md).
+  It does not block, and it is not meant to: see [decision D5](docs/decisions/quality-gateway.md#d5-the-author-does-not-grade-its-own-work).
 - `make test-hooks` tests the hooks themselves. It runs as part of `make test`
   and as its own CI step, since `ci.yml` invokes the suites directly rather
   than through `make test`.
@@ -106,10 +107,7 @@ same name beside it, and the index's own document map routes by section name.
 - Keep topic guides focused on the current state; put chronology and superseded approaches in
   `docs/decisions/`.
 - Put implementation-time security requirements in `docs/security.md` and treat it as required reading for security-sensitive changes.
-- Follow [the OKF writing rules](docs/index.md#writing-rules): `docs/` is one OKF v0.2 bundle,
-  concepts carry metadata, and each directory has an `index.md` listing its contents.
-- Split by responsibility, with one authoritative concept per contract and links from other
-  documents. The directory hierarchy is a tree; document links are graph edges. Keep
-  `docs/<name>.md` as the topic entrance and `docs/<name>/index.md` as its directory listing;
-  preserve routes from old section names when moving content.
+- Follow [the OKF writing rules](docs/index.md#writing-rules) for `docs/` metadata, directory
+  indexes, cohesive file granularity, English-only prose, topic-grouped decisions under
+  `docs/decisions/<topic>.md`, and direct reference updates without redirect stubs.
 - When adding a new long-form document, add it to the index here so agents can discover it quickly.

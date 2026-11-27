@@ -71,7 +71,7 @@ That is the only permission they grant. Do not add `sandbox.allowPty`,
   (`/tmp/claude-<uid>`), so a shared file cannot name it.
 
 Tests that need these capabilities skip inside the sandbox and are verified in CI instead
-(decision D13 in [Decision rationale](decisions/quality-gateway/capability-probes.md)).
+(decision D13 in [Decision rationale](decisions/quality-gateway.md#d13-capability-probes-skip-locally-and-fail-in-ci)).
 
 Tests must not write to the developer's own configuration or cache directories. The sandbox makes a
 violation fail loudly, but the rule holds outside it too: substitute `internal/cachedir` and

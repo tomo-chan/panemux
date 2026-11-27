@@ -18,4 +18,4 @@ description: "Red-check requirements proving that changed tests detect the imple
 - Neither exemption is for bypassing a test that asserts nothing. Inspect a branch where most
   changed tests survive before exempting it; [the #190 measurement](../quality-gateway/mutants.md#clearing-the-boundary-value-class-issue-190)
   records the unusual case of tests pinning already-correct behavior (15 of 18 survived).
-- See decision D4 in [Decision rationale](../decisions/quality-gateway/red-check.md).
+- See decision D4 in [Decision rationale](../decisions/quality-gateway.md#d4-verify-the-test-came-first-after-the-fact-red-check).

@@ -8,7 +8,6 @@ Runtime behavior, API contracts, task events, and task dashboard details.
 * [Behavior: the split preview](preview.md) - Split preview rendering, local and remote files, and preview lifecycle.
 * [Behavior: REST API](rest-api.md) - REST endpoints, request and response contracts, and failure behavior.
 * [Behavior: SSH connections](ssh.md) - SSH connection configuration, session behavior, and remote host assumptions.
-* [タスクイベント（日本語訳）](task-events.ja.md) - タスクイベントの観測・配信と受け手の契約を説明する英語正本の日本語訳。
 * [Behavior: task events](task-events.md) - Task event observation, WebSocket delivery, and receiver responsibilities.
 * [Task summaries: what they cost](task-summary-cost.md) - Dated measurements of task summary cost for synthetic conversations and selected models.
 * [Behavior: task dashboard](tasks.md) - Task dashboard model and routes to collection, actions, APIs, summaries, and host tools.

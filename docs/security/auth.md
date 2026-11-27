@@ -36,7 +36,7 @@ header-free `/api/session-token` and `/ws/{sessionID}`. The middleware probe der
 from `chi.Walk` and covers mutating methods without invoking handlers. The table check catches
 renames and unreachable routes too: a reachable board route outside the authenticated mount
 fails the auth probe, but a board path shadowed by that mount can still return `401`; only
-the table check catches that registration. See the [route-gate decision](../decisions/quality-gateway/consolidated-gates.md).
+the table check catches that registration. See the [route-gate decision](../decisions/quality-gateway.md#d3-consolidate-gates-rather-than-adding-them).
 
 Browsers cannot add `Authorization` to a WebSocket upgrade. `/ws/board/command` instead takes
 the token in `Sec-WebSocket-Protocol` (`new WebSocket(url, [token])`), compares it with
@@ -80,7 +80,7 @@ not DNS rebinding protection.
 Keep the endpoint outside `/api/board/`: chi routes that subtree through bearer auth regardless
 of a separately registered literal handler. A flat handler test misses mount precedence;
 `TestServer_SessionTokenRoute_RemainsUnauthenticated` exercises the real `server.New()` router.
-See the [bootstrap decision](../decisions/agent-board/board-token-bootstrap.md) for history.
+See the [bootstrap decision](../decisions/agent-board.md#browser-token-bootstrap-and-independent-dashboard-capability-2026-08-142026-08-22-prs-170-171) for history.
 
 #### MCP token file
 

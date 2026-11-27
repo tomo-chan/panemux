@@ -54,7 +54,7 @@ appear as `M` in `git status`. Tests would then exercise the new tests against o
   entry. Request the normal outside-sandbox approval for removal; do not assume cleanup succeeded.
 
 See [#370](https://github.com/tomo-chan/panemux/issues/370) for the observed partial switches and
-[D13](../decisions/quality-gateway/capability-probes.md) for capability limits during verification.
+[D13](../decisions/quality-gateway.md#d13-capability-probes-skip-locally-and-fail-in-ci) for capability limits during verification.
 
 After changing sandbox settings, verify `make check`, `make test-e2e`, and `make test-hooks`
 from Claude Code with sandboxing active. Runs from another agent or outside the sandbox verify

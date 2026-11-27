@@ -46,7 +46,7 @@ and do not reach for `t.Setenv("HOME", ...)`, which mutates the process environm
 and subprocess in the binary shares, and does nothing on Windows (`USERPROFILE` is used).
 Substitute the unsynchronized `homedir.dirFn` only from non-parallel tests; unlike `t.Setenv`,
 it races silently under `t.Parallel`. Cross-package callers need the shared seam rather than
-package-private overrides; see [filesystem seams](../decisions/architecture/filesystem-seams.md)
+package-private overrides; see [filesystem seams](../decisions/architecture.md#filesystem-globals-use-named-seams-2026-09-102026-09-13-prs-224-231-234)
 and [#212](https://github.com/tomo-chan/panemux/issues/212).
 
 **The cache directory has its own seam, and it is `internal/cachedir`.** Same shape — `cachedir.Dir()`,
@@ -61,7 +61,7 @@ the cache seam. See [#226](https://github.com/tomo-chan/panemux/issues/226).
 **Neither seam is safe under `t.Parallel`.** Substitute them only from non-parallel tests.
 A mutex would remove the data race while leaving cleanup last-writer-wins. If parallel tests
 are needed, use per-test injection without globals for the affected packages rather than a lock.
-See [filesystem seams](../decisions/architecture/filesystem-seams.md) and
+See [filesystem seams](../decisions/architecture.md#filesystem-globals-use-named-seams-2026-09-102026-09-13-prs-224-231-234) and
 [#227](https://github.com/tomo-chan/panemux/issues/227).
 
 **Persisted files are written through one seam, and it is `internal/fileops`.** `fileops.AtomicWrite`
