@@ -221,7 +221,7 @@ request guard, since the page it serves runs in an opaque origin and all of its 
 cross-site; the token is what grants access. Missing tokens and files, directories, `..` and paths or
 symbolic links leading outside the root answer `404`; an HTML or Markdown file over 10 MiB answers
 `413`. Markdown is answered rendered as HTML. Headers and policies are in
-[security/preview.md](../security/preview.md).
+[security/preview-and-urls.md](../security/preview-and-urls.md).
 
 ### `GET /api/tasks`, `POST /api/tasks/hosts/{name}/reconnect`, `PUT /api/tasks/records`, `POST /api/tasks`, `POST /api/tasks/resume`, `POST /api/tasks/summary`, `POST /api/tasks/input-given`, `GET`/`POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update` and `POST`/`DELETE /api/tasks/attach`
 
@@ -284,7 +284,7 @@ Request body:
 - `500`: unable to read or write `~/.ssh/config`
 - `201`: host appended
 
-`name` must match `^[a-zA-Z0-9_.\-]+$`. `hostname`, `user`, and `identity_file` must not contain a control character: each is written as the rest of one line, and a line break would add a directive of its own ([security](../security/ssh-execution.md#ssh-proxycommand)). `port` defaults to 0 (omitted from the written block) when not specified. `identity_file` is optional.
+`name` must match `^[a-zA-Z0-9_.\-]+$`. `hostname`, `user`, and `identity_file` must not contain a control character: each is written as the rest of one line, and a line break would add a directive of its own ([security](../security/process-and-ssh.md#ssh-proxycommand)). `port` defaults to 0 (omitted from the written block) when not specified. `identity_file` is optional.
 
 ### `/api/config/ssh-connections`
 

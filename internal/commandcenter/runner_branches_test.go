@@ -159,8 +159,10 @@ func TestQueryReportsAFailureToMintASessionID(t *testing.T) {
 
 // The work directory is created after the MCP config, so this also pins that
 // the config's cleanup still runs when a later step fails — otherwise the
-// token-bearing temp file that BuildMCPConfig writes (docs/security.md) would
+// token-bearing temp file that BuildMCPConfig writes (docs/security/auth.md) would
 // outlive the query that needed it.
+//
+//efficacy:exempt documentation link update only; test and covered implementation are unchanged.
 func TestQueryReportsAFailureToCreateTheWorkDirAndStillCleansUpTheMCPConfig(t *testing.T) {
 	f := newRunnerFixture(t, "")
 	cleaned := false

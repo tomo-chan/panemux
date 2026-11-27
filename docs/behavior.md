@@ -144,7 +144,7 @@ procedures.
 
 - Product overview: [overview.md](overview.md)
 - Architecture and security design: [architecture.md](architecture.md)
-- Security requirements for implementation: [security.md](security.md)
+- Security requirements for implementation: [security/overview.md](security/overview.md)
 - UI intent: [ui-design.md](ui-design.md)
 - Agent Board design: [agent-board.md](agent-board.md)
 - Developer workflow rules: [../DEVELOPMENT.md](../DEVELOPMENT.md)

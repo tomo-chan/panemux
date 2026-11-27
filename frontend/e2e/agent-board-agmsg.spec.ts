@@ -8,7 +8,7 @@ import { boardDialog, boardOpenButton, gotoAndReadSessionToken } from './agent-b
 //
 // Only agmsg itself is stubbed, and only because it is a separate,
 // operator-installed tool panemux deliberately never installs (see
-// docs/security.md); the two shell scripts under e2e/fixtures/agmsg stand in
+// docs/security/agent-board.md); the two shell scripts under e2e/fixtures/agmsg stand in
 // for the ones a real installation provides. Everything the dashboard
 // actually depends on is the real implementation: the relay really execs
 // those scripts, parses their JSONL, validates each row's from/to against
@@ -50,7 +50,7 @@ test('renders the pane status and message the relay read from the agmsg installa
   // the card deliberately does not render — panemux computes those itself
   // for the pane header, and a self-reported copy can contradict it. The
   // card having no <a> at all is the same decision seen from the security
-  // side (docs/security.md's Agent-reported values in the dashboard UI).
+  // side (docs/security/agent-board.md's Agent Board remote writes and dashboard UI).
   await expect(panel.getByText('example/project')).toHaveCount(0)
   await expect(panel.getByText('feature/agent-board')).toHaveCount(0)
   await expect(panel.getByText('/workspace/user/project')).toHaveCount(0)

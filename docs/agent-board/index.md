@@ -1,6 +1,6 @@
 # Agent Board
 
-Agent Board architecture, messaging, integration, security, and verification contracts.
+Agent Board architecture, messaging, integration, and command center contracts.
 
 * [Agent Board: agmsg compatibility contract](agmsg-contract.md) - The supported agmsg interface, compatibility guarantees, and upgrade verification contract.
 * [Agent Board: integration with agmsg](agmsg-integration.md) - Participation, identity selection, and messaging through the official agmsg workflow.
@@ -11,4 +11,3 @@ Agent Board architecture, messaging, integration, security, and verification con
 * [Agent Board: known limitations](limitations.md) - Current Agent Board availability, recovery, and deployment limitations.
 * [Agent Board: status and message flow](message-flow.md) - Agent status messages, history collection, and message flow through Agent Board.
 * [Agent Board: cross-host relay](relay.md) - Cross-host message relay, deduplication, and delivery lifecycle.
-* [Agent Board: security model](security-model.md) - Agent Board trust boundaries and security responsibilities across hosts and processes.

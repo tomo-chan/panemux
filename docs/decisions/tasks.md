@@ -49,7 +49,7 @@ On macOS, real SIP probes showed ordinary Claude/Codex binaries expose environme
 `KERN_PROCARGS2` helper, strips independently observed argv, and requires a single marker match. A
 single occurrence inside another variable remains an explicitly accepted same-user limitation.
 See [Pane environment identity](../behavior/task-navigation.md#the-pane-of-an-agent-outside-tmux)
-and [Task collection security](../security/task-collection.md).
+and [Task collection security](../security/tasks.md#task-collection).
 
 ## Done and labels are recorded on the panemux host (2026-09-26–2026-10-07, issues #256, #310)
 
@@ -82,7 +82,7 @@ To pick up variables exported in `~/.bashrc` and similar files, bash/zsh/sh laun
 `-lic` (other shells retain direct start). Because rc files can mutate positional parameters with
 `set --` or `shift`, the launcher reads/removes the prompt file first, exports `PANEMUX_LAUNCH_*`
 variables, expands them after rc execution, and unsets them before invoking the agent.
-See [Launch security](../security/task-launch.md) and [Task launch and resume](../behavior/task-launch.md).
+See [Launch security](../security/tasks.md#task-launch-and-resume) and [Task launch and resume](../behavior/task-launch.md).
 
 ## Working directory suggestions derive from collected tasks (2026-10-09, issue #311)
 

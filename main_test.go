@@ -409,8 +409,10 @@ func TestBrowserOpenArgv(t *testing.T) {
 
 // The URL is the only caller-derived value that reaches an exec argv here.
 // It is always panemux's own listen address, and it travels as a discrete
-// argument rather than through a shell — see docs/security.md's general
+// argument rather than through a shell — see docs/security/overview.md's general
 // rules — so this pins that it is never concatenated into one string.
+//
+//efficacy:exempt documentation link update only; test and covered implementation are unchanged.
 func TestBrowserOpenArgv_URLStaysADiscreteArgument(t *testing.T) {
 	const url = "http://127.0.0.1:8080"
 

@@ -174,7 +174,7 @@ func (e *apiEnv) do(t *testing.T, method, path, body string) *httptest.ResponseR
 // createPane creates a real local pane through POST /api/sessions, which is
 // both the happy path for that route and the precondition for every
 // per-session route below. The shell is the hardcoded /bin/sh the rest of
-// this repository defaults to (see docs/security.md), and cwd is a temp
+// this repository defaults to (see docs/security/process-and-ssh.md), and cwd is a temp
 // directory rather than the checkout, so git-info answers "not a repo"
 // without walking a real worktree.
 func (e *apiEnv) createPane(t *testing.T, id string) {
@@ -700,7 +700,7 @@ var apiCases = map[string]apiCase{
 		// neither of them loopback. This route is the reason do() overrides
 		// them: api.GetBoardSessionToken's DNS-rebinding guard answers 403
 		// otherwise, and that guard is the only thing between this token and
-		// any LAN client (docs/security.md).
+		// any LAN client (docs/security/auth.md).
 		rr := e.do(t, http.MethodGet, "/api/session-token", "")
 		assert.Equal(t, http.StatusOK, rr.Code)
 		assert.Contains(t, rr.Body.String(), integrationToken)

@@ -26,7 +26,7 @@ import (
 // except --resume's value sits before that marker and needs its own guard.
 // A regex-allowlist branch gating a value before it reaches exec.Command
 // argv is this repository's established pattern for exactly this problem
-// (see docs/security.md's validateShell/validTmuxSessionName/validRemotePath).
+// (see docs/security/process-and-ssh.md for validateShell/validTmuxSessionName/validRemotePath).
 var validSessionID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // ErrBusy is returned by Query when a previous query against this Runner's

@@ -329,5 +329,5 @@ not known, so the dashboard shows none rather than the collected time of an earl
 
 - Task dashboard collection and states: [task-collection.md](task-collection.md)
 - Notification overview and permission prompt timing: [notifications.md](notifications.md)
-- Collection command safety: [Task dashboard collection](../security/task-collection.md)
+- Collection command safety: [Task dashboard collection](../security/tasks.md#task-collection)
 - Architecture: [architecture.md](../architecture.md)

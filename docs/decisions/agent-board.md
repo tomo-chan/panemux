@@ -6,8 +6,7 @@ description: "Design rationale for agmsg transport isolation, installer coordina
 
 # Agent Board decisions
 
-Current contracts live in [Agent Board](../agent-board.md), [Agent Board security](../security/agent-board.md),
-and [Command Center security](../security/command-center.md).
+Current contracts live in [Agent Board](../agent-board.md) and [Agent Board and command center security](../security/agent-board.md).
 
 ## Agent Board uses agmsg only (2026-08-08, PR #162)
 
@@ -54,12 +53,12 @@ can be enabled independently.
 - **Structural argv separation**: Real-CLI probes exposed dash-prefixed prompts being parsed as
   flags and variadic flag collisions; the runner builds a fixed option segment terminated before
   the prompt operand, and exact argv-shape tests are retained as a security contract
-  ([arguments and CLI parsing](../security/command-center.md#arguments-and-cli-parsing)).
+  ([arguments and CLI parsing](../security/agent-board.md#arguments-and-cli-parsing)).
 - **Pinned execution context**: Live testing showed plain `claude -p` can report ambient session
   IDs and inherit broadened tool policies. Command center mints its own session ID, disables
   ambient settings, runs in an empty per-query directory, restricts MCP config, and pairs an
   allowlist with an explicit acting-tool denylist
-  ([Command Center subprocess execution](../security/command-center.md#command-center-subprocess-execution)).
+  ([Command Center subprocess execution](../security/agent-board.md#command-center-subprocess-execution)).
 
 ## Shared host execution, host-tool port, and transport isolation (2026-10-25–2026-10-26, issues #438–#441)
 

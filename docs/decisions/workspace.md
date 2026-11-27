@@ -7,7 +7,7 @@ description: "Design rationale for browser authority boundaries, layout normaliz
 # Workspace and runtime decisions
 
 Current contracts live in [Behavior specification](../behavior.md) and
-[Preview security](../security/preview.md).
+[Preview security](../security/preview-and-urls.md).
 
 ## One browser authority boundary for APIs and WebSockets (2026-10-11, issue #360)
 

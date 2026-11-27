@@ -41,7 +41,7 @@ same setting, and a field left out keeps the block's value:
 | `host` | `HostName` | Hostname or IP address |
 | `user` | `User` | Remote username |
 | `port` | `Port` | SSH port (22 when neither sets one) |
-| `key_file` | `IdentityFile` | Absolute path to a private key, or `~/…`, which is expanded at load time. A path that is still relative when the key is read is refused — see [security/ssh-execution.md](../security/ssh-execution.md#ssh-private-key-paths-and-an-unresolvable-home-directory) |
+| `key_file` | `IdentityFile` | Absolute path to a private key, or `~/…`, which is expanded at load time. A path that is still relative when the key is read is refused — see [security/process-and-ssh.md](../security/process-and-ssh.md#ssh-private-key-paths-and-an-unresolvable-home-directory) |
 | `password` | — | Password for password-based authentication |
 | `known_hosts_file` | — | Path to known\_hosts file for host-key verification (default `~/.ssh/known_hosts`). Absolute or `~/…`, refused when still relative at the read, for the same reason as `key_file` |
 
@@ -49,7 +49,7 @@ same setting, and a field left out keeps the block's value:
 a name-only entry included — takes both from the `Host` block. An entry that sets its own `host` takes
 neither: the route belongs to the host the block names, and the entry has replaced that host. Its
 `ProxyJump` is then not resolved at all, so one panemux cannot follow does not stop the entry from
-connecting ([security](../security/ssh-execution.md#ssh-proxycommand)).
+connecting ([security](../security/process-and-ssh.md#ssh-proxycommand)).
 
 An entry needs a host from one of the two: an entry with no `host` and no `Host` block of its name
 fails when it is connected — the pane does not start, and the task dashboard reports the error on
@@ -127,7 +127,7 @@ Host-key verification uses `known_hosts_file` if configured, or `~/.ssh/known_ho
 
 `tmux_session` must match `^[a-zA-Z0-9_.-]+$`.
 
-`cwd` is validated against `validRemotePath` before use: absolute paths only, no shell metacharacters (`;|&$` + "`" + `'"<>(){}[]!`), no control characters. See [Remote path arguments](../security/ssh-execution.md#remote-path-arguments-ssh-working-directory).
+`cwd` is validated against `validRemotePath` before use: absolute paths only, no shell metacharacters (`;|&$` + "`" + `'"<>(){}[]!`), no control characters. See [Remote path arguments](../security/process-and-ssh.md#remote-path-arguments-ssh-working-directory).
 
 Pane settings in the frontend expose a directory browser for `cwd`. Local and local tmux panes browse the local filesystem; `ssh` and `ssh_tmux` panes browse the selected SSH connection's remote filesystem. The browser lists directories only and hides dot-directories by default unless the user enables the hidden-directory toggle.
 

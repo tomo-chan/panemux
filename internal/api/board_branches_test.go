@@ -13,7 +13,7 @@ import (
 
 // The two loopback checks below guard GET /api/session-token, the one
 // unauthenticated route that hands out the credential every other board route
-// requires (docs/security.md). Both parse an address that may not have a
+// requires (docs/security/auth.md). Both parse an address that may not have a
 // port, and what they do when it does not is the difference between the guard
 // holding and the guard rejecting every legitimate request.
 

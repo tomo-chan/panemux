@@ -139,7 +139,7 @@ Documentation is part of the product here: an operator cannot use Agent Board wi
 | F2 | The prerequisites section | Names agmsg, says panemux never installs it, and links to it | `manual`: read [README](../README.md#prerequisites) |
 | F3 | Config examples match the schema | Every key in `config.example.yaml` is accepted by validation | `manual`: `./bin/panemux --config config.example.yaml` starts without a **validation** error — warnings about missing shells or SSH keys are environmental and expected |
 | F4 | Legacy mode documentation | Explains validation, one warning per load, and that mode is ignored | `manual`: read [README](../README.md#pane-detection-and-participation) |
-| F5 | Security claims are current | Every claim in [security.md](security.md) is either verified or explicitly marked unverified | `manual`: reread the sections touching whatever changed |
+| F5 | Security claims are current | Every claim in [security/](security/) is either verified or explicitly marked unverified | `manual`: reread the sections touching whatever changed |
 | F6 | Current-state docs match shipped behavior | Topic guides state the present contract without rollout/status narration; historical rationale is in [decision concepts](decisions/index.md) | `manual`: check the topic guide and decision concept for any area changed |
 | F7 | A reader can choose the right level of detail | [docs/index.md](index.md) routes from overview to concise topic guides and then to focused deep dives | `manual`: follow each route in the documentation index |
 | F8 | Documentation follows the OKF bundle convention | Concepts have parseable YAML with a non-empty type, and directory indexes group described links under headings | `auto`: `scripts/docsokf/main_test.go`; `manual`: check titles, descriptions, type choices, and English-only prose against [writing rules](index.md#writing-rules) |
@@ -359,7 +359,7 @@ label records, launch/resume, and summaries. The E2E launcher is
 
 Workspace panes and Type in pane popups preview HTML, Markdown, localhost URLs, and files on
 SSH hosts. See [the split preview](behavior/preview.md) for behavior and
-[preview security](security/preview.md) for isolation.
+[preview security](security/preview-and-urls.md) for isolation.
 
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
@@ -453,7 +453,7 @@ genuinely alters no use case.
 - Developer workflow and the TDD rules these scenarios sit on top of: [../DEVELOPMENT.md](../DEVELOPMENT.md)
 - Agent Board design, including its own testing plan and agmsg compatibility contract: [agent-board.md](agent-board.md)
 - Behavior and API specification: [behavior.md](behavior.md)
-- Security requirements: [security.md](security.md)
+- Security requirements: [security/overview.md](security/overview.md)
 
 ## agmsg management (#435)
 

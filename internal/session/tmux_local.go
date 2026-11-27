@@ -89,7 +89,7 @@ func startTmuxLocal(id, title, tmuxSession string, args []string) (*TmuxLocalSes
 	// exec.Command, because gosec's G204 check flags any exec.Command call
 	// whose argument list is not a literal. The args (including cwd) are
 	// still discrete argv entries handed to the tmux binary, never a shell
-	// string, so this carries no injection risk — see docs/security.md.
+	// string, so this carries no injection risk — see docs/security/process-and-ssh.md.
 	cmd := tmuxLocalCommandFn(args)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

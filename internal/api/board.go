@@ -240,13 +240,13 @@ type boardSessionTokenResponse struct {
 //     send the navigation URL's original host, not the resolved IP. Only
 //     the Host check catches that case.
 //
-// See docs/security.md's "Auth token and transport encryption" section for
+// See docs/security/auth.md's "Auth token and transport encryption" section for
 // the full rationale, including the accepted limitation this creates: a
 // dashboard served from a genuinely non-loopback `server.host` can no
 // longer bootstrap its own token through this endpoint at all, by design —
 // and the narrower, NOT fully closed gap a same-host reverse proxy still
 // opens, which the forwarding-header check below only partially mitigates.
-// See that same security.md section for why a complete fix needs an
+// See that same docs/security/auth.md section for why a complete fix needs an
 // operator-configured trusted-proxy allowlist this endpoint does not have.
 func (h *Handler) GetBoardSessionToken(w http.ResponseWriter, r *http.Request) {
 	if isProxiedRequest(r) || !isLoopbackRemoteAddr(r.RemoteAddr) || !isLoopbackAuthority(r.Host) {
@@ -275,7 +275,7 @@ func (h *Handler) GetBoardSessionToken(w http.ResponseWriter, r *http.Request) {
 // proxy defaults, its Host loopback-looking too, for a client that may be
 // anywhere on the internet. This is a partial mitigation, not a complete
 // one: a proxy configured not to set any of these headers is not caught by
-// it. See docs/security.md's "Auth token and transport encryption" section
+// it. See docs/security/auth.md's "Auth token and transport encryption" section
 // for the accepted residual gap.
 func isProxiedRequest(r *http.Request) bool {
 	return r.Header.Get("X-Forwarded-For") != "" ||

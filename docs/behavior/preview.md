@@ -15,7 +15,7 @@ localhost page, beside their terminal: the terminal on the left, the preview on 
 #385 and #386). It is how a mock or a
 design note an agent wrote is checked while the agent is still being instructed in the same terminal.
 The isolation that keeps the previewed page away from panemux's own API is in
-[security/preview.md](../security/preview.md).
+[security/preview-and-urls.md](../security/preview-and-urls.md).
 
 ![A local pane split in two: its terminal on the left and the preview of the HTML mock whose path it printed on the right, under a header naming the host and the path, with Reload, Open in new tab and Close.](../images/preview.png)
 

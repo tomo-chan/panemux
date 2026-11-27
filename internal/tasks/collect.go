@@ -18,7 +18,7 @@ import (
 // adapter (collect_adapters.go) declares. No value from a request, a config
 // file or a remote host is ever spliced into them, and they reach the shell
 // on stdin (`sh -s`), not as an argument, so the remote login shell never
-// parses them. See docs/security/task-collection.md.
+// parses them. See docs/security/tasks.md.
 //
 // They read only what the agents themselves write and what `ps`/`tmux`
 // report, and never fail as a whole: every probe that can be missing on a
