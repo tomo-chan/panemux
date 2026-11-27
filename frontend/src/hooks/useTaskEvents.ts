@@ -22,7 +22,7 @@ const LAST_RETRY_MS = 30_000
 
 /**
  * The tab's one connection to /ws/tasks/events (issue #279,
- * docs/behavior/task-events.md#store-and-connection). Every frame goes through
+ * docs/backend/tasks/events.md#store-and-connection). Every frame goes through
  * applyTaskEventFrame; one it refuses discards what the tab holds and the
  * stream is opened again for a fresh snapshot. A lost connection is retried
  * from 2 to 30 seconds apart with no limit, and the stream stays open while

@@ -46,7 +46,7 @@ var frontendFS embed.FS
 func main() {
 	// __board-mcp-server is a hidden subcommand, not an ordinary flag: the
 	// command center's own claude -p subprocess re-invokes this same binary
-	// as its MCP server (see docs/agent-board.md's Command center section),
+	// as its MCP server (see docs/backend/agent-board/command-center.md),
 	// so it must be recognized before flag.Parse ever runs.
 	if len(os.Args) > 1 && os.Args[1] == commandcenter.BoardMCPServerSubcommand {
 		if err := runBoardMCPServer(context.Background(), os.Getenv, os.Stdin, os.Stdout); err != nil {

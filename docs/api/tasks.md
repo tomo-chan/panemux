@@ -6,10 +6,10 @@ description: "Task and host terminal REST routes, Codex hook endpoints, and the 
 
 # Task Dashboard REST and Event Stream API
 
-Wire contracts for the [task dashboard](../behavior/tasks.md): task and host-terminal REST routes,
+Wire contracts for the [task dashboard](../backend/tasks/index.md): task and host-terminal REST routes,
 Codex hook endpoints, and the `/ws/tasks/events` event stream. Collection, state derivation,
-availability, and navigation rules live in [task collection](../behavior/task-collection.md),
-[task navigation](../behavior/task-navigation.md), and [task events](../behavior/task-events.md).
+availability, and navigation rules live in [task collection](../backend/tasks/collection.md),
+[task lifecycle and navigation](../backend/tasks/lifecycle.md), and [task events](../backend/tasks/events.md).
 
 ## `GET /api/tasks`
 
@@ -19,18 +19,18 @@ individual host errors do not fail the request (`200` even if all fail).
 - `hosts`: panemux host first (`""`), then `ssh_connections` keys in name order. `status` is `ok`,
   `error` (with `error`), or `connecting`; `collected_at` is present when `status` is `ok`.
 - `unreadable_state_files`: host state files that could not be read, by filename, omitted when none
-  ([Unreadable state files](../behavior/task-collection.md#unreadable-state-files)). `reason` is
+  ([Unreadable state files](../backend/tasks/collection.md#unreadable-state-files)). `reason` is
   `not_json`, `invalid_pid`, or `invalid_session_id`; `detail` is omitted when empty; `pid` and
   `location` are the live Claude process named by the file (omitted when none). Reported only on
   this route, never on `/ws/tasks/events`.
-- `availability`: host [agent availability](../behavior/task-collection.md#agent-availability) for
+- `availability`: host [agent availability](../backend/tasks/collection.md#agent-availability) for
   each agent's declared `collect`, `launch`, and `resume` capabilities in registry order, present
   even on failed hosts (`reason`, `detail`, and `observed_version` omitted when empty).
-- `agents`: every registered agent ([agent registry](../agent-registry.md)) in registry order with
+- `agents`: every registered agent ([agent registry](../backend/agent-registry.md)) in registry order with
   `id`, `display_name`, `capabilities`, and fixed adapter `notes` (`notes.launch` omitted when
   empty), including non-collected agents (`detect`/`board` only). A `panemux_fixture_agent`-tagged
   build (never shipped) appends `panemux-fixture-agent` (`detect`, `collect`, `launch`, `summary`;
-  see [Adding an agent](../agent-registry/adding-an-agent.md)).
+  see [Adding an agent](../backend/agent-registry.md#adding-an-agent)).
 - `tasks`: per host, running tasks in `id` order followed by stopped tasks newest first (`[]` when
   empty).
 - `id`: `local:<agent>:<key>` on the panemux host or `ssh:<host>:<agent>:<key>` on an SSH host,
@@ -39,20 +39,20 @@ individual host errors do not fail the request (`200` even if all fail).
 - `session_id`, `cwd`, `waiting_for`, `status_since`, `started_at`, `pid`, `git`, and
   `location.pane_id` are omitted when unknown. `waiting_for` appears only in `wait`.
 - `wait_signature`: present only in `wait` when the agent recorded when the wait began
-  ([Wait signature](../behavior/task-collection.md#wait-signature)).
+  ([Wait signature](../backend/tasks/collection.md#wait-signature)).
 - `git`: `repo`, `repo_url`, `branch`, `pr_url`, `pr_number`, `issues`, and `autolinks` (each
   omitted when empty). Issues carry positive `number`, HTTP(S) `url`, and optional `repo`
   (`owner/name`, which may differ from the PR repo). Autolinks carry matched `text` and `url`
-  ([Metadata rules](../behavior/task-records.md#repository-branch-pull-request-issues-and-references)).
+  ([Metadata rules](../backend/tasks/lifecycle.md#repository-branch-pull-request-issues-and-references)).
 - `done` and `labels`: the task's record, omitted when false/empty.
-- `actions`: declared task [actions](../behavior/task-collection.md#agent-availability) (`resume`,
+- `actions`: declared task [actions](../backend/tasks/collection.md#agent-availability) (`resume`,
   `summary` with `status`, `reason`, `detail`; `{}` when none). `state_note`: fixed text from the
   collect adapter (omitted when empty).
 - `summaries_error`: present only while summaries are enabled and persistence fails
-  ([Saved summaries](../behavior/task-summaries.md#saved-summaries)); summaries are still generated
+  ([Saved summaries](../backend/tasks/lifecycle.md#saved-summaries-and-codex-specifics)); summaries are still generated
   and displayed.
 - `summaries_enabled`: `task_dashboard.summary.enabled`. `summary` appears only while true and only
-  for summarized or in-flight tasks ([Summaries](../behavior/task-summaries.md#summaries)): `state`
+  for summarized or in-flight tasks ([Summaries](../backend/tasks/lifecycle.md#summaries)): `state`
   is `pending`, `ready`, `error` (with `error`), or `unreadable`; `text`, `remaining` (omitted when
   empty), and `summarized_at` retain the last answer regardless of `state`; `outdated` is true when
   the log changed since that answer/attempt; `done_candidate` is true when ready, current, and
@@ -60,7 +60,7 @@ individual host errors do not fail the request (`200` even if all fail).
 - `records_error`: present only when the record file could not be read (tasks listed without
   records).
 - `known_labels`: deduplicated labels in the record file in case-insensitive alphabetical order
-  ([Done and labels](../behavior/task-records.md#done-and-labels)), omitted when empty or when
+  ([Done and labels](../backend/tasks/lifecycle.md#done-and-labels)), omitted when empty or when
   `records_error` is present.
 - No bearer token required ([current boundaries](../overview.md#current-boundaries)). The
   [shared browser request guard](../security/auth.md#shared-browser-request-guard) rejects
@@ -100,7 +100,7 @@ Starts a new task:
 
 - Every field except `labels` is required (`agent` must declare `launch`, currently `claude` or
   `codex`, otherwise `agent must be one of: claude, codex`; `cwd`/`prompt` follow
-  [Starting a task](../behavior/task-launch.md#starting-a-task)). Unknown fields are refused.
+  [Starting a task](../backend/tasks/lifecycle.md#starting-a-task)). Unknown fields are refused.
 - `201` (Claude):
 
   ```json
@@ -116,7 +116,7 @@ Starts a new task:
 
 - `400` invalid body/agent/label/cwd/prompt; `404` unknown `host`; `409` host refusal (missing
   tmux or CLI—including cached probe `cli_missing` before execution, see
-  [Agent availability](../behavior/task-collection.md#agent-availability)—Codex lacking
+  [Agent availability](../backend/tasks/collection.md#agent-availability)—Codex lacking
   `--no-daemon`, missing directory, existing tmux session, tmux failure, temp file failure, each
   with a fixed message); `502` host unreachable/no answer; `403` cross-site.
 
@@ -136,7 +136,7 @@ Resumes a stopped task for an agent declaring `resume` (`claude` default when om
 ## `POST /api/tasks/attach`
 
 Opens the board's temporary attach
-([Opening a task](../behavior/task-navigation.md#opening-a-task)) to a task's tmux session:
+([Opening a task](../backend/tasks/lifecycle.md#opening-a-task-view-state-and-temporary-attaches)) to a task's tmux session:
 
 ```json
 { "id": "local:claude:7c21e0a4" }
@@ -176,7 +176,7 @@ Requests a summary for one task:
 ## `POST /api/tasks/input-given`
 
 Marks a Codex permission-request wait as answered
-([Codex permission requests](../behavior/task-codex-permissions.md#codex-permission-requests)):
+([Codex permission requests](../backend/tasks/collection.md#codex-permission-requests)):
 
 ```json
 { "wait_signature": "w1-<hex>" }
@@ -189,7 +189,7 @@ Marks a Codex permission-request wait as answered
 ## `GET` and `POST /api/tasks/codex-hook`, `POST /api/tasks/codex-hook/auto-update`
 
 Checks, installs/updates, or toggles auto-update for panemux's Codex permission hook
-([Codex permission requests](../behavior/task-codex-permissions.md#codex-permission-requests)):
+([Codex permission requests](../backend/tasks/collection.md#codex-permission-requests)):
 
 ```text
 GET  /api/tasks/codex-hook?host=gpu-box
@@ -215,7 +215,7 @@ POST /api/tasks/codex-hook   { "host": "gpu-box" }
 ## `POST /api/hosts/session-name`
 
 Generates an `ssh_tmux` session name for a host
-([Opening a host](../behavior/task-navigation.md#opening-a-host)):
+([Opening a host](../backend/tasks/lifecycle.md#opening-a-host)):
 
 ```json
 { "connection": "gpu-box" }
@@ -226,7 +226,7 @@ Generates an `ssh_tmux` session name for a host
 
 ## `POST /api/hosts/terminal`
 
-Opens a temporary host terminal ([Opening a host](../behavior/task-navigation.md#opening-a-host)):
+Opens a temporary host terminal ([Opening a host](../backend/tasks/lifecycle.md#opening-a-host)):
 
 ```json
 { "connection": "gpu-box", "type": "ssh_tmux", "tmux_session": "gpu-box-1a2b3c4d" }
@@ -247,7 +247,7 @@ terminal IDs including task attaches and pane sessions; `403` cross-site).
 
 The live stream of running agent task state changes. The server sends JSON text frames; anything
 the client sends is ignored. Observation lifecycle and browser receiver rules live in
-[Task events](../behavior/task-events.md).
+[Task events](../backend/tasks/events.md).
 
 - **Unauthenticated**, like [`/ws/{sessionID}`](workspace.md#terminal-websocket-protocol) and
   [`GET /api/tasks`](#get-apitasks) (no bearer token).
@@ -318,16 +318,16 @@ task first seen already waiting arrives as `added` in `wait`.
 | `id`, `host`, `agent`, `session_id`, `cwd` | Same as [`GET /api/tasks`](#get-apitasks) |
 | `state` | `busy`, `wait`, `idle`, `run`, or `unknown` |
 | `waiting_for` | Agent-reported wait reason; present only in `wait` |
-| `wait_id` | Wait identity (`w1-…` signature or `e1-<epoch>-<seq>`, see [The wait ID](../behavior/task-events.md#the-wait-id)); present only in `wait` |
-| `status_since` | Server-clock entry time as of this frame; not compared for diffing ([What counts as a change](../behavior/task-events.md#what-counts-as-a-change)) |
-| `location` | `kind`, `tmux_session`, `pane_id`, `attachable` ([Where a task runs](../behavior/task-navigation.md#where-a-task-runs)) |
+| `wait_id` | Wait identity (`w1-…` signature or `e1-<epoch>-<seq>`, see [The wait ID](../backend/tasks/events.md#the-wait-id)); present only in `wait` |
+| `status_since` | Server-clock entry time as of this frame; not compared for diffing ([Tasks and changes](../backend/tasks/events.md#tasks-and-changes)) |
+| `location` | `kind`, `tmux_session`, `pane_id`, `attachable` ([Where a task runs](../backend/tasks/lifecycle.md#where-a-task-runs)) |
 
 No frame carries conversation text, a prompt, a command line, or a process ID.
 
 ### Host view
 
 `name` (`""` for the panemux host), `status` (`pending`, `ok`, `connecting`, or `error`; see
-[Hosts](../behavior/task-events.md#hosts)), and `error` when `status` is `error`.
+[Hosts](../backend/tasks/events.md#hosts)), and `error` when `status` is `error`.
 
 ### Ordering: `epoch` and `seq`
 

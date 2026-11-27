@@ -58,7 +58,7 @@ Left to right: `⠿` drag handle, connection dot, pane type, optional title, opt
 PR link, reconnecting text, then right-aligned actions. Chrome uses the shared header palette
 ([Color palette](overview.md#color-palette)). Repository and `#<number>` PR shortcuts are inline
 text links with stronger blue and an underline on hover, without pills or outlines.
-[Pane Git and PR metadata](../behavior/pane-metadata.md#pane-git-and-pr-metadata) owns metadata
+[Pane Git and PR metadata](../backend/workspace/sessions.md#pane-git-and-pr-metadata) owns metadata
 resolution.
 
 ### Multiple worktrees
@@ -134,7 +134,7 @@ accessible):
 ## Split preview
 
 A clicked HTML or Markdown path—or a localhost URL—opens beside the terminal rather than over it, in
-both workspace panes and the task dashboard's Type in pane popup ([behavior](../behavior/preview.md)).
+both workspace panes and the task dashboard's Type in pane popup ([behavior](../backend/workspace/preview-and-urls.md#split-preview)).
 
 - The terminal keeps the left side and the preview takes the right, starting at `50:50`. The pane
   header, status bar, and all pane operations stay intact; the split lives in the pane body.

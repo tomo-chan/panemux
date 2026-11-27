@@ -6,7 +6,7 @@ description: "Design rationale for agmsg transport isolation, installer coordina
 
 # Agent Board decisions
 
-Current contracts live in [Agent Board](../agent-board.md) and [Agent Board and command center security](../security/agent-board.md).
+Current contracts live in [Agent Board](../backend/agent-board/index.md) and [Agent Board and command center security](../security/agent-board.md).
 
 ## Agent Board uses agmsg only (2026-08-08, PR #162)
 
@@ -111,7 +111,7 @@ checks run side-effect-free before acquiring forwarding leases.
 Remote message bodies still cross the shell boundary as base64-encoded positional arguments (PR #162
 wrapper), and the decoded body is piped to pinned `send.sh --body - --force` via stdin so
 option-like bodies are preserved.
-See [Relay](../agent-board/relay.md) and [agmsg contract](../agent-board/agmsg-contract.md).
+See [Relay](../backend/agent-board/relay.md) and [agmsg contract](../backend/agent-board/agmsg.md#agmsg-compatibility-contract).
 
 ## Validate SSH connection keys at load and API boundaries (2026-11-15, issues #495, #505, PR #540)
 
@@ -120,7 +120,7 @@ Unicode letters, combining marks, numbers, and `._-+`) across config loading, AP
 BoardID parsing. Disallowed handwritten keys now fail configuration loading before startup (even
 when Agent Board is disabled) so every configured host can form a safe, unambiguous
 `name@ssh:<key>` reply address.
-See [SSH connections](../behavior/ssh.md#defining-connections-in-ssh_connections).
+See [SSH connections](../backend/workspace/sessions.md#defining-connections-in-ssh_connections).
 
 ## Observed identities extend the pane response contract (2026-11-15, issue #516)
 

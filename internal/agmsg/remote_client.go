@@ -96,8 +96,8 @@ func (c *RemoteAgmsgClient) apiScript() string  { return c.agmsgPath + "/scripts
 func (c *RemoteAgmsgClient) sendScript() string { return c.agmsgPath + "/scripts/send.sh" }
 
 // Send always passes --force (via sendBase64WrapperScript's fixed
-// --force tail) — see docs/agent-board.md's Integration with agmsg
-// section for why every board-originated send does.
+// --force tail) — see docs/backend/agent-board/agmsg.md's Integration with
+// agmsg section for why every board-originated send does.
 func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body string) error {
 	if err := validateMessageBody(body); err != nil {
 		return err

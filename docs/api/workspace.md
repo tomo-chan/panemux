@@ -8,7 +8,7 @@ description: "Core workspace, session, SSH config, split preview, and URL-open R
 
 Core REST endpoints and the terminal WebSocket protocol for workspaces, sessions, SSH config, split
 previews, and pane URL opening. Startup, configuration, and operational assumptions live in
-[Behavior specification](../behavior.md); security boundaries live in
+[Workspace sessions and configuration](../backend/workspace/sessions.md); security boundaries live in
 [Authentication](../security/auth.md) and
 [Split preview and URL-open security](../security/preview-and-urls.md).
 
@@ -174,12 +174,12 @@ forwarding (no loopback callback port, or a `local`/`tmux` pane already running 
 
 Accepts `{ "path": "<path as shown in terminal>" }`, resolves it from the session's working
 directory and agent worktrees, and registers the HTML or Markdown file for the
-[split preview](../behavior/preview.md). For `ssh`/`ssh_tmux` sessions (panes or task attaches), the
+[split preview](../backend/workspace/preview-and-urls.md#split-preview). For `ssh`/`ssh_tmux` sessions (panes or task attaches), the
 path is resolved on and read from the SSH host.
 
 For `ssh`/`ssh_tmux` sessions, accepts `{ "url": "<localhost URL>" }` instead, relaying the host's
 address and port to a dedicated port on `127.0.0.1` of the panemux host
-([Localhost URLs of an SSH host](../behavior/preview.md#localhost-urls-of-an-ssh-host)).
+([Localhost URLs of an SSH host](../backend/workspace/preview-and-urls.md#localhost-urls-of-an-ssh-host)).
 
 - `400`: invalid JSON; path not `.html`/`.htm`/`.md`/`.markdown`; URL not `http`/`https` on
   `localhost`/`127.0.0.1`/`[::1]`; URL for a panemux-host session; or `ssh`/`ssh_tmux` session with
@@ -292,7 +292,7 @@ fields; `panes` lists the IDs of `ssh`/`ssh_tmux` panes across all workspaces re
 - `POST /api/config/ssh-connections` — adds an entry (`name` plus optional `host`, `user`, `port`,
   `key_file`, `known_hosts_file`, `password`). `201` with entry; `400` invalid JSON or unknown
   field; `409` duplicate name; `422` missing/malformed name
-  ([connection-key rule](../behavior/ssh.md#defining-connections-in-ssh_connections)),
+  ([connection-key rule](../backend/workspace/sessions.md#defining-connections-in-ssh_connections)),
   `clear_password`, or field error below.
 - `PUT /api/config/ssh-connections/{name}` — replaces fields with body (omitted fields removed,
   except empty/absent `password` keeps the saved password, non-empty replaces it, and
@@ -316,7 +316,7 @@ block.
 - Agent Board REST routes, `/api/session-token`, and `/ws/board/command`:
   [Agent Board API](agent-board.md).
 - Manual and global automatic agmsg host tool routes (`GET`/`POST /api/hosts/agmsg`,
-  `POST /api/hosts/agmsg/auto-update`): [Host tool management](../behavior/host-tools.md).
+  `POST /api/hosts/agmsg/auto-update`): [Host tool coordination](../backend/agent-board/agmsg.md#host-tool-coordination-and-agmsg-management).
 
 ## WebSocket browser connection policy
 

@@ -2,7 +2,7 @@
 // the running tasks on every host through internal/tasks while the task
 // event stream has a subscriber, and publishes every change in their state
 // as an ordered frame. It only observes and publishes; what a change means
-// is each receiver's decision. docs/behavior/task-events.md is the
+// is each receiver's decision. docs/backend/tasks/events.md is the
 // specification.
 package taskevents
 

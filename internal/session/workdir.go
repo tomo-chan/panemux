@@ -104,7 +104,7 @@ func (claudeWorkdir) locate(h workdirHost, pid int) (WorkdirSession, bool, error
 // per-agent transcripts under a "subagents" directory next to the parent
 // transcript; a subagent that works in a worktree never touches the parent's
 // recorded cwd, so the pane header would otherwise fall back to the base
-// working directory (see docs/behavior.md "Pane Git and PR metadata").
+// working directory (see docs/backend/workspace/sessions.md "Pane Git and PR metadata").
 func (claudeWorkdir) workdirs(h workdirHost, s WorkdirSession) ([]string, error) {
 	sessionID := s.Key.SessionID
 	if sessionID == "" || s.CWD == "" || !validClaudeSessionID.MatchString(sessionID) {

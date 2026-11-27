@@ -12,7 +12,7 @@ import (
 // host to resolve $HOME for expanding the fixed ~/ installation location
 // before it ever reaches a Runner.Run argument list — a literal ~
 // inside quoteArgs's single-quoting never expands on the remote shell (see
-// docs/agent-board/agmsg-integration.md's discovery section).
+// docs/backend/agent-board/agmsg.md's discovery rules).
 // printf, not "echo -n", because -n is not part of POSIX echo — some /bin/sh
 // implementations print it literally instead of suppressing the trailing
 // newline, which would otherwise corrupt the probed path in a way that's

@@ -1,7 +1,7 @@
 package agmsg_test
 
-// Tier 2 of docs/agent-board.md's agmsg compatibility contract: the
-// behaviors panemux depends on, asserted against a REAL agmsg install
+// Tier 2 of docs/backend/agent-board/agmsg.md's agmsg compatibility contract:
+// the behaviors panemux depends on, asserted against a REAL agmsg install
 // rather than a fake.
 //
 // Tier 1 (every other test in this package) pins what panemux itself sends
@@ -72,7 +72,7 @@ func contractInstall(t *testing.T) string {
 
 	src := strings.TrimSpace(os.Getenv(agmsgPathEnv))
 	if src == "" {
-		t.Skipf("%s is not set; see docs/agent-board.md's agmsg compatibility contract", agmsgPathEnv)
+		t.Skipf("%s is not set; see docs/backend/agent-board/agmsg.md's agmsg compatibility contract", agmsgPathEnv)
 	}
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("agmsg's own scripts require sqlite3, which is not on PATH")
@@ -283,9 +283,9 @@ func watchDelivery(t *testing.T, scripts, sessionID, project, expect string, sen
 }
 
 // TestAgmsgContract_TwoAgentsInOneProjectNeedTheClaim is the mechanical
-// version of the manual verification recorded in docs/agent-board.md's "Two
-// panes in one project directory". It asserts both halves: the exposure
-// that exists without a claim, and that the claim closes it.
+// version of the manual verification recorded in docs/backend/agent-board/agmsg.md
+// ("Two panes in one directory and agent type mapping"). It asserts both halves:
+// the exposure that exists without a claim, and that the claim closes it.
 //
 // If a future agmsg release makes identities.sh project-scoped differently,
 // or changes watch.sh's exclusivity handling, this test fails — which is

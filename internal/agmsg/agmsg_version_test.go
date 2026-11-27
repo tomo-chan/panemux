@@ -70,8 +70,7 @@ func TestVersionMismatchWarning(t *testing.T) {
 //efficacy:exempt documentation-only reference update; implementation behavior is unchanged
 func TestTestedAgmsgVersionIsPinned(t *testing.T) {
 	// The design requires a specific pinned, tested version rather than
-	// "whatever is installed" — see docs/agent-board/agmsg-integration.md's
-	// Version coverage section.
+	// "whatever is installed" — see docs/backend/agent-board/agmsg.md.
 	assert.Regexp(t, `^\d+\.\d+\.\d+$`, TestedAgmsgVersion)
 }
 

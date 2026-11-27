@@ -6,7 +6,7 @@ description: "Design rationale for task collection, Codex observation, launch/re
 
 # Task dashboard decisions
 
-Current contracts live in [Task dashboard](../behavior/tasks.md) and its linked specifications.
+Current contracts live in [Tasks backend](../backend/tasks/index.md) and its linked specifications.
 
 ## Session dashboard independent of panes (2026-09-25, issue #252)
 
@@ -24,7 +24,7 @@ Unreadable-file cards lacked a usable session ID and could not be labeled, compl
 The live process now becomes the task and its unreadable file becomes a diagnostic (omitting the
 process would re-list its newest log as a stopped task). Only invalid `pid`/`sessionId` make a file
 unreadable; malformed optional fields are omitted and warnings log only on change.
-See [Unreadable state files](../behavior/task-collection.md#unreadable-state-files).
+See [Unreadable state files](../backend/tasks/collection.md#unreadable-state-files).
 
 ## Codex sessions: state, starting, and resuming (2026-09-27, issue #264)
 
@@ -34,8 +34,8 @@ stale resumed turns, and newest rollout mtime (not descriptor number) tracks ses
 Shared app-server sessions carry a daemon location rather than guessing TUI ownership by cwd.
 Dashboard launches pass `--no-daemon`, refuse CLIs lacking help support, append (never prepend) the
 CLI directory to `PATH`, and filter CLI origin before capping stopped sessions so exec logs cannot
-hide TUI sessions. See [Codex sessions](../behavior/task-collection.md#codex-sessions) and
-[Codex launch](../behavior/task-launch.md#codex-launch).
+hide TUI sessions. See [Codex sessions](../backend/tasks/collection.md#codex-sessions) and
+[Starting a task](../backend/tasks/lifecycle.md#starting-a-task).
 
 ## Opening an agent outside tmux through `PANEMUX_PANE_ID` (2026-09-26–2026-09-27, issues #254, #263)
 
@@ -48,7 +48,7 @@ On macOS, real SIP probes showed ordinary Claude/Codex binaries expose environme
 (unlike Apple-signed binaries). Panemux keeps the fixed shell script rather than adding a
 `KERN_PROCARGS2` helper, strips independently observed argv, and requires a single marker match. A
 single occurrence inside another variable remains an explicitly accepted same-user limitation.
-See [Pane environment identity](../behavior/task-navigation.md#the-pane-of-an-agent-outside-tmux)
+See [Pane environment identity](../backend/tasks/lifecycle.md#the-pane-of-an-agent-outside-tmux)
 and [Task collection security](../security/tasks.md#task-collection).
 
 ## Done and labels are recorded on the panemux host (2026-09-26–2026-10-07, issues #256, #310)
@@ -59,7 +59,7 @@ state so `GET` never writes, unreadable files refuse writes, mtime/size checks p
 edits, and symlink writes preserve dotfile placement. Used-label suggestions derive directly from
 the record file inside `GET /api/tasks` with code-point sorting shared between Go and TypeScript
 and `Map` keys to avoid prototype collisions.
-See [Done and labels](../behavior/task-records.md#done-and-labels).
+See [Done and labels](../backend/tasks/lifecycle.md#done-and-labels).
 
 ## Issue links and autolinked references (2026-09-26, issue #255)
 
@@ -68,7 +68,7 @@ unknown-field refusal. Configured prefix/template pairs replace a brittle regex 
 SHA-256 hashes, and CVEs. References are links rather than queried APIs so no tracker credentials
 are required, and conservative URL validation with a shared Go/TS corpus keeps malformed links from
 breaking the task list.
-See [Repository and issue metadata](../behavior/task-records.md#repository-branch-pull-request-issues-and-references).
+See [Repository and issue metadata](../backend/tasks/lifecycle.md#repository-branch-pull-request-issues-and-references).
 
 ## Starting and resuming tasks through login/interactive shells (2026-09-26–2026-10-29, issues #257, #445)
 
@@ -82,14 +82,14 @@ To pick up variables exported in `~/.bashrc` and similar files, bash/zsh/sh laun
 `-lic` (other shells retain direct start). Because rc files can mutate positional parameters with
 `set --` or `shift`, the launcher reads/removes the prompt file first, exports `PANEMUX_LAUNCH_*`
 variables, expands them after rc execution, and unsets them before invoking the agent.
-See [Launch security](../security/tasks.md#task-launch-and-resume) and [Task launch and resume](../behavior/task-launch.md).
+See [Launch security](../security/tasks.md#task-launch-and-resume) and [Task launch and resume](../backend/tasks/lifecycle.md#starting-and-resuming-tasks).
 
 ## Working directory suggestions derive from collected tasks (2026-10-09, issue #311)
 
 Directory suggestions derive from tasks already held by the browser rather than storing a separate
 list that would drift or probing path existence on every collection; start handles deleted
 directories. Suggestions intentionally vanish when their last task leaves the bounded listing.
-See [Working-directory discovery](../behavior/task-launch.md#dashboard-discovery).
+See [Working-directory discovery](../backend/tasks/lifecycle.md#starting-a-task).
 
 ## Task summaries: bounded input, persistence, cost, and Codex runner (2026-09-26–2026-10-10, issues #258, #312, #352, #353)
 
@@ -100,15 +100,19 @@ See [Working-directory discovery](../behavior/task-launch.md#dashboard-discovery
 - **Persistence and input-hash reuse**: Answers are persisted in a separate cache file keyed by the
   excerpt hash plus agent and summarizer version so restarts and tool-output-only updates do not
   re-bill. Unusable cache files are moved aside rather than blocking future saves indefinitely.
-- **Cost controls**: [Cost measurements](../behavior/task-summary-cost.md) showed CLI system/tool
-  definitions dominated short excerpts. Claude summaries use a fixed system prompt, no offered
-  tools, and the `haiku` alias (avoiding retired pinned IDs); if organization policy substitutes a
-  costlier model, the paid answer is retained with a bounded model ID and one-time warning.
+- **Cost controls**: Synthetic-sequence measurements (2026-10-10, `TestSummaryCost_TheMeasuredSequence`,
+  Claude Code 2.1.294) showed persistence + excerpt-hash reuse cut calls per sequence from `5` to `2`
+  (`~$0.196` → `$0.091` on the default model), and CLI system/tool definitions accounted for ~3,900
+  of ~6,400 input tokens on short excerpts. Claude summaries therefore use a fixed system prompt,
+  `--tools ""`, and the `haiku` alias (cutting the same 2-call sequence to `~$0.0015`, avoiding
+  retired pinned IDs). If an organization's `availableModels` omits Haiku and falls back to a ~30×
+  costlier default model, the paid answer is retained with a bounded `modelUsage` model ID and a
+  one-time server warning.
 - **Codex runner**: Codex sessions are summarized by Codex itself in an ephemeral `exec` invocation
   preserving existing authentication and user/managed configuration; it requests no tools and never
   relaxes permissions, without promising a tool-free runtime when hooks or MCP are inherited.
 
-See [Task summaries](../behavior/task-summaries.md).
+See [Task summaries](../backend/tasks/lifecycle.md#summaries).
 
 ## Lightweight wait observation and server-published task events (2026-10-02, issues #277, #278)
 
@@ -121,7 +125,7 @@ Independent per-host cycles isolate slow hosts, slow WebSocket subscribers are c
 receiving gaps, and reader/writer goroutines join cleanly. Stopping the last subscriber retains the
 model and lets in-flight host probes finish without publishing; shutdown cancels all. Per-tab
 session storage tracks notified waits rather than racy cross-tab elections, and attention derives
-purely from current waits on healthy (`ok`) hosts. See [Task events](../behavior/task-events.md).
+purely from current waits on healthy (`ok`) hosts. See [Task events](../backend/tasks/events.md).
 
 ## Temporary tmux attach and Type in pane popup (2026-10-02, issues #280, #283, #284)
 
@@ -135,7 +139,7 @@ The popup mounts `useTerminal` directly rather than `TerminalPane`, uses `recove
 off because `/api/sessions/{id}/restart` is pane-only, leaves `Escape` and `Tab` to the focused
 terminal (closing via `Close`, `Cmd/Ctrl+Shift+Esc`, or header `Escape`), stores maximized state in
 `localStorage`, and keeps English labels consistent with the dashboard.
-See [Task navigation and terminals](../behavior/task-navigation.md#opening-a-task).
+See [Task navigation and terminals](../backend/tasks/lifecycle.md#opening-a-task-view-state-and-temporary-attaches).
 
 ## Dashboard host management and host chips (2026-09-29–2026-10-09, issues #272, #314)
 
@@ -149,5 +153,5 @@ superseded by [shared SSH key validation](agent-board.md#validate-ssh-connection
 
 Clicking a host chip opens a fresh `ssh`/`ssh_tmux` terminal via a destination popover with
 server-generated names rather than guessing an existing task session.
-See [Opening a host](../behavior/task-navigation.md#opening-a-host) and
+See [Opening a host](../backend/tasks/lifecycle.md#opening-a-host) and
 [SSH connection management API](../api/workspace.md#apiconfigssh-connections).

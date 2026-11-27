@@ -174,7 +174,7 @@ attempt itself fails, the pane shows the manual **Reconnect Session** action ins
   `https://exam\r\nple.com/path` on an 80-column pane) is still linked as the fragment, because a
   line stopping 60 columns early is indistinguishable from one that ended there.
 - `#<number>` references are linked separately to the pane's GitHub pull request
-  ([Pane Git and PR metadata](../behavior/pane-metadata.md)). The URL provider is registered first,
+  ([Pane Git and PR metadata](../backend/workspace/sessions.md#pane-git-and-pr-metadata)). The URL provider is registered first,
   so a `#123` inside a URL stays part of the URL; both providers report 1-based ranges on both axes
   mapped through cells rather than string indices so xterm can resolve overlaps accurately.
 
@@ -193,7 +193,7 @@ attempt itself fails, the pane shows the manual **Reconnect Session** action ins
 - Pane maximize state is frontend-local, tracked per workspace, and restored when switching back to
   a workspace.
 - Task and host Open select a destination before creating a pane
-  ([Opening a task](../behavior/task-navigation.md#opening-a-task)).
+  ([Opening a task](../backend/tasks/lifecycle.md#opening-a-task-view-state-and-temporary-attaches)).
 
 #### Layout editing and pane movement
 

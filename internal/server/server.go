@@ -114,7 +114,7 @@ func registerRoutes(
 	// these endpoints were gated from day one, before the frontend called
 	// any of them — GetBoardStatus/GetBoardMessages are now polled by the
 	// dashboard's useBoardStatus hook and GetBoardCommandHistory by the
-	// command palette/history panel (see docs/agent-board.md), but the
+	// command palette/history panel (see docs/api/agent-board.md), but the
 	// auth gate itself was never contingent on that. Retrofitting auth
 	// onto the rest of the table, which the frontend already relies on
 	// being unauthenticated, is a separate, larger change. See
@@ -124,12 +124,11 @@ func registerRoutes(
 	// The task event stream is unauthenticated like /ws/{sessionID} and
 	// GET /api/tasks, and refuses a cross-site request itself. Its two
 	// segments cannot be taken by a pane id, which /ws/{sessionID} matches
-	// as one segment. See docs/behavior/task-events.md.
+	// as one segment. See docs/api/tasks.md and docs/backend/tasks/events.md.
 	r.Get("/ws/tasks/events", taskEventsHandler.ServeHTTP)
 	// /ws/board/command is only registered when the command center is
-	// enabled (commandRunner != nil) — see docs/agent-board.md's Command
-	// center section. Unlike /ws/{sessionID}, this route requires the
-	// bearer token, mirroring /api/board/*.
+	// enabled (commandRunner != nil) — see docs/backend/agent-board/command-center.md.
+	// Unlike /ws/{sessionID}, this route requires the bearer token, mirroring /api/board/*.
 	if commandRunner != nil {
 		boardCommandHandler := ws.NewBoardCommandHandler(commandRunner, authToken)
 		r.Get("/ws/board/command", boardCommandHandler.ServeHTTP)

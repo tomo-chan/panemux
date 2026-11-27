@@ -137,4 +137,4 @@ Tests must protect these observable contracts rather than internal structure:
   pane states, overlay streaming and focus restoration.
 
 Real external scripts are verified separately by the
-[agmsg compatibility contract](../agent-board/agmsg-contract.md#agmsg-compatibility-contract).
+[agmsg compatibility contract](../backend/agent-board/agmsg.md#agmsg-compatibility-contract).

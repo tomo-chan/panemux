@@ -24,7 +24,7 @@ var taskEventsUpgrader = websocket.Upgrader{
 
 // TaskEventsHandler serves the task event stream, GET /ws/tasks/events
 // (issue #293): a snapshot of the running tasks on every host, then a frame
-// per change. See docs/behavior/task-events.md.
+// per change. See docs/api/tasks.md and docs/backend/tasks/events.md.
 type TaskEventsHandler struct {
 	publisher *taskevents.Publisher
 }

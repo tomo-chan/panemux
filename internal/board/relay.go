@@ -48,7 +48,7 @@ type RelayConfig struct {
 
 // Relay is panemux's message poller: it reads every known host's transport
 // team, updates BoardCache, and relays cross-host messages. See
-// docs/agent-board.md's Cross-host relay section for the full design this
+// docs/backend/agent-board/relay.md's Cross-host relay section for the full design this
 // implements.
 type Relay struct {
 	cache          *BoardCache

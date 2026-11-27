@@ -6,10 +6,10 @@ description: "Session-token bootstrap, authenticated /api/board/* REST routes, a
 
 # Agent Board REST and Command Center WebSocket API
 
-HTTP and WebSocket wire contracts for [Agent Board](../agent-board.md) and the command center.
+HTTP and WebSocket wire contracts for [Agent Board](../backend/agent-board/index.md) and the command center.
 Security requirements live in [Authentication](../security/auth.md) and
 [Agent Board security](../security/agent-board.md); YAML configuration lives in
-[Agent Board configuration](../agent-board/api-and-config.md#config-additions).
+[Agent Board configuration](../backend/agent-board/relay.md#configuration).
 
 ## Authorization and endpoint summary
 
@@ -46,7 +46,7 @@ Returns browser bootstrap data:
 - `agent_board_enabled` (`agent_board.enabled`) and `command_center_enabled` (`command_center.enabled`)
   are independent flags so the frontend exposes the two surfaces separately.
 - Background agent detection and host availability checks run automatically without PTY writes and
-  have no REST endpoint ([Bootstrap flow](../agent-board/bootstrap.md#bootstrap-flow)).
+  have no REST endpoint ([Pane detection and bootstrap](../backend/agent-board/relay.md#pane-detection-and-bootstrap)).
 
 ## `GET /api/board/status`
 
@@ -220,7 +220,7 @@ Command center chat WebSocket for the Spotlight palette. The
 [WebSocket browser connection policy](workspace.md#websocket-browser-connection-policy) applies
 before upgrading. `/ws/board-command` is an ordinary terminal URL for a pane named `board-command`
 with no alias or redirect. Full subprocess design lives in
-[Command center](../agent-board/command-center.md#command-center).
+[Command Center execution](../backend/agent-board/command-center.md).
 
 ### Authentication
 
@@ -243,7 +243,7 @@ Once connected, the client may send prompts sequentially over the same socket:
   - Optional `"warnings":["..."]` on either terminal frame (omitted unless a non-fatal surrounding
     step such as history persistence failed; also logged)
   - `{"type":"busy"}` — final response rejecting a prompt outright (never queued) when a query is
-    already in flight ([Process lifecycle](../agent-board/command-center.md#process-lifecycle))
+    already in flight ([Process lifecycle](../backend/agent-board/command-center.md#process-lifecycle))
 
 Every started query ends with exactly one of `error` or `done`; a `busy` prompt starts no query and
 receives neither. A failed history write never turns a successful answer into `error`; failed

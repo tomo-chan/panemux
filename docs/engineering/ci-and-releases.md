@@ -27,7 +27,7 @@ For runtime version pins and local toolchain behavior, see
 - **Agent Board tools**: Instance-wide enablement and automatic-update settings live in
   `config.yaml`; `TestedAgmsgVersion` and `TestedAgmsgCommit` must stay paired
   ([agmsg maintenance](agmsg-maintenance.md#bumping-the-pinned-agmsg-version),
-  [agmsg integration](../agent-board/agmsg-integration.md#automatic-updating)).
+  [agmsg automatic updating](../backend/agent-board/agmsg.md#global-automatic-updating-post-apihostsagmsgauto-update)).
 
 ## Runner images
 

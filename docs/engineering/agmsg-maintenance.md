@@ -9,7 +9,7 @@ description: "Running the agmsg compatibility workflow and reviewing automated p
 ## The agmsg Compatibility Contract Job
 
 `.github/workflows/agmsg-contract.yml` runs Tier 2 of the
-[agmsg compatibility contract](../agent-board/agmsg-contract.md#agmsg-compatibility-contract):
+[agmsg compatibility contract](../backend/agent-board/agmsg.md#agmsg-compatibility-contract):
 `make test-agmsg-contract` against a real agmsg install, which hermetic `make check` cannot run.
 
 - **Daily (06:00 UTC / 15:00 JST)**: Resolves the newest stable `vN.N.N` tag via
