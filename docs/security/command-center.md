@@ -29,7 +29,7 @@ alone does not prevent CLI option injection: a dash-prefixed prompt could otherw
 
 Both parser defects and their fixes were reproduced with CLI v2.1.226 and verified through the
 real Runner/WS/browser stack. `TestRunnerBuildArgsShapeIsSafeAgainstArgumentInjection` pins argv;
-a fake runner cannot prove how the real CLI parses it. The [argument-separation decision](../decisions/agent-board/command-argument-separation.md)
+a fake runner cannot prove how the real CLI parses it. The [argument-separation decision](../decisions/agent-board.md#command-center-api-boundary-argument-separation-and-context-isolation-2026-08-prs-162-170-171)
 records the incident.
 
 Pass `--disable-slash-commands`: neither tool list governs the CLI's slash-command registry.
@@ -63,7 +63,7 @@ A single setting, `permissions.defaultMode: acceptEdits`, can nullify `--allowed
 [Acting-tool denial](#acting-tool-denial)). This is ordinary interactive configuration, but
 inheriting it would silently unscope the command center. Host settings assume a watched
 interactive request; the command center instead
-accepts unattended input from any board-token holder. See the [context decision](../decisions/agent-board/command-center-context.md).
+accepts unattended input from any board-token holder. See the [context decision](../decisions/agent-board.md#command-center-api-boundary-argument-separation-and-context-isolation-2026-08-prs-162-170-171).
 
 #### Acting-tool denial
 

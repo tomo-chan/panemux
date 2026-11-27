@@ -165,14 +165,11 @@ follow [Red-check](docs/development/red-check.md) for justified exemptions and s
   manual verification is valid, an absent row is not. Run `make check-scenarios`.
   CI requires scenario edits for frontend/src, internal/api, and internal/config changes;
   use `scenarios-exempt` only when no use case changes.
-- Follow [the OKF writing rules](docs/index.md#writing-rules): docs/ is the bundle; concepts have
-  type/title/description and directory indexes have described entries. Root workflow files stay
-  outside it. Keep one authority per contract and one responsibility per concept, with relative
-  links and routes from old sections. Update actual references, filename labels, comments, and
-  expected paths when moving content; leave unrelated fixtures alone.
+- Follow [the OKF writing rules](docs/index.md#writing-rules) for `docs/` metadata, directory
+  indexes, cohesive file granularity, English-only prose, topic-grouped decisions under
+  `docs/decisions/<topic>.md`, and direct reference updates without redirect stubs.
 - Run `make check-docs-links`, `make check-docs-okf`, and their test targets; these remain in
-  `make check`. Keep topic entrances distinct from directory listings, and dated measurements
-  beside their topic with commit/date, as specified by the writing rules.
+  `make check`.
 
 ### Security-sensitive implementation
 

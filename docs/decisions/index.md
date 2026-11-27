@@ -1,13 +1,15 @@
 # Decisions
 
+Design rationale, rejected alternatives, and incident lessons grouped by topic. Current contracts
+live in the topic guides and specifications; these records link to those authorities rather than
+repeating them.
+
 ## Topics
 
-* [Agent Board](agent-board/index.md) - Transport boundaries, installation, participation history and command-center trust decisions.
-* [Agent Registry](agent-registry/index.md) - Static declarations, capability adapters, process rules and extensibility verification.
-* [Architecture](architecture/index.md) - Configuration ownership, filesystem seams and remote callback forwarding.
-* [Development](development/index.md) - Documentation structure and reproducible screenshot capture tradeoffs.
-* [Maintenance](maintenance/index.md) - Release recovery, pinned dependency proposals and Codex hook management.
-* [Preview](preview/index.md) - File isolation, remote relays, localhost framing and diagram rendering limits.
-* [Quality Gateway](quality-gateway/index.md) - D1–D14, actionable findings, false positives and verification ownership.
-* [Runtime](runtime/index.md) - API normalization, browser authority, terminal stream completion and session setup.
-* [Tasks](tasks/index.md) - Session observation, launch, records, summaries and notification delivery tradeoffs.
+* [Architecture decisions](architecture.md) - Configuration ownership, filesystem seams, and remote callback forwarding.
+* [Workspace and runtime decisions](workspace.md) - Browser authority boundaries, layout normalization, command-center stream frames, remote tmux shims, and split preview isolation.
+* [Task dashboard decisions](tasks.md) - Session observation, launch/resume, records, summaries, notifications, and host management tradeoffs.
+* [Agent Board decisions](agent-board.md) - Transport boundaries, agmsg installation and updates, pane-independent relay, identities, and command-center isolation.
+* [Agent Registry decisions](agent-registry.md) - Static declarations, capability adapters, process rules, and tagged-build extensibility verification.
+* [Quality gateway decisions](quality-gateway.md) - Decisions D1–D14, verification ownership, mutation verdicts, and worktree-aware hooks.
+* [Engineering and maintenance decisions](engineering.md) - Documentation structure, screenshot capture tradeoffs, Codex hook management, agmsg pin proposals, and release recovery.

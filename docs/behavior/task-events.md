@@ -6,9 +6,6 @@ description: "Task event observation, WebSocket delivery, and receiver responsib
 
 # Behavior: task events
 
-A Japanese translation is in [task-events.ja.md](task-events.ja.md). This English document is the
-authoritative one; a change updates both in the same pull request.
-
 ## Task Events
 
 panemux observes the running agent sessions on the panemux host and on every `ssh_connections` host,

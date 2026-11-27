@@ -225,7 +225,7 @@ func handlerGoroutines() int {
 // its own connection: once its subscription's buffer fills the publisher
 // drops it instead of waiting, every other subscriber keeps receiving and
 // observation goes on, and closing the stalled connection leaves none of
-// its goroutines behind (slow-subscriber decision in docs/decisions/tasks/server-task-events.md).
+// its goroutines behind (slow-subscriber decision in docs/decisions/tasks.md).
 //
 //efficacy:exempt documentation link update only; test and covered implementation are unchanged
 func TestTaskEvents_ClientThatStopsReadingStallsOnlyItsOwnConnection(t *testing.T) {

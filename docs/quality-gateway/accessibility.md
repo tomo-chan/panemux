@@ -12,7 +12,7 @@ description: "Per-rule accessibility ceilings and the procedure for lowering the
 `frontend/e2e/a11y-ceiling.ts`. The counts reproduced exactly on a second machine. Measurements
 use the spec's own fixture and panemux process (`frontend/e2e/a11y.yml`, port 4178), excluding
 `.xterm` because xterm.js owns that canvas and markup. See
-[D11](../decisions/quality-gateway/accessibility-ceilings.md) for fixture isolation and the
+[D11](../decisions/quality-gateway.md#d11-the-accessibility-ceiling-is-per-rule-counts-nodes-and-is-lowered-by-hand) for fixture isolation and the
 per-rule node-count ceiling.
 
 | Page state | Rule | Impact | Ceiling (nodes) |
@@ -39,7 +39,7 @@ so new kinds fail immediately. D11 explains per-rule node counts rather than loo
 Perturbation with an `<img>` lacking `alt` and a low-contrast `<span>` in `TerminalPane` failed
 both scans on both branches: new `image-alt` had ceiling zero and `region` rose from 7 to 9.
 The shared-server version passed alone but failed inside `make test-e2e`;
-[D11](../decisions/quality-gateway/accessibility-ceilings.md) records the isolation correction.
+[D11](../decisions/quality-gateway.md#d11-the-accessibility-ceiling-is-per-rule-counts-nodes-and-is-lowered-by-hand) records the isolation correction.
 
 **Lowering a ceiling after fixing something.** The run does the arithmetic; the edit is manual and
 takes two files:
