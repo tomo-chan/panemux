@@ -170,7 +170,7 @@ expect 0 "a test that needs its implementation passes the gate" "$good"
 #
 # TestSub never mentions Sub. Reverting sample.go removes Sub and the test
 # still passes — it asserts nothing about the change it claims to cover. This
-# is the exact shape docs/quality-gateway.md says the current gates cannot see,
+# is the exact shape docs/engineering/quality-gates.md says the current gates cannot see,
 # and it compiles and passes cleanly under `make check`.
 tauto=$(new_fixture) || exit 1
 (

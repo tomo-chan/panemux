@@ -37,7 +37,7 @@ import (
 	"panemux/internal/testcap"
 )
 
-// This file is the Go half of gate G3(c) in docs/quality-gateway.md — Zod
+// This file is the Go half of gate G3(c) in docs/engineering/quality-gates.md — Zod
 // schema round-trips — and issue #191's item (c).
 //
 // The problem it closes: frontend/src/schemas/index.test.ts had 103 tests and

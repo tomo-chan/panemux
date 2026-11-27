@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Gates G1 (edit) and G2 (unit) from docs/quality-gateway.md, as a Claude Code
+# Gates G1 (edit) and G2 (unit) from docs/engineering/quality-gates.md, as a Claude Code
 # Stop hook: before a turn is allowed to end, verify what this turn changed.
 #
 # **This is deliberately not `make check`** — decision D6:
@@ -193,7 +193,7 @@ $vitest_output"
 	fi
 
 	if [ -n "$problems" ]; then
-		printf 'The turn cannot end with these unresolved (docs/quality-gateway.md gates G1/G2):%s\n' \
+		printf 'The turn cannot end with these unresolved (docs/engineering/quality-gates.md gates G1/G2):%s\n' \
 			"$problems" >&2
 		exit 2
 	fi

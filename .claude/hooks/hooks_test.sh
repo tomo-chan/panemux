@@ -3,7 +3,7 @@
 # Tests for the G1/G2 hook scripts in this directory.
 #
 # The hooks themselves are the enforcement mechanism for
-# docs/quality-gateway.md's gates G1 (edit) and G2 (unit), so a hook that
+# docs/engineering/quality-gates.md's gates G1 (edit) and G2 (unit), so a hook that
 # silently does nothing is worse than no hook at all — it reports the
 # discipline as enforced while enforcing nothing. Design principle 4 (no false
 # positives) cuts the other way just as hard: a hook that blocks a healthy

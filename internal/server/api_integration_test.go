@@ -31,7 +31,7 @@ import (
 )
 
 // This file is the real-router integration harness for the /api surface:
-// gate G3(a) in docs/quality-gateway.md, and the second half of issue #180's
+// gate G3(a) in docs/engineering/quality-gates.md, and the second half of issue #180's
 // roadmap item 1. Its companion, route_table_test.go, already pins *which*
 // routes exist and which of them are authenticated. What was still missing is
 // the other half of the same question — that each of those routes, driven
@@ -44,7 +44,7 @@ import (
 // middleware stack, the mount precedence between /api and /api/board, or the
 // SPA catch-all that sits behind everything. A route could therefore answer
 // correctly in internal/api and be shadowed, wrapped, or 404'd in production
-// without a test failing. See docs/quality-gateway.md's P1 and gate G3, and
+// without a test failing. See docs/engineering/quality-gates.md's P1 and gate G3, and
 // issue #178.
 //
 // The table below is exhaustive *by construction*: the test walks the real
@@ -853,7 +853,7 @@ func TestServer_APIIntegration_DocumentedGaps(t *testing.T) {
 // thorough: registerRoutes has an `if commandRunner != nil` block, so an /api
 // route registered inside it is one the frontend can reach and one this
 // table's exhaustiveness check would never see. Walking only the disabled
-// router made the file header above — and quality-gateway.md's rollout row —
+// router made the file header above — and the original quality-gateway doc —
 // claim more than the code delivered. route_table_test.go pins both states
 // for the same reason.
 func registeredAPIRoutes(t *testing.T) []string {

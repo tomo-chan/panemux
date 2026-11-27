@@ -255,7 +255,7 @@ func startSessionsFromConfig(cfg *config.Config, manager *session.Manager, creat
 // browserOpenArgv returns the command that opens url in Chrome on goos, as a
 // program name and discrete arguments — never a shell string. Splitting the
 // decision out from the exec call is the humble-object shape
-// docs/quality-gateway.md's P2 asks for: every per-OS branch is testable
+// docs/engineering/quality-gates.md's P2 asks for: every per-OS branch is testable
 // here, and what is left below is one unconditional Run.
 //
 // ok is false for an OS panemux has no opener for, in which case nothing is

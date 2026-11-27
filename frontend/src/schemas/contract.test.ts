@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import * as schemas from './index'
 
-// Gate G3(c) in docs/quality-gateway.md — Zod schema round-trips — and issue
+// Gate G3(c) in docs/engineering/quality-gates.md — Zod schema round-trips — and issue
 // #191's item (c).
 //
 // index.test.ts, alongside this file, has 103 cases and not one of them sees

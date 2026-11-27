@@ -7,7 +7,7 @@ import (
 )
 
 // Performance efficiency is one of the two ISO 25010 characteristics
-// docs/quality-gateway.md records as completely unprotected. These benchmarks
+// docs/engineering/quality-gates.md records as measurement-only. These benchmarks
 // are the first measurement of it, and they are deliberately only that:
 // roadmap item 7 of issue #180 says measure now and decide thresholds once
 // real data has accumulated. Nothing here fails on a number.

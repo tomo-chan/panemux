@@ -51,14 +51,14 @@ Follow the [execution-boundary map](security/command-execution.md), [Agent Board
 Codex verification uses fixed targets and checkout-local expendable caches/logs;
 it does not install permission rules, alter managed policy, or authorize external
 operations. User approval of trusted verification code retains the scope and
-limitations in [Codex verification](development/codex-verification.md).
+limitations in [Codex verification](engineering/codex-verification.md).
 
 The shared Claude Code settings grant macOS sandboxed commands local port binding and access to
 all localhost services, including services outside the sandbox. Treat unauthenticated local
 services as a potential route to actions outside the sandbox, and non-loopback listeners as
 reachable from other machines. This is a development-tool permission; it does not authenticate
 panemux routes or change their runtime trust boundaries. Platform differences and managed-policy
-limits are documented in [Claude Code sandbox](development/claude-sandbox.md).
+limits are documented in [Claude Code sandbox](engineering/runtime-and-sandbox.md#claude-code-sandbox).
 
 That is the only permission they grant. Do not add `sandbox.allowPty`,
 `sandbox.network.allowUnixSockets`, `sandbox.network.allowAllUnixSockets` or
@@ -88,7 +88,7 @@ and provide npm/npx. A bad published cache is an error, not a reason to silently
 runtime. This is development tooling, with no product/user-input route into its commands.
 Exclusive locking assumes a conforming `mkdir`; affected uutils 0.10.0 is unsuitable
 for concurrent acquisition. The platform limitation and follow-up are in the runtime contract.
-See [the runtime contract](development/runtime.md).
+See [the runtime contract](engineering/runtime-and-sandbox.md#runtime-toolchain-contract).
 
 ## agmsg release proposal CI
 
@@ -98,7 +98,7 @@ input is a bounded data-only JSON artifact: fixed capture filenames, JSON object
 provenance validated against independently resolved scope outputs. Reject code, paths, symlinks,
 extra files and oversized content. Trusted code applies constants and fixture data, then runs
 the package tests before minting the repository-scoped App token. See
-[maintenance](maintenance/agmsg-contract.md#github-app-setup-repository-owner) for permissions and setup.
+[agmsg maintenance](engineering/agmsg-maintenance.md#github-app-setup-repository-owner) for permissions and setup.
 
 ## `gosec` Policy
 

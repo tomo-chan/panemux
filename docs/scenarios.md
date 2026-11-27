@@ -162,7 +162,7 @@ See [agent-board/agmsg-contract.md](agent-board/agmsg-contract.md#agmsg-compatib
 | G7 | A `board_status` report end to end | The `_system` sentinel survives agmsg verbatim and the body is still recognized as a status report | `auto (opt-in)`: `TestAgmsgContract_StatusRowRoundTrips` |
 | G8 | A pane ID is used verbatim as the agmsg agent id | A generated ID like `pane-1787195690568-re241` registers unchanged | `auto (opt-in)`: `TestAgmsgContract_JoinUsesThePaneIDVerbatim` |
 | G9 | An agmsg release changes behavior | The canary tests the latest stable tag's commit; failure leaves the pin unchanged and creates no proposal | `auto`: `.github/workflows/agmsg-contract.yml`, `schedule` trigger (daily 06:00 UTC, verifying each new tag/SHA pair) |
-| G10 | A PR bumps the agmsg version/SHA pin | The contract runs against the recorded commit SHA and blocks the merge if real behavior differs | `auto`: same workflow, `pull_request` trigger — see [agmsg compatibility maintenance](maintenance/agmsg-contract.md#the-agmsg-compatibility-contract-job) for the branch-protection step this depends on |
+| G10 | A PR bumps the agmsg version/SHA pin | The contract runs against the recorded commit SHA and blocks the merge if real behavior differs | `auto`: same workflow, `pull_request` trigger — see [agmsg compatibility maintenance](engineering/agmsg-maintenance.md#the-agmsg-compatibility-contract-job) for the branch-protection step this depends on |
 | G11 | An operator installs exactly the pinned agmsg | No version warning at startup, whichever install path they used — both bare release and v-prefixed installer provenance are accepted | `auto`: `TestVersionMismatchWarning_InstallProvenanceForms`; `auto (opt-in)`: `TestAgmsgContract_InstalledVersionDoesNotFalselyWarn` against the real installer |
 | G12 | An operator runs a newer patch of agmsg | Warn against the pinned release without blocking startup | `auto`: `TestVersionMismatchWarning_NewerPatchesWarn` |
 | G12a | An operator runs a patch *older* than the pin | Warned — it never went through the canary. Unreachable while the pin's patch is 0, so the rule is tested apart from the pin | `auto`: `TestReleaseCovered` |
@@ -265,7 +265,7 @@ remote pane's host reaches the process waiting for it.
 The dashboard lists agent sessions on every host by state, independently of panes, with done and
 label records, launch/resume, and summaries. The E2E launcher is
 `frontend/e2e/run-panemux-task-dashboard-e2e.sh`; isolation is defined in
-[Browser fixture isolation](development/browser-fixtures.md).
+[Browser fixture isolation](engineering/testing.md#browser-fixture-isolation).
 
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
@@ -426,7 +426,7 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
   replay-buffer cost and the relay's polling cost, and asserts no threshold — the `publish` rows
   move by up to 2.9× between runs of the same binary on the same machine, so a threshold chosen
   from them would fire on container noise. That is not a scenario row: there is no expected outcome
-  to state yet. See [quality-gateway/measurements.md](quality-gateway/measurements.md). The one
+  to state yet. See [Performance benchmarks](engineering/quality-gates.md#performance-benchmarks). The one
   exception is where a performance finding turned out to be about work done rather than time taken:
   the replay buffer's steady-state cost is asserted as an allocation count in `internal/session`,
   which has none of a timing's spread. H15b is the row it sits under.
@@ -436,7 +436,7 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
   unit-tested by `frontend/e2e/a11y-ceiling.test.ts`); the recorded counts are violations this
   repository still has, not an approved state. It is not a scenario row either, for the same
   reason — the expected outcome is "no worse than today", which is a gate's statement rather than a
-  use case's. See [Accessibility ceilings](quality-gateway/accessibility.md) for the ceiling and
+  use case's. See [Accessibility ceilings](engineering/quality-gates.md#accessibility-ceilings) for the ceiling and
   for how to lower it after a fix.
 
 ## Checking this ledger

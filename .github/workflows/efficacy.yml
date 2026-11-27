@@ -1,6 +1,6 @@
 name: efficacy
 
-# red-check: gate G4(b) in docs/quality-gateway.md.
+# red-check: gate G4(b) in docs/engineering/quality-gates.md.
 #
 # Runs `make efficacy`, which reverts this branch's implementation diff in a
 # scratch worktree and requires each test this branch changed to pass at HEAD

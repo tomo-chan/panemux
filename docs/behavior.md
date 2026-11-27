@@ -137,7 +137,7 @@ MST_REPO=OWNER/REPO MST_VERSION=v1.2.3 ./install.sh
 ```
 
 The release pipeline builds the frontend before cross-compiling Go. CI and release workflows call
-Make targets rather than duplicating raw npm/Go commands; [Maintenance](maintenance.md) owns those
+Make targets rather than duplicating raw npm/Go commands; [CI and releases](engineering/ci-and-releases.md) owns those
 procedures.
 
 ## Related Documents

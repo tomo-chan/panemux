@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Gate G1 (edit) from docs/quality-gateway.md, as a Claude Code PostToolUse
+# Gate G1 (edit) from docs/engineering/quality-gates.md, as a Claude Code PostToolUse
 # hook: after a file is written, check that one file.
 #
 # Scope is the point. `make lint` covers the repository and takes tens of

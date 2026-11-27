@@ -85,8 +85,8 @@ Exact request/response behavior lives in [Agent Board REST API](behavior/board-a
 | Which threats and trust assumptions apply? | [Security model](agent-board/security-model.md) |
 | What remains intentionally unsupported? | [Known limitations](agent-board/limitations.md) |
 | How is compatibility with agmsg verified? | [agmsg contract](agent-board/agmsg-contract.md) |
-| Which state-machine property is modeled? | [Model checking](agent-board/model-checking.md) |
-| How is the subsystem tested? | [Testing plan](agent-board/testing-plan.md) |
+| Which state-machine property is modeled? | [State-machine model checking](engineering/testing.md#state-machine-model-checking) |
+| How is the subsystem tested? | [Agent Board testing plan](engineering/testing.md#agent-board-testing-plan) |
 | Why were alternatives rejected? | [Decision log](decisions/agent-board.md) |
 
 ## Related documents

@@ -73,6 +73,6 @@ one-shot mode. There is no
 resume adapter. The common pipelines and API/dashboard consume these adapters without agent-name
 branches.
 
-The [tagged-build contract](../quality-gateway.md#the-fixture-agents-tagged-build) owns verification:
+The [tagged-build contract](../engineering/quality-gates.md#the-fixture-agents-tagged-build) owns verification:
 registry-wide adapter checks (including the absent board/workdir adapters), HTTP launch reaching the host/resume refused before execution, Go-produced `tasks-fixture-agent.json`, frontend schema/rendering checks, and isolated E2E
 against a fake CLI. It also states the untagged coverage/red-check/mutation scope and hook limit.
