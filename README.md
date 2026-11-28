@@ -173,7 +173,7 @@ message them. Two independent pieces, either of which can be used without the ot
 - **Command center** — a Spotlight-style palette (`Cmd/Ctrl+Shift+K`) where you ask in plain language:
   *"which panes are blocked?"*, *"tell every pane the branch is frozen"*.
 
-Full design lives in [Agent Board backend](docs/backend/agent-board/relay.md).
+Full design lives in [Agent Board backend](docs/backend/agent-board/index.md).
 
 ![The Agent Board dashboard open on the right of the workspace: under Panes, a working "editor" pane and a waiting "tests" pane each report a summary of what they are doing and their last tool; under Messages, the two panes' latest messages to each other.](docs/images/agent-board.png)
 

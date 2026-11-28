@@ -256,7 +256,7 @@ const paneIdStyle: React.CSSProperties = {
 // four lines, because an agent that reports a paragraph must not push every
 // other pane below the fold. -webkit-line-clamp is the only widely supported
 // way to bound by lines rather than pixels, and it is honored by every
-// browser panemux supports (see docs/backend/workspace/sessions.md's browser requirements).
+// browser panemux supports (see docs/backend/workspace/sessions.md's Operational assumptions and distribution).
 const summaryStyle: React.CSSProperties = {
   color: '#ccc',
   fontSize: 11,

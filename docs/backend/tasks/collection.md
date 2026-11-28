@@ -254,8 +254,10 @@ from the host menu and trusted manually in Codex `/hooks`. Host tool updates sha
 - **`Update automatically`**: persisted per host in `~/.config/panemux/codex-hook.json`
   (`{"version":1,"auto_update":["","gpu-box"]}`, mode `0600`; unreadable files report error, disable
   checkbox, and are never overwritten). When enabled on an `Update` host, updates automatically on
-  host-menu open and once in the background on first successful collection after startup (never
-  auto-installs `Not installed`, never updates Codex itself, runs at most once per host per process).
+  host-menu open, immediately when turned on while `Update` is shown, and once in the background on
+  first successful collection after startup (never auto-installs `Not installed`, never updates
+  Codex itself, runs at most once per host per process; automatic update failures are not retried
+  until restart, and a successful manual `Update` clears the message).
 - **Hook record & collection**: hook writes `<session ID> <turn ID> <unix seconds>` (hex/dash IDs
   only, no command/conversation text) to `~/.local/state/panemux/codex-permission/<session ID>`,
   prunes files `> 7 d` old, prints nothing, and exits `0`. `codex/permission` matches the active

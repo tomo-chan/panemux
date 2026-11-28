@@ -218,6 +218,8 @@ func TestNormalizeLayoutNode_KeepsARootPaneThatSitsBesideChildren(t *testing.T) 
 // (see TestNormalizeLayoutNode_DoesNotRepairAnInvalidDirection). The error
 // names the pane and the fix; the previous behavior was an empty workspace
 // and no explanation. docs/backend/workspace/sessions.md records it.
+//
+//efficacy:exempt documentation-only reference update; implementation behavior is unchanged
 func TestLoad_RelocatedRootPaneIsValidatedLikeAnyOther(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

@@ -171,7 +171,8 @@ Frontend persistence rules live in
     directory yields nothing, caching answers (including empty, never transport failures) for `30 s`
     per host and session, validating the returned path with `validRemotePath` and session-ID match,
     and resolving the project directory so `<sessionId>/subagents/*.jsonl` subagent transcripts are
-    read too.
+    read too (returning the already-derived directory is not treated or logged as an encoding
+    change).
   - **Claude signal precedence**: latest `Bash` `cd ... &&` target → latest top-level entry `cwd`
     (`user`/`assistant`/`attachment`/`system`) → latest non-auxiliary tool file path
     (`Read`/`Edit`/`Write`/etc.) or file-history snapshot path. Every subagent transcript under

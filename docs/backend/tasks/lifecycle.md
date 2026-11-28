@@ -149,7 +149,8 @@ cost trade-offs live in [Task decisions](../../decisions/tasks.md#task-summaries
 - Persisted in `~/.config/panemux/task-summaries.json` (mode `0600`, atomic write-through symlink):
   metadata + answer + excerpt/version SHA-256 + log fingerprint (never logs/excerpts; never saves
   `pending`/`error`/`unreadable`; untouched when summaries are off; removed-adapter entries kept
-  unshown until `30 d` expiry).
+  unshown until `30 d` expiry; last-listed timestamp saved at most once a day; manual edits while
+  panemux runs are overwritten on the next save).
 - Unusable files (invalid JSON, version `!= 1`, invalid entry) rename to
   `task-summaries.json.bad-<UTC time>` (up to `-1`..`-99` in the same second) and restart empty;
   unreadable/unmovable files or failed saves keep operating in memory and report `summaries_error`

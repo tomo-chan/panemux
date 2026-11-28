@@ -27,7 +27,7 @@ rule.
 ## What replacing the hand-written fixtures changed
 
 An earlier `agmsg-unpinned-handwritten/` directory held fixtures written
-from prose in `docs/backend/agent-board/relay.md`, in a session that had neither `sqlite3`
+from prose in `docs/backend/agent-board/agmsg.md`, in a session that had neither `sqlite3`
 nor network access to agmsg. Its own README asked for exactly this
 replacement.
 

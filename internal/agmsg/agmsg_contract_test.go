@@ -291,6 +291,8 @@ func watchDelivery(t *testing.T, scripts, sessionID, project, expect string, sen
 // or changes watch.sh's exclusivity handling, this test fails — which is
 // the entire point. panemux's bootstrap instruction tells an agent to run
 // actas-claim.sh precisely because of the behavior asserted here.
+//
+//efficacy:exempt documentation-only reference update; implementation behavior is unchanged
 func TestAgmsgContract_TwoAgentsInOneProjectNeedTheClaim(t *testing.T) {
 	scripts := contractScripts(t)
 	project := t.TempDir()
