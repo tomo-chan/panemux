@@ -43,6 +43,7 @@ type cliOptions struct {
 //go:embed frontend/dist
 var frontendFS embed.FS
 
+//coverage:exempt process entry point; comment-only documentation path update
 func main() {
 	// __board-mcp-server is a hidden subcommand, not an ordinary flag: the
 	// command center's own claude -p subprocess re-invokes this same binary
