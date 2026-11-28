@@ -12,13 +12,13 @@ const PATH_CHARS = '\\p{L}\\p{N}_\\-.@+=%/'
 
 /**
  * Matches a local HTML or Markdown path in terminal output: absolute
- * (`/w/index.html`), dot-relative (`./mockups/index.html`) or bare
- * (`docs/design.md`). It never starts inside another path or a URL, or after
- * `~`, which the server would not expand; a trailing `:12` or `.` is left out.
- * Kept non-global, like TERMINAL_URL_REGEX.
+ * (`/w/index.html`), home-relative (`~/notes/plan.md`), dot-relative
+ * (`./mockups/index.html`) or bare (`docs/design.md`). It never starts inside
+ * another path or a URL, or after `~user`, which the server does not expand;
+ * a trailing `:12` or `.` is left out. Kept non-global, like TERMINAL_URL_REGEX.
  */
 export const PREVIEW_PATH_REGEX = new RegExp(
-  `(?<![${PATH_CHARS}:~\\\\])[${PATH_CHARS}]*[\\p{L}\\p{N}_\\-@+=%]\\.(?:html?|md|markdown)` +
+  `(?<![${PATH_CHARS}:~\\\\])(?:~/)?[${PATH_CHARS}]*[\\p{L}\\p{N}_\\-@+=%]\\.(?:html?|md|markdown)` +
     `(?![${PATH_CHARS.replace('.', '')}]|\\.[\\p{L}\\p{N}])`,
   'iu',
 )

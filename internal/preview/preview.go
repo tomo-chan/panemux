@@ -37,6 +37,8 @@ import (
 	goldmarkhtml "github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
+
+	"panemux/internal/homedir"
 )
 
 // RoutePrefix is where previewed files are served.
@@ -49,7 +51,7 @@ const MaxDocumentBytes int64 = 10 << 20
 // The reasons a path cannot be previewed. They are shown to the operator.
 var (
 	ErrNotPreviewable = errors.New("only .html, .htm, .md and .markdown files can be previewed")
-	ErrNoWorkdir      = errors.New("the pane's working directory is unknown, so no file can be previewed")
+	ErrNoWorkdir      = errors.New("the pane's working directory is unknown, so a relative path cannot be previewed")
 	ErrNotFound       = errors.New("file not found")
 	ErrEscapes        = errors.New("the file is outside the pane's working directory and its agent's worktrees")
 	ErrTooLarge       = fmt.Errorf("the file is larger than the %d MiB preview limit", MaxDocumentBytes>>20)
@@ -91,53 +93,46 @@ func IsPreviewable(name string) bool {
 	return kindOf(name) != kindOther
 }
 
-// Found is a file a clicked path names, with the working directory it is
-// served from.
+// Found is a file a clicked path names, with the directory it is served
+// from. When SingleFile is true, only File itself is served from Root.
 type Found struct {
-	Root string
-	File string
+	Root       string
+	File       string
+	SingleFile bool
 }
 
-// Resolve finds the files a clicked path may name. Only files inside the
-// pane's working directories can be previewed: an absolute path must lie
-// inside one of them, and a relative one is looked for from each, so a path
-// that exists in two worktrees returns both for the operator to choose from.
-// Each file is served from the innermost working directory holding it, and
-// is found through that directory's os.Root, so neither "..", an absolute
-// path nor a symbolic link reaches a file outside it.
+// Resolve finds the files a clicked path may name. A relative path is looked
+// for from each of the pane's working directories, so a path that exists in
+// two worktrees returns both for the operator to choose from. A file inside
+// a working directory is served from the innermost working directory holding
+// it through os.Root, so a symbolic link inside a working directory cannot
+// escape it. An explicit path outside every working directory (absolute,
+// ~/..., or ../ leaving a working directory) is served from the resolved
+// file's parent directory, restricted to a single file when that parent is
+// /, the home directory, or /tmp (or os.TempDir()).
 func Resolve(name string, workdirs []string) ([]Found, error) {
 	if !IsPreviewable(name) {
 		return nil, ErrNotPreviewable
 	}
 	dirs := cleanDirs(workdirs)
-	if len(dirs) == 0 {
-		return nil, ErrNoWorkdir
-	}
-	var paths []string
-	if filepath.IsAbs(name) {
-		paths = []string{filepath.Clean(name)}
-	} else {
-		for _, dir := range dirs {
-			paths = append(paths, filepath.Join(dir, name))
-		}
+	paths, err := candidateLocalPaths(name, dirs)
+	if err != nil {
+		return nil, err
 	}
 
 	var found []Found
-	escaped := false
+	var escaped, notPreviewable bool
 	seen := map[string]bool{}
 	for _, file := range paths {
-		root, rel := locate(file, dirs)
-		if root == "" {
-			escaped = true
-			continue
-		}
-		_, err := statIn(root, rel, file)
+		candidate, err := resolveLocalCandidate(file, dirs)
 		switch {
 		case errors.Is(err, ErrEscapes):
 			escaped = true
-		case err == nil && !seen[file]:
-			seen[file] = true
-			found = append(found, Found{Root: root, File: file})
+		case errors.Is(err, ErrNotPreviewable):
+			notPreviewable = true
+		case err == nil && !seen[candidate.File]:
+			seen[candidate.File] = true
+			found = append(found, candidate)
 		}
 	}
 	if len(found) > 0 {
@@ -146,7 +141,113 @@ func Resolve(name string, workdirs []string) ([]Found, error) {
 	if escaped {
 		return nil, fmt.Errorf("%w: %s (allowed: %s)", ErrEscapes, name, strings.Join(dirs, ", "))
 	}
+	if notPreviewable {
+		return nil, ErrNotPreviewable
+	}
+	if filepath.IsAbs(name) || strings.HasPrefix(name, "~/") {
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, name)
+	}
 	return nil, fmt.Errorf("%w: %s (looked in %s)", ErrNotFound, name, strings.Join(dirs, ", "))
+}
+
+func candidateLocalPaths(name string, dirs []string) ([]string, error) {
+	if strings.HasPrefix(name, "~/") {
+		home, err := homedir.Dir()
+		if err != nil {
+			return nil, fmt.Errorf("home directory for %s: %w", name, err)
+		}
+		if !filepath.IsAbs(home) {
+			return nil, fmt.Errorf("home directory for %s is not absolute: %s", name, home)
+		}
+		return []string{filepath.Join(home, name[2:])}, nil
+	}
+	if filepath.IsAbs(name) {
+		return []string{filepath.Clean(name)}, nil
+	}
+	if len(dirs) == 0 {
+		return nil, ErrNoWorkdir
+	}
+	paths := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		paths = append(paths, filepath.Join(dir, name))
+	}
+	return paths, nil
+}
+
+func resolveLocalCandidate(file string, dirs []string) (Found, error) {
+	if root, rel := locate(file, dirs); root != "" {
+		if _, err := statIn(root, rel, file); err != nil {
+			return Found{}, err
+		}
+		return Found{Root: root, File: file}, nil
+	}
+	return resolveLocalOutside(file, dirs)
+}
+
+func resolveLocalOutside(file string, dirs []string) (Found, error) {
+	resolved, err := filepath.EvalSymlinks(file)
+	if err != nil {
+		return Found{}, fmt.Errorf("%w: %s", ErrNotFound, file)
+	}
+	if !IsPreviewable(resolved) {
+		return Found{}, ErrNotPreviewable
+	}
+	if root, rel := locate(resolved, dirs); root != "" {
+		if _, err := statIn(root, rel, resolved); err != nil {
+			return Found{}, err
+		}
+		return Found{Root: root, File: resolved}, nil
+	}
+	parent, base := filepath.Dir(resolved), filepath.Base(resolved)
+	if _, err := statIn(parent, base, resolved); err != nil {
+		return Found{}, err
+	}
+	return Found{Root: parent, File: resolved, SingleFile: isBroadLocalRoot(parent)}, nil
+}
+
+// tmpRootDir is the POSIX temporary directory treated as a broad root for
+// single-file restriction alongside os.TempDir().
+const tmpRootDir = "/tmp"
+
+// isBroadLocalRoot reports whether dir is /, /tmp (or os.TempDir()), or the
+// user's home directory, where serving sibling files for an outside preview
+// would expose unrelated files. Directory identity is checked via os.SameFile
+// through an "/" os.Root so case-insensitive filesystems (macOS APFS) and
+// symlinked roots cannot bypass the restriction. Fails closed when the home
+// directory or dir's identity cannot be determined.
+func isBroadLocalRoot(dir string) bool {
+	dir = filepath.Clean(dir)
+	if dir == filepath.Dir(dir) {
+		return true
+	}
+	home, err := homedir.Dir()
+	if err != nil || home == "" {
+		return true
+	}
+	host, err := os.OpenRoot(string(filepath.Separator))
+	if err != nil { //coverage:exempt the filesystem's root can always be opened
+		return true
+	}
+	defer func() { _ = host.Close() }()
+
+	fromRoot, err := filepath.Rel(string(filepath.Separator), dir)
+	if err != nil { //coverage:exempt dir is cleaned and absolute
+		return true
+	}
+	dirInfo, err := host.Stat(fromRoot)
+	if err != nil {
+		return true
+	}
+	for _, c := range []string{tmpRootDir, os.TempDir(), home} {
+		clean := filepath.Clean(c)
+		if dir == clean {
+			return true
+		}
+		if cInfo, statErr := os.Stat(clean); statErr == nil && os.SameFile(dirInfo, cInfo) {
+			return true
+		}
+	}
+	return false
 }
 
 // locate finds the innermost of dirs holding file, and file's path relative
@@ -182,27 +283,36 @@ func locateByIdentity(file string, dirs []string) (string, string) {
 			ids = append(ids, info)
 		}
 	}
+	if len(known) == 0 {
+		return "", ""
+	}
 	host, err := os.OpenRoot(string(filepath.Separator))
 	if err != nil { //coverage:exempt the filesystem's root can always be opened
 		return "", ""
 	}
 	defer func() { _ = host.Close() }()
 
-	// The filesystem's root always resolves, so this stops there at most.
-	dir := filepath.Dir(file)
-	resolved, err := filepath.EvalSymlinks(dir)
-	for err != nil && dir != filepath.Dir(dir) {
-		dir = filepath.Dir(dir)
-		resolved, err = filepath.EvalSymlinks(dir)
+	for dir := filepath.Dir(file); ; dir = filepath.Dir(dir) {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			if root, below := matchIdentityDir(host, resolved, known, ids); root != "" {
+				rest, _ := filepath.Rel(dir, file)
+				return root, filepath.Join(below, rest)
+			}
+		}
+		if dir == filepath.Dir(dir) {
+			return "", ""
+		}
 	}
-	rest, _ := filepath.Rel(dir, file)
+}
+
+func matchIdentityDir(host *os.Root, resolved string, known []string, ids []fs.FileInfo) (string, string) {
 	for parent := resolved; ; parent = filepath.Dir(parent) {
 		fromRoot, _ := filepath.Rel(string(filepath.Separator), parent)
 		if info, err := host.Stat(fromRoot); err == nil {
 			for i, id := range ids {
 				if os.SameFile(info, id) {
 					below, _ := filepath.Rel(parent, resolved)
-					return known[i], filepath.Join(below, rest)
+					return known[i], below
 				}
 			}
 		}
@@ -275,9 +385,10 @@ func within(dir, file string) bool {
 
 type entry struct {
 	// remote is the SSH host the file is on, or nil for the panemux host.
-	remote *Remote
-	root   string
-	file   string // slash-separated, relative to root
+	remote     *Remote
+	root       string
+	file       string // slash-separated, relative to root
+	singleFile bool
 }
 
 // fileReader is what a previewed file is served through: an *os.File, or an
@@ -311,6 +422,16 @@ func (r *Registry) SetMermaidRuntime(runtime *MermaidRuntime) { r.runtime.Store(
 // limit, inside root (see locate) and reached from it without leaving it
 // (see statIn).
 func (r *Registry) Open(root, file string) (string, error) {
+	return r.openLocal(root, file, false)
+}
+
+// OpenFound registers a file returned by Resolve, preserving its single-file
+// restriction when served from a broad directory.
+func (r *Registry) OpenFound(f Found) (string, error) {
+	return r.openLocal(f.Root, f.File, f.SingleFile)
+}
+
+func (r *Registry) openLocal(root, file string, singleFile bool) (string, error) {
 	if !IsPreviewable(file) {
 		return "", ErrNotPreviewable
 	}
@@ -327,7 +448,7 @@ func (r *Registry) Open(root, file string) (string, error) {
 		return "", ErrTooLarge
 	}
 
-	return r.register(entry{root: root, file: filepath.ToSlash(rel)})
+	return r.register(entry{root: root, file: filepath.ToSlash(rel), singleFile: singleFile})
 }
 
 // register returns the address e is served at, under a token of its own.
@@ -415,6 +536,9 @@ func (r *Registry) open(token, rest string) (fileReader, fs.FileInfo, bool) {
 	if !ok || rest == "." || !fs.ValidPath(rest) || strings.Contains(rest, `\`) {
 		return nil, nil, false
 	}
+	if e.singleFile && rest != e.file {
+		return nil, nil, false
+	}
 	if e.remote != nil {
 		return openRemote(e, rest)
 	}
@@ -423,12 +547,20 @@ func (r *Registry) open(token, rest string) (fileReader, fs.FileInfo, bool) {
 		return nil, nil, false
 	}
 	defer func() { _ = root.Close() }()
-	f, err := root.Open(filepath.FromSlash(rest))
+	rel := filepath.FromSlash(rest)
+	var linfo fs.FileInfo
+	if e.singleFile {
+		linfo, err = root.Lstat(rel)
+		if err != nil || !linfo.Mode().IsRegular() {
+			return nil, nil, false
+		}
+	}
+	f, err := root.Open(rel)
 	if err != nil {
 		return nil, nil, false
 	}
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil || !info.Mode().IsRegular() || (e.singleFile && !os.SameFile(linfo, info)) {
 		_ = f.Close()
 		return nil, nil, false
 	}

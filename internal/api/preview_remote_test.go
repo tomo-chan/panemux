@@ -8,7 +8,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -67,6 +69,7 @@ func (c *previewTestConn) isClosed() bool {
 // each ssh_connections host name has its own loopback services.
 type previewHostFixture struct {
 	loopback map[string]map[string]string // by SSHConfig.Host
+	workdir  map[string]string            // optional SFTP working directory by SSHConfig.Host
 	dialed   []string
 	conns    []*previewTestConn
 	mu       sync.Mutex
@@ -81,8 +84,12 @@ func (f *previewHostFixture) dial(t *testing.T) func(session.SSHConfig) (preview
 		if !ok {
 			return nil, errors.New("no route to host " + cfg.Host)
 		}
+		var opts []sftp.ServerOption
+		if wd := f.workdir[cfg.Host]; wd != "" {
+			opts = append(opts, sftp.WithServerWorkingDirectory(wd))
+		}
 		serverSide, clientSide := net.Pipe()
-		server, err := sftp.NewServer(serverSide)
+		server, err := sftp.NewServer(serverSide, opts...)
 		require.NoError(t, err)
 		go func() { _ = server.Serve() }()
 		t.Cleanup(func() { _ = server.Close() })
@@ -187,10 +194,12 @@ func TestPostSessionPreview_SSHTmuxAndTaskAttachReadFromTheirHost(t *testing.T) 
 	assert.Contains(t, getPreview(t, h, resp.URL).Body.String(), "<h1>feature</h1>")
 }
 
+//efficacy:exempt Replaced outside-path refusal with symlink escape; pins existing 403 refusal.
 func TestPostSessionPreview_RemoteRefusals(t *testing.T) {
 	cwd := previewDir(t)
 	outside := previewDir(t)
 	writePreviewFile(t, filepath.Join(outside, "secret.html"), "secret")
+	require.NoError(t, os.Symlink(filepath.Join(outside, "secret.html"), filepath.Join(cwd, "link.html")))
 	hosts := &previewHostFixture{loopback: map[string]map[string]string{"alpha.example.invalid": {}}}
 	unnamed := cwdSession("unnamed", cwd)
 	unnamed.typ = session.TypeSSH
@@ -205,8 +214,8 @@ func TestPostSessionPreview_RemoteRefusals(t *testing.T) {
 		name, id, body, contains string
 		code                     int
 	}{
-		{"outside the working directory", "pane-ssh",
-			`{"path":` + jsonString(t, filepath.Join(outside, "secret.html")) + `}`, "outside", http.StatusForbidden},
+		{"symbolic link out of the working directory", "pane-ssh",
+			`{"path":"link.html"}`, "outside", http.StatusForbidden},
 		{"missing", "pane-ssh", `{"path":"missing.md"}`, "missing.md", http.StatusNotFound},
 		{"an unreachable host", "pane-down", `{"path":"index.html"}`, "no route to host", http.StatusBadGateway},
 		{"an ssh pane naming no connection", "unnamed", `{"path":"index.html"}`, "SSH connection",
@@ -329,6 +338,41 @@ func TestPreviewReachesTheHostThePaneIsOn(t *testing.T) {
 	defer hosts.mu.Unlock()
 	assert.Equal(t, []string{"alpha.example.invalid", "moved.example.invalid"}, hosts.dialed,
 		"one connection per host the panes are on")
+}
+
+func TestPostSessionPreview_OpensRemoteOutsideAndTildePaths(t *testing.T) {
+	home := previewDir(t)
+	cwd := filepath.Join(home, "proj")
+	require.NoError(t, os.MkdirAll(cwd, 0o755))
+	plan := filepath.Join(home, "notes", "plan.md")
+	writePreviewFile(t, plan, "# remote outside")
+	writePreviewFile(t, filepath.Join(home, "notes", "style.css"), "p{}")
+	top := filepath.Join(home, "top.html")
+	writePreviewFile(t, top, "<p>remote top</p>")
+	writePreviewFile(t, filepath.Join(home, "secret.txt"), "secret")
+
+	hosts := &previewHostFixture{
+		loopback: map[string]map[string]string{"alpha.example.invalid": {}},
+		workdir:  map[string]string{"alpha.example.invalid": home},
+	}
+	noCWD := sshCWDSession("pane-nocwd", "alpha", "")
+	noCWD.cwdErr = errors.New("no cwd")
+	h := newRemotePreviewHandler(t, hosts, sshCWDSession("pane-ssh", "alpha", cwd), noCWD)
+
+	rec := postPreview(t, h, "pane-nocwd", `{"path":"~/notes/plan.md"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	resp := decodePreview(t, rec)
+	assert.Equal(t, plan, resp.Path)
+	assert.Equal(t, "alpha", resp.Host)
+	assert.Contains(t, getPreview(t, h, resp.URL).Body.String(), "remote outside")
+	assert.Equal(t, http.StatusOK, getPreview(t, h, strings.TrimSuffix(resp.URL, "plan.md")+"style.css").Code)
+
+	rec = postPreview(t, h, "pane-ssh", `{"path":"~/top.html"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	resp = decodePreview(t, rec)
+	assert.Equal(t, top, resp.Path)
+	assert.Equal(t, http.StatusOK, getPreview(t, h, resp.URL).Code)
+	assert.Equal(t, http.StatusNotFound, getPreview(t, h, strings.TrimSuffix(resp.URL, "top.html")+"secret.txt").Code)
 }
 
 func TestHandlerCloseClosesThePreviewHosts(t *testing.T) {

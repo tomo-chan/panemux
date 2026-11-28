@@ -47,7 +47,7 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `internal/ws` | Bridge session bytes and control messages to terminal WebSockets, stream command-center events, and serve the task event stream (`/ws/tasks/events`). |
 | `internal/requestsecurity` | Guard every API and WebSocket before side effects using browser Origin, Referer and Fetch Metadata evidence. |
 | `internal/server` | Compose middleware, API routes, WebSocket routes, static assets, and SPA fallback into the production router. |
-| `internal/preview` | Resolve a clicked HTML or Markdown path against a session's working directories, refusing any file outside them, register the file under a random token for the server's lifetime, and serve it and the files under its root sandboxed in an opaque origin, rendering Markdown and enabling the bundled Mermaid runtime only for diagram documents. For an SSH session the same is done on the host over SFTP (`Remote`, `ResolveRemote`, `Registry.OpenRemote`), and a clicked localhost URL of the host is relayed to a port of its own on `127.0.0.1` (`Relays`). |
+| `internal/preview` | Resolve a clicked HTML or Markdown path (relative against the session's working directories, or explicit absolute, `~/…`, and escaping `../` paths outside them, while still refusing escaping symlinks placed inside a working directory), register the file under a random token for the server's lifetime (`Registry.OpenFound`, restricting files directly under `/`, home, or `/tmp` to single-file serving), and serve it sandboxed in an opaque origin, rendering Markdown and enabling the bundled Mermaid runtime only for diagram documents. For an SSH session the same is done on the host over SFTP (`Remote`, `ResolveRemote`, `Registry.OpenRemoteFound`, expanding `~/…` via SFTP `Getwd()`), and a clicked localhost URL of the host is relayed to a port of its own on `127.0.0.1` (`Relays`). |
 | `internal/portforward` | Maintain short-lived loopback listeners that forward callback traffic through a session's SSH connection. |
 | `internal/board` | Define messaging and participation ports, validate senders, relay rows across configured hosts, and maintain the in-memory status/history view. |
 | `internal/agmsg` | Implement board messaging and participation through agmsg scripts, including path discovery, versions, parsing, agent type mapping, and the pinned-source tool adapter (cache, archive transfer, installer and prerequisites). |
@@ -175,9 +175,12 @@ SSH pane; existing sessions and the tmux server's environment are not reconfigur
 
 ### Preview flow
 
-`internal/preview` resolves HTML/Markdown paths against the session's working directories and agent
-worktrees. `PreviewSplit` frames the returned token URL beside the terminal. Localhost URLs use
-the same opener and split; SSH-host URLs use dedicated loopback relay ports.
+`internal/preview` resolves relative HTML/Markdown paths against the session's working directories
+and agent worktrees, and explicit outside paths (absolute, `~/…`, or escaping `../`) from the
+canonical file's parent directory (or single-file only directly under `/`, home, or `/tmp`), while
+refusing escaping symlinks inside working directories. `PreviewSplit` frames the returned token URL
+beside the terminal. Localhost URLs use the same opener and split; SSH-host URLs use dedicated
+loopback relay ports.
 
 Remote files use a preview-owned SSH connection per pane connection target, dialed with the pane's
 connection settings, and read only through SFTP. Relays use that connection's direct-tcpip channels.

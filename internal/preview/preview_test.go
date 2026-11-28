@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"panemux/internal/homedir"
 )
 
 func writeFile(t *testing.T, path, content string) string {
@@ -139,31 +141,83 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+func TestResolveOutsidePaths(t *testing.T) {
+	f := newResolveFixture(t)
+	cwd, other := f.cwd, f.other
+	cases := []struct {
+		name     string
+		path     string
+		workdirs []string
+		want     []Found
+	}{
+		{
+			name: "absolute path outside every working directory", path: filepath.Join(f.outside, "secret.html"),
+			workdirs: []string{cwd, other},
+			want:     []Found{{Root: f.outside, File: filepath.Join(f.outside, "secret.html")}},
+		},
+		{
+			name: "../ out of the working directory", path: "../" + filepath.Base(f.outside) + "/secret.html",
+			workdirs: []string{cwd},
+			want:     []Found{{Root: f.outside, File: filepath.Join(f.outside, "secret.html")}},
+		},
+		{
+			name: "../ out of two working directories to the same file counts once",
+			path: "../" + filepath.Base(f.outside) + "/secret.html", workdirs: []string{cwd, other},
+			want: []Found{{Root: f.outside, File: filepath.Join(f.outside, "secret.html")}},
+		},
+		{
+			name: "absolute path with no working directory", path: filepath.Join(other, "docs", "design.md"),
+			want: []Found{{Root: filepath.Join(other, "docs"), File: filepath.Join(other, "docs", "design.md")}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Resolve(tc.path, tc.workdirs)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestResolveRefuses(t *testing.T) {
 	f := newResolveFixture(t)
-	cwd, other, outside := f.cwd, f.other, f.outside
+	cwd, outside := f.cwd, f.outside
+	writeFile(t, filepath.Join(outside, "notes.txt"), "plain")
+	require.NoError(t, os.Symlink(filepath.Join(outside, "notes.txt"), filepath.Join(outside, "disguised.md")))
+	require.NoError(t, os.MkdirAll(filepath.Join(outside, "dir.md"), 0o755))
+	require.NoError(t, os.Symlink(filepath.Join(cwd, "folder.md"), filepath.Join(outside, "link-to-cwd-dir.md")))
+	locked := filepath.Join(outside, "locked")
+	writeFile(t, filepath.Join(locked, "index.html"), "<p>locked</p>")
+	require.NoError(t, os.Chmod(locked, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
 	cases := []struct {
 		err      error
 		name     string
 		path     string
 		workdirs []string
 	}{
-		{name: "absolute path outside every working directory", path: filepath.Join(outside, "secret.html"),
-			workdirs: []string{cwd, other}, err: ErrEscapes},
-		{name: "../ out of the working directory", path: "../" + filepath.Base(outside) + "/secret.html",
-			workdirs: []string{cwd}, err: ErrEscapes},
 		{name: "a symbolic link out of the working directory", path: "link.html", workdirs: []string{cwd},
 			err: ErrEscapes},
 		{name: "a symbolic link to an absolute path, even inside", path: "absolute.md", workdirs: []string{cwd},
 			err: ErrEscapes},
 		{name: "a directory link out of the working directory", path: "linkdir/secret.html",
 			workdirs: []string{cwd}, err: ErrEscapes},
-		{name: "absolute path with no working directory", path: filepath.Join(other, "docs", "design.md"),
-			err: ErrNoWorkdir},
 		{name: "relative path with no working directory", path: "docs/design.md", err: ErrNoWorkdir},
 		{name: "relative path found nowhere", path: "missing.md", workdirs: []string{cwd}, err: ErrNotFound},
 		{name: "absolute path that does not exist", path: filepath.Join(cwd, "missing.html"),
 			workdirs: []string{cwd}, err: ErrNotFound},
+		{name: "absolute path outside that does not exist", path: filepath.Join(outside, "missing.html"),
+			workdirs: []string{cwd}, err: ErrNotFound},
+		{name: "absolute path with no working directory that does not exist",
+			path: filepath.Join(outside, "missing.html"), err: ErrNotFound},
+		{name: "outside directory is not a file", path: filepath.Join(outside, "dir.md"),
+			workdirs: []string{cwd}, err: ErrNotFound},
+		{name: "outside symlink to a directory inside cwd", path: filepath.Join(outside, "link-to-cwd-dir.md"),
+			workdirs: []string{cwd}, err: ErrNotFound},
+		{name: "outside file in an unreadable directory", path: filepath.Join(locked, "index.html"),
+			workdirs: []string{cwd}, err: ErrNotFound},
+		{name: "outside symlink to a non-previewable target", path: filepath.Join(outside, "disguised.md"),
+			workdirs: []string{cwd}, err: ErrNotPreviewable},
 		{name: "a file used as a directory", path: "plain/index.html", workdirs: []string{cwd}, err: ErrNotFound},
 		{name: "a directory is not a file", path: "folder.md", workdirs: []string{cwd}, err: ErrNotFound},
 		{name: "a working directory that does not exist", path: "a.md",
@@ -174,6 +228,9 @@ func TestResolveRefuses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Resolve(tc.path, tc.workdirs)
 			require.ErrorIs(t, err, tc.err)
+			if errors.Is(tc.err, ErrNotFound) && (filepath.IsAbs(tc.path) || strings.HasPrefix(tc.path, "~/")) {
+				assert.NotContains(t, err.Error(), "looked in")
+			}
 		})
 	}
 }
@@ -201,9 +258,13 @@ func TestResolveNotFoundNamesWhereItLooked(t *testing.T) {
 func TestResolveEscapeNamesTheAllowedDirectories(t *testing.T) {
 	cwd := realDir(t)
 	worktree := realDir(t)
-	_, err := Resolve("/tmp/sample-project/index.html", []string{cwd, worktree})
+	outside := realDir(t)
+	writeFile(t, filepath.Join(outside, "index.html"), "<p>outside</p>")
+	require.NoError(t, os.Symlink(filepath.Join(outside, "index.html"), filepath.Join(cwd, "escape.html")))
+
+	_, err := Resolve("escape.html", []string{cwd, worktree})
 	require.ErrorIs(t, err, ErrEscapes)
-	assert.Contains(t, err.Error(), "/tmp/sample-project/index.html")
+	assert.Contains(t, err.Error(), "escape.html")
 	assert.Contains(t, err.Error(), cwd)
 	assert.Contains(t, err.Error(), worktree)
 }
@@ -658,11 +719,8 @@ func TestResolveThroughAnotherSpellingRefuses(t *testing.T) {
 		err  error
 		path string
 	}{
-		"a link in the prefix that leads elsewhere": {ErrEscapes, filepath.Join(base, "away", "secret.html")},
-		"../ out of it after the link": {
-			ErrEscapes, filepath.Join(base, "alias", "proj", "..", "..", "outside", "secret.html")},
-		"a prefix that names nothing is not inside": {
-			ErrEscapes, filepath.Join(base, "alias", "missing", "index.html")},
+		"a prefix that names nothing is not found": {
+			ErrNotFound, filepath.Join(base, "alias", "missing", "index.html")},
 		"a link out of it below a link into it": {ErrEscapes, filepath.Join(base, "docsalias", "out", "secret.html")},
 		"a missing directory inside it is not found, not outside": {
 			ErrNotFound, filepath.Join(base, "alias", "proj", "missing", "index.html")},
@@ -670,6 +728,37 @@ func TestResolveThroughAnotherSpellingRefuses(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := Resolve(tc.path, []string{cwd})
 			require.ErrorIs(t, err, tc.err)
+		})
+	}
+}
+
+func TestResolveThroughOutsideLinks(t *testing.T) {
+	base, cwd := spellingFixture(t)
+	outside := filepath.Join(base, "outside")
+	secret := filepath.Join(outside, "secret.html")
+	require.NoError(t, os.Symlink(filepath.Join(cwd, "index.html"), filepath.Join(outside, "into-cwd.html")))
+
+	for name, tc := range map[string]struct {
+		path string
+		want Found
+	}{
+		"a link in the prefix that leads outside": {
+			filepath.Join(base, "away", "secret.html"),
+			Found{Root: outside, File: secret},
+		},
+		"../ out of the working directory after a prefix link": {
+			filepath.Join(base, "alias", "proj", "..", "..", "outside", "secret.html"),
+			Found{Root: outside, File: secret},
+		},
+		"an outside file symlink that lands inside the working directory": {
+			filepath.Join(outside, "into-cwd.html"),
+			Found{Root: cwd, File: filepath.Join(cwd, "index.html")},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := Resolve(tc.path, []string{cwd})
+			require.NoError(t, err)
+			assert.Equal(t, []Found{tc.want}, got)
 		})
 	}
 }
@@ -686,6 +775,162 @@ func TestResolveInAnotherLetterCase(t *testing.T) {
 		assert.Equal(t, []Found{{Root: cwd, File: upper}}, got)
 	} else {
 		_, err := Resolve(upper, []string{cwd})
-		require.ErrorIs(t, err, ErrEscapes, "another letter case names another directory here")
+		require.ErrorIs(t, err, ErrNotFound, "another letter case names a missing directory here")
 	}
+}
+
+func TestResolveTildeAndBroadRoots(t *testing.T) {
+	home := realDir(t)
+	homedir.SetForTest(t, home)
+
+	cwd := filepath.Join(home, "proj")
+	outside := realDir(t)
+	top := writeFile(t, filepath.Join(home, "top.html"), "<p>top</p>")
+	plan := writeFile(t, filepath.Join(home, "notes", "plan.md"), "# plan")
+	inCWD := writeFile(t, filepath.Join(cwd, "docs", "design.md"), "# inside")
+	writeFile(t, filepath.Join(outside, "secret.html"), "<p>secret</p>")
+	require.NoError(t, os.Symlink(filepath.Join(outside, "secret.html"), filepath.Join(cwd, "link.html")))
+
+	got, err := Resolve("~/notes/plan.md", []string{cwd})
+	require.NoError(t, err)
+	assert.Equal(t, []Found{{Root: filepath.Join(home, "notes"), File: plan, SingleFile: false}}, got)
+
+	got, err = Resolve("~/notes/plan.md", nil)
+	require.NoError(t, err, "~/ resolves even when no working directory is known")
+	assert.Equal(t, []Found{{Root: filepath.Join(home, "notes"), File: plan, SingleFile: false}}, got)
+
+	got, err = Resolve("~/top.html", []string{cwd})
+	require.NoError(t, err)
+	assert.Equal(t, []Found{{Root: home, File: top, SingleFile: true}}, got,
+		"a file directly under home is restricted to single-file serving")
+
+	got, err = Resolve("~/proj/docs/design.md", []string{cwd})
+	require.NoError(t, err)
+	assert.Equal(t, []Found{{Root: cwd, File: inCWD, SingleFile: false}}, got,
+		"a ~/ path inside the working directory uses the working directory as root")
+
+	got, err = Resolve("top.html", []string{home})
+	require.NoError(t, err)
+	assert.Equal(t, []Found{{Root: home, File: top, SingleFile: false}}, got,
+		"when home itself is the pane working directory, normal workdir serving applies")
+
+	_, err = Resolve("~/proj/link.html", []string{cwd})
+	require.ErrorIs(t, err, ErrEscapes, "a ~/ path to an escaping symlink inside cwd is still refused")
+
+	_, err = Resolve("~user/notes/plan.md", nil)
+	require.ErrorIs(t, err, ErrNoWorkdir, "~user/ is not expanded and stays a relative path")
+
+	_, err = Resolve("~/missing.md", []string{cwd})
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.NotContains(t, err.Error(), "looked in")
+
+	homedir.SetForTest(t, "relative/home")
+	_, err = Resolve("~/notes/plan.md", []string{cwd})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not absolute")
+
+	homedir.SetFailingForTest(t, errors.New("no home"))
+	_, err = Resolve("~/notes/plan.md", []string{cwd})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no home")
+}
+
+func TestIsBroadLocalRoot(t *testing.T) {
+	base := realDir(t)
+	home := filepath.Join(base, "real-home")
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "notes"), 0o755))
+	homeAlias := filepath.Join(base, "home-link")
+	require.NoError(t, os.Symlink(home, homeAlias))
+	homedir.SetForTest(t, homeAlias)
+
+	assert.True(t, isBroadLocalRoot(string(filepath.Separator)), "filesystem root")
+	assert.True(t, isBroadLocalRoot(tmpRootDir), "/tmp")
+	if resolvedTmp, err := filepath.EvalSymlinks(tmpRootDir); err == nil {
+		assert.True(t, isBroadLocalRoot(resolvedTmp), "resolved /tmp")
+	}
+	assert.True(t, isBroadLocalRoot(os.TempDir()), "os.TempDir")
+	if resolvedTempDir, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
+		assert.True(t, isBroadLocalRoot(resolvedTempDir), "resolved os.TempDir")
+	}
+	assert.True(t, isBroadLocalRoot(homeAlias), "home symlink")
+	assert.True(t, isBroadLocalRoot(home), "resolved home")
+	upperHome := filepath.Join(base, "REAL-HOME")
+	if _, statErr := os.Stat(upperHome); statErr == nil {
+		assert.True(t, isBroadLocalRoot(upperHome), "another letter case on a case-insensitive filesystem")
+	}
+	assert.True(t, isBroadLocalRoot(filepath.Join(base, "missing-dir")), "missing dir fails closed")
+	assert.False(t, isBroadLocalRoot(filepath.Join(home, "notes")), "subdirectory under home")
+	assert.False(t, isBroadLocalRoot(base), "subdirectory under temp")
+
+	homedir.SetFailingForTest(t, errors.New("no home"))
+	assert.True(t, isBroadLocalRoot(filepath.Join(home, "notes")), "unknown home fails closed")
+}
+
+func TestOpenFoundRestrictsBroadRootToSingleFile(t *testing.T) {
+	home := realDir(t)
+	homedir.SetForTest(t, home)
+	cwd := filepath.Join(home, "proj")
+	require.NoError(t, os.MkdirAll(cwd, 0o755))
+
+	top := writeFile(t, filepath.Join(home, "top.html"), "<p>top</p>")
+	writeFile(t, filepath.Join(home, "secret.css"), "secret")
+	writeFile(t, filepath.Join(home, "sub", "token.txt"), "secret-token")
+
+	reg := NewRegistry()
+
+	// Single-file registration directly under home refuses every sibling and subdirectory.
+	foundTop, err := Resolve("~/top.html", []string{cwd})
+	require.NoError(t, err)
+	require.Len(t, foundTop, 1)
+	assert.True(t, foundTop[0].SingleFile)
+
+	topURL, err := reg.OpenFound(foundTop[0])
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, serve(t, reg, topURL).code)
+	topBase := strings.TrimSuffix(topURL, "top.html")
+	assert.Equal(t, http.StatusNotFound, serve(t, reg, topBase+"secret.css").code)
+	assert.Equal(t, http.StatusNotFound, serve(t, reg, topBase+"sub/token.txt").code)
+
+	// Opening the same file via workdir=home (SingleFile: false) gets a separate token and does not widen topURL.
+	fullURL, err := reg.Open(home, top)
+	require.NoError(t, err)
+	assert.NotEqual(t, topURL, fullURL)
+	assert.Equal(t, http.StatusNotFound, serve(t, reg, topBase+"secret.css").code)
+	assert.Equal(t, http.StatusOK, serve(t, reg, strings.TrimSuffix(fullURL, "top.html")+"secret.css").code)
+
+	// Replacing a single-file target with a relative symlink inside the same root is refused.
+	require.NoError(t, os.Remove(top))
+	require.NoError(t, os.Symlink(filepath.Join("sub", "token.txt"), top))
+	assert.Equal(t, http.StatusNotFound, serve(t, reg, topURL).code)
+}
+
+func TestOpenFoundBoundsOutsideSubdirectory(t *testing.T) {
+	home := realDir(t)
+	homedir.SetForTest(t, home)
+	cwd := filepath.Join(home, "proj")
+	require.NoError(t, os.MkdirAll(cwd, 0o755))
+
+	writeFile(t, filepath.Join(home, "secret.css"), "secret")
+	site := filepath.Join(home, "site")
+	page := writeFile(t, filepath.Join(site, "index.html"), "<p>site</p>")
+	writeFile(t, filepath.Join(site, "style.css"), "body{}")
+	outside := realDir(t)
+	writeFile(t, filepath.Join(outside, "leak.css"), "leak")
+
+	reg := NewRegistry()
+	foundSite, err := Resolve(page, []string{cwd})
+	require.NoError(t, err)
+	require.Len(t, foundSite, 1)
+	assert.False(t, foundSite[0].SingleFile)
+
+	siteURL, err := reg.OpenFound(foundSite[0])
+	require.NoError(t, err)
+	siteBase := strings.TrimSuffix(siteURL, "index.html")
+	assert.Equal(t, http.StatusOK, serve(t, reg, siteURL).code)
+	assert.Equal(t, http.StatusOK, serve(t, reg, siteBase+"style.css").code)
+	assert.Equal(t, http.StatusNotFound, serve(t, reg, siteBase+"../secret.css").code)
+
+	require.NoError(t, os.Remove(page))
+	require.NoError(t, os.Symlink(filepath.Join(outside, "leak.css"), page))
+	assert.Equal(t, http.StatusNotFound, serve(t, reg, siteURL).code)
 }

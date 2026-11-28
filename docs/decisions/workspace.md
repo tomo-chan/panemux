@@ -98,3 +98,27 @@ edges) bound work without claiming a preemptive CPU timeout.
 Because Mermaid requires a live DOM to measure its SVG before sanitization, the Markdown image
 policy applies during measurement and final SVG sanitization cannot retract already-issued image
 requests; diagram rendering is therefore not claimed to be network-isolated.
+
+## Outside-workdir and tilde paths in the split preview (2026-11-28, issues #472, #552)
+
+Issue #385 originally restricted file previews to the pane's working directory and active agent
+worktrees, and excluded `~/…` links. In practice, coding agents routinely write plans, walkthroughs,
+and mockups outside the repository (such as `~/.claude/plans/…`, `~/.agent/…`, or `/tmp/…`) and
+print them as absolute or `~/…` paths. Requiring an extra allowlist configuration or per-click
+confirmation strip was rejected because clicking a printed path is already an explicit operator
+action, and previewed files remain isolated in an opaque-origin sandbox with HTML/Markdown
+extension checks and the 10 MiB cap.
+
+Two boundaries are intentionally preserved:
+
+1. **Escaping symlinks inside a working directory remain refused (`403`).** A deceptive link placed
+   inside a repository (`docs/link.html -> ~/.ssh/…`) still fails closed instead of silently
+   falling back to outside-file serving; outside symlinks must also resolve to an HTML/Markdown
+   filename.
+2. **Broad parent directories serve a single file only.** Outside files normally serve from their
+   canonical parent directory through `os.Root` (or SFTP `realPath`) so sibling CSS and images
+   still load, but files directly under `/`, the home directory, or `/tmp` (`os.TempDir()`) are
+   registered with `singleFile` so an HTML preview with `sandbox allow-scripts` cannot read
+   unrelated sibling files or subdirectories (`~/.ssh`, `~/.config/panemux/token`). Leading `~/…`
+   expands via `internal/homedir` locally and SFTP `Getwd()` on SSH hosts, preserving the
+   no-shell-execution contract of `DialPreviewConn` (`~user/…` is intentionally left unsupported).

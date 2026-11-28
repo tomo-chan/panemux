@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"panemux/internal/homedir"
 	"panemux/internal/preview"
 	"panemux/internal/session"
 )
@@ -152,10 +153,6 @@ func TestPostSessionPreview_Refusals(t *testing.T) {
 		{"not found", "pane-1", `{"path":"missing.md"}`, "missing.md", http.StatusNotFound},
 		{"symbolic link out of the working directory", "pane-1", `{"path":"link.html"}`, "outside",
 			http.StatusForbidden},
-		{"absolute path outside the working directory", "pane-1",
-			`{"path":` + jsonString(t, filepath.Join(outside, "secret.html")) + `}`, "outside", http.StatusForbidden},
-		{"../ out of the working directory", "pane-1",
-			`{"path":"../` + filepath.Base(outside) + `/secret.html"}`, "outside", http.StatusForbidden},
 		{"too large", "pane-1", `{"path":"big.md"}`, "MiB", http.StatusRequestEntityTooLarge},
 		{"no working directory", "no-cwd", `{"path":"a.md"}`, "working directory", http.StatusUnprocessableEntity},
 		{"session with no working directory at all", "plain", `{"path":"a.md"}`, "working directory",
@@ -195,6 +192,67 @@ func TestPreviewOutlivesTheSession(t *testing.T) {
 	page := httptest.NewRecorder()
 	setupRouterWithHandler(h).ServeHTTP(page, httptest.NewRequest(http.MethodGet, url, nil))
 	assert.Equal(t, http.StatusOK, page.Code, "a tab opened on the preview keeps working")
+}
+
+func TestPostSessionPreview_OpensOutsideAndTildePaths(t *testing.T) {
+	home := previewDir(t)
+	homedir.SetForTest(t, home)
+	cwd := filepath.Join(home, "proj")
+	require.NoError(t, os.MkdirAll(cwd, 0o755))
+
+	outside := filepath.Join(home, "notes")
+	plan := filepath.Join(outside, "plan.md")
+	writePreviewFile(t, plan, "# outside plan")
+	writePreviewFile(t, filepath.Join(outside, "diagram.png"), "png")
+	top := filepath.Join(home, "top.html")
+	writePreviewFile(t, top, "<p>top</p>")
+	writePreviewFile(t, filepath.Join(home, "secret.txt"), "secret")
+
+	noCWD := cwdSession("no-cwd", "")
+	noCWD.cwdErr = errors.New("no cwd")
+	noCWD.activeErr = errors.New("no agent")
+	h := newPreviewHandler(t, cwdSession("pane-1", cwd), noCWD)
+
+	for _, tc := range []struct {
+		name, id, path, wantPath string
+	}{
+		{"absolute outside", "pane-1", plan, plan},
+		{"dot-dot outside", "pane-1", "../notes/plan.md", plan},
+		{"tilde outside", "pane-1", "~/notes/plan.md", plan},
+		{"tilde without cwd", "no-cwd", "~/notes/plan.md", plan},
+		{"absolute without cwd", "no-cwd", plan, plan},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := postPreview(t, h, tc.id, `{"path":`+jsonString(t, tc.path)+`}`)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			resp := decodePreview(t, rec)
+			assert.Equal(t, previewStatusReady, resp.Status)
+			assert.Equal(t, tc.wantPath, resp.Path)
+
+			page := httptest.NewRecorder()
+			setupRouterWithHandler(h).ServeHTTP(page, httptest.NewRequest(http.MethodGet, resp.URL, nil))
+			assert.Equal(t, http.StatusOK, page.Code)
+			assert.Contains(t, page.Body.String(), "outside plan")
+
+			sibling := httptest.NewRecorder()
+			setupRouterWithHandler(h).ServeHTTP(sibling,
+				httptest.NewRequest(http.MethodGet, strings.TrimSuffix(resp.URL, "plan.md")+"diagram.png", nil))
+			assert.Equal(t, http.StatusOK, sibling.Code)
+		})
+	}
+
+	// Directly under home: single-file serving refuses siblings.
+	rec := postPreview(t, h, "pane-1", `{"path":"~/top.html"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	resp := decodePreview(t, rec)
+	assert.Equal(t, top, resp.Path)
+	page := httptest.NewRecorder()
+	setupRouterWithHandler(h).ServeHTTP(page, httptest.NewRequest(http.MethodGet, resp.URL, nil))
+	assert.Equal(t, http.StatusOK, page.Code)
+	sibling := httptest.NewRecorder()
+	setupRouterWithHandler(h).ServeHTTP(sibling,
+		httptest.NewRequest(http.MethodGet, strings.TrimSuffix(resp.URL, "top.html")+"secret.txt", nil))
+	assert.Equal(t, http.StatusNotFound, sibling.Code)
 }
 
 func jsonString(t *testing.T, s string) string {

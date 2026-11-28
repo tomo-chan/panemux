@@ -54,10 +54,13 @@ type previewResponse struct {
 
 // PostSessionPreview resolves a path the operator clicked in a pane's
 // terminal and registers the HTML or Markdown file it names for the split
-// preview. Only files inside the pane's working directory and the worktrees
-// its agent is working in can be previewed; a relative path is looked for
-// in each of them. A file of an ssh or ssh_tmux pane is read from its host,
-// and a loopback URL of one is relayed from its host (issue #387). See
+// preview. Relative paths are looked for in the pane's working directory and
+// the worktrees its agent is working in, while explicit paths outside them
+// (absolute, ~/..., or ../ leaving a working directory) are served from the
+// resolved file's parent directory (or single-file only under /, ~, or /tmp).
+// Symbolic links inside a working directory that escape it are still refused.
+// A file of an ssh or ssh_tmux pane is read from its host, and a loopback URL
+// of one is relayed from its host (issue #387). See
 // docs/backend/workspace/preview-and-urls.md.
 func (h *Handler) PostSessionPreview(w http.ResponseWriter, r *http.Request) {
 	var req previewRequest
@@ -99,7 +102,7 @@ func (h *Handler) PostSessionPreview(w http.ResponseWriter, r *http.Request) {
 		writePreviewChoice(w, found, "")
 		return
 	}
-	url, err := h.previews.Open(found[0].Root, found[0].File)
+	url, err := h.previews.OpenFound(found[0])
 	if err != nil {
 		writePreviewError(w, err)
 		return
@@ -108,8 +111,8 @@ func (h *Handler) PostSessionPreview(w http.ResponseWriter, r *http.Request) {
 }
 
 // previewRemoteFile is PostSessionPreview for a pane whose shell runs on an
-// SSH host: the file is found inside the pane's working directories on that
-// host and read from it over the preview's own connection.
+// SSH host: the file is resolved on that host and read from it over the
+// preview's own connection.
 func (h *Handler) previewRemoteFile(
 	w http.ResponseWriter, sess session.Session, target session.PreviewTarget, name string,
 ) {
@@ -123,7 +126,7 @@ func (h *Handler) previewRemoteFile(
 		writePreviewChoice(w, found, remote.Name())
 		return
 	}
-	url, err := h.previews.OpenRemote(remote, found[0].Root, found[0].File)
+	url, err := h.previews.OpenRemoteFound(remote, found[0])
 	//coverage:exempt ResolveRemote has just found the file in bounds; only a host change in between fails this
 	if err != nil {
 		writePreviewError(w, err)
