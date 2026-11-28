@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.31.0](https://github.com/tomo-chan/panemux/compare/v0.30.0...v0.31.0) (2026-11-28)
+
+
+### Features
+
+* **board:** expose host-qualified identities through API and MCP ([#544](https://github.com/tomo-chan/panemux/issues/544)) ([8f1ed97](https://github.com/tomo-chan/panemux/commit/8f1ed97536c73d0c594f2cd0b468a2c600bdeb4f))
+* **board:** relay host-qualified agmsg identities without panes ([#540](https://github.com/tomo-chan/panemux/issues/540)) ([5a6f44d](https://github.com/tomo-chan/panemux/commit/5a6f44d80f7482c8904943802865b8caaad8861c))
+* **board:** show host-qualified identities and send to them from the UI ([#566](https://github.com/tomo-chan/panemux/issues/566)) ([1d4da24](https://github.com/tomo-chan/panemux/commit/1d4da241214c5891f6a928b61145bfdaa45582af))
+
+
+### Bug Fixes
+
+* batch macOS lsof probes and isolate task collection tests ([#408](https://github.com/tomo-chan/panemux/issues/408)) ([#567](https://github.com/tomo-chan/panemux/issues/567)) ([d69a771](https://github.com/tomo-chan/panemux/commit/d69a7717110f0f2f460c7013d915014d2bbd02bd))
+* bump pinned agmsg to v1.7.2 ([#535](https://github.com/tomo-chan/panemux/issues/535)) ([cb68e59](https://github.com/tomo-chan/panemux/commit/cb68e59afae332a9196021ca8bc68a812d08d619))
+* bump pinned agmsg to v1.7.3 ([#545](https://github.com/tomo-chan/panemux/issues/545)) ([9e4f519](https://github.com/tomo-chan/panemux/commit/9e4f519801c2e916508901999e3ad689a8fe4ed6))
+* bump pinned agmsg to v1.7.4 ([#546](https://github.com/tomo-chan/panemux/issues/546)) ([57a7083](https://github.com/tomo-chan/panemux/commit/57a7083c8bee7fc6ee688d1ed3529fd3d0355eb0))
+* bump pinned agmsg to v1.8.0 ([#547](https://github.com/tomo-chan/panemux/issues/547)) ([b10c81d](https://github.com/tomo-chan/panemux/commit/b10c81d49c71f826cd1ca96ee1eaaca63c573d44))
+* bump pinned agmsg to v1.8.1 ([#548](https://github.com/tomo-chan/panemux/issues/548)) ([d17ca65](https://github.com/tomo-chan/panemux/commit/d17ca65e74e91c0a21aaebae0bcb097b9f9cfa29))
+* bump pinned agmsg to v1.8.2 ([#549](https://github.com/tomo-chan/panemux/issues/549)) ([b7e63cd](https://github.com/tomo-chan/panemux/commit/b7e63cd5fc5ed358ed6fae56e461c6603842470b))
+* bump pinned agmsg to v1.9.0 ([#550](https://github.com/tomo-chan/panemux/issues/550)) ([1469033](https://github.com/tomo-chan/panemux/commit/1469033dff8742b4fb689b27c21080d7e1b5351d))
+* bump pinned agmsg to v1.9.1 ([#551](https://github.com/tomo-chan/panemux/issues/551)) ([dda967b](https://github.com/tomo-chan/panemux/commit/dda967b2cafe008cc7200022f5d8c929ea9eb1ac))
+* bump pinned agmsg to v1.9.2 ([#563](https://github.com/tomo-chan/panemux/issues/563)) ([b40bd1a](https://github.com/tomo-chan/panemux/commit/b40bd1a712d66d4ce6022710910821c052d7f4c3))
+
 ## [0.30.0](https://github.com/tomo-chan/panemux/compare/v0.29.0...v0.30.0) (2026-11-08)
 
 
