@@ -200,8 +200,8 @@ export const SSHConnectionEntrySchema = z.object({
   name: z.string().min(1),
   host: z.string().optional(),
   user: z.string().optional(),
-  // Not range-checked: config.yaml is not checked on load, and a hand-written
-  // port out of range must still list so it can be corrected here.
+  // Port fields are not range-checked on load; a hand-written port out of
+  // range must still list so it can be corrected here. Connection keys are validated.
   port: z.number().int().optional(),
   key_file: z.string().optional(),
   known_hosts_file: z.string().optional(),
@@ -268,7 +268,7 @@ export type BoardSessionTokenResponse = z.infer<typeof BoardSessionTokenResponse
 // today only a failed history write. It is optional because the server omits
 // the key entirely when there is none, and it rides whichever terminal frame
 // ends the query rather than getting a frame of its own, so that exactly one
-// frame still ends it: see docs/behavior.md's command center WS protocol, and
+// frame still ends it: see docs/api/agent-board.md's command center WS protocol, and
 // #214. It is on `error` as well as `done` because a turn that failed for its
 // own reasons can also have lost its history record, and reporting it only on
 // the successful path hides it from precisely the operator who needs it.
@@ -370,12 +370,32 @@ export const BoardParticipationSchema = z.object({
 })
 export type BoardParticipation = z.infer<typeof BoardParticipationSchema>
 
+// Host-qualified names are observations, never proof of membership or delivery.
+export const BoardIdentitySchema = z.object({
+  host: z.string(),
+  team: z.string(),
+  name: z.string(),
+  pane_id: z.string().nullable(),
+  source: z.enum(['task', 'self_report', 'unreported']),
+  state: z.string().nullable(),
+  waiting_for: z.string().nullable(),
+  status_since: z.string().nullable(),
+  task_observed_at: z.string().nullable(),
+  last_message_at: z.string().nullable(),
+  self_report: BoardStatusEntrySchema.nullable(),
+})
+export type BoardIdentity = z.infer<typeof BoardIdentitySchema>
+
 export const BoardStatusResponseSchema = z.object({
+  identities: z.record(z.string(), BoardIdentitySchema),
   participation: z.record(z.string(), BoardParticipationSchema),
   statuses: z.record(z.string(), BoardStatusEntrySchema),
 })
 
 export type BoardStatusResponse = z.infer<typeof BoardStatusResponseSchema>
+
+export const BoardBroadcastResponseSchema = z.object({ delivered: z.array(z.string()) })
+export const BoardBroadcastFailureSchema = z.object({ error: z.string(), delivered: z.array(z.string()).optional() })
 
 export const BoardMessageSchema = z.object({
   at: z.string(),
@@ -428,6 +448,22 @@ const HttpUrlSchema = z
 export const TaskStateSchema = z.enum(['busy', 'wait', 'idle', 'run', 'unknown', 'stop'])
 
 export type TaskState = z.infer<typeof TaskStateSchema>
+
+// Browser display preferences; independent of the task API and transient filters.
+export const TaskGroupModeSchema = z.enum(['none', 'host', 'label', 'repo'])
+export type TaskGroupMode = z.infer<typeof TaskGroupModeSchema>
+export const TaskSortSchema = z.object({
+  key: z.enum(['session', 'state', 'elapsed', 'host', 'agent', 'repository', 'branch']),
+  direction: z.enum(['asc', 'desc']),
+})
+export type TaskSort = z.infer<typeof TaskSortSchema>
+export const TaskDashboardPrefsSchema = z.object({
+  version: z.literal(1),
+  viewMode: z.enum(['cards', 'table']),
+  groupMode: TaskGroupModeSchema,
+  sort: TaskSortSchema,
+})
+export type TaskDashboardPrefs = z.infer<typeof TaskDashboardPrefsSchema>
 
 export const TaskLocationSchema = z.object({
   // daemon: a codex session run by codex's shared app-server daemon, which
@@ -627,7 +663,7 @@ export type TasksResponse = z.infer<typeof TasksResponseSchema>
 
 // ── Task events: GET /ws/tasks/events ──────────────────────────────────────
 //
-// The task event stream (docs/behavior/task-events.md): a snapshot, then one
+// The task event stream (docs/api/tasks.md and docs/backend/tasks/events.md): a snapshot, then one
 // frame per change. A frame that fails these schemas is treated like a gap
 // in seq: the receiver discards what it holds and reconnects.
 

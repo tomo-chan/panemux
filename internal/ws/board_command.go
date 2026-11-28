@@ -30,8 +30,8 @@ var boardCommandUpgrader = websocket.Upgrader{
 // Runner's single-query busy flag forever.
 const boardCommandWriteTimeout = 10 * time.Second
 
-// boardCommandFrame.Type wire values — see docs/agent-board.md's "API and
-// streaming" section.
+// boardCommandFrame.Type wire values — see docs/api/agent-board.md's
+// GET /ws/board/command section.
 const (
 	boardCommandFrameTypeLine  = "line"
 	boardCommandFrameTypeError = "error"
@@ -61,8 +61,8 @@ type boardCommandRequest struct {
 }
 
 // boardCommandFrame is the server->client WS frame. Type is one of "line",
-// "error", "done", or "busy" — see docs/agent-board.md's "API and
-// streaming" section.
+// "error", "done", or "busy" — see docs/api/agent-board.md's
+// GET /ws/board/command section.
 //
 // Warnings rides whichever terminal frame ends the query — "done" or
 // "error" — and is omitted when there is none, so an ordinary turn's frame is
@@ -81,7 +81,7 @@ type boardCommandFrame struct {
 // BoardCommandHandler serves WS /ws/board/command: the command center chat
 // used by the Spotlight palette. Unlike /ws/{sessionID}, this route
 // requires the bearer token, matching every other /api/board/* endpoint —
-// see docs/security.md. Browsers cannot set an Authorization header on a
+// see docs/security/auth.md. Browsers cannot set an Authorization header on a
 // WebSocket upgrade request, so the token travels as a WebSocket
 // subprotocol (`new WebSocket(url, [token])`) instead of a query string,
 // keeping it out of server access logs, browser history, and same-origin

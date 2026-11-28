@@ -18,7 +18,3 @@ func leaseMessages(client MessageClient) (MessageClient, func(), error) {
 	}
 	return client, func() {}, nil
 }
-
-type ParticipationLeaser interface {
-	LeaseParticipation() (Participation, func(), error)
-}

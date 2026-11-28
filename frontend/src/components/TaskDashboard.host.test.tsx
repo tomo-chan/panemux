@@ -1,11 +1,17 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { TaskDashboard } from './TaskDashboard'
+import { TaskDashboard as ControlledTaskDashboard, INITIAL_TASK_DASHBOARD_VIEW_STATE, type TaskDashboardProps } from './TaskDashboard'
 import type { TasksState } from '../hooks/useTasks'
 import type { SSHConnectionsState } from '../hooks/useSSHConnections'
 import type { TasksResponse } from '../schemas'
 import type { TaskTerminalStatus } from './TaskTerminal'
+
+// Keep view settings in a parent, as App does, including across rerenders.
+function TaskDashboard(props: Omit<TaskDashboardProps, 'viewState' | 'onViewStateChange'>) {
+  const [viewState, setViewState] = useState(INITIAL_TASK_DASHBOARD_VIEW_STATE)
+  return <ControlledTaskDashboard {...props} viewState={viewState} onViewStateChange={setViewState} />
+}
 
 // Issue #314: a host chip's Type in pane popup. The terminal is a stub whose
 // status the test drives, as in TaskDashboard.input.test.tsx.

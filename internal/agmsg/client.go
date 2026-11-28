@@ -136,6 +136,9 @@ func (c *Client) since(ctx context.Context, team, after string, limit int) ([]bo
 	return rows, nil
 }
 func (c *Client) send(ctx context.Context, team, from, to, body string) error {
+	if err := validateMessageBody(body); err != nil {
+		return err
+	}
 	runner := c.sendRunner
 	if runner == nil {
 		runner = c.runner
@@ -183,24 +186,4 @@ func (c *Client) available(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("%w: %w", board.ErrParticipationPath, err)
 	}
 	return RemoteAgmsgPresent(ctx, c.runner, path)
-}
-func (c *Client) joinInstruction(ctx context.Context, request board.JoinRequest) (string, error) {
-	if err := c.ValidateAddress(request.Team, request.PaneID); err != nil {
-		return "", err
-	}
-	var typeName string
-	for _, entry := range boardAdapters() {
-		if entry.id == request.Agent {
-			typeName = entry.agmsgType
-			break
-		}
-	}
-	if typeName == "" {
-		return "", fmt.Errorf("agmsg: no board adapter for agent %q", request.Agent)
-	}
-	path, err := c.participationRoot(ctx)
-	if err != nil {
-		return "", err
-	}
-	return buildBootstrapInstruction(path, request.Team, request.PaneID, typeName, request.Mode), nil
 }

@@ -13,7 +13,7 @@ import (
 
 const updateFlag = "--update"
 
-const TestedAgmsgCommit = "809be25847e1100e4c93b0108bd6cfcb7e694c4d"
+const TestedAgmsgCommit = "0fed950187c99e2d131a5d3ec1973d77d0278e28"
 
 // The marker matches v1.2.0 install.sh's own alternate-install discovery.
 const toolProbe = `for d in "$HOME"/.agents/skills/*/; do
@@ -39,8 +39,7 @@ exit "$missing"`
 
 // Only the mktemp directory created by this invocation is removed. Archive
 // bytes arrive on stdin; bash reads install.sh and never consumes that stream.
-const installerScript = `set -eu
-case "$1" in ''|--update) ;; *) exit 2 ;; esac
+const installerScript = "set -eu\n" + agmsgEnvironment + `case "$1" in ''|--update) ;; *) exit 2 ;; esac
 for d in "$HOME"/.agents/skills/*/; do
   if [ -f "${d}.agmsg" ] && [ "${d%/}" != "$HOME/.agents/skills/agmsg" ]; then
     echo 'Another named agmsg installation exists; consolidate it before installing or updating.' >&2

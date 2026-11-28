@@ -2,8 +2,8 @@ package board
 
 import "time"
 
-// PaneParticipation distinguishes detection, a sent instruction, and a self-report.
-// Instructed is not a claim that the agent executed the instruction.
+// PaneParticipation records detection and self-reports.
+// Instructed remains false for API compatibility; Board never writes instructions.
 type PaneParticipation struct {
 	LastReport *time.Time `json:"last_report,omitempty"`
 	PaneID     string     `json:"pane_id"`
@@ -13,10 +13,10 @@ type PaneParticipation struct {
 }
 
 // RecordParticipation publishes a bootstrap snapshot for concurrent API readers.
-func (c *BoardCache) RecordParticipation(paneID, host, agentType string, instructed bool) {
+func (c *BoardCache) RecordParticipation(paneID, host, agentType string, _ bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.participation[paneID] = PaneParticipation{PaneID: paneID, Host: host, AgentType: agentType, Instructed: instructed}
+	c.participation[paneID] = PaneParticipation{PaneID: paneID, Host: host, AgentType: agentType, Instructed: false}
 }
 
 func (c *BoardCache) ParticipationSnapshot() map[string]PaneParticipation {
@@ -26,7 +26,7 @@ func (c *BoardCache) ParticipationSnapshot() map[string]PaneParticipation {
 	for id, state := range c.participation {
 		result[id] = state
 	}
-	for id, status := range c.status {
+	for id, status := range c.paneStatusesLocked() {
 		state := result[id]
 		state.PaneID = id
 		at := status.UpdatedAt

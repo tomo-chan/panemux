@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Page, type WebSocketRoute } from '@playwright/test'
 
 // The task dashboard against a real panemux: the real collection script, the
 // real `ps` and `tmux` of this machine, and a HOME that
@@ -54,6 +54,9 @@ test('opens a session running in tmux as a pane attached to it', async ({ page, 
   await expect(card).toContainText('tmux e2e-task-dashboard · no pane')
 
   await card.getByRole('button', { name: /^Open/ }).click()
+  const picker = page.getByRole('dialog', { name: 'Open in workspace' })
+  await expect(picker.getByRole('radio', { name: 'Default' })).toBeChecked()
+  await picker.getByRole('button', { name: 'Open here' }).click()
 
   await expect(page.getByRole('region', { name: 'Task dashboard' })).toHaveCount(0)
   const pane = page.locator('[data-pane-id]').filter({ hasText: 'e2e-task-dashboard' })
@@ -120,12 +123,12 @@ test('labels a task and marks it done, and both survive a reload', async ({ page
 
     await page.reload()
     await page.getByRole('button', { name: /^Tasks/ }).click()
-    await page.getByRole('checkbox', { name: 'Show Done column' }).check()
+    await page.getByRole('checkbox', { name: 'Show done' }).check()
     const done = page.getByRole('region', { name: 'Done' }).getByTestId('task-card-local:claude:e2e-stopped')
     await expect(done.getByRole('list', { name: 'Labels' })).toHaveText('e2e-label')
 
-    await page.getByRole('combobox', { name: 'Split rows by' }).selectOption('label')
-    await expect(page.getByRole('region', { name: 'Done' }).getByRole('heading', { level: 3 })).toHaveText('e2e-label')
+    await page.getByRole('combobox', { name: 'Group tasks by' }).selectOption('label')
+    await expect(page.getByRole('region', { name: 'e2e-label — Done' }).getByTestId('task-card-local:claude:e2e-stopped')).toBeVisible()
   } finally {
     expect((await clear()).ok()).toBe(true)
   }
@@ -250,7 +253,7 @@ test('types into a waiting tmux task from a popup on the board, and closes back 
   await expect(dialog.getByTestId('task-input-status')).toHaveText('Connected')
   await expect(dialog).toContainText('Local · claude · tmux: e2e-task-dashboard')
   expect(await page.locator('.td-top').evaluate((el) => el.closest('[inert]') !== null)).toBe(true)
-  expect(await page.locator('.td-board').evaluate((el) => el.closest('[inert]') !== null)).toBe(true)
+  expect(await page.getByRole('region', { name: 'Task board', exact: true }).evaluate((el) => el.closest('[inert]') !== null)).toBe(true)
 
   const terminalInput = dialog.locator('.xterm-helper-textarea')
   await expect(terminalInput).toBeFocused()
@@ -504,4 +507,226 @@ test('lists nothing running outside the fixture', async ({ request }) => {
     (t) => t.cwd && !/^\/(private\/)?tmp(\/e2e-stopped)?$|\/panemux-e2e-task-dashboard-home(\/|$)/.test(t.cwd),
   )
   expect(outside.map((t) => `${t.id} ${t.cwd}`)).toEqual([])
+})
+
+
+test('table supports keyboard sorting, shared details, scrolling and narrow screens', async ({ page, request }) => {
+  const data = await (await request.get('/api/tasks')).json()
+  const template = data.tasks.find((task: { state: string }) => task.state !== 'stop')
+  expect(template).toBeTruthy()
+  await page.route('**/api/tasks', route => route.fulfill({ json: { ...data,
+    tasks: Array.from({ length: 35 }, (_, index) => ({ ...template,
+      id: `table-${index}`, cwd: `/tmp/sample-project/session-${index}`,
+      summary: { state: 'ready', text: 'A long session summary that stays inside its own cell while every independent column remains readable.' },
+    })),
+  } }))
+  await openDashboard(page)
+  await page.getByRole('button', { name: 'Table', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  const table = page.getByRole('table', { name: 'Tasks' })
+  const list = page.getByRole('region', { name: 'Task table', exact: true })
+  await expect(table).toBeVisible()
+  const headingCenters = await table.getByRole('columnheader').evaluateAll(headings => headings.map(heading => {
+    const range = document.createRange()
+    range.selectNodeContents(heading.querySelector('button') || heading)
+    const rect = range.getBoundingClientRect()
+    return rect.y + rect.height / 2
+  }))
+  expect(Math.max(...headingCenters) - Math.min(...headingCenters)).toBeLessThan(2)
+  const sort = table.getByRole('button', { name: /Sort by Session/ })
+  await sort.focus()
+  await page.keyboard.press('Enter')
+  await expect(table.getByRole('columnheader', { name: /Session/ })).toHaveAttribute('aria-sort', 'ascending')
+  const session = table.getByRole('button', { name: 'session-2', exact: true })
+  await session.focus()
+  await page.keyboard.press('Enter')
+  const details = page.getByRole('complementary', { name: 'Task details' })
+  await expect(details).toBeVisible()
+  await expect(session).toHaveAttribute('aria-pressed', 'true')
+  await list.evaluate(element => { element.scrollTop = 200; element.scrollLeft = 150 })
+  const before = await table.getByRole('columnheader', { name: /Session/ }).boundingBox()
+  const viewport = await list.boundingBox()
+  expect(Math.abs(before!.y - viewport!.y)).toBeLessThan(3)
+  await page.getByRole('button', { name: 'Cards', exact: true }).click()
+  await page.getByRole('button', { name: 'Table', exact: true }).click()
+  expect(await list.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+  await expect(session).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click()
+  await page.getByRole('button', { name: /^Tasks/ }).click()
+  await expect(table).toBeVisible()
+  await expect(table.getByRole('columnheader', { name: /Session/ })).toHaveAttribute('aria-sort', 'ascending')
+  await page.reload()
+  await page.getByRole('button', { name: /^Tasks/ }).click()
+  await expect(table).toBeVisible()
+  await expect(table.getByRole('columnheader', { name: /Session/ })).toHaveAttribute('aria-sort', 'ascending')
+  const axe = await new AxeBuilder({ page }).include('.td-table-scroll').analyze()
+  expect(axe.violations.map(v => `${v.id}: ${v.help}`)).toEqual([])
+  await page.setViewportSize({ width: 600, height: 700 })
+  await expect(table).toBeVisible()
+  expect(await list.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+  await list.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => list.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
+})
+
+
+test('group rows stretch across states with shared scrolling, sticky bands and live moves', async ({ page, request }) => {
+  const data = await (await request.get('/api/tasks')).json()
+  const template = data.tasks[0]
+  expect(template).toBeTruthy()
+  const longName = 'beta — integration checks for the sample project and its release pipeline'
+  let tasks = Array.from({ length: 9 }, (_, index) => ({ ...template,
+    id: `group-${index}`, session_id: `sample-session-${index}`, host: '',
+    cwd: `/tmp/sample-project/card-${index}`, labels: [index < 7 ? 'alpha' : longName],
+    state: index < 6 ? 'busy' : 'wait', done: false,
+    waiting_for: index === 6 ? 'Review the migration plan and its rollback steps before continuing. '.repeat(8) : 'Input needed',
+  }))
+  tasks.push({ ...tasks[0], id: 'group-done', state: 'stop', done: true, labels: ['finished'] })
+  await page.route('**/api/tasks', route => route.fulfill({ json: { ...data, tasks } }))
+  await openDashboard(page)
+  await page.getByLabel('Group tasks by').selectOption('label')
+  const board = page.getByRole('region', { name: 'Task board', exact: true })
+  const groups = board.locator('.td-group')
+  await expect(groups).toHaveCount(2)
+  const aligned = async (columns: number) => {
+    const rows = await groups.evaluateAll(elements => elements.map(group => ({
+      top: group.getBoundingClientRect().top,
+      bottom: group.getBoundingClientRect().bottom,
+      cells: [...group.querySelectorAll('.td-col')].map(cell => {
+        const rect = cell.getBoundingClientRect()
+        return { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width }
+      }),
+    })))
+    for (const row of rows) {
+      expect(row.cells).toHaveLength(columns)
+      for (const edge of ['top', 'bottom'] as const) {
+        expect(Math.max(...row.cells.map(c => c[edge])) - Math.min(...row.cells.map(c => c[edge]))).toBeLessThanOrEqual(1)
+      }
+    }
+    for (let i = 1; i < rows.length; i++) {
+      expect(rows[i].top).toBeGreaterThanOrEqual(rows[i - 1].bottom - 1)
+      rows[i].cells.forEach((cell, j) => {
+        expect(Math.abs(cell.left - rows[0].cells[j].left)).toBeLessThanOrEqual(1)
+        expect(Math.abs(cell.width - rows[0].cells[j].width)).toBeLessThanOrEqual(1)
+      })
+    }
+  }
+  await aligned(5)
+  const headingTops = await groups.first().locator('.td-colh-dot').evaluateAll(els => els.map(el => el.getBoundingClientRect().top))
+  expect(Math.max(...headingTops) - Math.min(...headingTops)).toBeLessThanOrEqual(1)
+  await expect(board.getByRole('region', { name: 'alpha — Stopped' })).toContainText('None')
+  await page.getByLabel('Show done').check()
+  await expect(groups).toHaveCount(3)
+  await aligned(6)
+  await page.getByLabel('Show done').uncheck()
+  await board.getByRole('button', { name: 'card-0', exact: true }).click()
+  await expect(page.getByRole('complementary', { name: 'Task details' })).toBeVisible()
+  await aligned(5)
+  await board.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => board.evaluate(el => el.scrollLeft)).toBeGreaterThan(0)
+  await aligned(5)
+  // Move the selected card into the next group and change the most populated column.
+  tasks = tasks.map(t => t.id === 'group-0' ? { ...t, labels: [longName], state: 'idle' } : { ...t, state: t.done ? t.state : 'wait' })
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  const moved = board.getByRole('region', { name: `${longName} — Idle` }).getByTestId('task-card-group-0')
+  await expect(moved).toHaveAttribute('data-selected', 'true')
+  await expect(page.getByRole('complementary', { name: 'Task details' })).toContainText('card-0')
+  await aligned(5)
+  // A short scrollport leaves enough room to pin the second group's band.
+  await page.setViewportSize({ width: 1100, height: 350 })
+  await board.evaluate(el => { el.scrollTop = 0; el.scrollLeft = 0 })
+  const scrollInsideGroup = async (index: number) => {
+    await board.evaluate((el, groupIndex) => {
+      const group = el.querySelectorAll('.td-group')[groupIndex]
+      el.scrollTop += group.getBoundingClientRect().top - el.getBoundingClientRect().top + 20
+    }, index)
+  }
+  const assertPinned = async (index: number) => {
+    const viewport = await board.boundingBox()
+    const band = await groups.nth(index).locator('.td-group-band').boundingBox()
+    expect(Math.abs(band!.y - viewport!.y)).toBeLessThanOrEqual(1)
+  }
+  await scrollInsideGroup(0)
+  await assertPinned(0)
+  await scrollInsideGroup(1)
+  await assertPinned(1)
+  const bands = await groups.locator('.td-group-band').evaluateAll(els => els.map(el => {
+    const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }
+  }))
+  expect(bands[0].bottom).toBeLessThanOrEqual(bands[1].top + 1)
+  await page.setViewportSize({ width: 500, height: 700 })
+  await aligned(5)
+  expect(await board.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true)
+  await page.getByRole('complementary', { name: 'Task details' }).getByRole('button', { name: /Close/ }).click()
+  await board.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => board.evaluate(el => el.scrollLeft)).toBeGreaterThan(0)
+  await page.getByLabel('Group tasks by').selectOption('none')
+  await expect(groups).toHaveCount(0)
+  const columns = board.locator('.td-col')
+  await expect(columns).toHaveCount(5)
+  const rects = await columns.evaluateAll(els => els.map(el => el.getBoundingClientRect().top))
+  expect(rects[1]).toBeGreaterThan(rects[0])
+})
+
+
+test('notification jumps uncover a card underneath its sticky group band', async ({ page, request }) => {
+  const data = await (await request.get('/api/tasks')).json()
+  const tasks = Array.from({ length: 20 }, (_, i) => ({ ...data.tasks[0],
+    id: `notice-${i}`, session_id: `sample-notice-${i}`, host: '',
+    cwd: `/tmp/sample-project/notice-${i}`, state: 'wait', done: false,
+    labels: [i < 10 ? 'alpha' : 'beta'], waiting_for: 'Review the sample change',
+    location: { kind: 'outside', attachable: false },
+  }))
+  await page.route('**/api/tasks', route => route.fulfill({ json: { ...data, tasks } }))
+  await page.addInitScript(() => {
+    const recorded: Array<{ click: () => void }> = []
+    ;(window as Window & { __groupNotifications?: typeof recorded }).__groupNotifications = recorded
+    class MockNotification {
+      static permission = 'granted'
+      static requestPermission = () => Promise.resolve('granted')
+      onclick: (() => void) | null = null
+      constructor() { recorded.push({ click: () => this.onclick?.() }) }
+      close() {}
+    }
+    Object.defineProperty(window, 'Notification', { configurable: true, value: MockNotification })
+    Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => false })
+  })
+  let stream: WebSocketRoute | undefined
+  const targetTask = { ...tasks[10], state: 'busy' }
+  await page.routeWebSocket(/\/ws\/tasks\/events$/, ws => {
+    stream = ws
+    ws.send(JSON.stringify({ type: 'snapshot', epoch: 'group-notice', seq: 10,
+      hosts: [{ name: '', status: 'ok' }], tasks: [targetTask] }))
+  })
+  await page.setViewportSize({ width: 1100, height: 450 })
+  await openDashboard(page)
+  await page.getByLabel('Group tasks by').selectOption('label')
+  const board = page.getByRole('region', { name: 'Task board', exact: true })
+  await board.getByRole('button', { name: 'notice-0', exact: true }).click()
+  await expect(page.getByRole('complementary', { name: 'Task details' })).toBeVisible()
+  await expect.poll(() => stream !== undefined).toBe(true)
+  stream!.send(JSON.stringify({ type: 'task', epoch: 'group-notice', seq: 11, op: 'changed', prev_state: 'busy',
+    task: { ...targetTask, state: 'wait', wait_id: 'w1-group-notice', waiting_for: 'Review the sample change' } }))
+  await expect.poll(() => page.evaluate(() =>
+    (window as Window & { __groupNotifications?: unknown[] }).__groupNotifications?.length)).toBe(1)
+  const card = board.getByRole('region', { name: 'beta — Waiting for input' }).getByTestId('task-card-notice-10')
+  await expect(card).toBeVisible()
+  await card.evaluate(el => {
+    const board = el.closest('.td-board')!
+    board.scrollTop += el.getBoundingClientRect().top - board.getBoundingClientRect().top - 8
+  })
+  const band = board.getByRole('region', { name: 'beta · 10 tasks', exact: true }).locator('.td-group-band')
+  const before = await card.boundingBox()
+  const beforeBand = await band.boundingBox()
+  expect(before!.y).toBeLessThan(beforeBand!.y + beforeBand!.height - 1)
+  expect(before!.y).toBeGreaterThanOrEqual((await board.boundingBox())!.y)
+  await page.evaluate(() => {
+    (window as Window & { __groupNotifications?: Array<{ click: () => void }> }).__groupNotifications![0].click()
+  })
+  await expect(card.getByRole('button', { name: 'notice-10', exact: true })).toBeFocused()
+  const after = await card.boundingBox()
+  const afterBand = await band.boundingBox()
+  expect(after!.y).toBeGreaterThanOrEqual(afterBand!.y + afterBand!.height - 1)
 })

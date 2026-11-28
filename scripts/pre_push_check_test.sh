@@ -296,8 +296,16 @@ expect "the screenshot capture selects its staging tests" \
 	"$(planfor frontend/screenshots/screenshots-env.sh 'echo changed')" \
 	"shell scripts/screenshots_check_test.sh" "shell frontend/screenshots/screenshots-env_test.sh"
 
-expect "a document selects the link check, not the scenario ledger" \
-	"$(planfor docs/guide.md '# Changed')" "docs-links" "!scenarios"
+expect "a document selects links and OKF, not the scenario ledger" \
+	"$(planfor docs/guide.md '# Changed')" "docs-links" "docs-okf" "docs-okf-tests" "!scenarios"
+
+expect "the OKF checker selects its real package and the bundle checks" \
+	"$(planfor scripts/docsokf/main.go 'package main')" \
+	"go-vet ./scripts/docsokf" "go-test ./scripts/docsokf" "docs-okf" "docs-okf-tests" "!go-test ./scripts"
+expect "a nested concept also selects both OKF checks" \
+	"$(planfor docs/security/auth.md '# Changed')" "docs-okf" "docs-okf-tests"
+expect "a root workflow document is outside the OKF bundle" \
+	"$(planfor README.md '# Changed')" "docs-links" "!docs-okf" "!docs-okf-tests"
 
 expect "the scenario ledger selects its check" \
 	"$(planfor docs/scenarios.md '# Changed')" "docs-links" "scenarios"

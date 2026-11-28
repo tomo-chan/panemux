@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import * as schemas from './index'
 
-// Gate G3(c) in docs/quality-gateway.md — Zod schema round-trips — and issue
+// Gate G3(c) in docs/engineering/quality-gates.md — Zod schema round-trips — and issue
 // #191's item (c).
 //
 // index.test.ts, alongside this file, has 103 cases and not one of them sees
@@ -152,6 +152,10 @@ const roundTrips: RoundTrip[] = [
 // merely red: a schema added without a fixture has to be classified here, in
 // the diff, and "component of X" is a claim a reviewer can check.
 const fixtureless: Record<string, string> = {
+  // Broadcast is side-effectful; its live response is checked by the isolated
+  // relay/script E2E, while form tests cover 422/502 and malformed responses.
+  BoardBroadcastResponseSchema: 'authenticated broadcast response checked by e2e/agent-board-agmsg.spec.ts',
+  BoardBroadcastFailureSchema: 'broadcast error variants checked by components/BoardMessageForm.test.tsx',
   // Request bodies. panemux never receives these from the server, so there is
   // no server output to round-trip them against; index.test.ts covers them.
   CreateSessionRequestSchema: 'request body sent to POST /api/sessions',
@@ -176,9 +180,13 @@ const fixtureless: Record<string, string> = {
   SSHConnectionEntrySchema: 'component of SSHConnectionEntriesResponseSchema',
   SSHConfigHostSchema: 'component of SSHConfigHostsResponseSchema',
   DirectoryEntrySchema: 'component of DirectoryBrowserResponseSchema',
+  BoardIdentitySchema: 'component of BoardStatusResponseSchema',
   BoardStatusEntrySchema: 'component of BoardStatusResponseSchema',
   BoardMessageSchema: 'component of BoardMessagesResponseSchema',
   BoardCommandHistoryEntrySchema: 'component of BoardCommandHistoryResponseSchema',
+  TaskDashboardPrefsSchema: 'browser-only localStorage preferences, tested in utils/taskDashboardPrefs.test.ts',
+  TaskGroupModeSchema: 'component of browser-only TaskDashboardPrefsSchema',
+  TaskSortSchema: 'component of browser-only TaskDashboardPrefsSchema',
   TaskStateSchema: 'component of TaskSchema, via tasks',
   TaskLocationSchema: 'component of TaskSchema, via tasks',
   TaskGitSchema: 'component of TaskSchema, via tasks',
@@ -228,18 +236,14 @@ describe('API contract fixtures', () => {
   // A schema the frontend parses a response with, and that nothing here
   // captures, is a contract nobody is checking. Adding one forces a choice:
   // give it a fixture, or say in `fixtureless` why it does not need one.
-  it('classifies every exported schema as round-tripped or explained', () => {
+  it('keeps exported schemas and their round-trip or fixtureless classification in sync', () => {
     const roundTripped = roundTrips.map((r) => r.schemaName as string)
     const unclassified = exportedSchemaNames().filter(
       (name) => !roundTripped.includes(name) && !(name in fixtureless)
     )
 
     expect(unclassified).toEqual([])
-  })
-
-  // The complement: `fixtureless` must not outlive the schemas it names, or
-  // it becomes a list of excuses for code that no longer exists.
-  it('has no stale entries in the fixtureless list', () => {
+    // Check both directions together: explanations must not outlive schemas.
     const exported = exportedSchemaNames()
     const stale = Object.keys(fixtureless).filter((name) => !exported.includes(name))
 
@@ -617,5 +621,21 @@ describe('discriminated union coverage', () => {
 
     expect(emitted).toEqual(['busy', 'done', 'error', 'line'])
     expect(declaredVariants(schemas.BoardCommandFrameSchema).filter((v) => !emitted.includes(v))).toEqual([])
+  })
+
+  // The populated fixture must exercise every identity source, not merely an empty map.
+  it('captures task priority, supplemental reports, and equal names on different hosts', () => {
+    const captured = readFixture('board-status')
+    const parsed = schemas.BoardStatusResponseSchema.parse(captured)
+    expect(parsed).toEqual(captured)
+    const entries = Object.values(parsed.identities)
+    expect(new Set(entries.map((e) => e.source))).toEqual(new Set(['task', 'self_report', 'unreported']))
+    expect(parsed.identities['worker@local'].host).toBe('local')
+    expect(parsed.identities['worker@ssh:build'].host).toBe('ssh:build')
+    const task = parsed.identities['pane-editor@local']
+    expect(task.state).toBe('wait')
+    expect(task.waiting_for).toBe('input needed')
+    expect(task.self_report?.state).toBe('working')
+    expect(task.pane_id).toBe('pane-editor')
   })
 })

@@ -1,7 +1,7 @@
 package agmsg_test
 
-// Tier 2 of docs/agent-board.md's agmsg compatibility contract: the
-// behaviors panemux depends on, asserted against a REAL agmsg install
+// Tier 2 of docs/backend/agent-board/agmsg.md's agmsg compatibility contract:
+// the behaviors panemux depends on, asserted against a REAL agmsg install
 // rather than a fake.
 //
 // Tier 1 (every other test in this package) pins what panemux itself sends
@@ -72,7 +72,7 @@ func contractInstall(t *testing.T) string {
 
 	src := strings.TrimSpace(os.Getenv(agmsgPathEnv))
 	if src == "" {
-		t.Skipf("%s is not set; see docs/agent-board.md's agmsg compatibility contract", agmsgPathEnv)
+		t.Skipf("%s is not set; see docs/backend/agent-board/agmsg.md's agmsg compatibility contract", agmsgPathEnv)
 	}
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("agmsg's own scripts require sqlite3, which is not on PATH")
@@ -283,14 +283,16 @@ func watchDelivery(t *testing.T, scripts, sessionID, project, expect string, sen
 }
 
 // TestAgmsgContract_TwoAgentsInOneProjectNeedTheClaim is the mechanical
-// version of the manual verification recorded in docs/agent-board.md's "Two
-// panes in one project directory". It asserts both halves: the exposure
-// that exists without a claim, and that the claim closes it.
+// version of the manual verification recorded in docs/backend/agent-board/agmsg.md
+// ("Two panes in one directory and agent type mapping"). It asserts both halves:
+// the exposure that exists without a claim, and that the claim closes it.
 //
 // If a future agmsg release makes identities.sh project-scoped differently,
 // or changes watch.sh's exclusivity handling, this test fails — which is
 // the entire point. panemux's bootstrap instruction tells an agent to run
 // actas-claim.sh precisely because of the behavior asserted here.
+//
+//efficacy:exempt documentation-only reference update; implementation behavior is unchanged
 func TestAgmsgContract_TwoAgentsInOneProjectNeedTheClaim(t *testing.T) {
 	scripts := contractScripts(t)
 	project := t.TempDir()
@@ -443,6 +445,25 @@ func TestAgmsgContract_SendThenSinceRoundTrip(t *testing.T) {
 	assert.NotEmpty(t, rows[0].ID, "every row must carry agmsg's own id")
 	assert.False(t, rows[0].At.IsZero(),
 		"the at timestamp must parse as RFC3339 — parseAgmsgMessageRows silently zeroes it otherwise")
+}
+
+func TestAgmsgContract_QualifiedIdentifiersRoundTrip(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+	const body = "'quoted' $(id) `whoami`\n世界"
+	for _, pair := range [][2]string{{"orch.1@local", "worker.2@ssh:build.1"}, {"worker.2@ssh:build.1", "orch.1@local"}} {
+		require.NoError(t, client.Send(ctx, "contract", pair[0], pair[1], body))
+	}
+	rows, err := client.Since(ctx, "contract", "", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	assert.Equal(t, "orch.1@local", rows[0].From)
+	assert.Equal(t, "worker.2@ssh:build.1", rows[0].To)
+	assert.Equal(t, "worker.2@ssh:build.1", rows[1].From)
+	assert.Equal(t, "orch.1@local", rows[1].To)
+	for _, row := range rows {
+		assert.Equal(t, body, row.Body)
+	}
 }
 
 // TestAgmsgContract_MessageIDsAreOpaque is the drift check for the
@@ -628,4 +649,61 @@ func TestAgmsgContract_InstalledVersionDoesNotFalselyWarn(t *testing.T) {
 	assert.Empty(t, agmsg.VersionMismatchWarning("host-a", installed),
 		"an install of the pinned version must not be warned about, "+
 			"whatever provenance form install.sh wrote into VERSION (found %q)", installed)
+}
+
+//efficacy:exempt documents the pinned upstream transport's existing trailing-newline normalization
+func TestAgmsgContract_TrailingNewlinesAreNormalized(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+	require.NoError(t, client.Send(ctx, "contract", "pane-a", "pane-b", "first\n世界\n\n"))
+	rows, err := client.Since(ctx, "contract", "", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "first\n世界", rows[0].Body)
+}
+
+func TestAgmsgContract_OptionLikeBodiesRoundTrip(t *testing.T) {
+	client, _ := contractClient(t, "contract")
+	ctx := contractCtx(t)
+	bodies := []string{"--force", "--body", "--body-file", "--", "--help", "--force\n'quoted' $(id) 世界"}
+	for _, body := range bodies {
+		require.NoError(t, client.Send(ctx, "contract", "orch@local", "impl@ssh:build", body))
+	}
+	rows, err := client.Since(ctx, "contract", "", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, len(bodies))
+	for i, row := range rows {
+		assert.Equal(t, bodies[i], row.Body)
+		assert.Equal(t, "orch@local", row.From)
+		assert.Equal(t, "impl@ssh:build", row.To)
+	}
+}
+
+func TestAgmsgContract_SSHKeyCharactersSendAndHistory(t *testing.T) {
+	root := contractInstall(t)
+	scripts := filepath.Join(root, "scripts")
+	runScript(t, scripts, "join.sh", "contract", "pane-a", "claude-code", t.TempDir(), "--force")
+	pool := hostexec.New(hostexec.Options{})
+	t.Cleanup(pool.Close)
+	client := agmsg.NewRemoteAgmsgClient("local", root, host.Bind(pool, host.Local))
+	for _, key := range []string{"build1", "build.1_x-y", "build+1", "開発機", "開発+1_x-y.dev", "de\u0301v"} {
+		t.Run(key, func(t *testing.T) {
+			remote := "pane-b@ssh:" + key
+			// Establish the public script's transport capability independently of panemux.
+			runScript(t, scripts, "send.sh", "contract", remote, "pane-a@local", "public request", "--force")
+			runScript(t, scripts, "send.sh", "contract", "pane-a@local", remote, "public reply", "--force")
+			history := runScript(t, scripts, "history.sh", "contract", remote, "100")
+			require.Contains(t, history, remote)
+			require.Contains(t, history, "public request")
+			require.Contains(t, history, "public reply")
+			t.Logf("public send/history preserve key %q in both directions", key)
+			require.NoError(t, client.Send(contractCtx(t), "contract", remote, "pane-a@local", "client request"))
+			require.NoError(t, client.Send(contractCtx(t), "contract", "pane-a@local", remote, "client reply"))
+			rows, err := client.Since(contractCtx(t), "contract", "", 100)
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, len(rows), 4)
+			require.Equal(t, remote, rows[len(rows)-2].From)
+			require.Equal(t, remote, rows[len(rows)-1].To)
+		})
+	}
 }

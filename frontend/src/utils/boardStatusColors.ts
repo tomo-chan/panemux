@@ -5,6 +5,8 @@
 // coverage-gated, unlike hooks/ and schemas/, but still worth testing
 // directly like the other pure modules there).
 
+import type { BoardIdentity, TaskState } from '../schemas'
+
 const STATE_COLORS: Record<string, string> = {
   working: '#7bd88f',
   idle: '#7aa2f7',
@@ -17,13 +19,23 @@ const STATE_COLORS: Record<string, string> = {
 
 const UNKNOWN_STATE_COLOR = '#4b5565'
 
-// colorForBoardState maps a pane's self-reported state string to a status
-// dot color. The agent-reported vocabulary is free text, not an enum (see
-// bootstrap.go's own PTY instruction, which only *suggests*
-// working/idle/waiting) — any other string, or an empty/missing one, must
-// render as a neutral color rather than throw or look broken.
-export function colorForBoardState(state: string | undefined): string {
+// Task collection uses a different vocabulary from free-text self-reports.
+const TASK_STATE_COLORS: Record<TaskState, string> = {
+  busy: STATE_COLORS.working,
+  wait: STATE_COLORS.waiting,
+  idle: STATE_COLORS.idle,
+  run: '#8fa6c4',
+  unknown: '#c586c0',
+  stop: '#80858d',
+}
+
+// Task observations use the collected task enum. Self-reported vocabulary
+// stays free text: only working/idle/waiting have known colors, and arbitrary
+// strings (including task-like values) remain neutral rather than implying
+// they are task observations.
+export function colorForBoardState(state: string | undefined, source?: BoardIdentity['source']): string {
   if (!state) return UNKNOWN_STATE_COLOR
+  if (source === 'task') return TASK_STATE_COLORS[state as TaskState] ?? UNKNOWN_STATE_COLOR
   return STATE_COLORS[state] ?? UNKNOWN_STATE_COLOR
 }
 

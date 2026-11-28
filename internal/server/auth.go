@@ -20,7 +20,7 @@ const bearerPrefix = "Bearer "
 // or /ws/{sessionID}, since those would require every existing, currently-
 // unauthenticated frontend request to start sending a token it doesn't
 // have. Widening it to those routes is a separate, larger change — see
-// docs/agent-board.md's API additions section.
+// docs/api/agent-board.md's Authorization and endpoint summary section.
 func bearerAuthMiddleware(token string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

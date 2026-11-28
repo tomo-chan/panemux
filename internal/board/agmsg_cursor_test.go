@@ -105,7 +105,7 @@ func TestRelayPollAdvancesCursorAcrossUUIDRows(t *testing.T) {
 // TestRelayPollCursorOutsideWindowSelfCorrects pins the bounded shape of the
 // truncation case: a cursor that scrolled out of the poll window costs one
 // replay of that window, not a permanent loop. This is the cursor tradeoff
-// documented in docs/agent-board/relay.md; failed forwards are not retried.
+// documented in docs/backend/agent-board/relay.md; failed forwards are not retried.
 //
 //efficacy:exempt documentation-only terminology update; implementation behavior is unchanged
 func TestRelayPollCursorOutsideWindowSelfCorrects(t *testing.T) {

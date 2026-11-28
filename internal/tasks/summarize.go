@@ -23,7 +23,7 @@ import (
 // Summarizing a task with `claude -p` on the panemux host (issue #258).
 //
 // The argv follows the command center's (internal/commandcenter/runner.go
-// and docs/security/command-center.md), whose every flag was checked against
+// and docs/security/agent-board.md), whose every flag was checked against
 // the real CLI there: no user, project or local settings (so none of the
 // operator's hooks run and no CLAUDE.md is read), no MCP server, no slash
 // commands, and every tool that can act denied by name. On top of it, no

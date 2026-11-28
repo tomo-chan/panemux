@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Diff-scoped mutation testing: gate G4(c) in docs/quality-gateway.md, roadmap
+# Diff-scoped mutation testing: gate G4(c) in docs/engineering/quality-gates.md, roadmap
 # item 6 of issue #180.
 #
 # The other three G4 gates each answer a different question, and this one
@@ -35,7 +35,7 @@
 # unreachable without fault injection. A test that killed the buffer-size
 # mutants would pin a constant and assert nothing: a tautology, the exact thing
 # G4 exists to catch. Failing on those from day one would have made this gate
-# wrong more often than right, and principle 4 in docs/quality-gateway.md is
+# wrong more often than right, and principle 4 in docs/engineering/quality-gates.md is
 # that a gate which cries wolf gets routed around, taking the gates that do work
 # with it.
 #
@@ -129,7 +129,7 @@
 # the suite is hermetic and needs no gremlins install — the same split
 # scripts/coverage_blocks.sh has with `--profile`.
 #
-# SCOPED TO THE DIFF, for the reason decision D2 gave and one the measurement
+# SCOPED TO THE DIFF, for the reason decision D2 (docs/decisions/quality-gateway.md) gave and one the measurement
 # added. D2 scoped it because gremlins' own documentation warns of hours on a
 # large module; measured on this repository the whole module takes 14m25s, so
 # that reason is weaker than it looked. The reason that survives is the false
@@ -817,7 +817,7 @@ if [ "$scoped_count" -eq 0 ]; then
 	if [ "$file_mutant_count" -gt 0 ]; then
 		echo "  gremlins produced $file_mutant_count mutant(s) in the files this branch touched, and"
 		echo "  none of them sits on a line the diff changed. That is what the line"
-		echo "  scope is for (decision D2) and what it costs: this run says nothing"
+		echo "  scope is for (decision D2: docs/decisions/quality-gateway.md) and what it costs: this run says nothing"
 		echo "  about whether the change is protected."
 	else
 		echo "  gremlins produced no mutants at all in the files this branch touched."

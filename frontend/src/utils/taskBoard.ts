@@ -7,6 +7,7 @@ import type {
   TaskAction,
   TaskActions,
   TaskHost,
+  TaskGroupMode,
   TaskRecord,
   TaskState,
   TaskSummary,
@@ -278,7 +279,12 @@ export function filterTasks(tasks: Task[], filter: TaskFilter): Task[] {
   })
 }
 
-export type LaneMode = 'none' | 'host' | 'label' | 'repo'
+/** The filter-matching set shared by list views, before grouping or duplication. */
+export function listedTasks(tasks: Task[], filter: TaskFilter, showDone: boolean): Task[] {
+  return filterTasks(tasks, filter).filter((task) => showDone || columnForTask(task) !== 'done')
+}
+
+export type LaneMode = TaskGroupMode
 
 // The keys of the lanes that collect "everything else". A control character
 // keeps them apart from any repository or label, which cannot contain one,
@@ -306,7 +312,7 @@ export function laneTitle(key: string): string {
 export function laneKeys(task: Task, mode: LaneMode): string[] {
   switch (mode) {
     case 'host':
-      return [hostLabel(task.host)]
+      return [task.host]
     case 'label':
       return task.labels && task.labels.length > 0 ? [...task.labels] : [NO_LABEL_LANE]
     case 'repo':
@@ -324,22 +330,26 @@ export interface TaskLane {
 
 export function groupIntoLanes(tasks: Task[], mode: LaneMode): TaskLane[] {
   const lanes = new Map<string, Task[]>()
+  const seen = new Set<string>()
   for (const task of tasks) {
-    for (const key of laneKeys(task, mode)) {
+    if (seen.has(task.id)) continue
+    seen.add(task.id)
+    for (const key of new Set(laneKeys(task, mode))) {
       const lane = lanes.get(key)
       if (lane) lane.push(task)
       else lanes.set(key, [task])
     }
   }
+  const title = (key: string) => mode === 'host' ? (key === 'Local' ? 'Local (SSH)' : hostLabel(key)) : laneTitle(key)
   return [...lanes.entries()]
     .sort(([a], [b]) => {
       // Lanes that collect "everything else" sort after every named lane.
       const aLast = CATCH_ALL_TITLES.has(a)
       const bLast = CATCH_ALL_TITLES.has(b)
       if (aLast !== bLast) return aLast ? 1 : -1
-      return a.localeCompare(b)
+      return title(a).localeCompare(title(b)) || a.localeCompare(b)
     })
-    .map(([key, laneTasks]) => ({ key, title: laneTitle(key), tasks: laneTasks }))
+    .map(([key, laneTasks]) => ({ key, title: title(key), tasks: laneTasks }))
 }
 
 export interface TaskPaneRef {
@@ -495,12 +505,18 @@ export function waitingCount(tasks: Task[]): number {
   return tasks.filter((task) => task.state === 'wait').length
 }
 
-/** A compact age, such as "3m" or "2h"; "" when there is no time to show. */
-export function formatElapsed(since: string | undefined, now: number): string {
-  if (!since) return ''
+/** Elapsed state seconds; unknown timestamps stay distinct from zero. */
+export function elapsedSeconds(since: string | undefined, now: number): number | null {
+  if (!since) return null
   const at = Date.parse(since)
-  if (Number.isNaN(at)) return ''
-  const seconds = Math.max(0, Math.floor((now - at) / 1000))
+  if (!Number.isFinite(at) || !Number.isFinite(now)) return null
+  return Math.max(0, Math.floor((now - at) / 1000))
+}
+
+/** A compact age, using the same numeric value as the table comparator. */
+export function formatElapsed(since: string | undefined, now: number): string {
+  const seconds = elapsedSeconds(since, now)
+  if (seconds === null) return ''
   if (seconds < 60) return 'just now'
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m`
@@ -536,4 +552,19 @@ export function isTerminalMaximizeShortcut(event: KeyboardEvent): boolean {
 export function formatShortcut(letter: string, isMac: boolean): string {
   const key = letter.toUpperCase()
   return isMac ? `⌘⇧${key}` : `Ctrl+Shift+${key}`
+}
+
+export interface TaskBoardGroup extends TaskLane {
+  columns: Array<TaskColumn & { tasks: Task[] }>
+}
+
+/** Cards alone distribute the shared groups into the common state columns. */
+export function boardGroups(groups: TaskLane[], showDone: boolean, mode: LaneMode): TaskBoardGroup[] {
+  const source = mode === 'none' && groups.length === 0 ? [{ key: '', title: '', tasks: [] }] : groups
+  return source.map(group => {
+    const columns = visibleColumns(showDone).map(column => ({ ...column, tasks: [] as Task[] }))
+    const byId = new Map(columns.map(column => [column.id, column]))
+    for (const task of group.tasks) byId.get(columnForTask(task))?.tasks.push(task)
+    return { ...group, columns }
+  })
 }

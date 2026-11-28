@@ -198,3 +198,28 @@ func TestServerProcessesMultipleLinesInOrder(t *testing.T) {
 	assert.InDelta(t, 1, resp[0]["id"], 0)
 	assert.InDelta(t, 2, resp[1]["id"], 0)
 }
+
+func TestServerExplainsQualifiedRecipientsAndObservedIdentities(t *testing.T) {
+	tools := NewServer(&fakeBoardAPIClient{}).handleToolsList().Tools
+	require.Len(t, tools, 3)
+	assert.Contains(t, tools[0].Description, "name@BoardID")
+	assert.Contains(t, tools[0].Description, "self-reports")
+	assert.Contains(t, tools[1].Description, "host/team")
+	assert.Contains(t, tools[2].Description, "roster")
+	to := tools[2].InputSchema["properties"].(map[string]any)["to"].(map[string]any)
+	assert.Contains(t, to["description"], "name@ssh:")
+}
+
+//efficacy:exempt Unchanged raw REST forwarding and MCP errors; qualified addresses need no MCP parser.
+func TestServerQualifiedBroadcastPreservesPartialDeliveryError(t *testing.T) {
+	client := &fakeBoardAPIClient{broadcastErr: errors.New("panemux board api returned 502: " +
+		`{"error":"unreachable","delivered":["worker@local"]}`)}
+	resp := serveLines(t, client, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":`+
+		`{"name":"board_broadcast","arguments":{"to":["worker@local","worker@ssh:build"],"body":"hi"}}}`)
+	assert.Equal(t, []string{"worker@local", "worker@ssh:build"}, client.gotBroadcastTo)
+	result := resp[0]["result"].(map[string]any)
+	assert.Equal(t, true, result["isError"])
+	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
+	assert.Contains(t, text, `502`)
+	assert.Contains(t, text, `"delivered":["worker@local"]`)
+}

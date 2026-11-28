@@ -169,8 +169,7 @@ func TestBootstrapRecoversAfterPathResolutionFailure(t *testing.T) {
 	watcher.pollOnce(context.Background())
 	require.Empty(t, sess.writes)
 	watcher.pollOnce(context.Background())
-	require.Len(t, sess.writes, 1)
-	require.Contains(t, string(sess.writes[0]), "/remote/home/demo/agmsg")
+	require.Empty(t, sess.writes)
 	require.Equal(t, 2, attempts)
 }
 
@@ -247,8 +246,7 @@ func TestSetupBoardBootstrapUsesSharedRunner(t *testing.T) {
 	defer func() { require.NoError(t, srv.Shutdown(context.Background())) }()
 	watcher.pollOnce(context.Background())
 	watcher.pollOnce(context.Background())
-	require.Len(t, sess.writes, 1)
-	require.Contains(t, string(sess.writes[0]), "/.agents/skills/agmsg/scripts/join.sh")
+	require.Empty(t, sess.writes)
 }
 
 func TestBootstrapWithoutHostRunnerDoesNotWrite(t *testing.T) {
@@ -346,13 +344,13 @@ func TestGlobalBoardIncludesShellAddressesAndPublishesParticipation(t *testing.T
 	require.Equal(t, "codex", state.AgentType)
 	require.False(t, state.Instructed)
 	watcher.pollOnce(context.Background())
-	require.True(t, cache.ParticipationSnapshot()["agent"].Instructed)
+	require.False(t, cache.ParticipationSnapshot()["agent"].Instructed)
 	require.False(t, cache.ParticipationSnapshot()["shell"].Instructed)
 	require.Empty(t, cache.ParticipationSnapshot()["shell"].AgentType)
 	agentSession.detectOK = false
 	watcher.pollOnce(context.Background())
 	require.Empty(t, cache.ParticipationSnapshot()["agent"].AgentType)
-	require.True(t, cache.ParticipationSnapshot()["agent"].Instructed)
+	require.False(t, cache.ParticipationSnapshot()["agent"].Instructed)
 	cfg.AgentBoard.Enabled = false
 	_, relay, disabled := setupTestBoard(t, cfg, manager)
 	require.False(t, relay.HasClients())
@@ -372,8 +370,8 @@ func TestBoardTracksPanesAddedAndRemovedAfterStartup(t *testing.T) {
 	cfg.Workspaces.Items[0].Layout.Children = []config.LayoutChild{{Pane: paneConfig("added")}}
 	watcher.pollOnce(context.Background())
 	watcher.pollOnce(context.Background())
-	require.Len(t, added.writes, 1)
-	require.True(t, cache.ParticipationSnapshot()["added"].Instructed)
+	require.Empty(t, added.writes)
+	require.False(t, cache.ParticipationSnapshot()["added"].Instructed)
 	cfg.Workspaces.Items[0].Layout.Children = nil
 	_, err := relay.Broadcast(context.Background(), board.SystemID, []string{"added"}, "removed")
 	require.ErrorContains(t, err, "unknown")
@@ -392,10 +390,10 @@ func TestBootstrapForgetsInstructionWhenPaneChangesHost(t *testing.T) {
 				PaneHosts:        map[string]string{"pane": "host-a"},
 				CurrentPaneHosts: func() map[string]string { return current },
 			})
-			watcher.bootstrapped["pane"] = &fakeAgentSession{id: "pane"}
+			watcher.pending["pane"] = &fakeAgentSession{id: "pane"}
 			watcher.refreshPanes()
-			_, instructed := watcher.bootstrapped["pane"]
-			require.Equal(t, next == "host-a", instructed)
+			_, pending := watcher.pending["pane"]
+			require.Equal(t, next == "host-a", pending)
 			require.Equal(t, current, watcher.paneHosts)
 		})
 	}

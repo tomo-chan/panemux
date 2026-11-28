@@ -72,8 +72,7 @@ func (h *Handler) sshConnections() map[string]config.SSHConnection {
 
 // connectionNameParam is the {name} path parameter, unescaped. chi matches
 // on the escaped path when there is one and hands the parameter back still
-// escaped, so a name written by hand in config.yaml with an @, : or / in it
-// would otherwise never be found.
+// escaped, including percent-encoded Unicode and plus signs in supported keys.
 func connectionNameParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	name, err := url.PathUnescape(chi.URLParam(r, "name"))
 	if err != nil {
@@ -146,6 +145,11 @@ func (h *Handler) PutConfigSSHConnection(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if err := config.ValidateSSHConnectionName(name); err != nil {
+		writeValidationError(w, err.Error())
+		return
+	}
+
 	req, ok := decodeSSHConnectionRequest(w, r)
 	if !ok {
 		return
@@ -181,9 +185,6 @@ func (h *Handler) PutConfigSSHConnection(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	// The dashboard's open connection was made with the old details; the
-	// next collection dials again with the new ones.
-	_ = h.tasks.Reconnect(name)
 	writeJSON(w, saved)
 }
 
@@ -303,7 +304,30 @@ func (h *Handler) replaceSSHConnections(w http.ResponseWriter, next map[string]c
 		writeJSONError(w, http.StatusInternalServerError, "failed to save ssh_connections")
 		return false
 	}
+	changed := changedSSHConnectionKeys(previous, next)
+	// Drop ready connections and in-flight dials before advancing the watermark,
+	// all under cfgMu. ForgetHost does not re-enter the membership callback.
+	for _, name := range changed {
+		h.tasks.ForgetHost(name)
+	}
+	h.invalidateBoardConnections(changed)
 	return true
+}
+
+func changedSSHConnectionKeys(previous, next map[string]config.SSHConnection) []string {
+	var changed []string
+	for name, old := range previous {
+		current, exists := next[name]
+		if !exists || current != old {
+			changed = append(changed, name)
+		}
+	}
+	for name := range next {
+		if _, exists := previous[name]; !exists {
+			changed = append(changed, name)
+		}
+	}
+	return changed
 }
 
 func (h *Handler) sshConnectionEntry(

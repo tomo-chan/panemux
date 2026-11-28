@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { useLayout } from './useLayout'
+import { collectPanes } from '../utils/layoutTree'
 import type { LayoutNode } from '../schemas'
 
 const validLayout: LayoutNode = {
@@ -916,6 +917,7 @@ describe('useLayout', () => {
       expect(result.current.workspaces?.items[0].layout.children[0].pane?.id).toBe('right')
     })
 
+    //efficacy:exempt Pins the existing swapPanes no-op before initial layout load; this PR does not change swapPanes.
     it('does nothing when layout is null', async () => {
       const fetchMock = vi
         .fn()
@@ -934,7 +936,139 @@ describe('useLayout', () => {
     })
   })
 
+  describe('createNamedWorkspace', () => {
+    const checkInvalidWorkspaceName = async (name: string) => {
+      window.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => validWorkspaces })
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+      await act(async () => { await expect(result.current.createNamedWorkspace(name)).rejects.toThrow() })
+      expect(window.fetch).not.toHaveBeenCalledWith('/api/workspaces', { method: 'POST' })
+    }
+    it('refuses an empty workspace name before POST', () => checkInvalidWorkspaceName(''))
+    it('refuses a whitespace workspace name before POST', () => checkInvalidWorkspaceName('   '))
+    it('refuses a duplicate workspace name before POST', () => checkInvalidWorkspaceName('Dev'))
+    it('refuses a trimmed duplicate workspace name before POST', () => checkInvalidWorkspaceName(' Dev '))
+
+
+    it('reports workspace creation failure without naming or creating a pane', async () => {
+      window.fetch = vi.fn().mockImplementation(async (_url, init) => init?.method === 'POST'
+        ? { ok: false, status: 500 } : { ok: true, json: async () => validWorkspaces })
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+      await act(async () => { await expect(result.current.createNamedWorkspace('Review')).rejects.toThrow('HTTP 500') })
+      expect(result.current.workspaces).toEqual(validWorkspaces)
+      expect(window.fetch).not.toHaveBeenCalledWith('/api/workspaces/new', expect.anything())
+    })
+
+    const checkCreatedWorkspace = async (renameOK: boolean) => {
+      const created = { ...validWorkspaces, active: 'new', items: [...validWorkspaces.items,
+        { id: 'new', title: 'Workspace 3', layout: validLayout }] }
+      window.fetch = vi.fn().mockImplementation(async (_url, init) => {
+        if (init?.method === 'PUT') return { ok: renameOK, status: 500, json: async () => ({ ...created,
+          items: created.items.map(w => w.id === 'new' ? { ...w, title: 'Review' } : w) }) }
+        return { ok: true, json: async () => init?.method === 'POST' ? created : validWorkspaces }
+      })
+      const onCreated = vi.fn()
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+      await act(async () => {
+        if (renameOK) expect(await result.current.createNamedWorkspace(' Review ', onCreated)).toBe('new')
+        else await expect(result.current.createNamedWorkspace('Review', onCreated)).rejects.toThrow('HTTP 500')
+      })
+      expect(onCreated).toHaveBeenCalledWith('new')
+      expect(result.current.workspaces?.items.at(-1)?.title).toBe(renameOK ? 'Review' : 'Workspace 3')
+      expect(window.fetch).toHaveBeenCalledWith('/api/workspaces/new', expect.objectContaining({ body: JSON.stringify({ title: 'Review' }) }))
+      expect(window.fetch).not.toHaveBeenCalledWith('/api/sessions', expect.anything())
+    }
+    it('keeps the created workspace when naming succeeds', () => checkCreatedWorkspace(true))
+    it('keeps the created workspace when naming fails', () => checkCreatedWorkspace(false))
+
+  })
+
   describe('createPane', () => {
+    it('opens in a just-created workspace with the callback captured before creation', async () => {
+      let server = structuredClone(validWorkspaces)
+      const newLayout = { direction: 'horizontal' as const, children: [{ size: 100, pane: { id: 'new-main', type: 'local' as const } }] }
+      const fetchMock = vi.fn().mockImplementation(async (url, init) => {
+        if (url === '/api/workspaces' && init?.method === 'POST') {
+          server = { ...server, active: 'new', items: [...server.items, { id: 'new', title: 'Workspace 3', layout: newLayout }] }
+        }
+        if (url === '/api/workspaces/new' && init?.method === 'PUT') {
+          server = { ...server, items: server.items.map(w => w.id === 'new' ? { ...w, title: 'Review' } : w) }
+        }
+        return { ok: true, json: async () => url === '/api/display' ? validDisplay : server }
+      })
+      window.fetch = fetchMock
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+      const { createPane, createNamedWorkspace } = result.current
+      await act(async () => {
+        const id = await createNamedWorkspace('Review')
+        await createPane({ id: 'created', type: 'tmux', tmux_session: 'task' }, { type: 'workspace-edge', edge: 'right' }, id)
+      })
+      expect(result.current.workspaces?.items.slice(0, 2)).toEqual(validWorkspaces.items)
+      expect(result.current.workspaces?.active).toBe('new')
+      expect(result.current.layout?.children.map(c => c.pane?.id)).toEqual(['new-main', 'created'])
+      expect(fetchMock).toHaveBeenCalledWith('/api/workspaces/new/layout', expect.objectContaining({
+        method: 'PUT', body: JSON.stringify(result.current.layout),
+      }))
+    })
+
+    const checkPaneRetry = async (failure: 'layout' | 'activation') => {
+      let server = structuredClone(validWorkspaces)
+      let created = false
+      let failed = false
+      const pane = { id: 'created', type: 'tmux' as const, tmux_session: 'task' }
+      const fetchMock = vi.fn().mockImplementation(async (url, init) => {
+        if (url === '/api/sessions') {
+          if (created) return { ok: false, status: 409 }
+          created = true
+        }
+        if (url === '/api/workspaces/ops/layout') {
+          if (failure === 'layout' && !failed) { failed = true; return { ok: false, status: 500 } }
+          server = { ...server, items: server.items.map(w => w.id === 'ops' ? { ...w, layout: JSON.parse(init.body) } : w) }
+        }
+        if (url === '/api/workspaces/active' && failure === 'activation' && !failed) {
+          failed = true
+          return { ok: false, status: 500 }
+        }
+        return { ok: true, json: async () => url === '/api/display' ? validDisplay : server }
+      })
+      window.fetch = fetchMock
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+      await act(async () => {
+        await expect(result.current.createPane(pane, { type: 'workspace-edge', edge: 'right' }, 'ops')).rejects.toThrow('HTTP 500')
+      })
+      if (failure === 'activation') {
+        await act(async () => {
+          await expect(result.current.createPane(pane, { type: 'workspace-edge', edge: 'right' }, 'dev'))
+            .rejects.toThrow('Terminal is already in workspace Ops')
+        })
+      }
+      await act(async () => {
+        await result.current.createPane(pane, { type: 'workspace-edge', edge: 'right' }, 'ops')
+      })
+      expect(fetchMock.mock.calls.filter(([url]) => url === '/api/sessions')).toHaveLength(1)
+      expect(result.current.workspaces?.items[0]).toEqual(validWorkspaces.items[0])
+      expect(result.current.workspaces?.active).toBe('ops')
+      expect(collectPanes(result.current.layout!).map(p => p.id)).toEqual(['ops-main', 'created'])
+    }
+    it('resumes after layout failure without duplicate sessions or panes', () => checkPaneRetry('layout'))
+    it('resumes after activation failure without duplicate sessions or panes', () => checkPaneRetry('activation'))
+
+
+    it('refuses a selected workspace deleted on the server without creating a session', async () => {
+      window.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => validWorkspaces })
+      const { result } = renderHook(() => useLayout())
+      await waitFor(() => expect(result.current.workspaces).not.toBeNull())
+      await act(async () => {
+        await expect(result.current.createPane({ id: 'created', type: 'tmux', tmux_session: 'task' },
+          { type: 'workspace-edge', edge: 'right' }, 'deleted')).rejects.toThrow('Workspace no longer exists')
+      })
+      expect(window.fetch).not.toHaveBeenCalledWith('/api/sessions', expect.anything())
+    })
+
     it('creates a pane on the workspace edge and persists the layout', async () => {
       const fetchMock = vi.fn()
         .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(validWorkspaces) } as Response)

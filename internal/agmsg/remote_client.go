@@ -9,13 +9,25 @@ import (
 	"panemux/internal/host"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // execArguments forwards arguments through fixed script text; values never become script text.
 const execArguments = `exec "$@"`
 
-// validAgmsgIdentifier constrains team/from/to values (pane IDs, the
-// configured team name, or SystemID) to a safe, constrained alphabet before
+// Board calls act for other agents, never as the calling session. The pinned
+// built-in drivers cannot identify a pane after these markers are removed, so
+// self-rename returns before reading/writing durable marks. Keep HOME, PATH and
+// storage settings. Child Bash must not restore the markers or opt in at startup.
+const agmsgEnvironment = `unset BASH_ENV ENV TMUX TMUX_PANE HERDR_ENV HERDR_SOCKET_PATH HERDR_PANE_ID
+unset ORCA_TERMINAL_HANDLE CLAUDE_CODE_ENTRYPOINT CODEX_THREAD_ID
+export AGMSG_SELF_NAME=off
+`
+
+const agmsgExecArguments = agmsgEnvironment + execArguments
+
+// validAgmsgIdentifier constrains team values to the existing safe alphabet.
+// From/to use board.ParseIdentity's structured name and BoardID validation before
 // they are ever placed in a Runner.Run argument list — the same
 // regex-allowlist-then-quote shape internal/session/ssh.go's
 // validRemotePath already applies to cwd.
@@ -27,20 +39,18 @@ var validAgmsgIdentifier = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 // regex-allowlisted directly the way an identifier or path can — encoding
 // it to a fixed alphabet first, then allowlisting the *encoded* string,
 // mirrors validRemotePath's accepted shape for a value that couldn't
-// otherwise take it. See docs/security.md and docs/agent-board.md's
-// Security model section.
+// otherwise take it. See docs/security/agent-board.md.
 var validBase64 = regexp.MustCompile(`^[A-Za-z0-9+/]*={0,2}$`)
 
 // sendBase64WrapperScript is a fixed script string, never built from
 // tainted input: every piece of caller-supplied data ($1 through $5) is
 // delivered as a separate, already-quoted shell positional parameter by
 // Runner.Run/quoteArgs, never interpolated into this script text.
-// send.sh has no stdin option for its body argument (see
-// docs/agent-board.md's Integration with agmsg section), so this decodes
-// the base64-encoded body back to its original bytes remotely, immediately
-// before the one call site that needs the raw value.
+// Decode before invoking the public --body - interface so option-like bodies
+// remain stdin data. Command substitution retains upstream's trailing-newline
+// normalization, and a decode failure prevents sending.
 const sendBase64WrapperScript = `send="$1"; team="$2"; from="$3"; to="$4"; ` +
-	`body=$(printf '%s' "$5" | base64 -d) && exec "$send" "$team" "$from" "$to" "$body" --force`
+	`body=$(printf '%s' "$5" | base64 -d) && printf '%s' "$body" | "$send" "$team" "$from" "$to" --body - --force`
 
 // sendBase64WrapperScriptName is the dummy $0 value passed to the `sh -c`
 // invocation that runs sendBase64WrapperScript — it becomes the script's
@@ -56,6 +66,15 @@ func validateAgmsgIdentifier(label, value string) error {
 }
 
 var _ board.MessageClient = (*RemoteAgmsgClient)(nil)
+
+// Shell variables cannot represent NUL bytes. Reject before executing a script
+// rather than silently sending altered text or breaking own-send ledger hashes.
+func validateMessageBody(body string) error {
+	if strings.IndexByte(body, 0) >= 0 {
+		return errors.New("agmsg: message body contains unsupported NUL byte")
+	}
+	return nil
+}
 
 // RemoteAgmsgClient runs agmsg's scripts on a remote host over the SSH exec
 // channel the shared host.Runner already exposes.
@@ -76,10 +95,13 @@ func (c *RemoteAgmsgClient) HostID() string { return c.hostID }
 func (c *RemoteAgmsgClient) apiScript() string  { return c.agmsgPath + "/scripts/api.sh" }
 func (c *RemoteAgmsgClient) sendScript() string { return c.agmsgPath + "/scripts/send.sh" }
 
-// Send always passes --force (via sendBase64WrapperScript's fixed "exec ...
-// --force" tail) — see docs/agent-board.md's Integration with agmsg
-// section for why every board-originated send does.
+// Send always passes --force (via sendBase64WrapperScript's fixed
+// --force tail) — see docs/backend/agent-board/agmsg.md's Integration with
+// agmsg section for why every board-originated send does.
 func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body string) error {
+	if err := validateMessageBody(body); err != nil {
+		return err
+	}
 	if err := validateIdentifiers(team, from, to); err != nil {
 		return err
 	}
@@ -94,7 +116,7 @@ func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body strin
 		"sh", "-c", sendBase64WrapperScript, sendBase64WrapperScriptName,
 		c.sendScript(), team, from, to, encoded,
 	}
-	if _, err := c.executor.Run(ctx, execArguments, args...); err != nil {
+	if _, err := c.executor.Run(ctx, agmsgExecArguments, args...); err != nil {
 		return fmt.Errorf("agmsg send.sh (remote): %w", err)
 	}
 	return nil
@@ -106,7 +128,7 @@ func (c *RemoteAgmsgClient) Since(ctx context.Context, team, afterID string, lim
 	}
 
 	args := []string{c.apiScript(), "get", "teams", team, "messages", "--limit", strconv.Itoa(limit)}
-	out, err := c.executor.Run(ctx, execArguments, args...)
+	out, err := c.executor.Run(ctx, agmsgExecArguments, args...)
 	if err != nil {
 		return nil, fmt.Errorf("agmsg api.sh (remote): %w", err)
 	}
@@ -117,11 +139,11 @@ func validateIdentifiers(team, from, to string) error {
 	if err := validateAgmsgIdentifier("team", team); err != nil {
 		return err
 	}
-	if err := validateAgmsgIdentifier("from", from); err != nil {
-		return err
+	if _, err := board.ParseIdentity(from); err != nil {
+		return fmt.Errorf("agmsg: invalid from: %w", err)
 	}
-	if err := validateAgmsgIdentifier("to", to); err != nil {
-		return err
+	if _, err := board.ParseIdentity(to); err != nil {
+		return fmt.Errorf("agmsg: invalid to: %w", err)
 	}
 	return nil
 }

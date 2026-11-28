@@ -209,8 +209,9 @@ func TestGetBoardSessionToken_WildcardBindHost_Allowed(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
+//efficacy:exempt documentation link update only; test and covered implementation are unchanged.
 func TestGetBoardSessionToken_XForwardedForHeader_Forbidden(t *testing.T) {
-	// A same-host reverse proxy (the exact mitigation docs/security.md
+	// A same-host reverse proxy (the exact mitigation docs/security/auth.md
 	// itself recommends for exposing panemux beyond loopback) makes every
 	// proxied request arrive with a loopback RemoteAddr and, under common
 	// proxy defaults (nginx's $proxy_host, Apache's ProxyPreserveHost Off),
@@ -289,6 +290,25 @@ func TestGetBoardStatus_PopulatedCache_ReturnsEntries(t *testing.T) {
 	require.Contains(t, resp.Statuses, "pane-a")
 	assert.Equal(t, "working", resp.Statuses["pane-a"].State)
 	assert.Equal(t, "feature/x", resp.Statuses["pane-a"].Branch)
+}
+
+func TestGetBoardStatus_HostScopedReportsPreservePaneContract(t *testing.T) {
+	cache := board.NewBoardCache()
+	cache.SyncParticipation(map[string]string{"pane-a": "local"})
+	cache.RecordStatus("pane-a@local", board.Status{State: "working"})
+	cache.RecordStatus("pane-a@ssh:build", board.Status{State: "wrong-host"})
+	cache.RecordStatus("worker@local", board.Status{State: "hidden-until-S3b"})
+	r := setupRouterWithHandler(setupBoardRouter(cache, nil))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/board/status", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp boardStatusResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Statuses, 1)
+	assert.Equal(t, "working", resp.Statuses["pane-a"].State)
+	require.Len(t, resp.Participation, 1)
+	assert.Equal(t, "local", resp.Participation["pane-a"].Host)
+	assert.NotNil(t, resp.Participation["pane-a"].LastReport)
 }
 
 func TestGetBoardMessages_EmptyCache_ReturnsEmptyArray(t *testing.T) {

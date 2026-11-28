@@ -4,13 +4,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 // defaultBoardCacheHistoryLimit bounds the in-memory history ring buffer.
 // It comfortably exceeds the relay's cold-start backfill limit (see
-// docs/agent-board.md's Cross-host relay section) so a freshly repopulated
+// docs/backend/agent-board/relay.md's Cross-host relay section) so a freshly repopulated
 // cache isn't immediately trimmed back down.
 const defaultBoardCacheHistoryLimit = 2000
 
@@ -77,8 +78,8 @@ func newCacheEpoch() string {
 	return hex.EncodeToString(buf[:])
 }
 
-// RecordStatus stores s as paneID's latest self-reported status, overwriting
-// any previous status for that pane. UpdatedAt is set here, not by the
+// RecordStatus stores s under its host-qualified identity, overwriting
+// any previous status for that identity. UpdatedAt is set here, not by the
 // caller, to when the write actually happened.
 func (c *BoardCache) RecordStatus(paneID string, s Status) {
 	c.mu.Lock()
@@ -90,7 +91,7 @@ func (c *BoardCache) RecordStatus(paneID string, s Status) {
 // AppendMessage appends r to the history ring buffer, assigning it the next
 // Seq. When the buffer exceeds its bound, the oldest rows are dropped —
 // the same accepted truncation tradeoff the relay's own bounded polling
-// already makes (see docs/agent-board.md).
+// already makes (see docs/backend/agent-board/relay.md).
 func (c *BoardCache) AppendMessage(r Row) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -107,13 +108,34 @@ func (c *BoardCache) AppendMessage(r Row) {
 	}
 }
 
-// StatusSnapshot returns a copy of the current pane-ID -> Status map.
+// StatusSnapshot returns a copy of the host-qualified identity -> Status map.
 func (c *BoardCache) StatusSnapshot() map[string]Status {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	out := make(map[string]Status, len(c.status))
 	for k, v := range c.status {
 		out[k] = v
+	}
+	return out
+}
+
+// PaneStatusSnapshot projects host-qualified reports onto configured panes for
+// the existing API. Pane-free identities remain internal until the API migration.
+func (c *BoardCache) PaneStatusSnapshot() map[string]Status {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.paneStatusesLocked()
+}
+
+func (c *BoardCache) paneStatusesLocked() map[string]Status {
+	out := make(map[string]Status)
+	for key, status := range c.status {
+		name, host, qualified := strings.Cut(key, "@")
+		if !qualified {
+			out[key] = status
+		} else if pane, ok := c.participation[name]; ok && pane.Host == host {
+			out[name] = status
+		}
 	}
 	return out
 }

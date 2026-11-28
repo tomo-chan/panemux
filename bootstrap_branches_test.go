@@ -36,33 +36,6 @@ func captureBootstrapLog(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-// A persisted pane id names a pane from a previous run of panemux. By the
-// time the first tick arrives that pane may simply not exist — the operator
-// deleted it while panemux was stopped. Seeding must skip it and go on to the
-// rest, not stop at the first missing one.
-func TestPollOnceSkipsAPersistedPaneThatNoLongerExists(t *testing.T) {
-	manager := session.NewManager()
-	survivor := &fakeAgentSession{id: "pane-b", sessionType: session.TypeTmux}
-	manager.Add(survivor)
-	t.Cleanup(manager.CloseAll)
-
-	w := newTestBootstrapWatcher(testBootstrapWatcherConfig{
-		Manager:       manager,
-		PaneHosts:     map[string]string{"pane-b": boardHostIDLocal},
-		PaneModes:     func() map[string]string { return nil },
-		ResolvedPaths: map[string]string{boardHostIDLocal: localAgmsgDir(t, true)},
-		Team:          "panemux",
-	})
-	w.LoadPersistedState([]string{"pane-gone", "pane-b"})
-
-	w.pollOnce(context.Background())
-
-	assert.True(t, w.seeded)
-	assert.NotContains(t, w.bootstrapped, "pane-gone", "a pane that is not there cannot be seeded")
-	assert.Contains(t, w.bootstrapped, "pane-b",
-		"the missing pane must not stop the ones after it from being seeded")
-}
-
 // A pane that vanishes while it is pending has to be forgotten. Leaving it in
 // the map means every later tick looks it up again, forever, for a pane that
 // is never coming back.
@@ -192,7 +165,7 @@ func TestBootstrapWarningsOfDifferentKindsDoNotSuppressEachOther(t *testing.T) {
 }
 
 // A pane that is restarted is a new Session object — the same signal
-// bootstrapped and givenUp already compare by identity — so nothing the old
+// detection warnings compare by identity — so nothing the old
 // session's failures suppressed may carry over to it. Without this, the one
 // case where the operator hears *nothing* would be the strongest recovery
 // signal there is: the pane was torn down and recreated.
@@ -289,7 +262,6 @@ func TestAgmsgPresentReportsUncheckedWhenTheHostHasNoResolvedPath(t *testing.T) 
 	w := newTestBootstrapWatcher(testBootstrapWatcherConfig{
 		Manager:       session.NewManager(),
 		PaneHosts:     map[string]string{"pane-a": "workstation"},
-		PaneModes:     func() map[string]string { return nil },
 		ResolvedPaths: map[string]string{},
 		Team:          "panemux",
 	})

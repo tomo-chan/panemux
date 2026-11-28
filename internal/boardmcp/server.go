@@ -119,7 +119,7 @@ func (e *jsonrpcError) Error() string { return e.Message }
 // Server is the command center's narrow MCP server: three tools
 // (board_status, board_messages, board_broadcast), each a thin wrapper
 // around a BoardAPIClient call. It never calls the message transport or anything else
-// directly — see docs/agent-board.md's Command center section.
+// directly — see docs/backend/agent-board/command-center.md.
 type Server struct {
 	client BoardAPIClient
 }
@@ -271,22 +271,26 @@ func arrayProperty(itemKind, description string) map[string]any {
 func (s *Server) handleToolsList() toolsListResult {
 	return toolsListResult{Tools: []toolDef{
 		{
-			Name:        toolBoardStatus,
-			Description: "Get the current self-reported status of every board-enabled pane " + statusToolFieldsHint,
+			Name: toolBoardStatus,
+			Description: "Get board identities by name@BoardID, including names without panes, " +
+				"primary task observations and supplemental self-reports " + statusToolFieldsHint,
 			InputSchema: objectSchema(map[string]any{}),
 		},
 		{
-			Name:        toolBoardMessages,
-			Description: "Get recent board message history. Optional 'since' returns only newer messages.",
+			Name: toolBoardMessages,
+			Description: "Get recent board message history including source host/team. " +
+				"Combine from and host to identify the sender; qualified to names identify cross-host recipients. " +
+				"Optional 'since' returns only newer messages.",
 			InputSchema: objectSchema(map[string]any{
 				"since": typedProperty("integer", "Only return messages newer than this sequence number"),
 			}),
 		},
 		{
-			Name:        toolBoardBroadcast,
-			Description: "Send a message to one or more board-enabled panes.",
+			Name: toolBoardBroadcast,
+			Description: "Send a message to qualified name@BoardID recipients or legacy pane IDs. " +
+				"Names need no pane or roster entry. Validation sends nothing; send failures report delivered recipients.",
 			InputSchema: objectSchema(map[string]any{
-				"to":               arrayProperty("string", "Pane IDs to send to"),
+				"to":               arrayProperty("string", "Recipients: name@local, name@ssh:connection-key, or legacy pane IDs"),
 				broadcastBodyField: typedProperty("string", "Message text"),
 			}, "to", broadcastBodyField),
 		},

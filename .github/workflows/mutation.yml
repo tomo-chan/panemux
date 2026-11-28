@@ -1,6 +1,6 @@
 name: mutation
 
-# Diff-scoped mutation testing: gate G4(c) in docs/quality-gateway.md, roadmap
+# Diff-scoped mutation testing: gate G4(c) in docs/engineering/quality-gates.md, roadmap
 # item 6 of issue #180.
 #
 # Asks the one question the other three G4 gates cannot: would the tests NOTICE
@@ -14,12 +14,12 @@ name: mutation
 # because 34% of those 108 survivors are ones nobody should "fix" — buffer sizes
 # and timeout constants whose killing test would be a tautology itself. Failing
 # on those from day one would have been wrong more often than right, and
-# principle 4 in docs/quality-gateway.md is that a gate which cries wolf gets
+# principle 4 in docs/engineering/quality-gates.md is that a gate which cries wolf gets
 # routed around, taking the working gates with it.
 #
 # Three things had to be true before the exit code could change, and each was
 # measured rather than assumed — the full record is decision D9 in
-# docs/quality-gateway/decisions.md:
+# docs/decisions/quality-gateway.md (D9):
 #
 #   - The 34% have somewhere to go: //mutation:exempt now waives a mutant TYPE
 #     and not a whole line (#236), so a reason written about the buffer-size
@@ -120,7 +120,7 @@ jobs:
       # must have to build or test the project. Pinned to the version #180's
       # measurement was taken with, rather than @latest, so a new release
       # cannot change what this job reports without anyone choosing that: every
-      # number in docs/quality-gateway/mutants.md came
+      # number in docs/decisions/quality-gateway.md (D9) came
       # from v0.6.0.
       - name: Install gremlins
         run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0

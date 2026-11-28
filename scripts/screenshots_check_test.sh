@@ -65,7 +65,7 @@ expect 1 'the capture itself' "frontend/screenshots/showcase.yml${nl}" 'frontend
 expect 1 'the remedy is named' "frontend/src/App.tsx${nl}" 'make screenshots'
 expect 1 'the escape hatch is named' "frontend/src/App.tsx${nl}" 'screenshots-exempt'
 expect 1 'a change elsewhere in docs/ is not new images' \
-	"frontend/src/App.tsx${nl}docs/ui-design.md${nl}README.md${nl}"
+	"frontend/src/App.tsx${nl}docs/ui/overview.md${nl}README.md${nl}"
 expect 1 'only the triggering files are listed' \
 	"frontend/src/App.tsx${nl}internal/api/server.go${nl}" 'frontend/src/App.tsx'
 
@@ -75,6 +75,12 @@ expect 0 'a component change with new images' \
 	"frontend/src/components/PaneHeader.tsx${nl}docs/images/workspace.png${nl}"
 expect 0 'any one image is enough' \
 	"frontend/src/App.tsx${nl}frontend/src/styles/attention.css${nl}docs/images/task-dashboard.png${nl}"
+expect 1 'an image index is not a retaken screenshot' \
+	"frontend/src/App.tsx${nl}docs/images/index.md${nl}"
+expect 1 'other non-image files are not retaken screenshots' \
+	"frontend/src/App.tsx${nl}docs/images/notes.txt${nl}"
+expect 1 'nested PNG files are not capture output' \
+	"frontend/src/App.tsx${nl}docs/images/nested/sample.png${nl}"
 
 # ── Changes the images cannot show: pass ────────────────────────────────────
 
@@ -87,7 +93,7 @@ expect 1 'a shell script of the capture' "frontend/screenshots/screenshots-env.s
 expect 0 'hooks, schemas and utils hold no presentation' \
 	"frontend/src/hooks/useTasks.ts${nl}frontend/src/schemas/index.ts${nl}frontend/src/utils/layoutTree.ts${nl}"
 expect 0 'the e2e suite' "frontend/e2e/core-multiplexer.spec.ts${nl}"
-expect 0 'documentation only' "README.md${nl}docs/ui-design.md${nl}"
+expect 0 'documentation only' "README.md${nl}docs/ui/overview.md${nl}"
 expect 0 'a path that only contains a trigger as a substring' \
 	"docs/frontend/src/components/note.md${nl}vendor/frontend/index.html${nl}"
 

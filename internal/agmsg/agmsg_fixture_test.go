@@ -16,9 +16,9 @@ import (
 )
 
 // fixtureDir holds Tier 1 of the agmsg compatibility contract (see
-// docs/agent-board/agmsg-contract.md#agmsg-compatibility-contract): fast, hermetic tests
-// that assert panemux's own parsing against frozen, versioned output
-// captured from a real agmsg install at TestedAgmsgVersion. See
+// docs/backend/agent-board/agmsg.md#agmsg-compatibility-contract): fast,
+// hermetic tests that assert panemux's own parsing against frozen, versioned
+// output captured from a real agmsg install at TestedAgmsgVersion. See
 // fixtureDir/README.md for how it is regenerated, and for what the capture
 // caught that the hand-written fixtures it replaced could not.
 const fixtureDir = "testdata/agmsg-v" + TestedAgmsgVersion
@@ -65,6 +65,26 @@ func TestAgmsgFixture_TeamMessages_ParsesAllRowsInOrder(t *testing.T) {
 
 	assert.Equal(t, fixtureMessages(t)[3].ID, rows[3].ID)
 	assert.Equal(t, "lgtm, merging now", rows[3].Body)
+}
+
+//efficacy:exempt parser regression against a real release capture; parsing already preserved arbitrary from/to strings
+func TestAgmsgFixture_QualifiedMessages(t *testing.T) {
+	// This historical capture remains pinned even when the current fixture advances.
+	data, err := os.ReadFile("testdata/agmsg-v1.7.1/get_qualified_messages.jsonl")
+	require.NoError(t, err)
+	rows := parseAgmsgMessageRows(data, "ssh:build.1")
+	require.Len(t, rows, 2)
+	assert.Equal(t, "orch.1@local", rows[0].From)
+	assert.Equal(t, "worker.2@ssh:build.1", rows[0].To)
+	assert.Equal(t, "worker.2@ssh:build.1", rows[1].From)
+	assert.Equal(t, "orch.1@local", rows[1].To)
+	for _, row := range rows {
+		assert.Equal(t, "relay-contract", row.Team)
+		assert.Equal(t, "ssh:build.1", row.Host)
+		assert.Equal(t, "'quoted' $(id) `whoami`\n世界", row.Body)
+		assert.NotEmpty(t, row.ID)
+		assert.False(t, row.At.IsZero())
+	}
 }
 
 func TestAgmsgFixture_TeamMessages_StatusRowRecognized(t *testing.T) {

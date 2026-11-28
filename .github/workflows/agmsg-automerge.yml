@@ -1,0 +1,106 @@
+name: agmsg-automerge
+
+# Automatically squash-merges verified same-major agmsg pin bump PRs once every
+# required check succeeds, without enabling repository-wide auto-merge or
+# altering branch rulesets for other pull requests.
+on:
+  workflow_run:
+    workflows:
+      - ci
+      - agmsg-contract
+      - coverage-blocks
+      - efficacy
+      - mutation
+      - scenarios
+      - screenshots
+      - pr-title
+    types: [completed]
+  check_suite:
+    types: [completed]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  # Runs only trusted main checkout code with a read-only GITHUB_TOKEN and no
+  # App secrets. Never checks out or executes pull request code.
+  agmsg-automerge-verify:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'automation/agmsg-v') &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'check_suite' &&
+       github.event.check_suite.conclusion == 'success' &&
+       startsWith(github.event.check_suite.head_branch, 'automation/agmsg-v'))
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      statuses: read
+    runs-on: ubuntu-latest
+    outputs:
+      eligible: ${{ steps.verify.outputs.eligible }}
+      pr_number: ${{ steps.verify.outputs.pr_number }}
+      head_sha: ${{ steps.verify.outputs.head_sha }}
+      tag: ${{ steps.verify.outputs.tag }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Verify agmsg bump PR eligibility and required checks
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}
+        run: python3 -B scripts/agmsg_contract.py verify-automerge
+      - name: Record verdict
+        env:
+          ELIGIBLE: ${{ steps.verify.outputs.eligible }}
+          REASON: ${{ steps.verify.outputs.reason }}
+          PR_NUMBER: ${{ steps.verify.outputs.pr_number }}
+        run: echo "agmsg-automerge: eligible=$ELIGIBLE pr=#$PR_NUMBER reason=$REASON" >> "$GITHUB_STEP_SUMMARY"
+
+  # Mints the short-lived GitHub App token only after read-only verification
+  # passes, and merges the verified HEAD SHA with --match-head-commit so
+  # release-please runs normally on the resulting push to main.
+  agmsg-automerge-merge:
+    needs: agmsg-automerge-verify
+    if: needs.agmsg-automerge-verify.outputs.eligible == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Check optional App configuration
+        id: app
+        env:
+          APP_ID: ${{ secrets.AGMSG_BUMP_APP_ID }}
+          APP_KEY: ${{ secrets.AGMSG_BUMP_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APP_ID" ] && [ -n "$APP_KEY" ]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'GitHub App secrets are absent; skipping automated merge.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        if: steps.app.outputs.enabled == 'true'
+        id: token
+        with:
+          app-id: ${{ secrets.AGMSG_BUMP_APP_ID }}
+          private-key: ${{ secrets.AGMSG_BUMP_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Squash-merge verified agmsg bump PR
+        if: steps.app.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          PR_NUMBER: ${{ needs.agmsg-automerge-verify.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.agmsg-automerge-verify.outputs.head_sha }}
+        run: python3 -B scripts/agmsg_contract.py automerge

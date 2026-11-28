@@ -129,6 +129,9 @@ jobs:
       - name: Test (sandbox-safe scripts)
         run: make test-tmpdir-guard test-install-hooks test-golangci-lint-cache test-require-pty test-verify
 
+      - name: Test and validate the OKF documentation bundle
+        run: make test-docs-okf check-docs-okf
+
       # The pre-push hook checks only what a push touches (issue #335), so CI is
       # where every suite `make check` holds has to run. These three had no
       # step anywhere: the pre-push selector's own tests, the red-check's and

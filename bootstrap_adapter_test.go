@@ -12,11 +12,9 @@ import (
 type testBootstrapWatcherConfig struct {
 	Manager       *session.Manager
 	PaneHosts     map[string]string
-	PaneModes     func() map[string]string
 	ResolvedPaths map[string]string
 	RunnerForHost func(string) host.Runner
 	ResolvePath   func(context.Context, string) (string, error)
-	Persist       func([]string)
 	Team          string
 }
 type testParticipation struct {
@@ -56,8 +54,8 @@ func newTestBootstrapWatcher(cfg testBootstrapWatcherConfig) *bootstrapWatcher {
 			runner:        runner, resolve: cfg.ResolvePath, id: id}
 	}
 	return newBootstrapWatcher(bootstrapWatcherConfig{
-		Manager:   cfg.Manager,
-		PaneHosts: cfg.PaneHosts,
-		PaneModes: cfg.PaneModes, Team: cfg.Team, Persist: cfg.Persist,
+		Manager:              cfg.Manager,
+		PaneHosts:            cfg.PaneHosts,
+		Team:                 cfg.Team,
 		ParticipationForHost: func(id string) board.Participation { return participants[id] }})
 }

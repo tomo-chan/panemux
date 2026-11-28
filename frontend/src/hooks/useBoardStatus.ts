@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BoardParticipation, BoardMessage, BoardMessagesResponseSchema, BoardStatusEntry, BoardStatusResponseSchema } from '../schemas'
+import { BoardIdentity, BoardParticipation, BoardMessage, BoardMessagesResponseSchema, BoardStatusEntry, BoardStatusResponseSchema } from '../schemas'
 
 const BOARD_STATUS_POLL_INTERVAL_MS = 5000
 const MAX_MESSAGES = 500
@@ -10,6 +10,7 @@ interface UseBoardStatusOptions {
 }
 
 export interface UseBoardStatusResult {
+  identities: Record<string, BoardIdentity>
   participation: Record<string, BoardParticipation>
   statuses: Record<string, BoardStatusEntry>
   messages: BoardMessage[]
@@ -22,11 +23,12 @@ function errorMessageForStatus(status: number): string {
 }
 
 // useBoardStatus polls the Agent Board's status snapshot and incremental
-// message history for the dashboard panel. See docs/agent-board.md's
-// Architecture section: GET /api/board/status always returns a full
+// message history for the dashboard panel. See docs/backend/agent-board/relay.md
+// and docs/api/agent-board.md: GET /api/board/status always returns a full
 // snapshot, while GET /api/board/messages?since=<seq> is incremental against
 // panemux's own monotonic cursor (not an agmsg-native id).
 export function useBoardStatus({ enabled, token }: UseBoardStatusOptions): UseBoardStatusResult {
+  const [identities, setIdentities] = useState<Record<string, BoardIdentity>>({})
   const [participation, setParticipation] = useState<Record<string, BoardParticipation>>({})
   const [statuses, setStatuses] = useState<Record<string, BoardStatusEntry>>({})
   const [messages, setMessages] = useState<BoardMessage[]>([])
@@ -60,7 +62,7 @@ export function useBoardStatus({ enabled, token }: UseBoardStatusOptions): UseBo
         statusError = errorMessageForStatus(res.status)
       } else {
         const data = BoardStatusResponseSchema.parse(await res.json())
-        if (!cancelledRef.current) { setStatuses(data.statuses); setParticipation(data.participation) }
+        if (!cancelledRef.current) { setIdentities(data.identities); setStatuses(data.statuses); setParticipation(data.participation) }
       }
     } catch {
       statusError = 'Failed to load board status.'
@@ -152,5 +154,5 @@ export function useBoardStatus({ enabled, token }: UseBoardStatusOptions): UseBo
     }
   }, [enabled, token, isVisible, poll])
 
-  return { statuses, participation, messages, error }
+  return { identities, statuses, participation, messages, error }
 }

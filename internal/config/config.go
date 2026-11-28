@@ -520,9 +520,13 @@ func (c *Config) write() error {
 	// Serialize the domain model itself. This used to be a second struct
 	// listing the same sections, which had to be extended by hand whenever a
 	// section was added to Config — and a section left out of it was dropped
-	// on every save with nothing to notice. The two adjustments the file
+	// on every save with nothing to notice. The adjustments the file
 	// needs are made on a copy, so the in-memory config is untouched.
 	out := c.Data
+
+	// Legacy delivery mode is ignored. Keep its API default in memory,
+	// but never regenerate a deprecated key when saving configuration.
+	out.AgentBoard.Mode = ""
 
 	// The top-level layout mirrors the active workspace's layout for
 	// in-memory readers; workspaces own the persisted copy, so clearing it

@@ -93,9 +93,12 @@ func TestCodexPermissionHook_IgnoresInputWithoutASessionOrTurn(t *testing.T) {
 // What the hook wrote is what the live collection reads. The hook removes
 // records older than 7 days when it writes, so the collection reads them all
 // with one process.
+//
+//efficacy:exempt isolates host processes (issue #408); permission reading predates branch
 func TestRunLocal_CollectScriptReadsCodexPermissionRecords(t *testing.T) {
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
+	isolateEmptyProcesses(t)
 	runPermissionHook(t, home, permissionHookInput(codexSessionB, codexTurnB))
 	old := time.Now().Add(-8 * 24 * time.Hour)
 	require.NoError(t, os.Chtimes(permissionRecordPath(home, codexSessionB), old, old))

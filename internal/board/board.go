@@ -1,13 +1,12 @@
 // Package board implements Agent Board: cross-pane Claude/Codex messaging
 // and status aggregation through consumer-owned messaging ports.
-// See docs/agent-board.md for the full design this package implements.
+// See docs/backend/agent-board/index.md for the full design this package implements.
 package board
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"panemux/internal/agent"
 	"time"
 )
 
@@ -23,7 +22,7 @@ const SystemID = "_system"
 // statusKind is the required discriminator value for a status self-report.
 // Detecting a status update by JSON shape alone ("does this body happen to
 // have a state field") has a real false-positive edge — see
-// docs/agent-board.md's Status self-report section — so a literal
+// docs/backend/agent-board/relay.md's Status self-report section — so a literal
 // "kind": "board_status" is required, not merely permitted.
 const statusKind = "board_status"
 
@@ -62,17 +61,12 @@ type MessageClient interface {
 	Since(ctx context.Context, team, afterID string, limit int) ([]Row, error)
 }
 
-// JoinRequest describes one pane joining board messaging.
-type JoinRequest struct {
-	Agent  agent.ID
-	Team   string
-	PaneID string
-	Mode   string
-}
-
 // ErrParticipationPath marks a path-discovery failure, distinct from a presence
 // probe failure. Callers can suppress and recover their warning streaks separately.
 var ErrParticipationPath = errors.New("resolve messaging path")
+
+// ErrParticipationPaused indicates a managed tool update, not a host failure.
+var ErrParticipationPaused = errors.New("messaging participation is paused")
 
 // ParticipationDescription names the operator-facing tool and its path setting.
 // The adapter owns these labels; board orchestration only formats their context.
@@ -81,13 +75,12 @@ type ParticipationDescription struct {
 	PathSetting string
 }
 
-// Participation supplies host availability and the instruction written to a pane.
+// Participation supplies host availability for pane detection.
 // Address validation is available before process detection or host I/O.
 type Participation interface {
 	Description() ParticipationDescription
 	ValidateAddress(team, paneID string) error
 	Available(context.Context) (bool, error)
-	JoinInstruction(context.Context, JoinRequest) (string, error)
 }
 
 type statusPayload struct {

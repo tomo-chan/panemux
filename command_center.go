@@ -15,7 +15,7 @@ import (
 // setupCommandCenter builds the command center's Runner when
 // command_center.enabled is true, wired with real session/history paths and
 // the current executable re-invoked as its own narrow MCP server (see
-// docs/agent-board.md's Command center section). It returns nil when
+// docs/backend/agent-board/command-center.md). It returns nil when
 // disabled, or when no auth token is configured — the command center's MCP
 // server authenticates every REST call it makes with that token, so running
 // without one would mean every query fails at the first tool call. server.New

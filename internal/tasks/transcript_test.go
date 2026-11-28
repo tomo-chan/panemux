@@ -380,9 +380,12 @@ func TestRunLocal_TranscriptScriptReadsTheNewestOfTwoLogs(t *testing.T) {
 // Two logs of one session changed in the same second: the fetch reads the
 // one whose version the collection reports, so the summary is keyed on the
 // log it was made from.
+//
+//efficacy:exempt isolates the test from unrelated host processes (issue #408); transcript keying predates this branch
 func TestRunLocal_TranscriptScriptReadsTheLogTheCollectionKeysOn(t *testing.T) {
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
+	isolateEmptyProcesses(t)
 	short := filepath.Join(home, ".claude", "projects", "a-dir", "same.jsonl")
 	long := filepath.Join(home, ".claude", "projects", "z-dir", "same.jsonl")
 	for path, text := range map[string]string{short: "A-short", long: "Z-longer-text"} {

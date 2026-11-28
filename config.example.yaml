@@ -20,7 +20,7 @@ server:
 # panemux's tested agmsg source; dependencies must be installed separately.
 agent_board:
   enabled: false
-  mode: monitor
+  # mode is deprecated and ignored (one warning per config load)
   agmsg_auto_update: false  # update older installed copies on all hosts
   team: "panemux"                      # shared agmsg team for all participating panes
 

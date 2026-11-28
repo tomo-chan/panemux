@@ -3,7 +3,7 @@
 Real JSON, captured from the router `server.New()` builds, so the frontend's
 Zod schemas can be validated against what Go actually emits instead of against
 hand-written TypeScript objects. This closes gate **G3(c)** in
-[../../docs/quality-gateway.md](../../docs/quality-gateway.md) — see issue #191.
+[../../docs/engineering/quality-gates.md](../../docs/engineering/quality-gates.md) — see issue #191.
 
 ## Who writes these
 

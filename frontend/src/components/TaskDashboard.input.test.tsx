@@ -1,12 +1,18 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { TaskDashboard } from './TaskDashboard'
+import { TaskDashboard as ControlledTaskDashboard, INITIAL_TASK_DASHBOARD_VIEW_STATE, type TaskDashboardProps } from './TaskDashboard'
 import type { TasksState, TaskActionResult } from '../hooks/useTasks'
 import type { SSHConnectionsState } from '../hooks/useSSHConnections'
 import type { Task, TaskAttach, TasksResponse, Workspace } from '../schemas'
 import type { TaskTerminalStatus } from './TaskTerminal'
 import { localhostFrameDocument } from '../utils/preview'
+
+// Keep view settings in a parent, as App does, including across rerenders.
+function TaskDashboard(props: Omit<TaskDashboardProps, 'viewState' | 'onViewStateChange'>) {
+  const [viewState, setViewState] = useState(INITIAL_TASK_DASHBOARD_VIEW_STATE)
+  return <ControlledTaskDashboard {...props} viewState={viewState} onViewStateChange={setViewState} />
+}
 
 // Issue #284: the dashboard's Type in pane popup. The terminal itself is
 // TaskTerminal's (tested on its own); here it is a stub whose status the test
@@ -772,6 +778,16 @@ describe('TaskDashboard Type in pane: while open', () => {
     expect(within(dialog()).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 
+  //efficacy:exempt Pins the existing popup-to-App callback and attach cleanup; this PR changes App destination handling only.
+  it('routes popup Open through the shared task opening callback and ends its attach', async () => {
+    const { state, onOpenTask } = renderDashboard()
+    await openPopup('wait-1')
+    fireEvent.click(within(dialog()).getByRole('button', { name: /^Open:/ }))
+    expect(onOpenTask).toHaveBeenCalledWith(waiting, expect.objectContaining({ kind: 'open' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(state.detach).toHaveBeenCalled()
+  })
+
   it('offers Go to pane and says who sizes the window when a workspace pane shows the same session', async () => {
     const onOpenTask = vi.fn()
     const { state } = renderDashboard(tasksState(), onOpenTask)
@@ -939,4 +955,67 @@ describe('TaskDashboard Type in pane: preview', () => {
     expect(wrapped.defaultPrevented).toBe(true)
     expect(dialog().contains(document.activeElement)).toBe(true)
   })
+})
+
+
+it('keeps a table attach and terminal mounted across view and sort changes', async () => {
+  const { state } = renderDashboard()
+  fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+  await act(async () => {
+    fireEvent.click(within(screen.getByTestId('task-row-wait-1')).getByRole('button', { name: /^Type in pane:/ }))
+  })
+  const terminal = screen.getByTestId('task-terminal')
+  const mounts = terminals.mounts.length
+  // The toolbar is inert in a browser while typing. Drive its state here to
+  // prove the common popup does not belong to either list's lifecycle.
+  fireEvent.click(screen.getByRole('button', { name: 'Cards' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Table' }))
+  fireEvent.click(screen.getByRole('button', { name: /Sort by Session/ }))
+  expect(screen.getByTestId('task-terminal')).toBe(terminal)
+  expect(terminals.mounts).toHaveLength(mounts)
+  expect(state.attach).toHaveBeenCalledTimes(1)
+  expect(state.detach).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Cards' }))
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+  expect(typeIn('wait-1')).toHaveFocus()
+})
+
+
+it('keeps the popup attached across duplicated group moves and returns focus to the surviving copy', async () => {
+  const state = tasksState({}, [{ ...waiting, labels: ['alpha', 'beta'] }])
+  const { rerenderWith } = renderDashboard(state)
+  fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'label' } })
+  const original = within(screen.getByRole('region', { name: 'alpha — Waiting for input' })).getByRole('button', { name: /^Type in pane:/ })
+  await act(async () => { fireEvent.click(original) })
+  setStatus('connected')
+  const mounts = terminals.mounts.length
+  rerenderWith(tasksState({ attach: state.attach, detach: state.detach }, [{ ...waiting, state: 'idle', labels: ['beta'] }]))
+  expect(screen.getByTestId('task-terminal')).toBeInTheDocument()
+  expect(terminals.mounts).toHaveLength(mounts)
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+  expect(within(screen.getByRole('region', { name: 'beta — Idle' })).getByRole('button', { name: /^Type in pane:/ })).toHaveFocus()
+})
+
+
+it.each(['Cards', 'Table'])('returns focus to the visible %s list if the input task disappears', async mode => {
+  const state = tasksState({}, [waiting])
+  const { rerenderWith } = renderDashboard(state)
+  fireEvent.click(screen.getByRole('button', { name: mode }))
+  const list = screen.getByRole('region', { name: mode === 'Cards' ? 'Task board' : 'Task table' })
+  const button = within(list).getByRole('button', { name: /^Type in pane:/ })
+  await act(async () => { fireEvent.click(button) })
+  rerenderWith(tasksState({ attach: state.attach, detach: state.detach }, []))
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+  expect(list).toHaveFocus()
+})
+
+
+it('returns focus to the task selection action when a group move removes Type in pane', async () => {
+  const state = tasksState({}, [{ ...waiting, labels: ['alpha'] }])
+  const { rerenderWith } = renderDashboard(state)
+  fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'label' } })
+  await openPopup()
+  rerenderWith(tasksState({ attach: state.attach, detach: state.detach }, [{ ...waiting, state: 'busy', labels: ['beta'] }]))
+  fireEvent.click(within(dialog()).getByRole('button', { name: 'Close' }))
+  expect(within(screen.getByRole('region', { name: 'beta — Working' })).getByRole('button', { name: 'review-api' })).toHaveFocus()
 })

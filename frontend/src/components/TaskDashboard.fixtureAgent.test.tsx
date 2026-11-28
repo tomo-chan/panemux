@@ -2,9 +2,16 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { TaskDashboard } from './TaskDashboard'
+import { useState } from 'react'
+import { TaskDashboard as ControlledTaskDashboard, INITIAL_TASK_DASHBOARD_VIEW_STATE, type TaskDashboardProps } from './TaskDashboard'
 import type { TasksState } from '../hooks/useTasks'
 import { TasksResponseSchema } from '../schemas'
+
+// Keep view settings in a parent, as App does, including across rerenders.
+function TaskDashboard(props: Omit<TaskDashboardProps, 'viewState' | 'onViewStateChange'>) {
+  const [viewState, setViewState] = useState(INITIAL_TASK_DASHBOARD_VIEW_STATE)
+  return <ControlledTaskDashboard {...props} viewState={viewState} onViewStateChange={setViewState} />
+}
 
 // A third agent added through registration alone (issue #377). The input is
 // tasks-fixture-agent, the GET /api/tasks response the Go suite's

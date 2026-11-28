@@ -10,8 +10,7 @@ import (
 	"panemux/internal/tasks"
 )
 
-// Source is what the publisher observes. *Service is the production
-// implementation.
+// Source supplies host collections without owning publication policy.
 type Source interface {
 	// Hosts is the configured hosts besides the panemux host, read on every
 	// cycle.
@@ -19,6 +18,12 @@ type Source interface {
 	// CollectHostLive observes one host's running tasks, within its own
 	// timeout.
 	CollectHostLive(ctx context.Context, name string) (tasks.HostResult, []tasks.Task)
+}
+
+// DeferredSource stages optional observation side effects until the publisher
+// accepts the result. The callback must not re-enter the publisher.
+type DeferredSource interface {
+	CollectHostLiveDeferred(context.Context, string) (tasks.HostResult, []tasks.Task, func())
 }
 
 // Options configures a Publisher. Every field has a default.
@@ -204,11 +209,14 @@ func (p *Publisher) superviseHosts() {
 // a result that arrives after either is discarded.
 func (p *Publisher) observeHost(name string) {
 	for {
-		result, observed := p.src.CollectHostLive(p.ctx, name)
+		result, observed, accept := p.collectHost(name)
 		p.mu.Lock()
 		if !p.continueLocked(name) {
 			p.mu.Unlock()
 			return
+		}
+		if accept != nil {
+			accept()
 		}
 		p.publishLocked(p.model.applyHost(name, result, observed))
 		stop := p.stop
@@ -225,6 +233,14 @@ func (p *Publisher) observeHost(name string) {
 		}
 		p.mu.Unlock()
 	}
+}
+
+func (p *Publisher) collectHost(name string) (tasks.HostResult, []tasks.Task, func()) {
+	if src, ok := p.src.(DeferredSource); ok {
+		return src.CollectHostLiveDeferred(p.ctx, name)
+	}
+	result, observed := p.src.CollectHostLive(p.ctx, name)
+	return result, observed, nil
 }
 
 // continueLocked reports whether name's loop goes on, and marks it ended

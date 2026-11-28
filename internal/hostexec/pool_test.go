@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -244,4 +245,38 @@ func TestLocalNoArgumentsWithoutInjection(t *testing.T) {
 	out, err := p.Run(poolTestContext(t), host.Local, "printf local")
 	require.NoError(t, err)
 	require.Equal(t, "local", string(out))
+}
+
+func TestForgetRemovedHostDiscardsReadyOrPendingConnection(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		t.Run(strconv.FormatBool(pending), func(t *testing.T) {
+			conn := &testConn{}
+			started, release := make(chan struct{}), make(chan struct{})
+			p := New(Options{Hosts: func() []string { return []string{"dev"} }, Dial: func(string) (Conn, error) {
+				close(started)
+				<-release
+				return conn, nil
+			}})
+			defer p.Close()
+			done := make(chan error, 1)
+			go func() { _, err := p.Connect(poolTestContext(t), "dev"); done <- err }()
+			<-started
+			if !pending {
+				close(release)
+				require.NoError(t, <-done)
+			}
+			p.opts.Hosts = func() []string { t.Error("forget must not consult membership while config is locked"); return nil }
+			p.Forget("dev")
+			if pending {
+				close(release)
+				require.ErrorIs(t, <-done, ErrConnecting)
+			}
+			require.Nil(t, p.Current("dev"))
+			require.Eventually(t, func() bool {
+				conn.mu.Lock()
+				defer conn.mu.Unlock()
+				return conn.closed == 1
+			}, 5*time.Second, time.Millisecond)
+		})
+	}
 }

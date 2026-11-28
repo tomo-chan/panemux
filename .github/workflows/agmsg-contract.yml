@@ -30,6 +30,7 @@ jobs:
       run: ${{ steps.verified.outputs.run }}
       agmsg_ref: ${{ steps.decide.outputs.agmsg_ref }}
       agmsg_tag: ${{ steps.decide.outputs.agmsg_tag }}
+      base_version: ${{ steps.decide.outputs.base_version }}
       cache_key: ${{ steps.decide.outputs.cache_key }}
       app_enabled: ${{ steps.app.outputs.enabled }}
       proposal_mode: ${{ steps.preflight.outputs.mode }}
@@ -219,6 +220,7 @@ jobs:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           AGMSG_TAG: ${{ needs.scope.outputs.agmsg_tag }}
           AGMSG_SHA: ${{ needs.scope.outputs.agmsg_ref }}
+          AGMSG_BASE_VERSION: ${{ needs.scope.outputs.base_version }}
         run: |
           set -euo pipefail
           gh auth setup-git

@@ -279,7 +279,18 @@ type taskEventSource struct{ h *Handler }
 func (s taskEventSource) Hosts() []string { return s.h.tasks.Hosts() }
 
 func (s taskEventSource) CollectHostLive(ctx context.Context, name string) (tasks.HostResult, []tasks.Task) {
-	return s.h.tasks.CollectHostLive(ctx, name)
+	result, list, accept := s.CollectHostLiveDeferred(ctx, name)
+	accept()
+	return result, list
+}
+
+// CollectHostLiveDeferred lets the publisher discard results before board cache writes.
+func (s taskEventSource) CollectHostLiveDeferred(
+	ctx context.Context, name string,
+) (tasks.HostResult, []tasks.Task, func()) {
+	generation := s.h.beginBoardTaskCollection()
+	result, list := s.h.tasks.CollectHostLive(ctx, name)
+	return result, list, func() { s.h.recordBoardTasks(generation, result, list) }
 }
 
 // TaskEventSource is the task collector as the task event publisher
@@ -307,7 +318,17 @@ func (h *Handler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	if refuseCrossSite(w, r) {
 		return
 	}
+	generation := h.beginBoardTaskCollection()
 	snapshot := h.tasks.Collect(r.Context())
+	for _, result := range snapshot.Hosts {
+		var list []tasks.Task
+		for _, task := range snapshot.Tasks {
+			if task.Host == result.Name {
+				list = append(list, task)
+			}
+		}
+		h.recordBoardTasks(generation, result, list)
+	}
 	h.pendingTaskLabels.Apply(snapshot, h.addTaskLabels)
 
 	collected := make(map[string]bool, len(snapshot.Hosts))
@@ -407,7 +428,7 @@ func taskGitFor(task tasks.Task, info *taskGitInfo) *taskGitInfo {
 // others GET /api/tasks has a heavy side effect — every host is dialed and
 // runs the collection script, and `gh pr view` runs per directory — which an
 // <img> on any page the operator has open could otherwise trigger. See
-// docs/security/command-execution.md, "Task dashboard collection".
+// docs/security/tasks.md.
 func refuseCrossSite(w http.ResponseWriter, r *http.Request) bool {
 	return RefuseCrossSite(w, r)
 }

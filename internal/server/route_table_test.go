@@ -23,7 +23,7 @@ import (
 // different middleware in internal/server without a single one of them
 // failing — and the /api/board/* routes had already drifted apart, registered
 // flat and unauthenticated in the test copy. See
-// docs/quality-gateway.md's gate G3, and issue #178.
+// docs/engineering/quality-gates.md's gate G3, and issue #178.
 //
 // Adding a route to the server is now expected to fail these tests until the
 // expected sets below are updated. That is the point: the table is stated in

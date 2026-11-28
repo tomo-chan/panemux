@@ -149,3 +149,10 @@ func TestDefaultContextDirReportsAnUnresolvableHomeDirectory(t *testing.T) {
 	assert.Contains(t, err.Error(), "resolving home directory")
 	assert.Empty(t, dir, "no path may be returned alongside the error")
 }
+
+func TestSystemPromptExplainsQualifiedNamesAndObservationLimits(t *testing.T) {
+	assert.Contains(t, DefaultSystemPrompt, "name@BoardID")
+	assert.Contains(t, DefaultSystemPrompt, "self-report")
+	assert.Contains(t, DefaultSystemPrompt, "not proof of liveness")
+	assert.NotContains(t, DefaultSystemPrompt, "Address broadcasts by exact pane id")
+}

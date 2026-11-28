@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/tomo-chan/panemux/actions/workflows/ci.yml/badge.svg)](https://github.com/tomo-chan/panemux/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go 1.24](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://golang.org)
+[![Go](https://img.shields.io/badge/Go-00ADD8?logo=go)](https://golang.org)
 [![Releases](https://img.shields.io/github/v/release/tomo-chan/panemux)](https://github.com/tomo-chan/panemux/releases)
 
 ![panemux in the browser: on the left, the workspace bar lists the "Development", "Review" and "Ops" workspaces with a card per pane showing its repository and branch. The "Development" workspace is split into a local shell showing git log, and on the right a tmux pane running a dev server above a local shell that ran the tests. Each pane header shows its type, title, repository and branch.](docs/images/workspace.png)
@@ -45,7 +45,7 @@ Or with options:
 
 ### Build from source
 
-Requirements: **Go 1.24+**, **Node.js 20+**
+Requirements: use the exact Go and Node versions in the [runtime version contract](DEVELOPMENT.md#runtime-version-contract).
 
 ```sh
 git clone https://github.com/tomo-chan/panemux.git
@@ -108,7 +108,7 @@ Common uses:
 - **Change a pane's settings** — type, shell, working directory, title, and whether it joins the Agent Board — with the **Pane settings** button in its header.
 - **Restart a pane** with the on-screen button if the underlying session exits.
 - **Open a linked PR** from the pane header when the current Git branch already has a GitHub pull request. For local panes, panemux can prefer the live worktree of an interactive `codex` or `claude` session, including resumed Codex sessions, and keeps the last valid sibling worktree pinned after the agent exits until a newer valid context is detected.
-- **Preview an HTML or Markdown file** by clicking its path in a local pane: it opens beside the terminal, which keeps taking input. Drag the divider (or use the arrow keys, double-click for 50:50) to resize, and **Open in new tab** to see it larger. See [the split preview](docs/behavior/preview.md).
+- **Preview an HTML or Markdown file** by clicking its path in a local pane: it opens beside the terminal, which keeps taking input. Drag the divider (or use the arrow keys, double-click for 50:50) to resize, and **Open in new tab** to see it larger. See [the split preview](docs/backend/workspace/preview-and-urls.md#split-preview).
 
 ![A local pane split in two: on the left its terminal, which printed the path of an HTML mock; on the right the preview of that mock, under a header naming the host "local" and the file's path, with Reload, Open in new tab and Close.](docs/images/preview.png)
 - **Open VS Code** from supported panes using the pane header action. Like pane Git/PR metadata, this can prefer the live worktree of an interactive `codex` or `claude` session and keeps the last valid sibling worktree pinned after the agent exits until a newer valid context is detected.
@@ -117,13 +117,16 @@ Common uses:
 
 ### Notifications and attention prompts
 
-- panemux watches terminal output for agent confirmation prompts such as approval or proceed requests.
-- Codex permission menus such as MCP tool allow prompts are detected too.
-- When one is detected, the pane frame is highlighted.
-- If the pane belongs to an inactive workspace, that workspace tab is highlighted too.
-- Browser notifications are shown after notification permission has been granted only when the prompt is not currently visible to the user, and clicking one switches to the matching workspace.
-- panemux remembers the last browser-notified prompt per pane, so refreshes, reconnects, and maximize toggles do not re-notify the same prompt replay.
-- Notification permission is requested on the first browser interaction, instead of waiting for the first prompt.
+panemux observes coding agents' recorded task state through the
+[task event stream](docs/backend/tasks/events.md), including agents outside visible panes.
+Codex command-approval waits need the host's
+[permission hook](docs/backend/tasks/collection.md#codex-permission-requests).
+
+A waiting task highlights its pane frame and inactive workspace tab. With browser notification
+permission granted, a wait that is not visible can also notify; clicking it reveals the pane or
+opens the task dashboard. Permission is requested on the first browser interaction. See
+[notifications and attention](docs/ui/tasks.md#attention-indicators-and-browser-notifications) for visibility, clearing and
+per-tab deduplication rules across reloads and reconnects.
 
 ### Task dashboard
 
@@ -137,7 +140,7 @@ Common uses:
 - A session running inside `tmux` can be opened: **Open** adds a `tmux` (or `ssh_tmux`) pane attached to its tmux session to the current workspace, and **Go to pane** jumps to a pane already attached to it. A session running outside tmux, or stopped, cannot be opened in a pane.
 - Each SSH host gets one command connection shared by both boards, separate from its panes. An unreachable host shows its error and a **Reconnect** button without hiding the other hosts.
 - A card links the repository, branch and pull request of the task's directory, the issues that pull request closes (needs `gh` 2.72.0 or later), and references such as `JIRA-123` in the branch name or pull request title. References are set up in `config.yaml` under `task_dashboard.autolinks`, in the same shape as a GitHub repository's autolink references: `key_prefix: JIRA-` with `url_template: https://jira.example.com/JIRA-<num>` links `JIRA-123` to `https://jira.example.com/JIRA-123`. The tracker itself is never queried.
-- Claude Code sessions are read from the files Claude Code keeps under `~/.claude` on each host, and codex sessions from `~/.codex` (the session log a running `codex` holds open, and its turn history when `sqlite3` is installed). A codex waiting for command approval shows as working, since codex records nothing for it, unless its permission hook is registered on that host ([Codex permission requests](docs/behavior/tasks.md#codex-permission-requests)). A `codex` started without `--no-daemon` runs its session in codex's shared daemon, which the dashboard shows as a card of its own that cannot be opened in a pane.
+- Claude Code sessions are read from the files Claude Code keeps under `~/.claude` on each host, and codex sessions from `~/.codex` (the session log a running `codex` holds open, and its turn history when `sqlite3` is installed). A codex waiting for command approval shows as working, since codex records nothing for it, unless its permission hook is registered on that host ([Codex permission requests](docs/backend/tasks/collection.md#codex-permission-requests)). A `codex` started without `--no-daemon` runs its session in codex's shared daemon, which the dashboard shows as a card of its own that cannot be opened in a pane.
 - **New task** starts `claude` or `codex` in a tmux session of its own on the chosen host, and **Resume** restarts a stopped session there. If codex stops at a start-up screen (trusting the directory, a new model), open the task's pane to answer it.
 - Set `task_dashboard.summary.enabled: true` in `config.yaml` to have each agent CLI on this machine summarize its own Claude Code or Codex session: what it is doing and the work left, on its card and in its detail panel. It sends the text of the conversation (never tool output) to the corresponding agent account on this machine, so it is off by default. Codex uses the operator's existing settings and permissions.
 
@@ -152,7 +155,7 @@ Common uses:
 
 - A pane with `connection: my-host` can use either a named `ssh_connections` entry or a `Host my-host` entry from `~/.ssh/config`. Only `ssh_connections` entries are task dashboard hosts.
 - `tmux` and `ssh_tmux` panes automatically create the target tmux session if it does not already exist.
-- New sessions created by `ssh_tmux` panes on tmux 3.3 or newer can show `Open` / `Ignore` for CLI browser requests, including Claude MCP authentication. Existing tmux sessions are not reconfigured; see [URL opening](docs/behavior/url-open.md#new-remote-tmux-sessions).
+- New sessions created by `ssh_tmux` panes on tmux 3.3 or newer can show `Open` / `Ignore` for CLI browser requests, including Claude MCP authentication. Existing tmux sessions are not reconfigured; see [URL opening](docs/backend/workspace/preview-and-urls.md#new-remote-tmux-sessions).
 - In `tmux` and `ssh_tmux` panes, plain drag continues to follow tmux mouse behavior. Use `Option` + drag on macOS or `Shift` + drag on Linux and Windows to force browser-side text selection.
 - Set `cwd` on `local`, `ssh`, or `ssh_tmux` panes when you want the shell to start in a specific directory.
 - In the pane settings dialog, `Working Directory` can be chosen from a browsable directory tree for both local and SSH-backed panes. Hidden directories are available through a toggle.
@@ -170,7 +173,7 @@ message them. Two independent pieces, either of which can be used without the ot
 - **Command center** — a Spotlight-style palette (`Cmd/Ctrl+Shift+K`) where you ask in plain language:
   *"which panes are blocked?"*, *"tell every pane the branch is frozen"*.
 
-Full design lives in [docs/agent-board.md](docs/agent-board.md).
+Full design lives in [Agent Board backend](docs/backend/agent-board/index.md).
 
 ![The Agent Board dashboard open on the right of the workspace: under Panes, a working "editor" pane and a waiting "tests" pane each report a summary of what they are doing and their last tool; under Messages, the two panes' latest messages to each other.](docs/images/agent-board.png)
 
@@ -184,9 +187,10 @@ cooldown; **Reconnect** clears that wait for both boards.
 
 **[agmsg](https://github.com/fujibee/agmsg) must be installed** on every host whose panes join
 the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux is tested against the
-[pinned agmsg version and commit](docs/maintenance.md#bumping-the-pinned-agmsg-version); it reads each host's `VERSION` on its first successful probe and logs a warning for anything else, without
+[pinned agmsg version and commit](docs/engineering/agmsg-maintenance.md#bumping-the-pinned-agmsg-version); it reads each host's `VERSION` on its first successful probe and logs a warning for anything else, without
 blocking. agmsg promises compatibility only for reading through `scripts/api.sh`, while panemux also
-depends on `send.sh`, `join.sh` and `delivery.sh`, so a different version may work or may misbehave.
+depends on `send.sh` for messaging and `install.sh` for managed Install / Update, so a different
+version may work or may misbehave.
 The host menu can Install / Update the tested fixed-SHA source, with one optional automatic-update
 preference for older installed copies on all hosts. Discovery looks for `scripts/api.sh` under the
 fixed `~/.agents/skills/agmsg` location. If it isn't there, panemux logs one warning naming the host and the path it looked in,
@@ -214,7 +218,6 @@ command_center:
 agent_board:
     team: panemux                      # shared agmsg team for all participating panes
     enabled: true                     # default false; all configured panes
-    mode: monitor                     # monitor | turn | both | off
     agmsg_auto_update: false           # update older installed copies on all hosts
 
 workspaces:
@@ -233,86 +236,33 @@ workspaces:
 Pane ids become board addresses, so give them names you will recognize (`api`, `web`, `infra`) rather
 than `pane-1`. `_system` is reserved and rejected at config validation.
 
-Set enablement and mode in the top-level YAML block. Pane Settings has no board controls.
+Set enablement in the top-level YAML block. Pane Settings has no board controls.
 With Agent Board enabled, each task-board host menu can Install / Update the tested agmsg source.
 Dependencies must already be installed. The menu explains installer effects and restart guidance;
-newer versions are kept unchanged. See [manual installation](docs/agent-board/agmsg-integration.md#manual-install--update).
-Enabling Agent Board consents to participation instructions for every detected agent on hosts
-with agmsg. With `turn` or `both`, that consent includes project-local hook writes. Removed
-pane-level `agent_board` and `agent_board.agmsg_path` settings cause migration errors.
+newer versions are kept unchanged. See [manual installation](docs/backend/agent-board/agmsg.md#manual-install--update-get-and-post-apihostsagmsg).
+Enabling Agent Board authorizes detection and relay polling. It never writes instructions into
+terminal panes or changes agent delivery settings. Removed pane-level `agent_board` and
+`agent_board.agmsg_path` settings cause migration errors.
 
-### How a pane joins
+### Pane detection and participation
 
-Joining is automatic — you do not run anything by hand.
+Start an interactive agent in a configured pane. Panemux polls every 5s and displays detected agents
+without sending terminal input. It checks agmsg availability after two consecutive detections, retrying until confirmed and then
+skipping further probes for that session. Host changes and session replacement reset confirmation.
+Detection is not proof of registration or reception. Use agmsg's official participation, identity,
+and delivery workflow. To use Board relay and status, join the configured `agent_board.team` with
+your agmsg name exactly equal to the pane ID on that host; panemux does not set up this membership.
+See [agmsg integration](docs/backend/agent-board/agmsg.md#integration-with-agmsg).
+Existing registrations and delivery hooks are left untouched, as is `board-bootstrap-state.json`.
 
-1. Start your agent in the pane as usual (`claude`, `codex`, `cursor-agent`, `gemini`, `grok`, or
-   `opencode`). panemux polls every 5s and needs to see it on two consecutive polls.
-2. panemux confirms agmsg exists at `~/.agents/skills/agmsg` on that pane's host.
-3. It writes a **one-time instruction into the pane's terminal**, asking the agent to run agmsg's
-   `join.sh` using the pane id as its agmsg agent id, and from then on to send board messages with
-   `send.sh` and to self-report its status periodically.
-
-You will see that instruction appear in the pane, and the agent's replies to it. That is expected —
-it is written into the terminal the same way your own keystrokes are, so nothing happens mid-command
-that you cannot see. It is written once per pane; panemux remembers which panes are done across
-restarts.
-
-The pane id is used deliberately as the agmsg agent id: every board address assumes `from`/`to` are
-pane ids, so an agent that picks its own name breaks addressing.
-
-### Delivery mode, and the one setup step it needs
-
-`agent_board.mode` decides whether messages *reach* a pane's agent. It is worth understanding before
-you pick a value, because the default is the quiet one:
-
-| mode | Writes into your repository | Broadcasts reach the agent |
-|---|---|---|
-| `monitor` (default) | no | **no** — they sit in agmsg until the agent looks |
-| `turn` / `both` | yes, one file | yes |
-
-With `monitor`, panemux does not run agmsg's `delivery.sh` at all, so no delivery hooks exist and the
-board is effectively read-only: panes report their status and you can see it, but a broadcast is not
-pushed to anyone. Choose `turn` or `both` if you want the messaging half to work.
-
-`turn` and `both` have the agent run agmsg's `delivery.sh`, and **agmsg** — not panemux — writes a
-hook file into the pane's project directory. The path is agmsg's own per-type convention
-(`scripts/drivers/types/<type>/type.conf`, `hooks_file=`), and agmsg deliberately rejects any
-non-project-relative value, so it cannot be redirected to a user-scope location:
-
-| agent type | file agmsg writes |
-|---|---|
-| claude-code | `.claude/settings.local.json` |
-| codex | `.codex/hooks.json` |
-| gemini | `.agent/rules/agmsg.md` |
-| opencode | `.opencode/rules/agmsg.md` |
-| cursor | `.cursor/rules/agmsg.mdc` |
-| grok-build | `.grok/rules/agmsg.md` |
-
-These are local, machine-specific files — none of them belong in version control. Rather than editing
-`.gitignore` in every repository you work in, set a global exclude file once per machine:
-
-```sh
-git config --global core.excludesFile ~/.gitignore_global
-cat >> ~/.gitignore_global <<'EOF'
-.claude/settings.local.json
-.codex/hooks.json
-.agent/rules/agmsg.md
-.opencode/rules/agmsg.md
-.cursor/rules/agmsg.mdc
-.grok/rules/agmsg.md
-EOF
-```
-
-Repeat that once on each host that runs `ssh`/`ssh_tmux` panes. Writes are idempotent — each
-`delivery.sh set` strips agmsg's own hook entries before re-adding them — but they persist after the
-pane closes, and panemux never reverts them, including when a pane later sets
-`agent_board.enabled: false`. Removing them is done through agmsg (`delivery.sh set off`), outside
-panemux.
+`agent_board.mode` is deprecated for one release: values are still validated, but a configured key
+produces one warning per load and is ignored. Saving configuration removes this deprecated key.
+It does not configure agmsg delivery.
 
 ### Checking that it worked
 
-Open the dashboard. A pane appears there only after its agent has actually sent a status report, so
-give it a moment after the agent starts.
+Open the dashboard. A pane appears after agent detection or a status report. A detected
+agent without a report is labeled `agent detected`.
 
 Nothing showing up? In order of likelihood:
 
@@ -330,7 +280,7 @@ Nothing showing up? In order of likelihood:
 It has exactly three tools: read board status, read message history, and send messages to panes. It
 has **no shell, no filesystem access, and no network access** — it cannot write code, run tests, or
 open pull requests, and it is launched in a way that enforces this rather than relying on it being
-asked nicely (see [docs/security/command-center.md](docs/security/command-center.md#command-center-subprocess-execution)).
+asked nicely (see [docs/security/agent-board.md](docs/security/agent-board.md#command-center-subprocess-execution)).
 
 A message it sends is an ordinary message to the receiving agent, not a pre-authorized command. That
 agent's own confirmation behavior still applies, so "sent" is not "done".
@@ -394,7 +344,7 @@ workspaces:
 
 Older config files with a top-level `layout:` are still accepted. When the config is next saved, panemux migrates that layout into a `default` workspace and writes the `workspaces:` format.
 
-The workspace bar is always available for workspace actions. Newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. The same bar also exposes inline workspace rename, workspace delete with confirmation, a `+` workspace action, and tab-position controls. When the bar is vertical, its width is shared across all workspaces and is also persisted. It also acts as a cross-workspace operational overview: pane detail cards can be selected to focus that pane, and those same cards can be dragged onto another workspace to move the pane there. Switching the active workspace, changing `tab_position`, and resizing the vertical workspace bar are persisted so the same navigation chrome is restored after restart. Agent confirmation prompts, including Codex MCP allow menus, can mark inactive workspace tabs and trigger browser notifications after notification permission has been granted. Clicking the notification switches to the relevant workspace.
+The workspace bar is always available for workspace actions. Newly added workspaces start with a single local terminal pane, become active immediately, and are saved to the config. The same bar also exposes inline workspace rename, workspace delete with confirmation, a `+` workspace action, and tab-position controls. When the bar is vertical, its width is shared across all workspaces and is also persisted. It also acts as a cross-workspace operational overview: pane detail cards can be selected to focus that pane, and those same cards can be dragged onto another workspace to move the pane there. Switching the active workspace, changing `tab_position`, and resizing the vertical workspace bar are persisted so the same navigation chrome is restored after restart. For task-state attention, the Codex permission hook requirement, and notification navigation to a pane or the task dashboard, see [Notifications and attention prompts](#notifications-and-attention-prompts).
 
 ### Pane types
 
@@ -407,70 +357,48 @@ The workspace bar is always available for workspace actions. Newly added workspa
 
 ### SSH connections
 
-Connections can be defined in two ways:
+Use a named `ssh_connections` entry or any non-wildcard `~/.ssh/config` host alias as a pane's
+`connection`. A name-only YAML entry (`gpu-box:`) takes its details from the same-named `Host`
+block; explicitly set fields override that block. **Hosts…** on the task dashboard manages the YAML
+entries; **Add SSH Host** writes `~/.ssh/config`. The task dashboard collects only YAML-listed SSH hosts.
 
-**In the YAML config** under `ssh_connections` — supports `host`, `user`, `port`, `key_file`, `password`, and `known_hosts_file`, all optional. An entry can be just a name (`gpu-box:`), in which case its details come from the `~/.ssh/config` `Host` block of the same name. A field set in the entry overrides that block's value for the same setting; the fields left out keep the block's values.
+See [SSH connections](docs/backend/workspace/sessions.md#ssh-connections) for all fields, `ProxyJump` / `ProxyCommand` precedence,
+authentication order, host-key requirements, and pane working-directory behavior.
 
-**Via `~/.ssh/config`** — any non-wildcard `Host` entry is automatically available as a `connection` name. `HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump`, and `ProxyCommand` are read from the file. This lets you reuse your existing SSH config without duplicating it in YAML.
-
-The task dashboard collects only from the hosts under `ssh_connections`. A host that exists only in `~/.ssh/config` — including one added from the UI with **Add SSH Host**, which writes `~/.ssh/config` — is usable in panes but is not collected from until its name is listed under `ssh_connections`, which **Hosts…** on the task dashboard does without editing the file.
-
-An entry that sets its own `host` does not take the `Host` block's `ProxyJump` or `ProxyCommand`; leave `host` unset to connect through the route `~/.ssh/config` describes.
-
-Earlier versions added every `~/.ssh/config` host to `ssh_connections` when the config was saved, if `ssh_connections` was not empty. Those entries are not removed automatically; delete the ones you do not want on the task dashboard from `ssh_connections` by hand.
-
-Authentication is attempted in order: the key file (`key_file`, or the `Host` block's `IdentityFile` when `key_file` is not set) → configured `password` → default key files (`~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`).
+Earlier versions copied SSH-config hosts into a non-empty `ssh_connections` on save. Those entries
+are not removed automatically; remove unwanted dashboard hosts from YAML by hand.
 
 ---
 
 ## Documentation
 
-Start with the [documentation index](docs/README.md). It separates a short product
+Start with the [documentation index](docs/index.md). It separates a short product
 [overview](docs/overview.md), concise current-state topic guides, focused deep dives, and the
-[decision log](docs/DECISIONLOG.md) that preserves design history and rejected alternatives.
+[decision log](docs/decisions/index.md) that preserves design history and rejected alternatives.
 
 ---
 
 ## Development
 
+See [DEVELOPMENT.md](DEVELOPMENT.md) for pinned runtime requirements, first-time
+`make install-deps`, dev-server commands, and the mandatory `make check` quality gate.
+It also defines coverage, lint, test and pre-push requirements; CI runs the full suite on each PR.
+
 ### Prerequisites
 
-- Go 1.24+
-- Node.js 20+
+Use the [runtime version contract](DEVELOPMENT.md#runtime-version-contract).
 
 ### Setup
 
-```sh
-make install-deps   # first time: npm install + go mod download + repo-local pre-push hook setup
-```
+Follow [Build And Run](DEVELOPMENT.md#build-and-run).
 
 ### Dev servers
 
-```sh
-make dev-backend    # Go backend on :8080
-make dev-frontend   # Vite dev server on :5173 (proxies /api and /ws to :8080)
-```
+Use the [development commands](DEVELOPMENT.md#build-and-run).
 
 ### Quality gate
 
-```sh
-make check   # lint + test + coverage (must pass before build)
-```
-
-`make install-deps` also configures the tracked `.githooks/pre-push` hook, which runs the checks the
-pushed change touches before every `git push`. CI runs the whole suite on every pull request.
-
-Individual commands:
-
-```sh
-go test ./... -v -race           # Go tests
-cd frontend && npm test          # Frontend tests
-make test-e2e                    # Playwright E2E for browser-only rendering regressions
-make coverage-go                 # Go coverage (≥ 80 % required)
-cd frontend && npm run coverage  # Frontend coverage (≥ 80 % required)
-go vet ./...                     # Go lint
-cd frontend && npx tsc --noEmit  # TypeScript type check
-```
+Follow the [quality gate](DEVELOPMENT.md#quality-gate) and [push protection](DEVELOPMENT.md#push-protection).
 
 ---
 

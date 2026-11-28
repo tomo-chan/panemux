@@ -28,6 +28,8 @@ import (
 // a log line, so a wrong answer here is silent: a host quietly off the board,
 // or a stale cursor file quietly ignored.
 
+const legacyBootstrapStateFileName = "board-bootstrap-state.json"
+
 // isolatedHome points the home-directory seam at a directory this test owns,
 // so anything resolving ~/.config/panemux touches the fixture and never the
 // developer's real cursor or bootstrap-state files.
@@ -91,13 +93,6 @@ func TestSetupBoard_BoardEnabledPane_BuildsAClientForItsHost(t *testing.T) {
 	assert.True(t, relay.HasClients(),
 		"the enabled pane's host must reach the relay's client map, or it is silently off the board")
 	assert.True(t, bootstrap.HasWork(), "the enabled pane is the work the watcher has to do")
-
-	// Read through the live config rather than the value setupBoard saw: a
-	// mode changed in the pane settings dialog has to land on the next tick,
-	// and asserting the startup value would pass either way.
-	cfg.AgentBoard.Mode = "turn"
-	assert.Equal(t, "turn", bootstrap.modeFor("pane-a"),
-		"the watcher reads modes from the live config, not a startup snapshot")
 }
 
 // With no agmsg installed the host is skipped rather than given a client that
@@ -140,8 +135,7 @@ func TestSetupBoard_UnparsableCursorFile_LogsAndContinues(t *testing.T) {
 func TestSetupBoard_UnparsableBootstrapStateFile_LogsAndContinues(t *testing.T) {
 	home := isolatedHome(t)
 	panemuxConfigDir(t, home)
-	statePath, err := board.DefaultBootstrapStateFilePath()
-	require.NoError(t, err)
+	statePath := filepath.Join(home, ".config", "panemux", legacyBootstrapStateFileName)
 	require.NoError(t, os.WriteFile(statePath, []byte("{not json"), 0o600))
 
 	buf := captureBoardLog(t)
@@ -151,14 +145,13 @@ func TestSetupBoard_UnparsableBootstrapStateFile_LogsAndContinues(t *testing.T) 
 	_, _, bootstrap := setupTestBoard(t, cfg, session.NewManager())
 
 	require.NotNil(t, bootstrap)
-	assert.Contains(t, buf.String(), "loading bootstrap state file")
+	assert.NotContains(t, buf.String(), "loading bootstrap state file")
+	got, err := os.ReadFile(statePath)
+	require.NoError(t, err)
+	assert.Equal(t, "{not json", string(got))
 }
 
-// Well-formed persisted state is installed, not merely read without
-// complaint. Asserting only that the error branch was skipped would pass
-// with the parsed values thrown away: the relay would re-poll from the
-// beginning, and every already-bootstrapped pane would be sent its
-// onboarding instruction again after a restart.
+// Relay cursors still load; retired bootstrap state is left untouched.
 func TestSetupBoard_ValidPersistedState_IsLoadedIntoTheRelayAndWatcher(t *testing.T) {
 	home := isolatedHome(t)
 	panemuxConfigDir(t, home)
@@ -168,20 +161,17 @@ func TestSetupBoard_ValidPersistedState_IsLoadedIntoTheRelayAndWatcher(t *testin
 	cursors := []board.CursorEntry{{Host: boardHostIDLocal, Team: "panemux", Cursor: "42"}}
 	require.NoError(t, board.SaveCursorFile(cursorPath, cursors))
 
-	statePath, err := board.DefaultBootstrapStateFilePath()
-	require.NoError(t, err)
-	require.NoError(t, board.SaveBootstrapState(statePath, []string{"pane-a"}))
+	statePath := filepath.Join(home, ".config", "panemux", legacyBootstrapStateFileName)
+	require.NoError(t, os.WriteFile(statePath, []byte(`["pane-a"]`), 0o600))
 
 	buf := captureBoardLog(t)
 	installAgmsg(t, "")
 	cfg := boardEnabledConfig(paneConfig("pane-a"))
 
-	_, relay, bootstrap := setupTestBoard(t, cfg, session.NewManager())
+	_, relay, _ := setupTestBoard(t, cfg, session.NewManager())
 
 	require.NotNil(t, relay)
 	assert.Equal(t, cursors, relay.Cursors(), "the parsed cursors must reach the relay")
-	assert.Equal(t, []string{"pane-a"}, bootstrap.persistedPaneIDs,
-		"and the parsed pane IDs must reach the watcher")
 	assert.NotContains(t, buf.String(), "loading relay cursor file")
 	assert.NotContains(t, buf.String(), "loading bootstrap state file")
 }
@@ -200,11 +190,6 @@ func TestPersistHelpers_NoHomeDirectory_LogAndGiveUp(t *testing.T) {
 			name:    "relay cursors",
 			persist: func() { persistBoardCursors([]board.CursorEntry{{Host: "local", Team: "panemux"}}) },
 			want:    "resolving relay cursor file path",
-		},
-		{
-			name:    "bootstrap state",
-			persist: func() { persistBootstrapState([]string{"pane-a"}) },
-			want:    "resolving bootstrap state file path",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -239,11 +224,6 @@ func TestPersistHelpers_FailureMidWrite_LogAndGiveUp(t *testing.T) {
 			name:    "relay cursors",
 			persist: func() { persistBoardCursors([]board.CursorEntry{{Host: "local", Team: "panemux"}}) },
 			want:    "persisting relay cursor",
-		},
-		{
-			name:    "bootstrap state",
-			persist: func() { persistBootstrapState([]string{"pane-a"}) },
-			want:    "persisting bootstrap state",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

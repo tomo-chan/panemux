@@ -1217,9 +1217,10 @@ describe('BoardStatusEntrySchema', () => {
     expect(result.success).toBe(true)
   })
 
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('keeps every other pane readable when one pane reports a very long summary', () => {
     const result = BoardStatusResponseSchema.safeParse({
-      participation: {}, statuses: {
+      identities: {}, participation: {}, statuses: {
         chatty: { updated_at: '2026-08-14T12:00:00Z', summary: 'x'.repeat(10000) },
         quiet: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' },
       },
@@ -1229,21 +1230,24 @@ describe('BoardStatusEntrySchema', () => {
 })
 
 describe('BoardStatusResponseSchema', () => {
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('accepts an empty statuses map', () => {
-    const result = BoardStatusResponseSchema.safeParse({ participation: {}, statuses: {} })
+    const result = BoardStatusResponseSchema.safeParse({ identities: {}, participation: {}, statuses: {} })
     expect(result).toMatchObject({ success: true, data: { participation: {} } })
   })
 
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('accepts a populated statuses map keyed by pane id', () => {
     const result = BoardStatusResponseSchema.safeParse({
-      participation: {}, statuses: { main: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' } },
+      identities: {}, participation: {}, statuses: { main: { updated_at: '2026-08-14T12:00:00Z', state: 'idle' } },
     })
     expect(result).toMatchObject({ success: true, data: { participation: {} } })
   })
 
+  //efficacy:exempt Only response mocks gain required identities; existing behavior is unchanged.
   it('rejects statuses given as an array instead of a map', () => {
     const result = BoardStatusResponseSchema.safeParse({
-      participation: {}, statuses: [{ updated_at: '2026-08-14T12:00:00Z' }],
+      identities: {}, participation: {}, statuses: [{ updated_at: '2026-08-14T12:00:00Z' }],
     })
     expect(result.success).toBe(false)
     expect(BoardStatusResponseSchema.safeParse({ statuses: {} }).success).toBe(false)
@@ -1630,3 +1634,4 @@ describe('TasksResponseSchema agent capabilities', () => {
     }
   })
 })
+

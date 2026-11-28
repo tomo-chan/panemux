@@ -12,7 +12,7 @@
 #      it silently weakens every hermetic run. This script regenerates the table
 #      and diffs it against the committed copy.
 #
-# Outside `make check` for the reason docs/agent-board.md's agmsg contract Tier 2
+# Outside `make check` for the reason docs/backend/agent-board/agmsg.md's Tier 2 contract
 # is: it needs an external toolchain (a JDK and tla2tools.jar) that
 # `make install-deps` does not install, so a hermetic local run must stay green
 # without it.

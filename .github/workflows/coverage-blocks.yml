@@ -1,6 +1,6 @@
 name: coverage-blocks
 
-# Per-block coverage: gate G4(d) in docs/quality-gateway.md, from issue #164.
+# Per-block coverage: gate G4(d) in docs/engineering/quality-gates.md, from issue #164.
 #
 # `make coverage-go`'s 80% statement threshold cannot see an entire
 # `if err != nil { ... }` body that no test ever enters — the happy path around
@@ -11,7 +11,7 @@ name: coverage-blocks
 #
 # Scoped to the diff, and that is a decision taken from the measurement: the
 # repository has ~275 unexecuted blocks today, so a gate over all of them would
-# start red — and principle 4 in docs/quality-gateway.md is that a gate which
+# start red — and principle 4 in docs/engineering/quality-gates.md is that a gate which
 # starts red gets routed around, taking the gates that do work with it. A
 # branch that changes no Go implementation exits 0 in a second or two.
 #

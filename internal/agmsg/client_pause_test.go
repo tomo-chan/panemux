@@ -3,7 +3,6 @@ package agmsg
 import (
 	"context"
 	"github.com/stretchr/testify/require"
-	"panemux/internal/board"
 	"panemux/internal/host"
 	"panemux/internal/hosttools"
 	"testing"
@@ -29,8 +28,6 @@ func TestClientPauseRefusesEveryOperationAndInvalidatesAbsence(t *testing.T) {
 	require.ErrorIs(t, err, hosttools.ErrUpdating)
 	_, err = c.Available(context.Background())
 	require.ErrorIs(t, err, hosttools.ErrUpdating)
-	_, _, err = c.LeaseParticipation()
-	require.ErrorIs(t, err, hosttools.ErrUpdating)
 	resume()
 	revision++
 	client, release, err := c.LeaseMessages()
@@ -48,8 +45,6 @@ func TestAdmittedBoardOperationsDrainWithoutNestedAdmission(t *testing.T) {
 	c.absent = true
 	messages, release, err := c.LeaseMessages()
 	require.NoError(t, err)
-	participant, done, err := c.LeaseParticipation()
-	require.NoError(t, err)
 	paused := make(chan func(), 1)
 	go func() {
 		resume, pauseErr := gate.Pause(context.Background(), hosttools.AgmsgTool, host.Local)
@@ -61,27 +56,19 @@ func TestAdmittedBoardOperationsDrainWithoutNestedAdmission(t *testing.T) {
 		time.Second, time.Millisecond)
 	_, _, err = c.LeaseMessages()
 	require.ErrorIs(t, err, hosttools.ErrUpdating)
-	request := board.JoinRequest{Agent: "claude", Team: "team", PaneID: "pane", Mode: "off"}
-	_, err = c.JoinInstruction(context.Background(), request)
+	_, err = c.Available(context.Background())
 	require.ErrorIs(t, err, hosttools.ErrUpdating)
 	rows, err := messages.Since(context.Background(), "team", "", 10)
 	require.NoError(t, err)
 	require.Empty(t, rows)
 	err = messages.Send(context.Background(), "team", "from", "to", "body")
 	require.ErrorContains(t, err, "not installed")
-	present, err := participant.Available(context.Background())
-	require.NoError(t, err)
-	require.False(t, present)
-	instruction, err := participant.JoinInstruction(context.Background(), request)
-	require.NoError(t, err)
-	require.Contains(t, instruction, "join.sh")
 	select {
 	case <-paused:
 		t.Fatal("update began before leases drained")
 	default:
 	}
 	release()
-	done()
 	select {
 	case resume := <-paused:
 		resume()

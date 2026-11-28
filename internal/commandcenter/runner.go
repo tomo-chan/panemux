@@ -26,13 +26,13 @@ import (
 // except --resume's value sits before that marker and needs its own guard.
 // A regex-allowlist branch gating a value before it reaches exec.Command
 // argv is this repository's established pattern for exactly this problem
-// (see docs/security.md's validateShell/validTmuxSessionName/validRemotePath).
+// (see docs/security/process-and-ssh.md for validateShell/validTmuxSessionName/validRemotePath).
 var validSessionID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // ErrBusy is returned by Query when a previous query against this Runner's
 // single command-center session is still in flight. See
-// docs/agent-board.md's "Concurrency" subsection: two concurrent
-// `claude -p --resume <same-id>` invocations have no ordering guarantee
+// docs/backend/agent-board/command-center.md's Process lifecycle section: two
+// concurrent `claude -p --resume <same-id>` invocations have no ordering
 // from the CLI itself, so a second request is rejected immediately rather
 // than queued.
 var ErrBusy = errors.New("command center busy")
@@ -52,7 +52,7 @@ const (
 	// EventDone marks a successful query's end. It is never sent after an
 	// EventError on the same channel: exactly one of the two ends a query,
 	// which is what lets both be documented as the last frame for it (see
-	// docs/behavior.md's command center WS protocol).
+	// docs/api/agent-board.md's command center WS protocol).
 	EventDone EventType = "done"
 )
 
@@ -136,7 +136,7 @@ type RunnerConfig struct {
 // subprocess lifecycle: at most one query in flight at a time, streaming
 // parsed stream-json lines as Events, persisting captured history, and
 // persisting a freshly captured session id only after a successful first
-// run. See docs/agent-board.md's Command center section.
+// run. See docs/backend/agent-board/command-center.md.
 type Runner struct {
 	buildMCPConfig func() (path string, cleanup func(), err error)
 	newCommand     commandFactory
@@ -420,9 +420,10 @@ func (r *Runner) finishAfterStream(ctx context.Context, cmd cmdRunner, p finishP
 }
 
 // promptHistoryEntry records the operator's own prompt as a history entry.
-// panemux owns this file's format (see docs/agent-board.md's "API and
-// streaming"), and the type is one the CLI never emits, so a reader can
-// always tell a panemux-written entry from a relayed subprocess line.
+// panemux owns this file's format (see
+// docs/backend/agent-board/command-center.md), and the type is one the CLI
+// never emits, so a reader can always tell a panemux-written entry from a
+// relayed subprocess line.
 func (r *Runner) promptHistoryEntry(prompt string) HistoryEntry {
 	// json.Marshal on a string cannot fail, so the error is not reachable;
 	// the fallback keeps the entry well-formed rather than empty if that

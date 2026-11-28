@@ -16,9 +16,8 @@
 // Why a separate package rather than a variable in each caller — the same
 // question internal/homedir answers, with the same answer: the callers do not
 // line up with the tests. The root package's own tests drive
-// internal/board's cursor and bootstrap writes through persistBoardCursors /
-// persistBootstrapState, and a package-private variable is invisible from
-// another package's test.
+// internal/board's cursor writes through persistBoardCursors, and a
+// package-private variable is invisible from another package's test.
 package fileops
 
 import (

@@ -66,7 +66,10 @@ func TestGlobalBoardSettingsPersistOnUnrelatedLayoutSave(t *testing.T) {
 	require.NoError(t, cfg.SaveLayout(cfg.Layout))
 	again, err := Load(path)
 	require.NoError(t, err)
-	require.Equal(t, cfg.AgentBoard, again.AgentBoard)
+	require.Equal(t, "both", cfg.AgentBoard.Mode)
+	want := cfg.AgentBoard
+	want.Mode = "monitor"
+	require.Equal(t, want, again.AgentBoard)
 }
 
 func TestBoardMigrationDoesNotConfuseSSHHostNames(t *testing.T) {

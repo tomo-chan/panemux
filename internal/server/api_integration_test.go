@@ -31,7 +31,7 @@ import (
 )
 
 // This file is the real-router integration harness for the /api surface:
-// gate G3(a) in docs/quality-gateway.md, and the second half of issue #180's
+// gate G3(a) in docs/engineering/quality-gates.md, and the second half of issue #180's
 // roadmap item 1. Its companion, route_table_test.go, already pins *which*
 // routes exist and which of them are authenticated. What was still missing is
 // the other half of the same question — that each of those routes, driven
@@ -44,14 +44,14 @@ import (
 // middleware stack, the mount precedence between /api and /api/board, or the
 // SPA catch-all that sits behind everything. A route could therefore answer
 // correctly in internal/api and be shadowed, wrapped, or 404'd in production
-// without a test failing. See docs/quality-gateway.md's P1 and gate G3, and
+// without a test failing. See docs/engineering/quality-gates.md's P1 and gate G3, and
 // issue #178.
 //
 // The table below is exhaustive *by construction*: the test walks the real
 // router and fails when a registered /api route has no case here, so adding a
 // route forces an integration case for it rather than relying on anyone
-// remembering to add one. That is decision D3 (consolidate gates rather than
-// adding them) applied to this half of the gate — the same shape as the route
+// remembering to add one. Decision D3 (docs/decisions/quality-gateway.md)
+// consolidates gates rather than adding them — the same shape as the route
 // table's own exhaustiveness check, which is why no new *_routes_test.go file
 // is needed for the next feature either.
 
@@ -144,6 +144,19 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	return e
 }
 
+// isolateEmptyTaskProcesses puts no-op ps, lsof, and tmux shims first on PATH
+// so API integration cases that drive the real collector script against a temp
+// HOME do not scan unrelated live agents on the host (issue #408).
+func isolateEmptyTaskProcesses(t *testing.T) {
+	t.Helper()
+	bin := t.TempDir()
+	for _, name := range []string{"ps", "lsof", "tmux"} {
+		path := filepath.Join(bin, name)
+		require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700)) //nolint:gosec // G306: test shim
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // do issues a request against the real router, including its middleware
 // stack. Board routes need the bearer token; nothing else does, and that
 // asymmetry is itself asserted by route_table_test.go.
@@ -174,7 +187,7 @@ func (e *apiEnv) do(t *testing.T, method, path, body string) *httptest.ResponseR
 // createPane creates a real local pane through POST /api/sessions, which is
 // both the happy path for that route and the precondition for every
 // per-session route below. The shell is the hardcoded /bin/sh the rest of
-// this repository defaults to (see docs/security.md), and cwd is a temp
+// this repository defaults to (see docs/security/process-and-ssh.md), and cwd is a temp
 // directory rather than the checkout, so git-info answers "not a repo"
 // without walking a real worktree.
 func (e *apiEnv) createPane(t *testing.T, id string) {
@@ -477,8 +490,9 @@ var apiCases = map[string]apiCase{
 
 	"GET /api/tasks": {run: func(t *testing.T, e *apiEnv) {
 		// The real collector, running the real script on this machine against
-		// the test's own HOME: what it lists is only what the test put there,
-		// a conversation log with no process behind it, i.e. a stopped task.
+		// the test's own HOME: isolate ps/lsof/tmux so unrelated live agents on
+		// the developer's machine do not delay or pollute the collection (issue #408).
+		isolateEmptyTaskProcesses(t)
 		project := filepath.Join(e.home, ".claude", "projects", "-workspace-user-project")
 		require.NoError(t, os.MkdirAll(project, 0o700))
 		require.NoError(t, os.WriteFile(filepath.Join(project, "integration-session.jsonl"),
@@ -494,6 +508,7 @@ var apiCases = map[string]apiCase{
 	"PUT /api/tasks/records": {run: func(t *testing.T, e *apiEnv) {
 		// The record lands in the default file under the test's HOME, and the
 		// next collection carries it on the task it names.
+		isolateEmptyTaskProcesses(t)
 		project := filepath.Join(e.home, ".claude", "projects", "-workspace-user-project")
 		require.NoError(t, os.MkdirAll(project, 0o700))
 		require.NoError(t, os.WriteFile(filepath.Join(project, "integration-session.jsonl"),
@@ -700,7 +715,7 @@ var apiCases = map[string]apiCase{
 		// neither of them loopback. This route is the reason do() overrides
 		// them: api.GetBoardSessionToken's DNS-rebinding guard answers 403
 		// otherwise, and that guard is the only thing between this token and
-		// any LAN client (docs/security.md).
+		// any LAN client (docs/security/auth.md).
 		rr := e.do(t, http.MethodGet, "/api/session-token", "")
 		assert.Equal(t, http.StatusOK, rr.Code)
 		assert.Contains(t, rr.Body.String(), integrationToken)
@@ -748,7 +763,7 @@ var apiCases = map[string]apiCase{
 			assert.Equal(t, http.StatusUnprocessableEntity, rr.Code)
 			// The message comes from board.UnknownPaneError, so the request
 			// reached the real relay through the real handler.
-			assert.Contains(t, rr.Body.String(), "unknown pane id(s): pane-1")
+			assert.Contains(t, rr.Body.String(), "invalid or unknown recipient(s): pane-1")
 		},
 	},
 
@@ -853,7 +868,7 @@ func TestServer_APIIntegration_DocumentedGaps(t *testing.T) {
 // thorough: registerRoutes has an `if commandRunner != nil` block, so an /api
 // route registered inside it is one the frontend can reach and one this
 // table's exhaustiveness check would never see. Walking only the disabled
-// router made the file header above — and quality-gateway.md's rollout row —
+// router made the file header above — and the original quality-gateway doc —
 // claim more than the code delivered. route_table_test.go pins both states
 // for the same reason.
 func registeredAPIRoutes(t *testing.T) []string {

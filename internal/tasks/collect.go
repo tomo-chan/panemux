@@ -18,8 +18,7 @@ import (
 // adapter (collect_adapters.go) declares. No value from a request, a config
 // file or a remote host is ever spliced into them, and they reach the shell
 // on stdin (`sh -s`), not as an argument, so the remote login shell never
-// parses them. See docs/security/command-execution.md, "Task dashboard
-// collection".
+// parses them. See docs/security/tasks.md.
 //
 // They read only what the agents themselves write and what `ps`/`tmux`
 // report, and never fail as a whole: every probe that can be missing on a
@@ -122,11 +121,22 @@ func commonSections(prefilter string) []collectSection {
 `},
 		{name: sectionCWD, script: `agents=$(ps -U "$uid" -o pid=,command= 2>/dev/null |
 	awk 'tolower($2 " " $3) ~ /` + prefilter + `/ { print $1 }')
-for pid in $agents; do
-	c=$(readlink "/proc/$pid/cwd" 2>/dev/null ||
-		lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | awk '/^n/ { print substr($0, 2); exit }')
-	if [ -n "$c" ]; then echo "$pid $c"; fi
-done
+if [ -n "$agents" ]; then
+	if [ "$(uname -s 2>/dev/null)" != Darwin ] && [ -d /proc/$$/fd ]; then
+		for pid in $agents; do
+			c=$(readlink "/proc/$pid/cwd" 2>/dev/null)
+			if [ -n "$c" ]; then echo "$pid $c"; fi
+		done
+	else
+		agent_pids=$(printf '%s\n' "$agents" |
+			awk '$1 ~ /^[0-9]+$/ { if (s != "") s = s ","; s = s $1 } END { print s }')
+		if [ -n "$agent_pids" ]; then
+			lsof -n -P -a -p "$agent_pids" -d cwd -Fpn 2>/dev/null | awk '
+				/^p[0-9]+$/ { pid = substr($0, 2); seen = 0; next }
+				/^n/ && pid != "" && !seen { seen = 1; c = substr($0, 2); if (c != "") print pid " " c }'
+		fi
+	fi
+fi
 `},
 		{name: sectionEnv, script: `if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
 	for pid in $agents; do

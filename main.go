@@ -43,10 +43,11 @@ type cliOptions struct {
 //go:embed frontend/dist
 var frontendFS embed.FS
 
+//coverage:exempt process entry point; comment-only documentation path update
 func main() {
 	// __board-mcp-server is a hidden subcommand, not an ordinary flag: the
 	// command center's own claude -p subprocess re-invokes this same binary
-	// as its MCP server (see docs/agent-board.md's Command center section),
+	// as its MCP server (see docs/backend/agent-board/command-center.md),
 	// so it must be recognized before flag.Parse ever runs.
 	if len(os.Args) > 1 && os.Args[1] == commandcenter.BoardMCPServerSubcommand {
 		if err := runBoardMCPServer(context.Background(), os.Getenv, os.Stdin, os.Stdout); err != nil {
@@ -255,7 +256,7 @@ func startSessionsFromConfig(cfg *config.Config, manager *session.Manager, creat
 // browserOpenArgv returns the command that opens url in Chrome on goos, as a
 // program name and discrete arguments — never a shell string. Splitting the
 // decision out from the exec call is the humble-object shape
-// docs/quality-gateway.md's P2 asks for: every per-OS branch is testable
+// docs/engineering/quality-gates.md's P2 asks for: every per-OS branch is testable
 // here, and what is left below is one unconditional Run.
 //
 // ok is false for an OS panemux has no opener for, in which case nothing is
@@ -279,7 +280,7 @@ func openChrome(url string) {
 		return
 	}
 	// The first argument is a variable rather than a literal, which is a
-	// shape docs/security.md tracks deliberately — see its "Launching the
+	// shape docs/security/process-and-ssh.md tracks deliberately — see its "Launching the
 	// operator's browser" section. browserOpenArgv is the only source of
 	// both values, it returns one of three compile-time literals for the
 	// name, and url is panemux's own listen address; every element travels

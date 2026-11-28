@@ -4,13 +4,22 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing draft release to recover (for example v0.27.0)
+        required: true
+        type: string
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   release-please:
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -24,21 +33,87 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   goreleaser:
+    permissions:
+      contents: write
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
+    if: >-
+      always() && !cancelled() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    concurrency:
+      group: release-assets-${{ needs.release-please.outputs.tag_name || inputs.release_tag }}
+      cancel-in-progress: false
+    # uutils mkdir 0.10.0 on Ubuntu 26.04 can report success to two concurrent
+    # lock creators. Keep GNU coreutils, as in ci.yml, for the runtime gate.
+    runs-on: ubuntu-24.04
     steps:
+      - name: Resolve existing draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name || inputs.release_tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo 'recovery: expected a stable vN.N.N tag' >&2
+            exit 1
+          }
+          metadata=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json name,tagName,isDraft,targetCommitish,assets) || {
+            echo 'release: cannot read release metadata; draft access requires contents: write' >&2
+            exit 1
+          }
+          jq -e '.isDraft == true' >/dev/null <<< "$metadata" || {
+            echo 'release: requested release is not a draft' >&2
+            exit 1
+          }
+          jq -e --arg tag "$RELEASE_TAG" '.tagName == $tag' >/dev/null <<< "$metadata" || {
+            echo 'release: draft tag does not match requested tag' >&2
+            exit 1
+          }
+          jq -e --arg tag "$RELEASE_TAG" '.name == $tag' >/dev/null <<< "$metadata" || {
+            echo 'release: draft name does not match requested tag' >&2
+            exit 1
+          }
+          jq -e '.assets | type == "array" and length == 0' >/dev/null <<< "$metadata" || {
+            echo 'release: draft must have an empty asset list; inspect and remove all partial assets before retrying' >&2
+            exit 1
+          }
+          commit=$(jq -er '.targetCommitish' <<< "$metadata") || {
+            echo 'recovery: draft target must be a full commit SHA' >&2
+            exit 1
+          }
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'recovery: draft target must be a full commit SHA' >&2
+            exit 1
+          }
+          echo "tag_name=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ steps.draft.outputs.commit }}
           fetch-depth: 0
           fetch-tags: true
 
       - name: Create local tag for GoReleaser
+        env:
+          TAG: ${{ steps.draft.outputs.tag_name }}
+          EXPECTED_SHA: ${{ steps.draft.outputs.commit }}
         run: |
-          TAG="${{ needs.release-please.outputs.tag_name }}"
-          SHA="${{ github.sha }}"
-          git rev-parse "$TAG" 2>/dev/null || git tag "$TAG" "$SHA"
+          SHA=$(git rev-parse HEAD)
+          [[ "$SHA" == "$EXPECTED_SHA" ]] || {
+            echo 'release: checkout does not match the draft target commit' >&2
+            exit 1
+          }
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            [[ "$(git rev-parse "refs/tags/$TAG^{commit}")" == "$SHA" ]] || {
+              echo 'release: existing tag points to a different commit' >&2
+              exit 1
+            }
+          else
+            git tag "$TAG" "$SHA"
+          fi
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
@@ -64,7 +139,7 @@ jobs:
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a
         with:
           version: "~> v2"
-          args: release --clean
+          args: ${{ github.event_name == 'workflow_dispatch' && 'release --clean --draft' || 'release --clean' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}

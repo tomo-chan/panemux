@@ -68,7 +68,7 @@ describe('UnreadableStateDialog', () => {
     const link = screen.getByRole('link', { name: /How to fix/ })
     expect(link).toHaveAttribute(
       'href',
-      'https://github.com/tomo-chan/panemux/blob/main/docs/behavior/tasks.md#unreadable-state-files',
+      'https://github.com/tomo-chan/panemux/blob/main/docs/backend/tasks/collection.md#unreadable-state-files',
     )
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
   })
