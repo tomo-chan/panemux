@@ -28,9 +28,8 @@ interface BoardDashboardPanelProps {
 // — see docs/backend/agent-board/relay.md and docs/ui/agent-board.md's
 // Dashboard section. Structure and styling deliberately mirror
 // CommandHistoryPanel.tsx (same right-docked overlay pattern), not a new
-// visual language. Broadcast sending is out of scope by design (see the
-// implementation plan's "Scope外" section) — this panel only ever reads
-// /api/board/status and /api/board/messages.
+// visual language. Sending lives in the command center's Message mode;
+// this panel reads status/history and copies exact qualified addresses.
 export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen, token, boardPanes, onClose }) => {
   const { identities, statuses, participation, messages, error } = useBoardStatus({ enabled: isOpen, token })
   useRestoreFocusOnClose(isOpen)
@@ -73,7 +72,7 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
           {error && <div style={errorStyle}>{error}</div>}
 
           <div style={sectionTitleStyle}>Names</div>
-          <div style={mutedDetailStyle}>Observed names do not guarantee registration, liveness or delivery.</div>
+          <div style={{ ...notJoinedDetailStyle, marginBottom: 8 }}>Observed names do not guarantee registration, liveness or delivery.</div>
           {Object.entries(identities).sort(([a], [b]) => a.localeCompare(b)).map(([address, identity]) => (
             <IdentityCard key={address} address={address} identity={identity} title={identity.pane_id ? titles.get(identity.pane_id) : undefined} />
           ))}

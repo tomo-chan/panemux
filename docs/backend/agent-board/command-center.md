@@ -13,6 +13,11 @@ long-running agent daemon or PTY). WebSocket wire frames live in
 [Agent Board UI](../../ui/agent-board.md#command-center); subprocess isolation and CLI flag rules
 live in [Agent Board security](../../security/agent-board.md#command-center-subprocess-execution).
 
+The palette also offers a direct Message form backed by the same authenticated broadcast REST
+API, without invoking the subprocess or adding a conversation turn. Its destination selection,
+delivery feedback, and Board-history behavior belong to
+[Agent Board UI](../../ui/agent-board.md#command-center).
+
 ## Scoped MCP tools
 
 The subprocess receives exactly three stdio MCP tools (`internal/boardmcp`, JSON-RPC 2.0 with

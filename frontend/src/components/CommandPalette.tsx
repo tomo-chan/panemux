@@ -106,8 +106,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
       <div style={paletteStyle}>
         <div style={headerStyle}>Command Center{connected ? '' : ' (connecting…)'}</div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }} role="group" aria-label="Command center mode">
-          <button type="button" style={submitStyle} aria-pressed={mode === 'ask'} onClick={() => setMode('ask')}>Ask</button>
-          <button type="button" style={submitStyle} aria-pressed={mode === 'message'} onClick={() => { setMode('message'); setMessageOpened(true) }}>Message</button>
+          <button type="button" style={{ ...submitStyle, backgroundColor: mode === 'ask' ? '#0e639c' : '#3c3c3c' }} aria-pressed={mode === 'ask'} onClick={() => setMode('ask')}>Ask</button>
+          <button type="button" style={{ ...submitStyle, backgroundColor: mode === 'message' ? '#0e639c' : '#3c3c3c' }} aria-pressed={mode === 'message'} onClick={() => { setMode('message'); setMessageOpened(true) }}>Message</button>
         </div>
 
         <div hidden={mode !== 'ask'} style={mode === 'ask' ? historyStyle : { display: 'none' }} ref={transcriptRef} data-testid="command-palette-transcript">
@@ -144,12 +144,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
             placeholder="Ask the command center…"
             style={inputStyle}
             aria-label="Command center prompt"
+            disabled={mode !== 'ask'}
           />
-          <button type="submit" style={submitStyle} disabled={pending || !connected}>
+          <button type="submit" style={submitStyle} disabled={mode !== 'ask' || pending || !connected}>
             {pending ? 'Sending…' : 'Send'}
           </button>
         </form>
-        {messageOpened && <div hidden={mode !== 'message'} style={{ minHeight: 0, overflowY: 'auto' }}><BoardMessageForm token={token} boardPanes={boardPanes} /></div>}
+        {messageOpened && <div hidden={mode !== 'message'} style={{ minHeight: 0, overflowY: 'auto' }}><BoardMessageForm token={token} boardPanes={boardPanes} active={mode === 'message'} /></div>}
       </div>
     </div>
   )

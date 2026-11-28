@@ -95,8 +95,10 @@ test('observes pane-free names and sends to an unobserved qualified name from Me
   await page.keyboard.press('Escape')
   await boardOpenButton(page).click()
   await expect(panel.getByText(body)).toHaveCount(2, { timeout: 60_000 })
-  await expect(panel.getByText('_system → helper@local')).toBeVisible()
-  await expect(panel.getByText('_system → unseen@local')).toBeVisible()
+  // agmsg stores the resolved host-local name. Keep that original recipient
+  // and the source host; do not invent a qualified history snapshot.
+  await expect(panel.getByText('_system → helper', { exact: true })).toBeVisible()
+  await expect(panel.getByText('_system → unseen', { exact: true })).toBeVisible()
 })
 
 test('shows a message that arrives while the dashboard is already open', async ({ page }) => {
