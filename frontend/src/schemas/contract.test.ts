@@ -335,25 +335,22 @@ interface Coverage {
 
 /** Unwraps the modifier and indirection wrappers to the schema underneath. */
 function unwrap(schema: z.ZodTypeAny, value: unknown): z.ZodTypeAny {
-  const def = schema._def as { typeName?: string; innerType?: z.ZodTypeAny; getter?: () => z.ZodTypeAny }
-  switch (def.typeName) {
-    case 'ZodOptional':
-    case 'ZodNullable':
-    case 'ZodDefault':
-      return unwrap(def.innerType as z.ZodTypeAny, value)
-    case 'ZodLazy':
-      return unwrap((def.getter as () => z.ZodTypeAny)(), value)
-    case 'ZodUnion':
-    case 'ZodDiscriminatedUnion': {
-      // Pick the member this value actually is; a union whose members disagree
-      // about optionality would otherwise be unanswerable.
-      const options = (schema as unknown as { options: z.ZodTypeAny[] }).options
-      const matched = options.find((option) => option.safeParse(value).success)
-      return matched ? unwrap(matched, value) : schema
-    }
-    default:
-      return schema
+  if (
+    schema instanceof z.ZodOptional ||
+    schema instanceof z.ZodNullable ||
+    schema instanceof z.ZodDefault ||
+    schema instanceof z.ZodLazy
+  ) {
+    return unwrap(schema.unwrap() as z.ZodTypeAny, value)
   }
+  if (schema instanceof z.ZodUnion || schema instanceof z.ZodDiscriminatedUnion) {
+    // Pick the member this value actually is; a union whose members disagree
+    // about optionality would otherwise be unanswerable.
+    const options = schema.options as readonly z.ZodTypeAny[]
+    const matched = options.find((option) => option.safeParse(value).success)
+    return matched ? unwrap(matched, value) : schema
+  }
+  return schema
 }
 
 // Appends a segment, collapsing a path that has just repeated itself.
@@ -380,21 +377,20 @@ function push(path: string[], segment: string): string[] {
 
 function collect(schema: z.ZodTypeAny, value: unknown, path: string[], out: Coverage): void {
   const resolved = unwrap(schema, value)
-  const def = resolved._def as { typeName?: string; type?: z.ZodTypeAny; valueType?: z.ZodTypeAny }
 
-  if (def.typeName === 'ZodArray' && Array.isArray(value)) {
-    for (const item of value) collect(def.type as z.ZodTypeAny, item, push(path, '[]'), out)
+  if (resolved instanceof z.ZodArray && Array.isArray(value)) {
+    for (const item of value) collect(resolved.element as z.ZodTypeAny, item, push(path, '[]'), out)
     return
   }
-  if (def.typeName === 'ZodRecord' && value !== null && typeof value === 'object') {
+  if (resolved instanceof z.ZodRecord && value !== null && typeof value === 'object') {
     for (const item of Object.values(value)) {
-      collect(def.valueType as z.ZodTypeAny, item, push(path, '{}'), out)
+      collect(resolved.valueType as z.ZodTypeAny, item, push(path, '{}'), out)
     }
     return
   }
-  if (def.typeName !== 'ZodObject' || value === null || typeof value !== 'object') return
+  if (!(resolved instanceof z.ZodObject) || value === null || typeof value !== 'object') return
 
-  const shape = (resolved as unknown as { shape: Record<string, z.ZodTypeAny> }).shape
+  const shape = resolved.shape as Record<string, z.ZodTypeAny>
   const data = value as Record<string, unknown>
   for (const [key, child] of Object.entries(shape)) {
     const childPath = push(path, `.${key}`)
@@ -586,11 +582,12 @@ describe('optional field coverage', () => {
 
 /** The `type` literal of every member of a discriminated union. */
 function declaredVariants(schema: z.ZodTypeAny): string[] {
-  const options = (schema as unknown as { options: z.ZodTypeAny[] }).options
-  return options
-    .map((option) => {
-      const shape = (option as unknown as { shape: Record<string, z.ZodTypeAny> }).shape
-      return (shape.type._def as unknown as { value: string }).value
+  if (!(schema instanceof z.ZodUnion || schema instanceof z.ZodDiscriminatedUnion)) return []
+  return (schema.options as readonly z.ZodTypeAny[])
+    .flatMap((option) => {
+      if (!(option instanceof z.ZodObject)) return []
+      const typeField = (option.shape as Record<string, z.ZodTypeAny>).type
+      return typeField instanceof z.ZodLiteral ? [...typeField.values].map(String) : []
     })
     .sort()
 }

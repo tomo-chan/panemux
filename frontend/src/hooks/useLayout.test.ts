@@ -414,7 +414,7 @@ describe('useLayout', () => {
     act(() => {
       result.current.setWorkspaceVerticalBarWidth(120)
     })
-    expect(result.current.error).toContain('greater than or equal to 180')
+    expect(result.current.error).toContain('>=180')
 
     act(() => {
       result.current.setWorkspaceVerticalBarWidth(320)
