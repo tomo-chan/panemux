@@ -813,7 +813,8 @@ else
 		"-a -p $child -p 1 -d cwd -Fn" "-a -p1 -d cwd -Fn" "-a -p $child -d cwd -Fn -p 1" "-p $child,1 -Fn" \
 		"-d cwd -Fn" "-Fn" "-a -p $child -d txt -Fn" "-i" "-p $child -Fn -c codex" \
 		"-n -P -p $child -d cwd -Fpn" "-n -P -p $child, -Fpn" "-n -P -p ,$child -Fpn" \
-		"-n -P -a -p $child,,1 -d cwd -Fpn" "-n -P -p $child -Fn"; do
+		"-n -P -a -p $child,,1 -d cwd -Fpn" "-n -P -p $child -Fn" \
+		"-n -P -a -p $child -p 1 x:-d:cwd:-Fpn" "-n -P -p $child x:-Fpn" "-a -p $child -p 1 x:-d:cwd:-Fn"; do
 		check
 		# shellcheck disable=SC2086 # one argument per word
 		if out=$(iso_lsof $shape 2>"$work/iso-err"); then
@@ -856,6 +857,7 @@ else
 	done
 	if [ -n "$real_lsof" ]; then
 		for shape in "-a -p $child -d cwd -Fn" "-a -p $child -Fn" "-p $child -Fn" \
+			"-n -P -a -p $child -d cwd -Fpn" "-n -P -p $child -Fpn" \
 			"-n -P -a -p $child,$child2 -d cwd -Fpn" "-n -P -p $child,$child2 -Fpn"; do
 			check
 			# shellcheck disable=SC2086 # one argument per word

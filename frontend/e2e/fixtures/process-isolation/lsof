@@ -21,11 +21,44 @@ refuse() {
 }
 
 mode=single
-case "$#:${1-}:${2-}:${3-}:${4-}:${5-}:${6-}:${7-}:${8-}" in
-6:-a:-p:*:-d:cwd:-Fn:: | 4:-a:-p:*:-Fn:::: ) pids=$3 ;;
-3:-p:*:-Fn::::: ) pids=$2 ;;
-8:-n:-P:-a:-p:*:-d:cwd:-Fpn ) mode=batch; pids=$5 ;;
-5:-n:-P:-p:*:-Fpn::: ) mode=batch; pids=$4 ;;
+case $# in
+6)
+	if [ "$1" = -a ] && [ "$2" = -p ] && [ "$4" = -d ] && [ "$5" = cwd ] && [ "$6" = -Fn ]; then
+		pids=$3
+	else
+		refuse "$@"
+	fi
+	;;
+4)
+	if [ "$1" = -a ] && [ "$2" = -p ] && [ "$4" = -Fn ]; then
+		pids=$3
+	else
+		refuse "$@"
+	fi
+	;;
+3)
+	if [ "$1" = -p ] && [ "$3" = -Fn ]; then
+		pids=$2
+	else
+		refuse "$@"
+	fi
+	;;
+8)
+	if [ "$1" = -n ] && [ "$2" = -P ] && [ "$3" = -a ] && [ "$4" = -p ] && [ "$6" = -d ] && [ "$7" = cwd ] && [ "$8" = -Fpn ]; then
+		mode=batch
+		pids=$5
+	else
+		refuse "$@"
+	fi
+	;;
+5)
+	if [ "$1" = -n ] && [ "$2" = -P ] && [ "$3" = -p ] && [ "$5" = -Fpn ]; then
+		mode=batch
+		pids=$4
+	else
+		refuse "$@"
+	fi
+	;;
 *) refuse "$@" ;;
 esac
 
@@ -42,7 +75,6 @@ set -f
 for pid in $pids; do
 	IFS=$old_ifs
 	"$ps_bin" -p "$pid" -o pid= >/dev/null 2>&1 || exit 1
-	IFS=,
 done
 IFS=$old_ifs
 set +f

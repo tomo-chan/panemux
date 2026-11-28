@@ -327,6 +327,7 @@ func startStandInCodex(t *testing.T, path string) int {
 	readyR, readyW, err := os.Pipe()
 	require.NoError(t, err)
 	defer func() { _ = readyR.Close() }()
+	defer func() { _ = readyW.Close() }()
 	// ExtraFiles[0] is inherited as fd 3; open the rollout on fd 4, signal
 	// readiness on fd 3, then close fd 3 before sleeping. The trailing ":"
 	// keeps sh from exec'ing sleep, which would take over the process name.
