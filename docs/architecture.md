@@ -7,8 +7,8 @@ description: "System structure, component ownership, data flow, and trust bounda
 # Architecture
 
 This guide is the concise map of the current system. It identifies component ownership and the
-boundaries a change must preserve. Runtime contracts live in [Behavior specification](behavior.md),
-security requirements in [Security design](security.md), and historical rationale in the
+boundaries a change must preserve. Runtime contracts live in [Backend specifications](backend/index.md),
+security requirements in [Security overview](security/overview.md), and historical rationale in the
 [Decision log](decisions/index.md).
 
 ## System structure
@@ -36,12 +36,12 @@ layout rendering, terminal emulation, interaction state, and presentation.
 |---|---|
 | `main.go` and root helpers | Parse options, load config, construct dependencies, start sessions and optional subsystems, serve, and shut down. |
 | `internal/config` | Load, normalize, validate, and persist YAML. `Data` is the serializable domain model; `Config` adds file and lookup context. |
-| `internal/agent` | Register every coding agent panemux knows: its stable ID, display name, aliases, the process rules that detect it, and the capabilities it declares. Imports nothing else from panemux. It declares; the packages that use a capability implement it. See [Agent registry](agent-registry.md). |
+| `internal/agent` | Register every coding agent panemux knows: its stable ID, display name, aliases, the process rules that detect it, and the capabilities it declares. Imports nothing else from panemux. It declares; the packages that use a capability implement it. See [Agent registry](backend/agent-registry.md). |
 | `internal/session` | Provide one lifecycle interface for local PTY, SSH, local tmux, and tmux-over-SSH sessions. Optional capability interfaces expose CWD, Git context, port forwarding, and agent detection only where supported. Holds the per-session Workdir capability (`workdirAdapters`, one adapter per agent that declares `workdir`) and the one parser of Claude Code's `~/.claude/sessions` files, both of which `internal/tasks` uses too. `CommandConn` is an SSH connection for short non-interactive commands, dialed with the same dialer panes use. |
 | `internal/host`, `internal/hostexec` | Define host identity, the shared SSH connection-key rule and fixed-script execution, including a separate arbitrary stdin stream and local split stdout/stderr capture; own local and shared per-host SSH adapters, lazy dialing, cooldown and reconnect. |
 | `internal/hosttools` | Manage tool status, installation, per-host Codex hook and global tool automatic-update settings and background checks; define the `Tool` port (`Check` / `Install`), optional update-only intent and adapter prerequisites, and shared status. Coordinate per-tool/host call admission, update notification and draining. Consume successful task-collection and persisted host-addition notifications and own cancellation and joining of tool checks. |
 | `internal/codexhook` | Implement the tool port using the shared host execution port; own the embedded permission hook, fixed check/install scripts and hooks.json parsing. |
-| `internal/tasks` | Own agent collection and availability, task actions, done/label records, launch/resume and pending labels, and summary adapters, scheduling and persistence. Fixed scripts run through shared host execution. See [Task contracts](behavior/tasks.md) and [capability adapters](agent-registry/adapters.md). |
+| `internal/tasks` | Own agent collection and availability, task actions, done/label records, launch/resume and pending labels, and summary adapters, scheduling and persistence. Fixed scripts run through shared host execution. See [Task contracts](backend/tasks/index.md) and [capability adapters](backend/agent-registry.md#capability-adapters). |
 | `internal/taskevents` | Observe the running tasks on every host through `internal/tasks`'s lightweight collection while the task event stream has a subscriber, each host on its own cycle; keep what was last observed, publish each difference as an ordered event, assign unsigned waits their `wait_id`, and fan the events out to subscribers without waiting on any one of them. It decides nothing about notifications or panes. |
 | `internal/api` | Implement REST handlers and mount the route set. It is the single source of truth for API registration. |
 | `internal/ws` | Bridge session bytes and control messages to terminal WebSockets, stream command-center events, and serve the task event stream (`/ws/tasks/events`). |
@@ -65,11 +65,11 @@ layout rendering, terminal emulation, interaction state, and presentation.
 | `TerminalPane` and `useTerminal` | Own xterm.js setup, fitting, addons, pane input, replay sequencing and suppression, pending terminal messages, and terminal lifecycle. |
 | `useWebSocket` | Own the pane connection, reconnect behavior, send-if-open transport, and validation of structured text control frames. |
 | `PreviewSplit` and `usePreview` | Split a workspace pane's or the Type in pane popup's body into the terminal and a preview of a clicked HTML or Markdown path (`utils/preview`) or a localhost URL, own the divider and its per-pane / per-task ratio, and hide the preview when the terminal disconnects. |
-| `usePaneUrlOpen` | Own one URL-opening path for printed links, OSC 8 links and browser-shim requests, with approval, callback forwarding and preview behavior defined in [Opening URLs from a pane](behavior/url-open.md#clicked-links). |
+| `usePaneUrlOpen` | Own one URL-opening path for printed links, OSC 8 links and browser-shim requests, with approval, callback forwarding and preview behavior defined in [Opening URLs from a pane](backend/workspace/preview-and-urls.md#clicked-links). |
 | task event store (`useTaskEvents`, `utils/taskEvents`) | Hold one `/ws/tasks/events` connection per tab and the tasks and hosts it reports, validated and in `seq` order; reconnect from a fresh snapshot on any gap or close, 2 to 30 seconds apart with no limit. |
 | attention and notifications (`App`, `utils/taskEvents`) | Project the task event store and visibility changes into pane/workspace indicators, browser notifications and the task dashboard's state column, matching tasks to panes with `utils/taskBoard` and recording the `wait_id`s each tab notified, and those whose attention a person cleared, in its session storage. |
 | Agent Board hooks and panels | Poll status/message APIs, stream command-center output, and present dashboard, palette, and history overlays. |
-| `TaskDashboard` and `useTasks` | Own dashboard collection/presentation, records, launch/resume dialogs, pane matching, temporary task and host terminals, destination selection, and host tool actions. Shared terminal components use `useTerminal`; task reconnect recreates the attach. See [Task navigation](behavior/task-navigation.md), [task API](behavior/task-api.md), and [host tools](behavior/host-tools.md). |
+| `TaskDashboard` and `useTasks` | Own dashboard collection/presentation, records, launch/resume dialogs, pane matching, temporary task and host terminals, destination selection, and host tool actions. Shared terminal components use `useTerminal`; task reconnect recreates the attach. See [Task navigation](backend/tasks/lifecycle.md#task-navigation-and-temporary-terminals), [task API](api/tasks.md), and [host tools](backend/agent-board/agmsg.md#host-tool-coordination-and-agmsg-management). |
 | Preview Mermaid runtime | A separate classic bundle draws fenced Mermaid blocks inside the preview’s opaque origin, retains source and per-block errors, and sanitizes final SVG after Mermaid measures a temporary drawing in that same preview origin. It is embedded with frontend assets and served by content hash, independently of the dashboard bundle. |
 | Zod schemas | Runtime-validate structured success payloads and control frames for which schemas are defined. Generated TypeScript types derive from these schemas. |
 
@@ -130,15 +130,15 @@ relays rows, and updates `BoardCache`. The browser obtains the token from the lo
 bootstrap endpoint and sends it to the board REST and command-center WebSocket routes; the
 command-center MCP client also uses bearer-authenticated board REST APIs. Only `internal/agmsg`
 invokes agmsg scripts, through `host.Runner`; board logic uses its message ports. Full detail is in
-[Agent Board architecture](agent-board/architecture.md).
+[Agent Board architecture](backend/agent-board/relay.md#architecture-and-ownership).
 
 ### Task dashboard flow
 
 The visible dashboard polls tasks through `internal/tasks` and the handler-owned host execution
 pool. The API enriches collection with repository metadata, records and enabled summaries; the
 browser matches tasks to panes. Launch/resume and temporary task/host terminals reuse that host
-boundary but have separate lifecycle contracts. See the [task document map](behavior/tasks.md),
-[REST API](behavior/task-api.md) and [adapter contracts](agent-registry/adapters.md).
+boundary but have separate lifecycle contracts. See [Tasks backend](backend/tasks/index.md),
+[task API](api/tasks.md), and [adapter contracts](backend/agent-registry.md#capability-adapters).
 
 ### Task event flow
 
@@ -150,7 +150,7 @@ A host that fails publishes only its status; its tasks stay as last observed. Ob
 when the last subscriber leaves, keeping what it observed. The server publishes every state change and decides
 nothing about it: each tab's store feeds the task dashboard's states, the pane and workspace
 attention and the browser notifications, and the tab matches tasks to panes itself. Full behavior is
-in [Task events](behavior/task-events.md).
+in [Task events](backend/tasks/events.md).
 
 ```text
  hosts ──attentionScript──▶ internal/tasks ──▶ internal/taskevents ──▶ /ws/tasks/events
@@ -165,8 +165,8 @@ in [Task events](behavior/task-events.md).
 
 Pane-side URL detection or the browser shim reports a URL to panemux. Ordinary URLs open in the
 browser. Eligible loopback callback URLs may create a temporary local listener backed by SSH
-`direct-tcpip`. Full behavior and constraints are in [Opening URLs from a pane](behavior/url-open.md)
-and [URL-open security](security/url-open.md).
+`direct-tcpip`. Full behavior and constraints are in [Opening URLs from a pane](backend/workspace/preview-and-urls.md#opening-urls-from-a-pane)
+and [URL-open security](security/preview-and-urls.md#opening-urls-from-a-pane).
 
 New `ssh_tmux` sessions on tmux 3.3 or newer receive shim settings through session-local `-e`
 operands, with a fixed initial-pane bootstrap for PATH and the configured shell/command. Their shim
@@ -181,8 +181,8 @@ the same opener and split; SSH-host URLs use dedicated loopback relay ports.
 
 Remote files use a preview-owned SSH connection per pane connection target, dialed with the pane's
 connection settings, and read only through SFTP. Relays use that connection's direct-tcpip channels.
-Their lifetime is independent of terminal sessions. See [Split preview](behavior/preview.md) and
-[preview security](security/preview.md).
+Their lifetime is independent of terminal sessions. See [Split preview](backend/workspace/preview-and-urls.md#split-preview) and
+[preview security](security/preview-and-urls.md).
 
 ## Trust boundaries
 
@@ -198,7 +198,7 @@ Their lifetime is independent of terminal sessions. See [Split preview](behavior
   token itself; it accepts only requests whose remote address and `Host` are loopback. Non-loopback
   use of the authenticated routes also requires transport encryption.
 - User-controlled values never select an arbitrary executable. Shell paths, tmux names, remote
-  paths, and subprocess operands follow the per-sink rules in [Security design](security.md).
+  paths, and subprocess operands follow the per-sink rules in [Security overview](security/overview.md).
 - Panemux runs no copy of itself on remote hosts. The task and agent boards share a per-host
   command connection through `internal/host` and `internal/hostexec`, running trusted fixed scripts
   with variable values in positional arguments. Terminal panes keep their own SSH sessions. The
@@ -207,7 +207,7 @@ Their lifetime is independent of terminal sessions. See [Split preview](behavior
 - Previewed HTML and Markdown are untrusted content. They are served under `/preview/<token>/` in a
   sandboxed opaque origin, so their requests to `/api/*` and `/ws/*` are cross-site and refused; the
   token, issued only by the guarded API, is what grants access to a file
-  ([preview security](security/preview.md)). A relayed localhost page of an SSH host runs in the
+  ([preview security](security/preview-and-urls.md)). A relayed localhost page of an SSH host runs in the
   origin of its relay port on `127.0.0.1`, another loopback port, which the request guard refuses.
 - The browser is untrusted input to Go handlers. Structured backend payloads with declared frontend
   schemas remain untrusted until validation succeeds; other input paths apply their own parsing and
@@ -215,12 +215,11 @@ Their lifetime is independent of terminal sessions. See [Split preview](behavior
 
 ## Deep dives
 
-- [Behavior details](behavior/) — API, WebSocket, frontend, SSH, notifications, and URL-open contracts.
+- [Backend specifications](backend/) — workspace sessions/preview/URLs, task collection/events/lifecycle, Agent Board relay/agmsg/command center, and agent registry.
 - [Security details](security/) — requirements grouped by execution and trust boundary.
-- [Agent registry](agent-registry.md) — agent IDs, aliases, detection rules, capabilities, and session keys.
-- [Agent Board details](agent-board/) — messaging, relay, bootstrap, command center, and limitations.
-- [UI design](ui-design.md) — workspace, pane, modal, attention, and Agent Board interactions.
-- [Quality gateway](quality-gateway.md) — how architectural contracts are verified.
+- [API contracts](api/) — REST and WebSocket wire contracts for workspace, tasks, and Agent Board.
+- [UI overview](ui/overview.md) — workspace, pane, modal, attention, and Agent Board interactions.
+- [Quality gates](engineering/quality-gates.md) — how architectural contracts are verified.
 - [Decision log](decisions/index.md) — tradeoffs and superseded approaches removed from this guide.
 
 Agent Board enablement is instance-wide; delivery mode is deprecated and ignored. Its relay accepts valid unqualified

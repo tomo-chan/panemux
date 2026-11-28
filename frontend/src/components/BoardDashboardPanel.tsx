@@ -25,8 +25,8 @@ interface BoardDashboardPanelProps {
 }
 
 // BoardDashboardPanel is the read-only status/history view for Agent Board
-// — see docs/agent-board.md's Architecture section and docs/ui-design/agent-board.md's
-// Agent Board UI section. Structure and styling deliberately mirror
+// — see docs/backend/agent-board/relay.md and docs/ui/agent-board.md's
+// Dashboard section. Structure and styling deliberately mirror
 // CommandHistoryPanel.tsx (same right-docked overlay pattern), not a new
 // visual language. Broadcast sending is out of scope by design (see the
 // implementation plan's "Scope外" section) — this panel only ever reads
@@ -308,7 +308,7 @@ const paneIdStyle: React.CSSProperties = {
 // four lines, because an agent that reports a paragraph must not push every
 // other pane below the fold. -webkit-line-clamp is the only widely supported
 // way to bound by lines rather than pixels, and it is honored by every
-// browser panemux supports (see docs/behavior.md's browser requirements).
+// browser panemux supports (see docs/backend/workspace/sessions.md's Operational assumptions and distribution).
 const summaryStyle: React.CSSProperties = {
   color: '#ccc',
   fontSize: 11,

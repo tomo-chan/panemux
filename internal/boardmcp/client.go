@@ -1,7 +1,7 @@
 // Package boardmcp implements the command center's narrow MCP server: three
 // tools (board_status, board_messages, board_broadcast) that are thin
 // wrappers around panemux's own authenticated REST API. See
-// docs/agent-board.md's Command center section — this is deliberately the
+// docs/backend/agent-board/command-center.md — this is deliberately the
 // only code that talks to that REST API on the command center subprocess's
 // behalf, so the LLM itself never composes an HTTP call or a shell
 // invocation.

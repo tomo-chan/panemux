@@ -16,9 +16,9 @@ import (
 )
 
 // fixtureDir holds Tier 1 of the agmsg compatibility contract (see
-// docs/agent-board/agmsg-contract.md#agmsg-compatibility-contract): fast, hermetic tests
-// that assert panemux's own parsing against frozen, versioned output
-// captured from a real agmsg install at TestedAgmsgVersion. See
+// docs/backend/agent-board/agmsg.md#agmsg-compatibility-contract): fast,
+// hermetic tests that assert panemux's own parsing against frozen, versioned
+// output captured from a real agmsg install at TestedAgmsgVersion. See
 // fixtureDir/README.md for how it is regenerated, and for what the capture
 // caught that the hand-written fixtures it replaced could not.
 const fixtureDir = "testdata/agmsg-v" + TestedAgmsgVersion

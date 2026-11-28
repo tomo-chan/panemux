@@ -19,8 +19,8 @@ interface CommandPaletteProps {
 const RECENT_HISTORY_LIMIT = 20
 
 // CommandPalette is the Spotlight-style modal for the Agent Board command
-// center, per docs/agent-board.md's Command center section and
-// docs/ui-design/agent-board.md's Agent Board UI section (docs/ui-design/dialogs.md pattern reused
+// center, per docs/backend/agent-board/command-center.md and
+// docs/ui/agent-board.md's Command center section (docs/ui/overview.md modal pattern reused
 // for the palette itself). It owns its own WS connection, open only while
 // the palette itself is open, and seeds itself with recent history on open
 // so a reopened palette isn't blank.

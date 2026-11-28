@@ -24,7 +24,7 @@ var taskEventsUpgrader = websocket.Upgrader{
 
 // TaskEventsHandler serves the task event stream, GET /ws/tasks/events
 // (issue #293): a snapshot of the running tasks on every host, then a frame
-// per change. See docs/behavior/task-events.md.
+// per change. See docs/api/tasks.md and docs/backend/tasks/events.md.
 type TaskEventsHandler struct {
 	publisher *taskevents.Publisher
 }
@@ -98,6 +98,6 @@ func writeTaskEventFrame(conn *websocket.Conn, frame taskevents.Frame) bool {
 	// machine, whose closed tab closes the socket at once. A connection that
 	// stops reading only falls behind, and the publisher closes its
 	// subscription; only this handler waits on the blocked write
-	// (docs/decisions/tasks/server-task-events.md, issue #277).
+	// (docs/decisions/tasks.md, issue #277).
 	return conn.WriteMessage(websocket.TextMessage, data) == nil
 }

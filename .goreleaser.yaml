@@ -34,8 +34,8 @@ archives:
         dst: config.example.yaml
       - src: docs/overview.md
         dst: docs/overview.md
-      - src: docs/behavior.md
-        dst: docs/behavior.md
+      - src: docs/backend/workspace/sessions.md
+        dst: docs/backend/workspace/sessions.md
 
 checksum:
   name_template: checksums.txt

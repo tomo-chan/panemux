@@ -838,7 +838,7 @@ func TestRemoteShellPID_ParsesShellProcess(t *testing.T) {
 // exist. Issue #190.
 // Nothing under this test changed on this branch, so the red-check could never
 // see it go red: it pins behavior that was already correct and merely
-// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+// unasserted. See docs/decisions/quality-gateway.md (D9).
 //
 //efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestRemoteShellPID_RejectsNonPositivePIDs(t *testing.T) {
@@ -855,7 +855,7 @@ func TestRemoteShellPID_RejectsNonPositivePIDs(t *testing.T) {
 // boundary: 1 is a real PID and must not be rejected.
 // Nothing under this test changed on this branch, so the red-check could never
 // see it go red: it pins behavior that was already correct and merely
-// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+// unasserted. See docs/decisions/quality-gateway.md (D9).
 //
 //efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestRemoteShellPID_AcceptsTheLowestUsablePID(t *testing.T) {
@@ -1258,7 +1258,7 @@ func TestDialWithRetry_ExhaustsAllRetries(t *testing.T) {
 // this file starts with a full budget. Issue #190.
 // Nothing under this test changed on this branch, so the red-check could never
 // see it go red: it pins behavior that was already correct and merely
-// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+// unasserted. See docs/decisions/quality-gateway.md (D9).
 //
 //efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestDialTransport_ExhaustedBudget_NeverDials(t *testing.T) {
@@ -1290,7 +1290,7 @@ func TestDialTransport_ExhaustedBudget_NeverDials(t *testing.T) {
 // and whatever the network says comes back instead of the budget error.
 // Nothing under this test changed on this branch, so the red-check could never
 // see it go red: it pins behavior that was already correct and merely
-// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+// unasserted. See docs/decisions/quality-gateway.md (D9).
 //
 //efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestDialTransport_SliverOfBudget_StillDials(t *testing.T) {

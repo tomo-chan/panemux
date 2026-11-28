@@ -85,7 +85,7 @@ func TestPersistBoardCursors_WritesAFileLoadCursorFileCanReadBack(t *testing.T) 
 // os.MkdirAll, so a missing home directory is simply created on demand and
 // the write SUCCEEDS. Those tests therefore drove the happy path while claiming to cover
 // the failure branch — tautological tests of exactly the shape this
-// repository's own red-check (docs/quality-gateway.md, D4) exists to catch,
+// repository's own red-check (docs/engineering/quality-gates.md, D4) exists to catch,
 // and `go tool cover` showed it: both functions sat at 50%.
 //
 // A plain FILE where the directory has to go is genuinely unwritable, and

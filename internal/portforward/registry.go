@@ -125,7 +125,7 @@ func New(opts Options) *Registry {
 // sits exactly at zero and nothing observable distinguishes the two from
 // outside — a reaper that ticks once a minute cannot be waited on in a test,
 // so New's own behavior at 0 was unverifiable in place. Same reason
-// browserOpenArgv is split out of openChrome (see docs/security.md). Issue #190.
+// browserOpenArgv is split out of openChrome (see docs/security/process-and-ssh.md). Issue #190.
 func resolveSweepInterval(configured time.Duration) (time.Duration, bool) {
 	if configured < 0 {
 		return 0, false

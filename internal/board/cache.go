@@ -11,7 +11,7 @@ import (
 
 // defaultBoardCacheHistoryLimit bounds the in-memory history ring buffer.
 // It comfortably exceeds the relay's cold-start backfill limit (see
-// docs/agent-board.md's Cross-host relay section) so a freshly repopulated
+// docs/backend/agent-board/relay.md's Cross-host relay section) so a freshly repopulated
 // cache isn't immediately trimmed back down.
 const defaultBoardCacheHistoryLimit = 2000
 
@@ -91,7 +91,7 @@ func (c *BoardCache) RecordStatus(paneID string, s Status) {
 // AppendMessage appends r to the history ring buffer, assigning it the next
 // Seq. When the buffer exceeds its bound, the oldest rows are dropped —
 // the same accepted truncation tradeoff the relay's own bounded polling
-// already makes (see docs/agent-board.md).
+// already makes (see docs/backend/agent-board/relay.md).
 func (c *BoardCache) AppendMessage(r Row) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -27,7 +27,7 @@ func TestVersionDefault(t *testing.T) {
 // session.CreateFromConfig directly — so none of them could be driven without
 // spawning real sessions or reading the developer's own config. Each now
 // takes its dependency as an argument (DEVELOPMENT.md's testability rule,
-// docs/quality-gateway.md's principle P3), which is what lets the tests below
+// docs/engineering/quality-gates.md's principle P3), which is what lets the tests below
 // exist and is why the root package joined COVERAGE_PKGS.
 
 func TestParseOptions(t *testing.T) {
@@ -409,8 +409,10 @@ func TestBrowserOpenArgv(t *testing.T) {
 
 // The URL is the only caller-derived value that reaches an exec argv here.
 // It is always panemux's own listen address, and it travels as a discrete
-// argument rather than through a shell — see docs/security.md's general
+// argument rather than through a shell — see docs/security/overview.md's general
 // rules — so this pins that it is never concatenated into one string.
+//
+//efficacy:exempt documentation link update only; test and covered implementation are unchanged.
 func TestBrowserOpenArgv_URLStaysADiscreteArgument(t *testing.T) {
 	const url = "http://127.0.0.1:8080"
 

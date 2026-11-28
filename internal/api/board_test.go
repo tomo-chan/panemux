@@ -209,8 +209,9 @@ func TestGetBoardSessionToken_WildcardBindHost_Allowed(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
+//efficacy:exempt documentation link update only; test and covered implementation are unchanged.
 func TestGetBoardSessionToken_XForwardedForHeader_Forbidden(t *testing.T) {
-	// A same-host reverse proxy (the exact mitigation docs/security.md
+	// A same-host reverse proxy (the exact mitigation docs/security/auth.md
 	// itself recommends for exposing panemux beyond loopback) makes every
 	// proxied request arrive with a loopback RemoteAddr and, under common
 	// proxy defaults (nginx's $proxy_host, Apache's ProxyPreserveHost Off),

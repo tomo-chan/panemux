@@ -14,8 +14,7 @@ import (
 // command means no second listening process is ever started — the
 // subprocess speaks MCP over stdio to the claude -p process that spawned
 // it, exits with it, and is never itself reachable over the network. See
-// docs/agent-board.md's "No new daemon, no new listening port" design
-// principle.
+// docs/backend/agent-board/command-center.md.
 const BoardMCPServerSubcommand = "__board-mcp-server"
 
 // mcpServerName is this MCP server's name as it appears in the mcp-config
@@ -25,8 +24,8 @@ const mcpServerName = "panemux-board"
 
 // The three tool names the board MCP server exposes — thin wrappers around
 // GET /api/board/status, GET /api/board/messages, and POST
-// /api/board/broadcast respectively. See docs/agent-board.md's Command
-// center section.
+// /api/board/broadcast respectively. See
+// docs/backend/agent-board/command-center.md.
 const (
 	MCPToolBoardStatus    = "board_status"
 	MCPToolBoardMessages  = "board_messages"
@@ -97,7 +96,8 @@ func BuildMCPConfig(execPath, baseURL, token string) (path string, cleanup func(
 // center's `claude -p` subprocess to exactly the three board MCP tools. The
 // subprocess never receives --dangerously-skip-permissions, and this narrow
 // allowlist stands in for the interactive approval prompt it has no PTY to
-// surface — see docs/agent-board.md's "Permissions" subsection.
+// surface — see docs/backend/agent-board/command-center.md and
+// docs/security/agent-board.md.
 //
 // Note what this does *not* mean, since an earlier revision of this comment
 // claimed it: the other built-in tools are not absent. They remain in the

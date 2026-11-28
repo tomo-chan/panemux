@@ -16,7 +16,7 @@ const sessionFileMode os.FileMode = 0600
 
 // SessionState is the command center's own persisted --resume continuity: a
 // single fixed Claude session id reused across every later query. See
-// docs/agent-board.md's Process lifecycle section.
+// docs/backend/agent-board/command-center.md's Process lifecycle section.
 type SessionState struct {
 	SessionID string `json:"session_id"`
 }

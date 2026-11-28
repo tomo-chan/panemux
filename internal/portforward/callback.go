@@ -40,8 +40,9 @@ var redirectParamNames = []string{
 // ValidateOpenURL reports whether raw is a URL panemux is willing to open in
 // the operator's browser. Only http and https are accepted: a pane can ask
 // for a URL to be opened (see the OSC browser-open path in
-// docs/behavior.md), and schemes such as file: or javascript: would turn
-// that into a local-file read or script execution in the dashboard's origin.
+// docs/backend/workspace/preview-and-urls.md), and schemes such as file: or
+// javascript: would turn that into a local-file read or script execution in the
+// dashboard's origin.
 func ValidateOpenURL(raw string) error {
 	_, err := parseHTTPURL(raw)
 	return err

@@ -4,7 +4,7 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { checkAgainstCeiling, type ScanLabel } from './a11y-ceiling'
 
 // Interaction capability is the other ISO 25010 characteristic
-// docs/quality-gateway.md records as thinly protected: three focus-restoration
+// docs/engineering/quality-gates.md records as thinly protected: three focus-restoration
 // E2E tests and, before this file, no accessibility checks at all.
 //
 // This file drives the four page states and reports what it found. The ceiling
@@ -46,7 +46,7 @@ async function scan(page: Page, testInfo: TestInfo, label: ScanLabel) {
   if (lowerable.length > 0) {
     console.log(
       `a11y[${label}] ceiling can be lowered — edit CEILINGS in e2e/a11y-ceiling.ts and the ` +
-        `Accessibility table in docs/quality-gateway.md:\n  ${lowerable.join('\n  ')}`,
+        `Accessibility table in docs/engineering/quality-gates.md:\n  ${lowerable.join('\n  ')}`,
     )
   }
   await testInfo.attach(`axe-${label}.txt`, {

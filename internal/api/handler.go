@@ -118,7 +118,7 @@ type gitInfoCacheEntry struct {
 // gitInfoCacheTTL bounds how long a pane header may show git/PR metadata
 // that is no longer perfectly current, in exchange for not re-running
 // process/transcript scans, remote git inspection, and `gh pr view` lookups
-// on every poll. See docs/behavior.md "Pane Git and PR metadata".
+// on every poll. See docs/backend/workspace/sessions.md ("Pane Git and PR metadata").
 const gitInfoCacheTTL = 30 * time.Second
 
 // activeGitContext pairs a resolved git context with the working directory

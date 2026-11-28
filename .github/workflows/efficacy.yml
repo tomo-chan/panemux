@@ -1,17 +1,17 @@
 name: efficacy
 
-# red-check: gate G4(b) in docs/quality-gateway.md.
+# red-check: gate G4(b) in docs/engineering/quality-gates.md.
 #
 # Runs `make efficacy`, which reverts this branch's implementation diff in a
 # scratch worktree and requires each test this branch changed to pass at HEAD
 # and then FAIL against the revert, one test at a time. A test that still
 # passes without the code it covers protects nothing — see decision D4:
-# docs/decisions/quality-gateway/red-check.md.
+# docs/decisions/quality-gateway.md (D4).
 #
 # Pull requests only, and deliberately not part of `make check`: it needs the
 # base branch and a second test run, which is a per-pull-request cost, not a
 # per-turn one. The same reasoning keeps mutation testing (D2 in
-# docs/decisions/quality-gateway/mutation-diff-scope.md) and the agmsg
+# docs/decisions/quality-gateway.md, D2) and the agmsg
 # contract out of the local gate.
 #
 # No `paths:` filter, for the reason agmsg-contract.yml records: a

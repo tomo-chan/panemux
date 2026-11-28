@@ -1,14 +1,14 @@
 # Development Guide
 
 Daily setup, commands, and mandatory development rules. Details live in the
-[development index](docs/development/index.md).
+[engineering index](docs/engineering/index.md).
 
 ## Runtime version contract
 
 Use the exact Go and Node versions pinned in `go.mod` and `.node-version`. Run ordinary
 `make` commands without overriding `GOTOOLCHAIN`, `PATH`, or `NODE_OPTIONS` for runtime selection.
 Install a Go launcher supporting toolchain selection (Go 1.21+); use `make install-deps`
-or `scripts/npm.sh` for dependency setup. See the [runtime contract](docs/development/runtime.md)
+or `scripts/npm.sh` for dependency setup. See the [runtime contract](docs/engineering/runtime-and-sandbox.md#runtime-toolchain-contract)
 for SDK bootstrap prerequisites, supported platforms, offline use, and failure recovery.
 
 ## Build And Run
@@ -43,8 +43,8 @@ retake them in the same change: inspect every rewritten image and commit it. Thi
 UI components, layout, styles, text, and the capture itself; the rule also covers hooks,
 schemas, or utilities that change the screen.
 
-See [Documentation screenshots](docs/development/screenshots.md) for CI scope, placeholder
-capture, staging recovery, and cleanup; [Browser fixture isolation](docs/development/browser-fixtures.md)
+See [Documentation screenshots](docs/engineering/screenshots.md) for CI scope, placeholder
+capture, staging recovery, and cleanup; [Browser fixture isolation](docs/engineering/testing.md#browser-fixture-isolation)
 covers E2E isolation.
 
 ### Format and checks
@@ -60,12 +60,12 @@ make check
 ### Codex verification
 
 Use the fixed `make verify-*` entry points for checkout-local logs/build caches
-and saved PR bases. See [Codex verification](docs/development/codex-verification.md)
+and saved PR bases. See [Codex verification](docs/engineering/codex-verification.md)
 for first-time user approval setup, supported scope, and remaining sandbox limits.
 
 ### Claude Code sandbox
 
-See [Claude Code sandbox](docs/development/claude-sandbox.md) for shared local-network
+See [Claude Code sandbox](docs/engineering/runtime-and-sandbox.md#claude-code-sandbox) for shared local-network
 permissions, platform and managed-policy differences, skipped capability tests, and required
 verification after settings changes. CI verifies capabilities unavailable inside the sandbox.
 
@@ -89,7 +89,7 @@ Test at the smallest unit that exercises the logic. Enumerate behavioral factors
 their meaningful combinations; use tables for matrices. Add injectable overrides for global
 side effects. Use `internal/homedir`, `internal/cachedir`, and `internal/fileops` for their
 respective boundaries, only from non-parallel tests. Follow the full
-[test granularity and testability rules](docs/development/test-granularity.md).
+[test granularity and testability rules](docs/engineering/testing.md#test-granularity-and-testability-seams).
 
 ### Schema-first
 
@@ -101,28 +101,28 @@ respective boundaries, only from non-parallel tests. Follow the full
 
 Run `make test-go` (or `make check`) after changing a Go response struct before trusting
 frontend results: fixtures flow Go → JSON → TypeScript. Commit fixture changes with the struct;
-never hand-edit `testdata/api-contract/`. See [Contract fixtures](docs/development/contract-fixtures.md).
+never hand-edit `testdata/api-contract/`. See [API contract fixtures](docs/engineering/testing.md#api-contract-fixtures-testdataapi-contract).
 
 ### Coverage
 
 Run `make coverage-go` and `make coverage-frontend` (80%), and the PR-only
-`COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`. Follow [Coverage gates](docs/development/coverage.md)
+`COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`. Follow [Coverage gates](docs/engineering/quality-gates.md#coverage-gates)
 for scope, justified exclusions, and required exemption reasons.
 
 ### Mutation (`make mutation`)
 
-Run `MUTATION_BASE=origin/main make mutation` for PRs. Follow [Mutation testing](docs/development/mutation.md)
+Run `MUTATION_BASE=origin/main make mutation` for PRs. Follow [Mutation testing](docs/engineering/quality-gates.md#mutation-testing-make-mutation)
 for gremlins setup, failing outcomes, and typed, justified exemptions.
 
 ### Model checking (`make model-check`, issue #168)
 
 Never hand-edit transition JSON: update .tla/.cfg, run `make model-check-write`, and commit the diff.
-[Model checking](docs/development/model-checking.md) separates always-on conformance from optional TLC.
+[State-machine model checking](docs/engineering/testing.md#state-machine-model-checking) separates always-on conformance from optional TLC.
 
 ### Red-check (`make efficacy`)
 
 Changed tests must fail without their implementation diff. Run the PR-only `make efficacy`;
-follow [Red-check](docs/development/red-check.md) for justified exemptions and scope.
+follow [Red-check](docs/engineering/quality-gates.md#red-check-make-efficacy) for justified exemptions and scope.
 
 ### Quality gate
 
@@ -135,21 +135,21 @@ follow [Red-check](docs/development/red-check.md) for justified exemptions and s
 - Pull-request-only gates: `make efficacy`, `COVERAGE_BLOCKS_BASE=origin/main make coverage-blocks`, and `MUTATION_BASE=origin/main make mutation` (all three fail the build)
 - Optional test tools: `python3` for model-check exporter and agmsg automation tests, `jq` for
   hook tests. Missing tools skip those checks locally; missing Python fails agmsg automation in CI.
-- `make bench` measures without thresholds; see [measurements](docs/quality-gateway/measurements.md).
-- Follow the [accessibility ceiling procedure](docs/quality-gateway/accessibility.md)
+- `make bench` measures without thresholds; see [Performance benchmarks](docs/engineering/quality-gates.md#performance-benchmarks).
+- Follow the [accessibility ceiling procedure](docs/engineering/quality-gates.md#accessibility-ceilings)
   after fixes; counts must not rise.
 - `make lint-go`, `make lint-frontend`, and `make lint` run lint checks. Go lint includes
   gofmt, vet, and the pinned golangci-lint; its cache is checkout-local `.cache/golangci-lint/`
   (inherited cache settings are overridden; user caches are left untouched).
-- Tagged fixture-agent verification follows [the build contract](docs/quality-gateway.md#the-fixture-agents-tagged-build).
+- Tagged fixture-agent verification follows [the build contract](docs/engineering/quality-gates.md#the-fixture-agents-tagged-build).
 - Run `make lint-go` or `make lint` after every Go code change before committing.
-- [docs/quality-gateway.md](docs/quality-gateway.md) explains what these gates are responsible for and which further gates are designed but not yet built. Read it before changing the gate set itself.
+- [docs/engineering/quality-gates.md](docs/engineering/quality-gates.md) explains what these gates are responsible for and how they are enforced. Read it before changing the gate set itself.
 
 ### Push protection
 
 - `make install-deps` configures the repo-local Git hooks path to `.githooks`.
 - The tracked `pre-push` hook runs only the checks the pushed change touches (`scripts/pre_push_check.sh`), and blocks `git push` when one fails. The whole suite is CI's job; run `make check` yourself to run all of it locally.
-- See [Pre-push check selection](docs/development/push-protection.md) for diff bases, selected checks, and full-suite fallback.
+- See [Pre-push check selection](docs/engineering/quality-gates.md#pre-push-check-selection) for diff bases, selected checks, and full-suite fallback.
 - Do not bypass the hook for ordinary development. Fix the failing checks instead.
 
 ### Documentation updates
@@ -165,18 +165,15 @@ follow [Red-check](docs/development/red-check.md) for justified exemptions and s
   manual verification is valid, an absent row is not. Run `make check-scenarios`.
   CI requires scenario edits for frontend/src, internal/api, and internal/config changes;
   use `scenarios-exempt` only when no use case changes.
-- Follow [the OKF writing rules](docs/index.md#writing-rules): docs/ is the bundle; concepts have
-  type/title/description and directory indexes have described entries. Root workflow files stay
-  outside it. Keep one authority per contract and one responsibility per concept, with relative
-  links and routes from old sections. Update actual references, filename labels, comments, and
-  expected paths when moving content; leave unrelated fixtures alone.
+- Follow [the OKF writing rules](docs/index.md#writing-rules) for `docs/` metadata, directory
+  indexes, cohesive file granularity, English-only prose, topic-grouped decisions under
+  `docs/decisions/<topic>.md`, and direct reference updates without redirect stubs.
 - Run `make check-docs-links`, `make check-docs-okf`, and their test targets; these remain in
-  `make check`. Keep topic entrances distinct from directory listings, and dated measurements
-  beside their topic with commit/date, as specified by the writing rules.
+  `make check`.
 
 ### Security-sensitive implementation
 
-- When code changes affect command execution, shell argument handling, SSH path handling, host key handling, or `gosec` posture, read [docs/security.md](docs/security.md) before implementation and follow it during the change.
+- When code changes affect command execution, shell argument handling, SSH path handling, host key handling, or `gosec` posture, read [docs/security/overview.md](docs/security/overview.md) before implementation and follow it during the change.
 - Prefer structural fixes over `//nolint:gosec` in shipped code.
 
 ### Temporary-file discipline
@@ -228,7 +225,7 @@ git worktree remove /tmp/<repo>-<feature>
 
 ## Related Documents
 
-Use the [development index](docs/development/index.md) for runtime selection, sandbox setup,
-screenshots, browser fixtures, pre-push selection, Codex verification, and focused testing contracts.
-The [documentation index](docs/index.md) routes to product, architecture, behavior, security,
-UI, maintenance, scenarios, quality-gateway, and decision documents.
+Use the [engineering index](docs/engineering/index.md) for quality gates, testing contracts,
+runtime selection, sandbox setup, screenshots, Codex verification, CI, and releases.
+The [documentation index](docs/index.md) routes to product, architecture, UI, API, backend,
+security, engineering, scenarios, and decision documents.

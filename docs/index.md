@@ -4,84 +4,53 @@ okf_version: "0.2"
 
 # Documentation
 
-This directory describes panemux at three levels. Start at the level that matches the question you
-are trying to answer; a reader should not have to reconstruct the current product from its project
-history.
+This directory is the current specification, design, and operating reference for panemux (end-user
+setup lives in [README.md](../README.md); developer workflow lives in
+[DEVELOPMENT.md](../DEVELOPMENT.md)). Start with the overview or jump directly by layer or
+cross-cutting concern.
 
-## 1. Overview
+## 1. Overview and system map
 
-Read [Application overview](overview.md) for a two-minute description of the product, its main
-capabilities, data flow, and current boundaries.
+- [Application overview](overview.md) - Two-minute description of product purpose, capabilities,
+  operating model, and boundaries.
+- [Architecture](architecture.md) - Component ownership, state lifecycle, data flows, and trust
+  boundaries.
+- [Scenario coverage](scenarios.md) - User-facing acceptance ledger mapping each scenario to its
+  automated or manual verification.
 
-## 2. Topic guides
+## 2. Layer-specific documentation
 
-Topic guides are concise explanation boards. They state the current model, the rules that always
-apply, and where to continue. They do not narrate how the model evolved.
+Organized by architectural layer, aligned along the same domain axis (`workspace`, `tasks`,
+`agent-board`):
 
-| Question | Guide |
-|---|---|
-| How is the system arranged? | [Architecture](architecture.md) |
-| What does the running product do? | [Behavior specification](behavior.md) |
-| Which security rules constrain a change? | [Security design](security.md) |
-| How should the interface behave and look? | [UI design](ui-design.md) |
-| Which agents are known, and how is one added? | [Agent registry](agent-registry.md), [Adding an agent](agent-registry/adding-an-agent.md) |
-| How does Agent Board work? | [Agent Board](agent-board.md) |
-| What must the test system protect? | [Quality gateway](quality-gateway.md) |
-| How is CI, dependency, and release work performed? | [Maintenance guide](maintenance.md) |
-| Which user scenarios are verified? | [Scenario coverage](scenarios.md) |
+| Layer | Entrance | `workspace` | `tasks` | `agent-board` | Shared |
+|---|---|---|---|---|---|
+| **UI** | [ui/](ui/) | [workspace.md](ui/workspace.md) | [tasks.md](ui/tasks.md) | [agent-board.md](ui/agent-board.md) | [overview.md](ui/overview.md) |
+| **API** | [api/](api/) | [workspace.md](api/workspace.md) | [tasks.md](api/tasks.md) | [agent-board.md](api/agent-board.md) | — |
+| **Backend** | [backend/](backend/) | [workspace/](backend/workspace/) | [tasks/](backend/tasks/) | [agent-board/](backend/agent-board/) | [agent-registry.md](backend/agent-registry.md) |
 
-Developer workflow is defined in [DEVELOPMENT.md](../DEVELOPMENT.md), outside this directory because
-it is also the day-to-day command reference.
+## 3. Cross-cutting concerns
 
-## 3. Deep dives
-
-Topic guides link to focused deep dives when the summary is not enough:
-
-- [UI details](ui-design/) - Workspace and pane chrome, layout editing, dialogs, previews, attention,
-  task dashboard surfaces, and Agent Board presentation.
-- [Behavior details](behavior/) - REST, WebSocket, frontend, SSH, notifications, URL opening, and the
-  task dashboard.
-- [Security details](security/) - requirements grouped by command or trust boundary.
-- [Agent Board details](agent-board/) - architecture, relay, bootstrap, command center, integration,
-  limitations, and tests.
-- [Quality-gateway details](quality-gateway/) - measurements and mutation findings.
-- [Decisions](decisions/index.md) - historical decisions grouped by topic.
-- [Development details](development/) - runtime and sandbox setup, screenshots, browser fixtures,
-  pre-push selection, and focused testing contracts.
-
-## Decision history
-
-[Decisions](decisions/index.md) records why consequential choices were made and what they replaced.
-Each decision is one concept under `decisions/<topic>/<slug>.md`; topic indexes provide discovery.
-[DECISIONLOG.md](DECISIONLOG.md) preserves routes from historical headings. Current-state contracts
-stay in guides and deep dives; decisions link to those authorities rather than repeat them.
-Git history remains the authority for line-level chronology.
+| Concern | Entrance | Scope |
+|---|---|---|
+| **Security** | [security/overview.md](security/overview.md), [security/](security/) | Invariants, auth/browser guard, process/SSH, tasks, Agent Board, and split preview/URL-open boundaries |
+| **Engineering** | [engineering/](engineering/) | Quality gates, testing contracts, runtimes, sandboxes, Codex verification, screenshots, CI, releases, and agmsg maintenance |
+| **Decisions** | [decisions/](decisions/) | Historical design rationale and rejected alternatives grouped into one topic file per domain |
 
 ## Bundle contents
 
-* [Decision Log](DECISIONLOG.md) - Compatibility routes from historical decision headings.
 * [Documentation](README.md) - GitHub landing page linking to the canonical documentation index.
-* [Agent Board](agent-board.md) - Agent Board capabilities, design principles, and routes to focused contracts.
-* [Agent Registry](agent-registry.md) - Agent registration, identities, capabilities, and routes to integration requirements.
-* [Architecture](architecture.md) - System structure, component ownership, data flow, and trust boundaries.
-* [Behavior Specification](behavior.md) - Startup, configuration, operational assumptions, and routes to runtime contracts.
-* [Maintenance Guide](maintenance.md) - Maintenance procedures for toolchains, dependencies, CI, releases, and Agent Board tools.
 * [Application Overview](overview.md) - Product purpose, capabilities, operating model, and current boundaries.
-* [Quality Gateway](quality-gateway.md) - Product and test quality characteristics, verification gates, and enforcement responsibilities.
+* [Architecture](architecture.md) - System structure, component ownership, data flow, and trust boundaries.
 * [Scenario Coverage](scenarios.md) - User-facing acceptance scenarios and the automated or manual verification for each.
-* [Security Design](security.md) - Implementation security invariants, development trust boundaries, and routes to sink requirements.
-* [UI Design](ui-design.md) - Shared interface principles and routes to screen and interaction contracts.
-* [agent-board/](agent-board/) - Agent Board architecture, messaging, integration, security, and verification contracts.
-* [agent-registry/](agent-registry/) - Agent integration procedures and capability requirements.
-* [ui-design/](ui-design/) - Screen and interaction contracts linked from the shared UI principles.
-* [behavior/](behavior/) - Runtime behavior, API contracts, task events, and task dashboard details.
-* [decisions/](decisions/) - Individual design decisions and topic indexes.
-* [development/](development/) - Development and verification contracts, fixtures, and operational procedures.
-* [images/](images/) - Documentation screenshots captured from the product with placeholder content.
-* [maintenance/](maintenance/) - agmsg compatibility proposals and release recovery procedures.
-* [models/](models/) - Formal models of terminal replay behavior.
-* [quality-gateway/](quality-gateway/) - Quality gate decisions and dated measurements.
+* [ui/](ui/) - Shared UI principles, frontend runtime, and domain screen contracts.
+* [api/](api/) - REST API and WebSocket wire contracts grouped by domain.
+* [backend/](backend/) - Server-side runtime behavior, configuration, sessions, tasks, Agent Board, and agent registry.
 * [security/](security/) - Security requirements grouped by execution sink and trust boundary.
+* [engineering/](engineering/) - Quality gates, testing contracts, runtimes, sandboxes, screenshots, CI, releases, and agmsg maintenance.
+* [decisions/](decisions/) - Design decisions grouped into topic documents.
+* [images/](images/) - Documentation screenshots captured from the product with placeholder content.
+* [models/](models/) - Formal models of terminal replay behavior.
 
 ## Writing rules
 
@@ -101,20 +70,19 @@ Git history remains the authority for line-level chronology.
   such as `* [Application Overview](overview.md) - Product purpose, capabilities, operating model, and current boundaries.` Include a description
   for resource files and subdirectories too. Indexes have no frontmatter except this bundle-root
   index, whose frontmatter contains only `okf_version: "0.2"`. Reserve `log.md` for OKF §9 update
-  history, not a concept. Decision concepts use `type: Decision`; `DECISIONLOG.md` preserves old routes.
+  history, not a concept. Decision topic documents use `type: Decision`.
 - The directory hierarchy is a tree; Markdown links between concepts are graph edges. Explain the
   relationship in surrounding prose and use relative paths, never `/`-prefixed bundle paths,
   because GitHub resolves the latter from the repository root.
-- Split by responsibility: one concept owns one responsibility, and one concept is authoritative
-  for each contract or rule. Other concepts link to that authority rather than duplicating its
-  contract. Keep `docs/<name>.md` as the topic entrance when details live in `docs/<name>/`;
-  that directory's `index.md` lists its contents rather than replacing the topic concept.
-- Keep translations as ordinary concepts with the same type as the original, localized titles and
-  descriptions, and an index entry identifying the translation. For task events, the English
-  document remains authoritative and changes update both versions in the same pull request.
+- Split by responsibility without over-fragmenting: one concept is authoritative for each contract
+  or rule, and other concepts link to that authority rather than duplicating its contract. Prefer
+  cohesive documents (roughly 100–300 lines) over proliferation of tiny files. Place every topic
+  entrance inside its directory (`docs/<topic>/index.md`, plus `overview.md` when needed) rather
+  than adding top-level `docs/<topic>.md` files alongside the directory.
+- Write all bundle documentation in English; do not maintain parallel translated copies.
 - Update actual references when a document moves: Markdown links and filename labels, Go/TS/shell
-  comments, and expected documentation paths in tests. Identically named unrelated documents and
-  independent fixtures retain their own paths.
+  comments, and expected documentation paths in tests. Do not leave redirect stub files behind.
+  Identically named unrelated documents and independent fixtures retain their own paths.
 - Run `make check-docs-okf` and `make test-docs-okf` for metadata/index changes, alongside the
   existing link checks. The OKF gate checks parseable YAML and a non-empty string `type` on
   concepts, and section headings with described link-list entries in indexes. It accepts optional
@@ -123,20 +91,16 @@ Git history remains the authority for line-level chronology.
   them for bundle Markdown or checker changes. Symlink directories are not traversed; their paths
   are reported as not inspected. It does not replace link/anchor checks or validate log history.
 - Put product purpose and broad boundaries in `overview.md`.
-- Keep each top-level topic guide short enough to scan. Put per-surface or per-component detail in a
-  focused concept grouped by topic and link to it through a document map and directory index.
 - State current behavior and requirements in the present tense. Avoid rollout tables, "landed" or
   "previously" notes, stale measurements, and implementation status narratives in specification
   documents.
 - Document intent, invariants, external contracts, and failure semantics. Do not inventory types,
   functions, tests, or control flow that a code reader can discover directly; name implementation
   locations only when they identify where a rule is enforced.
-- Add one `type: Decision` concept under `decisions/<topic>/<slug>.md` when a reason, rejected
-  alternative, migration sequence, or incident matters to future maintainers. Use a meaning-based
-  lowercase kebab-case slug; keep dates, issue/PR references and existing D1–D14 identifiers in the
-  text/title and index rather than the filename. Update the topic index and current-state authority
-  in the same change. Mark replaced decisions `status: deprecated` and link their successors;
-  preserve old heading routes when moving records.
-- Put measurements beside the topic they measure and identify their commit/date. Measurements are
-  evidence, not timeless specification.
+- Record consequential design rationale, rejected alternatives, or incident lessons as a dated
+  section inside the matching topic file under `decisions/<topic>.md` (`type: Decision`). Update
+  the current-state authority in the same change, and prune superseded or purely historical notes
+  that add no value beyond Git history.
+- Keep dated one-off measurements out of timeless specifications; summarize lasting conclusions in
+  the relevant `decisions/<topic>.md` entry instead.
 - Put user-visible acceptance coverage in `scenarios.md`; do not duplicate it as prose test status.

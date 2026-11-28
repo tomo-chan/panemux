@@ -1,6 +1,6 @@
 // Package board implements Agent Board: cross-pane Claude/Codex messaging
 // and status aggregation through consumer-owned messaging ports.
-// See docs/agent-board.md for the full design this package implements.
+// See docs/backend/agent-board/index.md for the full design this package implements.
 package board
 
 import (
@@ -22,7 +22,7 @@ const SystemID = "_system"
 // statusKind is the required discriminator value for a status self-report.
 // Detecting a status update by JSON shape alone ("does this body happen to
 // have a state field") has a real false-positive edge — see
-// docs/agent-board.md's Status self-report section — so a literal
+// docs/backend/agent-board/relay.md's Status self-report section — so a literal
 // "kind": "board_status" is required, not merely permitted.
 const statusKind = "board_status"
 

@@ -177,8 +177,8 @@ func (b *bootstrapWatcher) sessionFor(paneID string) (session.Session, bool) {
 }
 
 // checkPane runs the bootstrap decision for one pane. See
-// docs/agent-board.md's Bootstrap flow section for the algorithm this
-// implements.
+// docs/backend/agent-board/relay.md's Pane detection and bootstrap section for
+// the algorithm this implements.
 func (b *bootstrapWatcher) checkPane(ctx context.Context, paneID, host string) {
 	participant := b.participant(host)
 	if participant == nil {

@@ -349,7 +349,7 @@ export const App: React.FC = () => {
   // The latest applied store, so a notification's click finds the task where it is then.
   const taskStoreRef = useRef<TaskEventChange['after'] | null>(null)
 
-  // The task event stream (docs/behavior/task-events.md#receiver): every
+  // The task event stream (docs/backend/tasks/events.md#receiver): every
   // applied frame updates the attention and notifies the waits it starts that
   // the person cannot see, each wait_id once.
   const handleTaskEvent = useCallback(({ before, frame, after }: TaskEventChange) => {
@@ -428,8 +428,8 @@ export const App: React.FC = () => {
 
   // Global command center palette shortcut: Cmd/Ctrl+Shift+K, deliberately
   // not plain Cmd/Ctrl+K (already bound in many shells/readline setups and
-  // would collide with pane-local terminal input) — see docs/ui-design/agent-board.md's
-  // Agent Board UI section. Registered on the capture phase so it reaches
+  // would collide with pane-local terminal input) — see docs/ui/agent-board.md's
+  // Command center section. Registered on the capture phase so it reaches
   // this handler even when a terminal pane (which owns its own keydown
   // handling) currently has focus.
   //
@@ -452,7 +452,7 @@ export const App: React.FC = () => {
   // Global agent board dashboard shortcut: Cmd/Ctrl+Shift+B, on the capture
   // phase for the same reason as the command palette's own Cmd/Ctrl+Shift+K
   // above — it must reach this handler even when a terminal pane currently
-  // has focus. See docs/ui-design/agent-board.md's Agent Board UI section.
+  // has focus. See docs/ui/agent-board.md's Dashboard section.
   useEffect(() => {
     if (!boardDashboardAvailable || layer === 'tasks') return
     const handleKeyDown = (event: KeyboardEvent) => {

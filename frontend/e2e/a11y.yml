@@ -14,7 +14,7 @@
 # page reports 10 and 11. A ceiling measured in one of those states fails in
 # the other, and it would fail on the order of the suite rather than on
 # anything about accessibility — a false positive, which design principle 4 in
-# docs/quality-gateway.md says a gate must not have.
+# docs/engineering/quality-gates.md says a gate must not have.
 #
 # So the audited page is pinned here rather than inherited. Two workspaces with
 # one pane each, matching the shape workspace-switch.yml had when issue #187

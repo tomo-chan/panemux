@@ -10,7 +10,7 @@ PaneMux is a browser-based terminal workspace. One server process renders multip
 tmux sessions in a resizable split layout and serves the browser UI that controls them.
 
 Use this page for the product-level picture. Continue to [Architecture](architecture.md) for system
-structure, [Behavior specification](behavior.md) for runtime contracts, or the
+structure, [Backend specifications](backend/index.md) for runtime contracts, or the
 [documentation index](index.md) to choose another topic.
 
 ## What it provides
@@ -81,20 +81,21 @@ backend and UI are released together.
   browser pane splitting and by the task dashboard, which creates only `tmux` and `ssh_tmux` panes
   attaching to a task's existing tmux session.
 - The task dashboard depends on unpublished Claude Code and Codex state formats. See
-  [collection and states](behavior/task-collection.md) for data sources, polling, unknown formats,
+  [collection and states](backend/tasks/collection.md) for data sources, polling, unknown formats,
   wait signatures, and done/label eligibility. Codex command-approval waits require the
-  [permission hook](behavior/task-codex-permissions.md#codex-permission-requests).
+  [permission hook](backend/tasks/collection.md#codex-permission-requests).
 - Finding an agent's pane outside tmux has platform limits; see
-  [task navigation](behavior/task-navigation.md#the-pane-of-an-agent-outside-tmux), including the
+  [task navigation](backend/tasks/lifecycle.md#the-pane-of-an-agent-outside-tmux), including the
   unverified macOS environment-reading support.
-- [Task launch and resume](behavior/task-launch.md) starts Claude Code and Codex in detached tmux
+- [Task launch and resume](backend/tasks/lifecycle.md#starting-and-resuming-tasks) starts Claude Code and Codex in detached tmux
   sessions without creating a pane or pane config; a Codex task held at a startup screen waits
   for operator input in its tmux pane.
 
 ## Where to continue
 
 - [Architecture](architecture.md) — components, ownership, and trust boundaries.
-- [Behavior specification](behavior.md) — startup, configuration, APIs, and browser behavior.
-- [Security design](security.md) — implementation requirements by sensitive sink.
-- [UI design](ui-design.md) — interaction and presentation rules.
+- [Backend specifications](backend/index.md) — startup, configuration, sessions, tasks, Agent Board, and agent registry.
+- [Security overview](security/overview.md) — implementation requirements by sensitive sink.
+- [UI overview](ui/overview.md) — interaction, frontend runtime, and presentation rules.
+- [API contracts](api/index.md) — REST and WebSocket wire specifications.
 - [Decision log](decisions/index.md) — why the present design replaced earlier approaches.

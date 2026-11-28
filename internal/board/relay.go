@@ -48,7 +48,7 @@ type RelayConfig struct {
 
 // Relay is panemux's message poller: it reads every known host's transport
 // team, updates BoardCache, and relays cross-host messages. See
-// docs/agent-board.md's Cross-host relay section for the full design this
+// docs/backend/agent-board/relay.md's Cross-host relay section for the full design this
 // implements.
 type Relay struct {
 	cache          *BoardCache
@@ -381,8 +381,8 @@ func (e *UnknownPaneError) Error() string {
 // every unresolved ID, and no Send happens at all. When from == SystemID,
 // an own-send-ledger entry is recorded for each target immediately before
 // its Send — matching exactly what the relay's own from-validation later
-// checks for such a row, closing the from-forgery gap docs/security.md and
-// docs/agent-board.md describe. If that Send then fails, the just-recorded
+// checks for such a row, closing the from-forgery gap docs/security/agent-board.md
+// describes. If that Send then fails, the just-recorded
 // entry is immediately forgotten again: leaving it live would let any pane
 // on that destination host impersonate SystemID for up to the ledger's TTL
 // with nothing ever actually delivered behind it. On a

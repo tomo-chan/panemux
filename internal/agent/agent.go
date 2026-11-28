@@ -4,7 +4,7 @@
 // rather than naming an agent itself.
 //
 // The registry declares; it does not implement. The code behind each
-// capability lives in the packages that use it. See docs/agent-registry.md.
+// capability lives in the packages that use it. See docs/backend/agent-registry.md.
 //
 // This package imports nothing else from panemux, so every package can import
 // it.

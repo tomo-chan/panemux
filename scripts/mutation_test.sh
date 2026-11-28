@@ -18,7 +18,7 @@
 #   1. Scoping to the diff. Only survivors on lines this branch changed are
 #      reported. The repository has 108 surviving mutants today (issue #180's
 #      measurement); a gate that named all of them would start red, and
-#      docs/quality-gateway.md principle 4 says what happens next.
+#      docs/engineering/quality-gates.md principle 4 says what happens next.
 #   2. Reporting every mutant that reached no verdict on a changed line.
 #      `--diff` decides for itself which mutants to run, a mutant whose suite
 #      timed out was never judged, and a status this gate does not recognise
@@ -1554,7 +1554,7 @@ fi
 # said need not be killed; whether the runner reached a verdict about it is a
 # fact about the runner, not about the code. Failing there would fail a build
 # for a mutant nobody is asking anyone to kill — principle 4 in
-# docs/quality-gateway.md, and the exact shape that gets a gate routed around.
+# docs/engineering/quality-gates.md, and the exact shape that gets a gate routed around.
 #
 # TIMED OUT is the status that makes this reachable in practice: #180's
 # measurement found 44% of runnable mutants timing out under gremlins' own

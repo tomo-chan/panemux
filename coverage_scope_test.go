@@ -13,7 +13,7 @@ import (
 
 // The coverage gate's scope is a hand-written list in the Makefile, which
 // makes it exactly the kind of duplicated knowledge principle P1 warns about
-// (docs/quality-gateway.md): a package added to this repository later is
+// (docs/engineering/quality-gates.md): a package added to this repository later is
 // silently outside the gate, and — worse than the failure this scope widening
 // was closing — the reported percentage goes UP, because the new, untested
 // code is invisible to the measurement rather than dragging it down.

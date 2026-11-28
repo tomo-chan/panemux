@@ -39,8 +39,7 @@ var validAgmsgIdentifier = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 // regex-allowlisted directly the way an identifier or path can — encoding
 // it to a fixed alphabet first, then allowlisting the *encoded* string,
 // mirrors validRemotePath's accepted shape for a value that couldn't
-// otherwise take it. See docs/security.md and docs/agent-board.md's
-// Security model section.
+// otherwise take it. See docs/security/agent-board.md.
 var validBase64 = regexp.MustCompile(`^[A-Za-z0-9+/]*={0,2}$`)
 
 // sendBase64WrapperScript is a fixed script string, never built from
@@ -97,8 +96,8 @@ func (c *RemoteAgmsgClient) apiScript() string  { return c.agmsgPath + "/scripts
 func (c *RemoteAgmsgClient) sendScript() string { return c.agmsgPath + "/scripts/send.sh" }
 
 // Send always passes --force (via sendBase64WrapperScript's fixed
-// --force tail) — see docs/agent-board.md's Integration with agmsg
-// section for why every board-originated send does.
+// --force tail) — see docs/backend/agent-board/agmsg.md's Integration with
+// agmsg section for why every board-originated send does.
 func (c *RemoteAgmsgClient) Send(ctx context.Context, team, from, to, body string) error {
 	if err := validateMessageBody(body); err != nil {
 		return err

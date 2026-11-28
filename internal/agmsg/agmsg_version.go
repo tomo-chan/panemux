@@ -10,16 +10,16 @@ import (
 
 // TestedAgmsgVersion is the agmsg release panemux's integration was checked
 // against: the script argument shapes in
-// docs/agent-board/agmsg-integration.md#integration-with-agmsg were read from this version's
-// own source, not inferred.
+// docs/backend/agent-board/agmsg.md#integration-with-agmsg were read from this
+// version's own source, not inferred.
 //
-// docs/agent-board/agmsg-integration.md's "Version coverage" section
-// requires a pinned tested version because agmsg's own compatibility promise
-// covers reading through scripts/api.sh only. The send.sh argument contract
+// docs/backend/agent-board/agmsg.md's version coverage rules require a pinned
+// tested version because agmsg's own compatibility promise covers reading
+// through scripts/api.sh only. The send.sh argument contract
 // and install.sh behavior used by managed Install / Update carry no such
 // promise, so an agmsg upgrade can change them without that being a bug
 // on agmsg's side.
-const TestedAgmsgVersion = "1.7.2"
+const TestedAgmsgVersion = "1.8.1"
 
 // agmsgVersionFile is agmsg's own version marker at its install root.
 const agmsgVersionFile = "VERSION"
@@ -99,12 +99,12 @@ func parseAgmsgRelease(raw string) (agmsgRelease, bool) {
 // about.
 //
 // A mismatch is deliberately a warning and never a failure. Agent Board is
-// additive, never load-bearing (see docs/agent-board.md's Design
-// principles), and refusing to run against an untested agmsg would turn a
-// possible incompatibility into a certain outage. What this buys is the
-// difference between a pane that silently stops communicating and a log
-// line naming the version that changed — the failure mode
-// docs/agent-board.md's compatibility contract exists to avoid.
+// additive, never load-bearing (see docs/backend/agent-board/relay.md), and
+// refusing to run against an untested agmsg would turn a possible
+// incompatibility into a certain outage. What this buys is the difference
+// between a pane that silently stops communicating and a log line naming the
+// version that changed — the failure mode docs/backend/agent-board/agmsg.md's
+// compatibility contract exists to avoid.
 //
 // Release comparison normalizes install provenance but now warns for every
 // release different from the pinned release, including newer patches.

@@ -108,7 +108,7 @@ Common uses:
 - **Change a pane's settings** — type, shell, working directory, title, and whether it joins the Agent Board — with the **Pane settings** button in its header.
 - **Restart a pane** with the on-screen button if the underlying session exits.
 - **Open a linked PR** from the pane header when the current Git branch already has a GitHub pull request. For local panes, panemux can prefer the live worktree of an interactive `codex` or `claude` session, including resumed Codex sessions, and keeps the last valid sibling worktree pinned after the agent exits until a newer valid context is detected.
-- **Preview an HTML or Markdown file** by clicking its path in a local pane: it opens beside the terminal, which keeps taking input. Drag the divider (or use the arrow keys, double-click for 50:50) to resize, and **Open in new tab** to see it larger. See [the split preview](docs/behavior/preview.md).
+- **Preview an HTML or Markdown file** by clicking its path in a local pane: it opens beside the terminal, which keeps taking input. Drag the divider (or use the arrow keys, double-click for 50:50) to resize, and **Open in new tab** to see it larger. See [the split preview](docs/backend/workspace/preview-and-urls.md#split-preview).
 
 ![A local pane split in two: on the left its terminal, which printed the path of an HTML mock; on the right the preview of that mock, under a header naming the host "local" and the file's path, with Reload, Open in new tab and Close.](docs/images/preview.png)
 - **Open VS Code** from supported panes using the pane header action. Like pane Git/PR metadata, this can prefer the live worktree of an interactive `codex` or `claude` session and keeps the last valid sibling worktree pinned after the agent exits until a newer valid context is detected.
@@ -118,14 +118,14 @@ Common uses:
 ### Notifications and attention prompts
 
 panemux observes coding agents' recorded task state through the
-[task event stream](docs/behavior/task-events.md), including agents outside visible panes.
+[task event stream](docs/backend/tasks/events.md), including agents outside visible panes.
 Codex command-approval waits need the host's
-[permission hook](docs/behavior/task-codex-permissions.md#codex-permission-requests).
+[permission hook](docs/backend/tasks/collection.md#codex-permission-requests).
 
 A waiting task highlights its pane frame and inactive workspace tab. With browser notification
 permission granted, a wait that is not visible can also notify; clicking it reveals the pane or
 opens the task dashboard. Permission is requested on the first browser interaction. See
-[notifications and attention](docs/behavior/notifications.md) for visibility, clearing and
+[notifications and attention](docs/ui/tasks.md#attention-indicators-and-browser-notifications) for visibility, clearing and
 per-tab deduplication rules across reloads and reconnects.
 
 ### Task dashboard
@@ -140,7 +140,7 @@ per-tab deduplication rules across reloads and reconnects.
 - A session running inside `tmux` can be opened: **Open** adds a `tmux` (or `ssh_tmux`) pane attached to its tmux session to the current workspace, and **Go to pane** jumps to a pane already attached to it. A session running outside tmux, or stopped, cannot be opened in a pane.
 - Each SSH host gets one command connection shared by both boards, separate from its panes. An unreachable host shows its error and a **Reconnect** button without hiding the other hosts.
 - A card links the repository, branch and pull request of the task's directory, the issues that pull request closes (needs `gh` 2.72.0 or later), and references such as `JIRA-123` in the branch name or pull request title. References are set up in `config.yaml` under `task_dashboard.autolinks`, in the same shape as a GitHub repository's autolink references: `key_prefix: JIRA-` with `url_template: https://jira.example.com/JIRA-<num>` links `JIRA-123` to `https://jira.example.com/JIRA-123`. The tracker itself is never queried.
-- Claude Code sessions are read from the files Claude Code keeps under `~/.claude` on each host, and codex sessions from `~/.codex` (the session log a running `codex` holds open, and its turn history when `sqlite3` is installed). A codex waiting for command approval shows as working, since codex records nothing for it, unless its permission hook is registered on that host ([Codex permission requests](docs/behavior/task-codex-permissions.md#codex-permission-requests)). A `codex` started without `--no-daemon` runs its session in codex's shared daemon, which the dashboard shows as a card of its own that cannot be opened in a pane.
+- Claude Code sessions are read from the files Claude Code keeps under `~/.claude` on each host, and codex sessions from `~/.codex` (the session log a running `codex` holds open, and its turn history when `sqlite3` is installed). A codex waiting for command approval shows as working, since codex records nothing for it, unless its permission hook is registered on that host ([Codex permission requests](docs/backend/tasks/collection.md#codex-permission-requests)). A `codex` started without `--no-daemon` runs its session in codex's shared daemon, which the dashboard shows as a card of its own that cannot be opened in a pane.
 - **New task** starts `claude` or `codex` in a tmux session of its own on the chosen host, and **Resume** restarts a stopped session there. If codex stops at a start-up screen (trusting the directory, a new model), open the task's pane to answer it.
 - Set `task_dashboard.summary.enabled: true` in `config.yaml` to have each agent CLI on this machine summarize its own Claude Code or Codex session: what it is doing and the work left, on its card and in its detail panel. It sends the text of the conversation (never tool output) to the corresponding agent account on this machine, so it is off by default. Codex uses the operator's existing settings and permissions.
 
@@ -155,7 +155,7 @@ per-tab deduplication rules across reloads and reconnects.
 
 - A pane with `connection: my-host` can use either a named `ssh_connections` entry or a `Host my-host` entry from `~/.ssh/config`. Only `ssh_connections` entries are task dashboard hosts.
 - `tmux` and `ssh_tmux` panes automatically create the target tmux session if it does not already exist.
-- New sessions created by `ssh_tmux` panes on tmux 3.3 or newer can show `Open` / `Ignore` for CLI browser requests, including Claude MCP authentication. Existing tmux sessions are not reconfigured; see [URL opening](docs/behavior/url-open.md#new-remote-tmux-sessions).
+- New sessions created by `ssh_tmux` panes on tmux 3.3 or newer can show `Open` / `Ignore` for CLI browser requests, including Claude MCP authentication. Existing tmux sessions are not reconfigured; see [URL opening](docs/backend/workspace/preview-and-urls.md#new-remote-tmux-sessions).
 - In `tmux` and `ssh_tmux` panes, plain drag continues to follow tmux mouse behavior. Use `Option` + drag on macOS or `Shift` + drag on Linux and Windows to force browser-side text selection.
 - Set `cwd` on `local`, `ssh`, or `ssh_tmux` panes when you want the shell to start in a specific directory.
 - In the pane settings dialog, `Working Directory` can be chosen from a browsable directory tree for both local and SSH-backed panes. Hidden directories are available through a toggle.
@@ -173,7 +173,7 @@ message them. Two independent pieces, either of which can be used without the ot
 - **Command center** — a Spotlight-style palette (`Cmd/Ctrl+Shift+K`) where you ask in plain language:
   *"which panes are blocked?"*, *"tell every pane the branch is frozen"*.
 
-Full design lives in [docs/agent-board.md](docs/agent-board.md).
+Full design lives in [Agent Board backend](docs/backend/agent-board/index.md).
 
 ![The Agent Board dashboard open on the right of the workspace: under Panes, a working "editor" pane and a waiting "tests" pane each report a summary of what they are doing and their last tool; under Messages, the two panes' latest messages to each other.](docs/images/agent-board.png)
 
@@ -187,7 +187,7 @@ cooldown; **Reconnect** clears that wait for both boards.
 
 **[agmsg](https://github.com/fujibee/agmsg) must be installed** on every host whose panes join
 the board — including remote hosts for `ssh`/`ssh_tmux` panes. panemux is tested against the
-[pinned agmsg version and commit](docs/maintenance/agmsg-contract.md#bumping-the-pinned-agmsg-version); it reads each host's `VERSION` on its first successful probe and logs a warning for anything else, without
+[pinned agmsg version and commit](docs/engineering/agmsg-maintenance.md#bumping-the-pinned-agmsg-version); it reads each host's `VERSION` on its first successful probe and logs a warning for anything else, without
 blocking. agmsg promises compatibility only for reading through `scripts/api.sh`, while panemux also
 depends on `send.sh` for messaging and `install.sh` for managed Install / Update, so a different
 version may work or may misbehave.
@@ -239,7 +239,7 @@ than `pane-1`. `_system` is reserved and rejected at config validation.
 Set enablement in the top-level YAML block. Pane Settings has no board controls.
 With Agent Board enabled, each task-board host menu can Install / Update the tested agmsg source.
 Dependencies must already be installed. The menu explains installer effects and restart guidance;
-newer versions are kept unchanged. See [manual installation](docs/agent-board/agmsg-integration.md#manual-install--update).
+newer versions are kept unchanged. See [manual installation](docs/backend/agent-board/agmsg.md#manual-install--update-get-and-post-apihostsagmsg).
 Enabling Agent Board authorizes detection and relay polling. It never writes instructions into
 terminal panes or changes agent delivery settings. Removed pane-level `agent_board` and
 `agent_board.agmsg_path` settings cause migration errors.
@@ -252,7 +252,7 @@ skipping further probes for that session. Host changes and session replacement r
 Detection is not proof of registration or reception. Use agmsg's official participation, identity,
 and delivery workflow. To use Board relay and status, join the configured `agent_board.team` with
 your agmsg name exactly equal to the pane ID on that host; panemux does not set up this membership.
-See [agmsg integration](docs/agent-board/agmsg-integration.md#integration-with-agmsg).
+See [agmsg integration](docs/backend/agent-board/agmsg.md#integration-with-agmsg).
 Existing registrations and delivery hooks are left untouched, as is `board-bootstrap-state.json`.
 
 `agent_board.mode` is deprecated for one release: values are still validated, but a configured key
@@ -280,7 +280,7 @@ Nothing showing up? In order of likelihood:
 It has exactly three tools: read board status, read message history, and send messages to panes. It
 has **no shell, no filesystem access, and no network access** — it cannot write code, run tests, or
 open pull requests, and it is launched in a way that enforces this rather than relying on it being
-asked nicely (see [docs/security/command-center.md](docs/security/command-center.md#command-center-subprocess-execution)).
+asked nicely (see [docs/security/agent-board.md](docs/security/agent-board.md#command-center-subprocess-execution)).
 
 A message it sends is an ordinary message to the receiving agent, not a pre-authorized command. That
 agent's own confirmation behavior still applies, so "sent" is not "done".
@@ -362,7 +362,7 @@ Use a named `ssh_connections` entry or any non-wildcard `~/.ssh/config` host ali
 block; explicitly set fields override that block. **Hosts…** on the task dashboard manages the YAML
 entries; **Add SSH Host** writes `~/.ssh/config`. The task dashboard collects only YAML-listed SSH hosts.
 
-See [SSH connections](docs/behavior/ssh.md) for all fields, `ProxyJump` / `ProxyCommand` precedence,
+See [SSH connections](docs/backend/workspace/sessions.md#ssh-connections) for all fields, `ProxyJump` / `ProxyCommand` precedence,
 authentication order, host-key requirements, and pane working-directory behavior.
 
 Earlier versions copied SSH-config hosts into a non-empty `ssh_connections` on save. Those entries

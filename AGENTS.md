@@ -1,5 +1,5 @@
 @DEVELOPMENT.md
-@docs/security.md
+@docs/security/overview.md
 
 # AGENTS.md
 
@@ -19,24 +19,23 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
 
 1. Read [DEVELOPMENT.md](DEVELOPMENT.md) for build, test, branch, and PR workflow rules.
    This includes the path-sanitization rule for tests, fixtures, PR bodies, PR comments, review replies, and the mandatory `make check` completion rule.
-   Its runtime, sandbox, fixture, pre-push, and testing references live in [docs/development/](docs/development/); DEVELOPMENT.md keeps the rule and links to the reasoning.
+   Its runtime, sandbox, fixture, pre-push, and testing references live in [docs/engineering/](docs/engineering/); DEVELOPMENT.md keeps the rule and links to the reasoning.
 2. Read [docs/index.md](docs/index.md) to choose the overview, topic guide, or deep dive appropriate
    to the change.
 3. Read [docs/overview.md](docs/overview.md) for the product purpose and current boundaries.
 4. Read [docs/architecture.md](docs/architecture.md) for current component ownership and trust boundaries.
-5. Read [docs/security.md](docs/security.md) before implementing changes that affect command execution, shell argument handling, SSH path handling, or `gosec` posture. It carries the rules that always apply and a map into [docs/security/](docs/security/), where each sink's requirements live.
-6. Read [docs/behavior.md](docs/behavior.md) for runtime behavior, API behavior, and operational assumptions; per-surface detail is in [docs/behavior/](docs/behavior/).
-7. Read [docs/ui-design.md](docs/ui-design.md) when changing frontend interaction or presentation.
-8. Read [docs/maintenance.md](docs/maintenance.md) when touching CI, release automation, or GitHub workflow operations.
-9. Read [docs/agent-board.md](docs/agent-board.md) before implementing cross-pane Claude
-   messaging/status features (the `internal/board` package), then use its document map to reach the
-   focused file under [docs/agent-board/](docs/agent-board/).
+5. Read [docs/security/overview.md](docs/security/overview.md) before implementing changes that affect command execution, shell argument handling, SSH path handling, or `gosec` posture. It carries the rules that always apply and a map into [docs/security/](docs/security/), where each sink's requirements live.
+6. Read [docs/backend/](docs/backend/) for startup, configuration, sessions, tasks, Agent Board, and the agent registry.
+7. Read [docs/ui/overview.md](docs/ui/overview.md) and [docs/ui/](docs/ui/) when changing frontend interaction or presentation, and [docs/api/](docs/api/) when changing REST or WebSocket contracts.
+8. Read [docs/engineering/ci-and-releases.md](docs/engineering/ci-and-releases.md) when touching CI, release automation, or GitHub workflow operations.
+9. Read [docs/backend/agent-board/](docs/backend/agent-board/) before implementing cross-pane
+   messaging/status features (`internal/board`, `internal/agmsg`, `internal/commandcenter`).
 10. Read [docs/scenarios.md](docs/scenarios.md) when adding or changing a user-facing feature: it
    maps each use case to where it is verified, and every feature change is expected to update it.
-11. Read [docs/quality-gateway.md](docs/quality-gateway.md) when changing what the test suite,
+11. Read [docs/engineering/quality-gates.md](docs/engineering/quality-gates.md) when changing what the test suite,
     coverage gates, or CI checks are responsible for. It defines the quality characteristics tests
-    must protect and the current layered gates. The numbered design decisions and measurements are
-    in [docs/quality-gateway/](docs/quality-gateway/).
+    must protect, the current layered gates, and accessibility ceilings. The numbered design
+    decisions live in [docs/decisions/quality-gateway.md](docs/decisions/quality-gateway.md).
 12. Read [decision index](docs/decisions/index.md) when the reason, sequence, or rejected alternative
     behind the current specification matters.
 
@@ -46,7 +45,7 @@ Some of the rules in the documents above are checked automatically rather than
 being left to memory. `.claude/` holds the agent-side half:
 
 - `.claude/settings.json` enables local port binding and localhost connections in the macOS
-  Claude Code sandbox. See [Claude Code sandbox](docs/development/claude-sandbox.md) for its
+  Claude Code sandbox. See [Claude Code sandbox](docs/engineering/runtime-and-sandbox.md#claude-code-sandbox) for its
   security scope, Linux/WSL2 behavior, and managed-setting limitations. It also wires two hooks.
   A `PostToolUse` hook checks the file
   you just edited (`gofmt -s`, and `go vet` on its package, or `tsc --noEmit`
@@ -60,9 +59,9 @@ being left to memory. `.claude/` holds the agent-side half:
   of it fails.
 - Neither hook runs `make check`, and neither does `.githooks/pre-push`, which runs only the checks
   the pushed change touches. The whole suite is CI's, and `make check` run by hand.
-  See [decision D6](docs/decisions/quality-gateway/fast-stop-hook.md).
+  See [decision D6](docs/decisions/quality-gateway.md#d6-the-stop-hook-does-not-run-everything).
 - `.claude/agents/diff-reviewer.md` reviews a branch's diff in a fresh context.
-  It does not block, and it is not meant to: see [decision D5](docs/decisions/quality-gateway/independent-review.md).
+  It does not block, and it is not meant to: see [decision D5](docs/decisions/quality-gateway.md#d5-the-author-does-not-grade-its-own-work).
 - `make test-hooks` tests the hooks themselves. It runs as part of `make test`
   and as its own CI step, since `ci.yml` invokes the suites directly rather
   than through `make test`.
@@ -78,20 +77,19 @@ These are the checks; they do not replace reading the documents above.
 Each entry below is an index. Where a topic outgrew one file, the detail sits in a directory of the
 same name beside it, and the index's own document map routes by section name.
 
-- Runtime selection, sandbox, screenshots, browser fixtures, and pre-push details: [docs/development/index.md](docs/development/index.md)
-- Codex verification and approval setup: [docs/development/codex-verification.md](docs/development/codex-verification.md)
-- Development workflow: [DEVELOPMENT.md](DEVELOPMENT.md) → [docs/development/](docs/development/)
+- Engineering index (quality gates, testing, runtimes, sandboxes, screenshots, CI, releases): [docs/engineering/index.md](docs/engineering/index.md)
+- Codex verification and approval setup: [docs/engineering/codex-verification.md](docs/engineering/codex-verification.md)
+- Development workflow: [DEVELOPMENT.md](DEVELOPMENT.md) → [docs/engineering/](docs/engineering/)
 - Documentation index and reader routes: [docs/index.md](docs/index.md)
 - Product overview: [docs/overview.md](docs/overview.md)
 - Current architecture: [docs/architecture.md](docs/architecture.md)
-- Security requirements for implementation: [docs/security.md](docs/security.md) → [docs/security/](docs/security/)
-- Behavior and API specification: [docs/behavior.md](docs/behavior.md) → [docs/behavior/](docs/behavior/)
-- UI intent and interaction design: [docs/ui-design.md](docs/ui-design.md) → [docs/ui-design/](docs/ui-design/)
-- CI and release maintenance: [docs/maintenance.md](docs/maintenance.md) → [docs/maintenance/](docs/maintenance/)
-- Agent registry, capabilities and session keys: [docs/agent-registry.md](docs/agent-registry.md) → [docs/agent-registry/](docs/agent-registry/)
-- Cross-pane Claude messaging design: [docs/agent-board.md](docs/agent-board.md) → [docs/agent-board/](docs/agent-board/)
+- Security requirements for implementation: [docs/security/overview.md](docs/security/overview.md) → [docs/security/](docs/security/)
+- API contracts (REST and WebSocket): [docs/api/index.md](docs/api/index.md) → [docs/api/](docs/api/)
+- UI intent, runtime, and interaction design: [docs/ui/overview.md](docs/ui/overview.md) → [docs/ui/](docs/ui/)
+- Backend specifications (workspace, tasks, Agent Board, agent registry): [docs/backend/index.md](docs/backend/index.md) → [docs/backend/](docs/backend/)
+- CI, releases, and agmsg maintenance: [docs/engineering/ci-and-releases.md](docs/engineering/ci-and-releases.md), [docs/engineering/agmsg-maintenance.md](docs/engineering/agmsg-maintenance.md)
 - Use-case scenario coverage map: [docs/scenarios.md](docs/scenarios.md)
-- Test quality characteristics and the gate design: [docs/quality-gateway.md](docs/quality-gateway.md) → [docs/quality-gateway/](docs/quality-gateway/)
+- Quality gates, coverage, mutation, red-check, and accessibility ceilings: [docs/engineering/quality-gates.md](docs/engineering/quality-gates.md)
 - Design history and rejected alternatives: [decision index](docs/decisions/index.md)
 - TLA+ specifications for `internal/board`'s state machines: [spec/agentboard/README.md](spec/agentboard/README.md)
 
@@ -105,11 +103,8 @@ same name beside it, and the index's own document map routes by section name.
 - Put enduring product, architecture, behavior, UI, and maintenance guidance under `docs/`.
 - Keep topic guides focused on the current state; put chronology and superseded approaches in
   `docs/decisions/`.
-- Put implementation-time security requirements in `docs/security.md` and treat it as required reading for security-sensitive changes.
-- Follow [the OKF writing rules](docs/index.md#writing-rules): `docs/` is one OKF v0.2 bundle,
-  concepts carry metadata, and each directory has an `index.md` listing its contents.
-- Split by responsibility, with one authoritative concept per contract and links from other
-  documents. The directory hierarchy is a tree; document links are graph edges. Keep
-  `docs/<name>.md` as the topic entrance and `docs/<name>/index.md` as its directory listing;
-  preserve routes from old section names when moving content.
+- Put implementation-time security requirements in `docs/security/` (starting at `docs/security/overview.md`) and treat it as required reading for security-sensitive changes.
+- Follow [the OKF writing rules](docs/index.md#writing-rules) for `docs/` metadata, directory
+  indexes, cohesive file granularity, English-only prose, topic-grouped decisions under
+  `docs/decisions/<topic>.md`, and direct reference updates without redirect stubs.
 - When adding a new long-form document, add it to the index here so agents can discover it quickly.

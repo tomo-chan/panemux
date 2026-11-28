@@ -3,7 +3,7 @@
 # Tests for the G1/G2 hook scripts in this directory.
 #
 # The hooks themselves are the enforcement mechanism for
-# docs/quality-gateway.md's gates G1 (edit) and G2 (unit), so a hook that
+# docs/engineering/quality-gates.md's gates G1 (edit) and G2 (unit), so a hook that
 # silently does nothing is worse than no hook at all — it reports the
 # discipline as enforced while enforcing nothing. Design principle 4 (no false
 # positives) cuts the other way just as hard: a hook that blocks a healthy
@@ -644,7 +644,7 @@ fi
 #
 # Putting all of make check in the Stop hook would run the frontend build and
 # the whole -race suite on every turn. Decision D6
-# (docs/decisions/quality-gateway/fast-stop-hook.md) says explicitly not to, and
+# (docs/decisions/quality-gateway.md, D6) says explicitly not to, and
 # a gate that sacrifices fast feedback gets bypassed — so the absence is
 # asserted rather than left to reviewer memory.
 # Comment lines are stripped first: the script's own header explains why it is

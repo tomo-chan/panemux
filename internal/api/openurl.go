@@ -43,7 +43,7 @@ func (h *Handler) SetPortForwards(registry *portforward.Registry) {
 // the OAuth redirect to http://localhost:<port>/… reaches the CLI that is
 // waiting for it on the remote host. The browser tab itself is opened by the
 // frontend, not here — the browser panemux should drive is the one showing
-// the dashboard. See docs/behavior.md "Opening URLs from a pane".
+// the dashboard. See docs/backend/workspace/preview-and-urls.md ("Opening URLs from a pane").
 func (h *Handler) PostOpenURL(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 

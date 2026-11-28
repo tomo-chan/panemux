@@ -31,7 +31,7 @@ import (
 )
 
 // This file is the real-router integration harness for the /api surface:
-// gate G3(a) in docs/quality-gateway.md, and the second half of issue #180's
+// gate G3(a) in docs/engineering/quality-gates.md, and the second half of issue #180's
 // roadmap item 1. Its companion, route_table_test.go, already pins *which*
 // routes exist and which of them are authenticated. What was still missing is
 // the other half of the same question — that each of those routes, driven
@@ -44,13 +44,13 @@ import (
 // middleware stack, the mount precedence between /api and /api/board, or the
 // SPA catch-all that sits behind everything. A route could therefore answer
 // correctly in internal/api and be shadowed, wrapped, or 404'd in production
-// without a test failing. See docs/quality-gateway.md's P1 and gate G3, and
+// without a test failing. See docs/engineering/quality-gates.md's P1 and gate G3, and
 // issue #178.
 //
 // The table below is exhaustive *by construction*: the test walks the real
 // router and fails when a registered /api route has no case here, so adding a
 // route forces an integration case for it rather than relying on anyone
-// remembering to add one. Decision D3 (docs/decisions/quality-gateway/consolidated-gates.md)
+// remembering to add one. Decision D3 (docs/decisions/quality-gateway.md)
 // consolidates gates rather than adding them — the same shape as the route
 // table's own exhaustiveness check, which is why no new *_routes_test.go file
 // is needed for the next feature either.
@@ -174,7 +174,7 @@ func (e *apiEnv) do(t *testing.T, method, path, body string) *httptest.ResponseR
 // createPane creates a real local pane through POST /api/sessions, which is
 // both the happy path for that route and the precondition for every
 // per-session route below. The shell is the hardcoded /bin/sh the rest of
-// this repository defaults to (see docs/security.md), and cwd is a temp
+// this repository defaults to (see docs/security/process-and-ssh.md), and cwd is a temp
 // directory rather than the checkout, so git-info answers "not a repo"
 // without walking a real worktree.
 func (e *apiEnv) createPane(t *testing.T, id string) {
@@ -700,7 +700,7 @@ var apiCases = map[string]apiCase{
 		// neither of them loopback. This route is the reason do() overrides
 		// them: api.GetBoardSessionToken's DNS-rebinding guard answers 403
 		// otherwise, and that guard is the only thing between this token and
-		// any LAN client (docs/security.md).
+		// any LAN client (docs/security/auth.md).
 		rr := e.do(t, http.MethodGet, "/api/session-token", "")
 		assert.Equal(t, http.StatusOK, rr.Code)
 		assert.Contains(t, rr.Body.String(), integrationToken)
@@ -853,7 +853,7 @@ func TestServer_APIIntegration_DocumentedGaps(t *testing.T) {
 // thorough: registerRoutes has an `if commandRunner != nil` block, so an /api
 // route registered inside it is one the frontend can reach and one this
 // table's exhaustiveness check would never see. Walking only the disabled
-// router made the file header above — and quality-gateway.md's rollout row —
+// router made the file header above — and the original quality-gateway doc —
 // claim more than the code delivered. route_table_test.go pins both states
 // for the same reason.
 func registeredAPIRoutes(t *testing.T) []string {

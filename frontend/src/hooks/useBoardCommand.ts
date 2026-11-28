@@ -37,8 +37,8 @@ let nextTurnId = 1
 // enabled (the palette is expected to pass its own open/closed state), the
 // bearer token as a WebSocket subprotocol per BoardCommandHandler's own
 // contract (internal/ws/board_command.go) since browsers cannot set an
-// Authorization header on a WebSocket upgrade. See docs/agent-board.md's
-// "API and streaming" section for the line/error/done/busy frame protocol.
+// Authorization header on a WebSocket upgrade. See docs/api/agent-board.md's
+// GET /ws/board/command section for the line/error/done/busy frame protocol.
 export function useBoardCommand({ enabled, token }: UseBoardCommandOptions): UseBoardCommandResult {
   const wsRef = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)

@@ -9,7 +9,7 @@ import (
 
 // agmsgMessageRow is the JSONL shape api.sh's "messages" verb emits per
 // line: {"type":"message_sent","id","team","from","to","body","at"}. See
-// docs/agent-board.md's Integration with agmsg section.
+// docs/backend/agent-board/agmsg.md's Integration with agmsg section.
 type agmsgMessageRow struct {
 	Type string `json:"type"`
 	ID   string `json:"id"`
@@ -83,7 +83,7 @@ func parseAgmsgMessageRows(data []byte, host string) []board.Row {
 // primitive to resolve it with (only backwards --before-id pagination), so
 // the window is re-delivered rather than skipped. This may duplicate a
 // successful forward and self-corrects on the next poll; it does not imply
-// retries for failed forwards. See docs/agent-board/relay.md.
+// retries for failed forwards. See docs/backend/agent-board/relay.md.
 func filterRowsAfter(rows []board.Row, afterID string) []board.Row {
 	if afterID == "" {
 		return rows

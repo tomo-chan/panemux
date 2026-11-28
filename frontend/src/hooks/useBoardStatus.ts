@@ -23,8 +23,8 @@ function errorMessageForStatus(status: number): string {
 }
 
 // useBoardStatus polls the Agent Board's status snapshot and incremental
-// message history for the dashboard panel. See docs/agent-board.md's
-// Architecture section: GET /api/board/status always returns a full
+// message history for the dashboard panel. See docs/backend/agent-board/relay.md
+// and docs/api/agent-board.md: GET /api/board/status always returns a full
 // snapshot, while GET /api/board/messages?since=<seq> is incremental against
 // panemux's own monotonic cursor (not an agmsg-native id).
 export function useBoardStatus({ enabled, token }: UseBoardStatusOptions): UseBoardStatusResult {

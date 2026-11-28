@@ -320,7 +320,7 @@ func TestValidate_ServerPortOutOfRange_Error(t *testing.T) {
 // suite still green. Issue #190.
 // Nothing under this test changed on this branch, so the red-check could never
 // see it go red: it pins behavior that was already correct and merely
-// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+// unasserted. See docs/decisions/quality-gateway.md (D9).
 //
 //efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestValidate_ServerPortRangeBoundaries(t *testing.T) {
@@ -358,7 +358,7 @@ func TestValidate_ServerPortRangeBoundaries(t *testing.T) {
 // have accepted a zero-width pane. Issue #190.
 // Nothing under this test changed on this branch, so the red-check could never
 // see it go red: it pins behavior that was already correct and merely
-// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+// unasserted. See docs/decisions/quality-gateway.md (D9).
 //
 //efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestValidate_ChildSizeBoundary(t *testing.T) {
@@ -375,7 +375,7 @@ func TestValidate_ChildSizeBoundary(t *testing.T) {
 // a dragged split produces with the suite still green. Issue #190.
 // Nothing under this test changed on this branch, so the red-check could never
 // see it go red: it pins behavior that was already correct and merely
-// unasserted. See docs/quality-gateway.md's "Clearing the boundary-value class".
+// unasserted. See docs/decisions/quality-gateway.md (D9).
 //
 //efficacy:exempt pins pre-existing behavior; no implementation under it changed
 func TestValidate_ChildSizeSumTolerance(t *testing.T) {

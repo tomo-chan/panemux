@@ -16,7 +16,7 @@ const (
 // runBoardMCPServer implements the panemux `__board-mcp-server` hidden
 // subcommand: a stdio MCP server exposing the three board tools, backed by
 // an HTTP client hitting panemux's own loopback REST API. See
-// docs/agent-board.md's Command center section for why this re-invokes the
+// docs/backend/agent-board/command-center.md for why this re-invokes the
 // panemux binary itself as the command center's MCP server rather than
 // starting a second listening process — the subprocess speaks MCP over
 // stdio to whichever `claude -p` process spawned it and is never itself
