@@ -8,6 +8,7 @@ import { useModalKeyboard } from '../hooks/useModalKeyboard'
 import { useRestoreFocusOnClose } from '../hooks/useRestoreFocusOnClose'
 import { BoardMessageForm } from './BoardMessageForm'
 import type { BoardPaneRef } from './BoardDashboardPanel'
+import { useBoardMessage } from '../hooks/useBoardMessage'
 
 interface CommandPaletteProps {
   isOpen: boolean
@@ -27,6 +28,7 @@ const RECENT_HISTORY_LIMIT = 20
 export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, onClose, boardPanes = [] }) => {
   const [mode, setMode] = useState<'ask' | 'message'>('ask')
   const [messageOpened, setMessageOpened] = useState(false)
+  const message = useBoardMessage(token)
   const { connected, turns, pending, sendPrompt } = useBoardCommand({ enabled: isOpen, token })
   const [prompt, setPrompt] = useState('')
   const [recentHistory, setRecentHistory] = useState<StreamSummaryLine[]>([])
@@ -150,7 +152,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, token, o
             {pending ? 'Sending…' : 'Send'}
           </button>
         </form>
-        {messageOpened && <div hidden={mode !== 'message'} style={{ minHeight: 0, overflowY: 'auto' }}><BoardMessageForm token={token} boardPanes={boardPanes} active={mode === 'message'} /></div>}
+        {messageOpened && <div hidden={mode !== 'message'} style={{ minHeight: 0, overflowY: 'auto' }}><BoardMessageForm token={token} boardPanes={boardPanes} active={mode === 'message'} message={message} /></div>}
       </div>
     </div>
   )

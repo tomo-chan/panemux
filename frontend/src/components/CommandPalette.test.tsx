@@ -392,6 +392,45 @@ describe('CommandPalette', () => {
     outside.remove()
   })
 
+  it.each([200, 502])('keeps a pending Message and its late %i result across close and reopen', async status => {
+    let finish!: (response: Response) => void
+    const held = new Promise<Response>(resolve => { finish = resolve })
+    const fetcher = vi.fn(async (url: string) => {
+      if (url.endsWith('/broadcast')) return held
+      return { ok: true, json: async () => url.endsWith('/status')
+        ? { identities: {}, statuses: {}, participation: {} }
+        : url.includes('/messages?') ? { messages: [], epoch: 'test' } : { entries: [] } }
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const onClose = vi.fn()
+    const { rerender } = render(<CommandPalette isOpen token="tok" onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Message' }))
+    fireEvent.change(screen.getByLabelText('Recipients'), { target: { value: 'helper@local, second@local' } })
+    fireEvent.change(screen.getByLabelText('Message body'), { target: { value: 'Review once.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+    expect(screen.getByRole('button', { name: 'Sending…' })).toBeDisabled()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalled()
+    rerender(<CommandPalette isOpen={false} token="tok" onClose={onClose} />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    rerender(<CommandPalette isOpen token="tok" onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Message' }))
+    expect(screen.getByLabelText('Message body')).toHaveValue('Review once.')
+    expect(screen.getByRole('button', { name: 'Sending…' })).toBeDisabled()
+    fireEvent.submit(screen.getByRole('button', { name: 'Sending…' }).closest('form')!)
+    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/broadcast'))).toHaveLength(1)
+    // The response can arrive while closed as well as after reopening.
+    rerender(<CommandPalette isOpen={false} token="tok" onClose={onClose} />)
+    await act(async () => finish(new Response(JSON.stringify(status === 200
+      ? { delivered: ['helper@local', 'second@local'] }
+      : { delivered: ['helper@local'], error: 'second host failed' }), { status })))
+    rerender(<CommandPalette isOpen token="tok" onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Message' }))
+    expect(await screen.findByText(status === 200 ? 'Sent to: helper@local, second@local'
+      : 'Partially sent. Delivered: helper@local. Not sent: second@local. second host failed')).toBeDefined()
+    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/broadcast'))).toHaveLength(1)
+  })
+
   it('keeps Ask available while Message sends directly without a Claude connection and retains drafts between modes', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => ({ ok: true, json: async () => {
       if (url.endsWith('/status')) return { identities: {}, statuses: {}, participation: {} }

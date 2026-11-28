@@ -149,7 +149,7 @@ async function serveBoardIdentities(page: Page) {
     source: 'unreported', state: null, waiting_for: null, status_since: null, task_observed_at: null,
     last_message_at: now, self_report: null }
   const snapshot: BoardStatusResponse = { identities: {
-    'editor@local': { ...base, name: 'editor', pane_id: 'editor', source: 'task', state: 'working',
+    'editor@local': { ...base, name: 'editor', pane_id: 'editor', source: 'task', state: 'wait', waiting_for: 'Review the pagination change',
       task_observed_at: now, status_since: now, self_report: { updated_at: now, state: 'waiting',
         summary: 'Adding pagination to the search endpoint', last_tool: 'Edit' } },
     'reviewer@local': base,

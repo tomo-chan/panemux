@@ -36,7 +36,7 @@ it('replaces the identity snapshot including removed hosts instead of retaining 
 
 it('merges pane details once, separates equal host names and keeps reports supplemental to tasks', async () => {
   serve({
-    'worker@local': identity({ pane_id: 'worker', source: 'task', state: 'working', waiting_for: 'approval', task_observed_at: new Date().toISOString(),
+    'worker@local': identity({ pane_id: 'worker', source: 'task', state: 'busy', waiting_for: 'approval', task_observed_at: new Date().toISOString(),
       self_report: { updated_at: new Date().toISOString(), state: 'waiting', summary: 'Review requested' } }),
     'worker@ssh:build': identity({ host: 'ssh:build', source: 'self_report', state: 'idle',
       self_report: { updated_at: new Date().toISOString(), state: 'idle' } }),
@@ -45,7 +45,7 @@ it('merges pane details once, separates equal host names and keeps reports suppl
   render(<BoardDashboardPanel isOpen token="tok" boardPanes={[{ id: 'worker', title: 'Main worker' }]} onClose={() => {}} />)
   const local = (await screen.findByText('worker@local')).closest('article')!
   expect(within(local).getByText('Task observed')).toBeDefined()
-  expect(within(local).getByText('working')).toBeDefined()
+  expect(within(local).getByText('busy')).toBeDefined()
   expect(within(local).getByText('Waiting for: approval')).toBeDefined()
   expect(within(local).getByText(/^Self-report/)).toBeDefined()
   expect(screen.getAllByText('Main worker')).toHaveLength(1)
@@ -58,6 +58,26 @@ it('merges pane details once, separates equal host names and keeps reports suppl
   expect(within(reader).queryByRole('link')).toBeNull()
   expect(screen.getByText('Detected panes')).toBeDefined()
   expect(screen.getByText('detected')).toBeDefined()
+})
+
+it.each([
+  ['busy', 'rgb(123, 216, 143)'], ['wait', 'rgb(244, 191, 79)'],
+  ['idle', 'rgb(122, 162, 247)'], ['run', 'rgb(143, 166, 196)'],
+  ['unknown', 'rgb(197, 134, 192)'], ['stop', 'rgb(128, 133, 141)'],
+])('uses the task observation palette for real task state %s', async (state, color) => {
+  serve({ 'worker@local': identity({ source: 'task', state }) })
+  render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={() => {}} />)
+  const card = (await screen.findByText('worker@local')).closest('article')!
+  const dot = within(card).getByText('Task observed').previousElementSibling as HTMLElement
+  expect(dot.style.backgroundColor).toBe(color)
+})
+
+it('keeps an arbitrary self-reported task-like state neutral', async () => {
+  serve({ 'worker@local': identity({ source: 'self_report', state: 'busy', self_report: { updated_at: new Date().toISOString(), state: 'busy' } }) })
+  render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={() => {}} />)
+  const card = (await screen.findByText('worker@local')).closest('article')!
+  const dot = within(card).getByText('Self-report').previousElementSibling as HTMLElement
+  expect(dot.style.backgroundColor).toBe('rgb(75, 85, 101)')
 })
 
 it('renders self-reports as expandable text with visible control characters and copies exact addresses', async () => {

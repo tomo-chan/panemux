@@ -107,7 +107,7 @@ const IdentityCard: React.FC<{ address: string; identity: BoardIdentity; title?:
     <div style={{ color: '#8f98a8', fontSize: 11, overflowWrap: 'anywhere' }}>{boardText(identity.host)} · {identity.pane_id ? `Pane: ${boardText(identity.pane_id)}` : 'No pane'}</div>
     {title && <div style={paneTitleStyle}>{title}</div>}
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-      <span style={statusDotStyle(identity.state ?? undefined)} />
+      <span style={statusDotStyle(identity.state ?? undefined, identity.source)} />
       <span>{task ? 'Task observed' : identity.source === 'self_report' ? 'Self-report' : 'Unreported'}</span>
       {identity.state && <span style={{ overflowWrap: 'anywhere', minWidth: 0 }}>{boardText(identity.state)}</span>}
       {stale && <span>stale</span>}
@@ -192,8 +192,8 @@ const MessageRow: React.FC<{ message: BoardMessage }> = ({ message }) => (
   </div>
 )
 
-function statusDotStyle(state: string | undefined): React.CSSProperties {
-  const color = colorForBoardState(state)
+function statusDotStyle(state: string | undefined, source?: BoardIdentity['source']): React.CSSProperties {
+  const color = colorForBoardState(state, source)
   return {
     width: 8,
     height: 8,
@@ -358,12 +358,13 @@ const notJoinedDetailStyle: React.CSSProperties = {
   color: '#8f98a8',
   fontSize: 11,
   whiteSpace: 'normal',
+  overflowWrap: 'anywhere',
 }
 
-const timestampStyle: React.CSSProperties = { color: '#666', fontSize: '11px' }
+const timestampStyle: React.CSSProperties = { color: '#666', fontSize: '11px', overflowWrap: 'anywhere' }
 
 const messageRowStyle: React.CSSProperties = { marginBottom: '10px' }
 
-const messageFromToStyle: React.CSSProperties = { color: '#4ec9b0', fontSize: '11px' }
+const messageFromToStyle: React.CSSProperties = { color: '#4ec9b0', fontSize: '11px', overflowWrap: 'anywhere' }
 
 const messageBodyStyle: React.CSSProperties = { color: '#ccc', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }

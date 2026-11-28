@@ -32,9 +32,12 @@ Agent Board reuses the shared modal, overlay-panel, color, status, and focus-res
   Markdown, or automatic links. Self-reported repository, branch, PR, and directory values remain
   omitted. Pane Settings exposes no board controls; global enablement lives in YAML and legacy
   `mode` is ignored.
-- Treats state as free text and maps known states to the status palette: `working` green, `idle`
-  blue, `waiting` attention gold, and everything else neutral.
-- Qualified names and hosts wrap rather than lose their distinguishing suffix. Summaries preserve
+- Task observations use their collected vocabulary: `busy` green, `wait` attention gold, `idle`
+  blue, `run` muted blue, `unknown` purple, and `stop` gray. Self-report state remains free text:
+  `working` green, `idle` blue, `waiting` attention gold, and other values neutral.
+- Qualified names, hosts, and unbroken task waiting reasons wrap rather than lose their
+  distinguishing suffix. History sender/destination and host metadata lines wrap at narrow widths.
+  Summaries preserve
   newlines, initially wrap to four lines, and offer `Show more` / `Show less`. Display normalizes
   CRLF to LF and tabs to spaces; other C0/C1 and bidirectional control characters appear as literal
   `\uXXXX` escapes. API data and accepted input lengths are unchanged.
@@ -65,8 +68,9 @@ priority. It does not exercise live SSH; the message feed still comes through th
   errors (`422`), actual delivered and unsent destinations on downstream failure (`502`, including
   zero deliveries), and `Delivery unknown` for transport or unrecognized responses. Nothing is
   retried automatically; check history before retrying an uncertain or partial outcome. Draft
-  recipients and body remain available; editing clears the previous result. Mode switches retain
-  drafts and pending sends while the palette stays open.
+  recipients and body remain available; editing clears the previous result. Mode switches and
+  palette close/reopen retain drafts, pending sends, and eventual results within the current page.
+  Closing the palette cannot re-enable a duplicate unresolved send.
 - Direct messages appear in Board message history after polling, not as fabricated Claude turns.
   Message mode is absent along with the palette when the command-center capability is disabled.
 - Global shortcuts register in capture phase so terminal focus does not swallow them. Closing any
