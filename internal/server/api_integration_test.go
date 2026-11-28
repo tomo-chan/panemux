@@ -144,6 +144,19 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	return e
 }
 
+// isolateEmptyTaskProcesses puts no-op ps, lsof, and tmux shims first on PATH
+// so API integration cases that drive the real collector script against a temp
+// HOME do not scan unrelated live agents on the host (issue #408).
+func isolateEmptyTaskProcesses(t *testing.T) {
+	t.Helper()
+	bin := t.TempDir()
+	for _, name := range []string{"ps", "lsof", "tmux"} {
+		path := filepath.Join(bin, name)
+		require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700)) //nolint:gosec // G306: test shim
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // do issues a request against the real router, including its middleware
 // stack. Board routes need the bearer token; nothing else does, and that
 // asymmetry is itself asserted by route_table_test.go.
@@ -477,8 +490,9 @@ var apiCases = map[string]apiCase{
 
 	"GET /api/tasks": {run: func(t *testing.T, e *apiEnv) {
 		// The real collector, running the real script on this machine against
-		// the test's own HOME: what it lists is only what the test put there,
-		// a conversation log with no process behind it, i.e. a stopped task.
+		// the test's own HOME: isolate ps/lsof/tmux so unrelated live agents on
+		// the developer's machine do not delay or pollute the collection (issue #408).
+		isolateEmptyTaskProcesses(t)
 		project := filepath.Join(e.home, ".claude", "projects", "-workspace-user-project")
 		require.NoError(t, os.MkdirAll(project, 0o700))
 		require.NoError(t, os.WriteFile(filepath.Join(project, "integration-session.jsonl"),
@@ -494,6 +508,7 @@ var apiCases = map[string]apiCase{
 	"PUT /api/tasks/records": {run: func(t *testing.T, e *apiEnv) {
 		// The record lands in the default file under the test's HOME, and the
 		// next collection carries it on the task it names.
+		isolateEmptyTaskProcesses(t)
 		project := filepath.Join(e.home, ".claude", "projects", "-workspace-user-project")
 		require.NoError(t, os.MkdirAll(project, 0o700))
 		require.NoError(t, os.WriteFile(filepath.Join(project, "integration-session.jsonl"),

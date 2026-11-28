@@ -150,9 +150,12 @@ func TestAttentionScript_IsTheLivePartOfTheCollection(t *testing.T) {
 
 // Run for real, the attention script reports the live state files and no
 // transcripts, even with conversation logs and rollouts on the host.
+//
+//efficacy:exempt isolates host processes (issue #408); attention filtering predates branch
 func TestRunLocal_AttentionScriptSkipsStoppedSessions(t *testing.T) {
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
+	isolateEmptyProcesses(t)
 
 	sessions := filepath.Join(home, ".claude", "sessions")
 	require.NoError(t, os.MkdirAll(sessions, 0o700))
