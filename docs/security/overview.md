@@ -75,6 +75,14 @@ outputs; rejecting code, paths, symlinks, extra files, and oversized content). T
 constants and captures, runs full package tests, and only then mints the repository-scoped App
 token ([agmsg maintenance](../engineering/agmsg-maintenance.md#github-app-setup-repository-owner)).
 
+Automated merging of same-major bump PRs (`.github/workflows/agmsg-automerge.yml`) follows the same
+split: a read-only `agmsg-automerge-verify` job runs trusted `main` code without App secrets and
+never checks out PR code, validating bot authorship, the `agmsg-automerge` opt-in label, exact 9-file
+diff shape (1-line constant updates matching fixture provenance), same-major ordering, and all 10
+required checks with zero failing or in-progress runs. Only after verification passes does
+`agmsg-automerge-merge` mint the App token and squash-merge using `--match-head-commit` to prevent
+TOCTOU swaps ([automated merging](../engineering/agmsg-maintenance.md#automated-merging-for-same-major-bump-prs)).
+
 ## `gosec` policy
 
 - Fix `gosec` findings structurally in shipped code rather than adding suppressions.

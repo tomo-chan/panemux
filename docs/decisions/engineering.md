@@ -55,13 +55,23 @@ or `/tmp` otherwise, failing explicitly if neither fits.
   `~/.config/panemux/codex-hook.json`), update-only (never installing where absent), and run at
   most once per process on first successful collection without retries.
 
-## agmsg pin bump proposals (2026-10-31, issue #437)
+## agmsg pin bump proposals (2026-10-31, issue #437; automated same-major merge 2026-11-28)
 
 Verified real-install runs propose release/SHA and fixture updates through a GitHub App so
 proposed PRs trigger normal CI (`GITHUB_TOKEN` PRs do not). Release tags are resolved once, the
 ordering-regression fixture stays frozen, and token minting runs only after validating a data-only
 artifact so upstream code never receives App secrets. Release-specific branches deduplicate even
 closed PRs without overwriting human decisions.
+
+To avoid manual merge backlogs while keeping repository-wide branch rulesets and `release-please`
+unaffected, same-major (minor/patch) bump PRs receive the `agmsg-automerge` label at creation time
+and are squash-merged by `.github/workflows/agmsg-automerge.yml` after a secretless read-only job
+verifies the exact 9-file diff, provenance constants, and all 10 required checks (failing closed on
+any pending or failing status). Enabling GitHub native auto-merge repository-wide was rejected
+because it requires adding GitHub Actions status checks to the `main` ruleset, which would block
+`release-please` PRs created with `GITHUB_TOKEN` (where Actions workflows do not trigger) and path-filtered
+`ci.yml` PRs or force adding admin bypass rules. Major agmsg releases remain manual-review only, and
+panemux release publication continues to require manual `release-please` PR merges.
 
 ## Release recovery uses original source with GNU coreutils (2026-11-02, PR #479)
 
