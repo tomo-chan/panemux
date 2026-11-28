@@ -676,7 +676,7 @@ func TestRunLocal_ReportsTheWorkingDirectoryOfAClaudeProcess(t *testing.T) {
 // run by the OS's own sh, and what macOS shows of an Apple binary's
 // environment is nothing (issue #263).
 //
-//efficacy:exempt only the fixture changed (issue #423); the Linux reading it pins predates this branch
+//efficacy:exempt isolates ps probe to fixture PIDs (issue #408); Linux env reading predates branch
 func TestRunLocal_ReportsThePaneIDInAnAgentsEnvironment(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("reads /proc/<pid>/environ, which only Linux has")
@@ -906,10 +906,7 @@ printf 'n/workspace/user/api\n'
 	require.NoError(t, err)
 	calls := strings.Split(strings.TrimSpace(string(callsRaw)), "\n")
 	require.Len(t, calls, 1, "cwd section invokes lsof once for all candidate PIDs: %v", calls)
-	assert.Contains(t, calls[0], "-n")
-	assert.Contains(t, calls[0], "-P")
-	assert.Contains(t, calls[0], "-p 301,302")
-	assert.Contains(t, calls[0], "-d cwd")
+	assert.Equal(t, "-n -P -a -p 301,302 -d cwd -Fpn", calls[0])
 
 	assert.Equal(t, map[int]string{
 		301: "/workspace/user/my project",

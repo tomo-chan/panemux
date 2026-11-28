@@ -339,14 +339,19 @@ func startStandInCodex(t *testing.T, path string) int {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	})
-	ready := make(chan error, 1)
+	type readyResult struct {
+		err  error
+		data []byte
+	}
+	ready := make(chan readyResult, 1)
 	go func() {
-		_, readErr := io.ReadAll(readyR)
-		ready <- readErr
+		data, readErr := io.ReadAll(readyR)
+		ready <- readyResult{data: data, err: readErr}
 	}()
 	select {
-	case readErr := <-ready:
-		require.NoError(t, readErr)
+	case res := <-ready:
+		require.NoError(t, res.err)
+		require.Equal(t, "ok", string(res.data), "stand-in codex failed before opening rollout")
 	case <-time.After(5 * time.Second):
 		t.Fatal("stand-in codex did not open rollout in time")
 	}
@@ -434,7 +439,7 @@ func TestRunLocal_CollectScriptListsTheTUIsRolloutsPastNewerOnes(t *testing.T) {
 	assert.Equal(t, codexSessionA, codexOf(raw).Rollouts[0].SessionID)
 }
 
-func installFakeMacOSCodexOpenTools(t *testing.T, openLog, rolloutA, rolloutB string) {
+func installFakeMacOSCodexOpenTools(t *testing.T, openLog, rolloutA, rolloutA2, rolloutB string) {
 	t.Helper()
 	bin := t.TempDir()
 	fakePS := `#!/bin/sh
@@ -464,7 +469,7 @@ for arg in "$@"; do
 	fi
 done
 printf '%s\n' "$*" >> '` + openLog + `'
-printf 'p201\nf0\nn/dev/ttys001\nf3\nn%s\n' '` + rolloutA + `'
+printf 'p201\nf0\nn/dev/ttys001\nf3\nn%s\nf4\nn%s\n' '` + rolloutA + `' '` + rolloutA2 + `'
 printf 'p202\nf3\nn%s\n' '` + rolloutB + `'
 printf 'p203\nf0\nn/dev/ttys002\n'
 `
@@ -476,14 +481,20 @@ printf 'p203\nf0\nn/dev/ttys002\n'
 }
 
 // On macOS, codex/open probes every live codex process in one lsof call with
-// -n -P rather than spawning lsof per PID (issue #408).
+// -n -P -Fpn rather than spawning lsof per PID (issue #408), preserving spaces
+// in rollout paths and multiple rollouts held by one PID.
 func TestRunLocal_CollectScriptBatchesLsofForCodexOpenOnMacOS(t *testing.T) {
-	home := t.TempDir()
+	home := filepath.Join(t.TempDir(), "home with spaces")
 	homedir.SetForTest(t, home)
 
+	codexSessionC := "01a0e2bd-ce26-7d81-a280-90c4de0d0099"
 	rolloutA := writeRollout(t, home, "2026/09/27", rolloutName("2026-09-27T11-57-03", codexSessionA),
 		sessionMeta(codexSessionA, "/workspace/user/api", codexOriginatorTUI),
 		`{"timestamp":"2026-09-27T11:59:50.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}`,
+	)
+	rolloutA2 := writeRollout(t, home, "2026/09/27", rolloutName("2026-09-27T12-05-00", codexSessionC),
+		sessionMeta(codexSessionC, "/workspace/user/api", codexOriginatorTUI),
+		`{"timestamp":"2026-09-27T12:06:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t3"}}`,
 	)
 	rolloutB := writeRollout(t, home, "2026/09/27", rolloutName("2026-09-27T12-00-00", codexSessionB),
 		sessionMeta(codexSessionB, "/workspace/user/web", codexOriginatorTUI),
@@ -491,7 +502,7 @@ func TestRunLocal_CollectScriptBatchesLsofForCodexOpenOnMacOS(t *testing.T) {
 	)
 
 	openLog := filepath.Join(t.TempDir(), "lsof-open.log")
-	installFakeMacOSCodexOpenTools(t, openLog, rolloutA, rolloutB)
+	installFakeMacOSCodexOpenTools(t, openLog, rolloutA, rolloutA2, rolloutB)
 
 	out, err := runLocal(context.Background(), attentionScript)
 	require.NoError(t, err)
@@ -502,23 +513,24 @@ func TestRunLocal_CollectScriptBatchesLsofForCodexOpenOnMacOS(t *testing.T) {
 	require.NoError(t, err)
 	calls := strings.Split(strings.TrimSpace(string(callsRaw)), "\n")
 	require.Len(t, calls, 1, "codex/open invokes lsof once for all codex PIDs: %v", calls)
-	assert.Contains(t, calls[0], "-n")
-	assert.Contains(t, calls[0], "-P")
-	assert.Contains(t, calls[0], "-p 201,202,203")
+	assert.Equal(t, "-n -P -p 201,202,203 -Fpn", calls[0])
 
 	assert.Equal(t, map[int]int64{201: 65, 202: 130, 203: 30}, codexOf(raw).Ages)
-	byPID := map[int]codexOpenRollout{}
+	bySession := map[string]codexOpenRollout{}
 	for _, o := range codexOf(raw).Open {
-		byPID[o.PID] = o
+		bySession[o.Rollout.SessionID] = o
 	}
-	require.Len(t, byPID, 2)
-	assert.Equal(t, codexSessionA, byPID[201].Rollout.SessionID)
-	assert.Equal(t, int64(65), byPID[201].Elapsed)
-	assert.Equal(t, "/workspace/user/api", byPID[201].Rollout.CWD)
-	assert.Equal(t, "task_started", byPID[201].Turn.Event)
+	require.Len(t, bySession, 3)
+	assert.Equal(t, 201, bySession[codexSessionA].PID)
+	assert.Equal(t, int64(65), bySession[codexSessionA].Elapsed)
+	assert.Equal(t, "/workspace/user/api", bySession[codexSessionA].Rollout.CWD)
+	assert.Equal(t, "task_started", bySession[codexSessionA].Turn.Event)
 
-	assert.Equal(t, codexSessionB, byPID[202].Rollout.SessionID)
-	assert.Equal(t, int64(130), byPID[202].Elapsed)
-	assert.Equal(t, "/workspace/user/web", byPID[202].Rollout.CWD)
-	assert.Equal(t, "task_complete", byPID[202].Turn.Event)
+	assert.Equal(t, 201, bySession[codexSessionC].PID)
+	assert.Equal(t, int64(65), bySession[codexSessionC].Elapsed)
+
+	assert.Equal(t, 202, bySession[codexSessionB].PID)
+	assert.Equal(t, int64(130), bySession[codexSessionB].Elapsed)
+	assert.Equal(t, "/workspace/user/web", bySession[codexSessionB].Rollout.CWD)
+	assert.Equal(t, "task_complete", bySession[codexSessionB].Turn.Event)
 }

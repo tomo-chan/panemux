@@ -128,7 +128,8 @@ if [ -n "$agents" ]; then
 			if [ -n "$c" ]; then echo "$pid $c"; fi
 		done
 	else
-		agent_pids=$(printf '%s\n' $agents | awk '/^[0-9]+$/ { if (s != "") s = s ","; s = s $0 } END { print s }')
+		agent_pids=$(printf '%s\n' "$agents" |
+			awk '$1 ~ /^[0-9]+$/ { if (s != "") s = s ","; s = s $1 } END { print s }')
 		if [ -n "$agent_pids" ]; then
 			lsof -n -P -a -p "$agent_pids" -d cwd -Fpn 2>/dev/null | awk '
 				/^p[0-9]+$/ { pid = substr($0, 2); seen = 0; next }

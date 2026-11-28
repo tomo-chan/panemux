@@ -112,7 +112,7 @@ if [ -n "$codex_procs" ]; then
 			} | awk '
 				/^E\t/ {
 					n = split($0, a, "\t")
-					if (n >= 2) et[a[2]] = (n >= 3 ? a[3] : "")
+					if (n >= 3) et[a[2]] = a[3]
 					next
 				}
 				/^p[0-9]+$/ { pid = substr($0, 2); next }

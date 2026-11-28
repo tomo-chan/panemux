@@ -741,6 +741,8 @@ elif [ -n "$iso_skip" ]; then
 else
 	sleep 60 >/dev/null 2>&1 &
 	child=$!
+	sleep 60 >/dev/null 2>&1 &
+	child2=$!
 	detached=$(sh -c 'sleep 60 >/dev/null 2>&1 & echo $!')
 	real_lsof=$(command -v lsof 2>/dev/null || true)
 	iso_ps() { E2E_REAL_PS="$real_ps" E2E_REAL_LSOF="$real_lsof" E2E_PROCESS_ROOTS="${roots-$$}" "$iso/ps" "$@"; }
@@ -809,7 +811,9 @@ else
 	done
 	for shape in \
 		"-a -p $child -p 1 -d cwd -Fn" "-a -p1 -d cwd -Fn" "-a -p $child -d cwd -Fn -p 1" "-p $child,1 -Fn" \
-		"-d cwd -Fn" "-Fn" "-a -p $child -d txt -Fn" "-i" "-p $child -Fn -c codex"; do
+		"-d cwd -Fn" "-Fn" "-a -p $child -d txt -Fn" "-i" "-p $child -Fn -c codex" \
+		"-n -P -p $child -d cwd -Fpn" "-n -P -p $child, -Fpn" "-n -P -p ,$child -Fpn" \
+		"-n -P -a -p $child,,1 -d cwd -Fpn" "-n -P -p $child -Fn"; do
 		check
 		# shellcheck disable=SC2086 # one argument per word
 		if out=$(iso_lsof $shape 2>"$work/iso-err"); then
@@ -841,8 +845,18 @@ else
 			pass 'ps answers -E -p <pid> -o command='
 		fi
 	fi
+	for shape in "-n -P -p $child,$detached -Fpn" "-n -P -a -p $child,$detached -d cwd -Fpn"; do
+		check
+		# shellcheck disable=SC2086 # one argument per word
+		if out=$(iso_lsof $shape 2>&1) || [ -n "$out" ]; then
+			fail "lsof answers nothing when a batch mixes a detached process: $shape" "$out"
+		else
+			pass "lsof answers nothing when a batch mixes a detached process: $shape"
+		fi
+	done
 	if [ -n "$real_lsof" ]; then
-		for shape in "-a -p $child -d cwd -Fn" "-a -p $child -Fn" "-p $child -Fn"; do
+		for shape in "-a -p $child -d cwd -Fn" "-a -p $child -Fn" "-p $child -Fn" \
+			"-n -P -a -p $child,$child2 -d cwd -Fpn" "-n -P -p $child,$child2 -Fpn"; do
 			check
 			# shellcheck disable=SC2086 # one argument per word
 			if ! out=$(iso_lsof $shape 2>&1) || [ -z "$out" ]; then
@@ -852,7 +866,7 @@ else
 			fi
 		done
 	fi
-	kill "$child" "$detached" 2>/dev/null
+	kill "$child" "$child2" "$detached" 2>/dev/null
 fi
 
 check
