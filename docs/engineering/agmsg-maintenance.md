@@ -39,18 +39,43 @@ The pin is `agmsg.TestedAgmsgVersion` (`internal/agmsg/agmsg_version.go`) paired
 3. Fixture tests derive paths and IDs from `TestedAgmsgVersion` and captured data; run full `agmsg`
    and `board` tests while preserving the original `v1.2.0` capture for the ID-order regression.
 4. Push `automation/agmsg-vN.N.N` and open its PR with a GitHub App token so PR CI rechecks the
-   recorded SHA independently of later tag movement.
+   recorded SHA independently of later tag movement. For newer releases within the same major version
+   as `main`'s pin (minor and patch bumps), `open_pr` attaches the `agmsg-automerge` label; major
+   releases (such as `v2.0.0`) omit the label and stay manual-review only.
 
 One tag gets at most one proposal (open, closed, and merged PRs deduplicate; a previously pushed
 branch whose PR creation failed is reused without force-pushing; deliberately closed proposals are
-not reopened; moved tags reverify without rewriting existing proposals). Review upstream changes,
-the version/SHA pair, captures, and CI before merging; a failed canary requires investigation, not
-an unverified bump.
+not reopened; moved tags reverify without rewriting existing proposals; older open proposals are not
+auto-closed). A failed canary requires investigation, not an unverified bump.
+
+### Automated merging for same-major bump PRs
+
+`.github/workflows/agmsg-automerge.yml` squash-merges verified same-major agmsg bump PRs without
+enabling repository-wide auto-merge or changing branch rulesets for other pull requests:
+
+- Triggered on `workflow_run` (`ci`, `agmsg-contract`, `coverage-blocks`, `efficacy`, `mutation`,
+  `scenarios`, `screenshots`, `pr-title`) and `check_suite` completion, filtered at the job level to
+  successful events on same-repository `automation/agmsg-v*` branches so unrelated PRs never start a
+  runner.
+- `agmsg-automerge-verify` runs read-only against trusted `main` code with `GITHUB_TOKEN` (no App
+  secrets, never checking out PR code). It verifies that the PR is open, non-draft, targeting `main`,
+  bot-authored, labeled `agmsg-automerge`, cleanly mergeable, a newer same-major release, limited to
+  the exact 9 pin/fixture files (1-line constant updates in `agmsg_version.go` and `tool.go` matching
+  `VERSION.txt` and `COMMIT.txt`), and that all 10 required checks (`ci`, `contract`,
+  `coverage-blocks`, `efficacy`, `mutation`, `ledger`, `links`, `retaken`, `validate`, `CodeQL`)
+  succeeded with zero pending or failing checks or commit statuses.
+- Only when verification returns `eligible=true` does `agmsg-automerge-merge` mint the short-lived
+  App token and run `gh pr merge --squash --delete-branch --match-head-commit <SHA>` (so
+  `release-please.yml` runs normally on the resulting `main` push and TOCTOU head changes fail
+  closed).
+- Removing the `agmsg-automerge` label or converting the PR to draft opts out immediately; the
+  automation never re-applies the label to an existing PR.
 
 ### GitHub App setup (repository owner)
 
 Create a GitHub App with **Contents: read and write** and **Pull requests: read and write**
-(Actions/Workflows write is not needed: proposals touch only `internal/agmsg/`), install it on the
+(Actions/Workflows write and Issues write are not needed: proposals touch only `internal/agmsg/`,
+and the `agmsg-automerge` label is pre-created once on the repository), install it on the
 repository, and set secrets `AGMSG_BUMP_APP_ID` and `AGMSG_BUMP_APP_PRIVATE_KEY`.
 
 Upstream installation and capture run in a read-only job without App secrets. A separate

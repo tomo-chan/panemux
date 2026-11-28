@@ -12,6 +12,31 @@ import tempfile
 UPSTREAM = "https://github.com/fujibee/agmsg.git"
 TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
+BRANCH_PREFIX = "automation/agmsg-"
+AUTOMERGE_LABEL = "agmsg-automerge"
+REQUIRED_CHECKS = frozenset({
+    "ci",
+    "contract",
+    "coverage-blocks",
+    "efficacy",
+    "mutation",
+    "ledger",
+    "links",
+    "retaken",
+    "validate",
+    "CodeQL",
+})
+SELF_CHECKS = frozenset({"agmsg-automerge-verify", "agmsg-automerge-merge"})
+ALLOWED_NON_REQUIRED_CONCLUSIONS = frozenset({"success", "skipped", "neutral"})
+FIXTURE_FILES = (
+    "COMMIT.txt",
+    "README.md",
+    "VERSION.txt",
+    "capture.sh",
+    "get_team_members.jsonl",
+    "get_team_messages.jsonl",
+    "get_teams.jsonl",
+)
 
 
 def run(args, cwd=None):
@@ -21,6 +46,20 @@ def run(args, cwd=None):
 def validate(tag, sha):
     if not TAG.fullmatch(tag) or not SHA.fullmatch(sha):
         raise ValueError("expected a stable vN.N.N tag and full lowercase commit SHA")
+
+
+def parse_version(value):
+    normalized = value if value.startswith("v") else "v" + value
+    match = TAG.fullmatch(normalized)
+    if not match:
+        raise ValueError("expected a stable vN.N.N release version")
+    return tuple(map(int, match.groups()))
+
+
+def is_automerge_eligible_version(current_version, target_tag):
+    current = parse_version(current_version)
+    target = parse_version(target_tag)
+    return target > current and target[0] == current[0]
 
 
 def latest_release(refs):
@@ -49,7 +88,7 @@ def pins(root):
 
 def scope(root, event, base, dispatch):
     version, sha = pins(root)
-    result = {"run": "true", "agmsg_ref": sha, "agmsg_tag": "v" + version, "cache_key": ""}
+    result = {"run": "true", "agmsg_ref": sha, "agmsg_tag": "v" + version, "base_version": version, "cache_key": ""}
     if event == "schedule":
         tag, sha = latest_release(run(["git", "ls-remote", "--tags", UPSTREAM, "v*"]))
         result.update(agmsg_tag=tag, agmsg_ref=sha, cache_key=f"agmsg-contract-v2-{tag}-{sha}")
@@ -173,12 +212,28 @@ def proposal_mode(root, tag, sha, repo):
     return "new"
 
 
-def open_pr(root, tag, sha, repo):
+def _resolve_base_version(root, base_version):
+    if base_version is not None:
+        return base_version
+    result = subprocess.run(
+        ["git", "show", "HEAD:internal/agmsg/agmsg_version.go"],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode != 0:
+        return None
+    match = re.search(r'^const TestedAgmsgVersion = "([^"]+)"$', result.stdout, re.M)
+    return match[1] if match else None
+
+
+def open_pr(root, tag, sha, repo, base_version=None):
     validate(tag, sha)
     if not os.environ.get("GH_TOKEN"):
         print("GitHub App credentials unavailable; no PR created")
         return
-    branch = f"automation/agmsg-{tag}"
+    branch = f"{BRANCH_PREFIX}{tag}"
     # All states prevent reopening a deliberately closed/merged proposal.
     existing = json.loads(run(["gh", "pr", "list", "--repo", repo, "--head", branch, "--base", "main", "--state", "all", "--json", "number"], cwd=root))
     if existing:
@@ -195,33 +250,174 @@ def open_pr(root, tag, sha, repo):
     if not remote and not run(["git", "diff", "--name-only"], cwd=root):
         print("pin unchanged; no PR created")
         return
+    current_base = _resolve_base_version(root, base_version)
+    automerge = bool(current_base) and is_automerge_eligible_version(current_base, tag)
     title = f"fix: bump pinned agmsg to {tag}"
     if not remote:
         run(["git", "checkout", "-b", branch], cwd=root)
         run(["git", "add", "internal/agmsg"], cwd=root)
         run(["git", "-c", "user.name=agmsg compatibility bot", "-c", "user.email=agmsg-bot@users.noreply.github.com", "commit", "-m", title], cwd=root)
         run(["git", "push", "origin", f"HEAD:refs/heads/{branch}"], cwd=root)
+    policy_note = (
+        f"This same-major update carries the `{AUTOMERGE_LABEL}` label and will squash-merge automatically "
+        "once all required checks pass; remove the label or convert to draft to hold it for manual review. "
+        if automerge else
+        "This major release requires manual review and is not eligible for automated merging. "
+    )
     with tempfile.TemporaryDirectory(prefix="panemux-agmsg-pr-") as tmp:
         body = Path(tmp) / "body.md"
         body.write_text(f"Bump the tested agmsg release to `{tag}` at commit `{sha}`.\n\n"
                         "The scheduled real-install contract passed at this exact SHA. Tier 1 fixtures "
                         "were recaptured in an isolated HOME; pin-independent fixture assertions were tested. "
                         "PR CI rechecks the recorded SHA.\n\n"
-                        "Review the upstream release, fixtures and CI before merging. Older release PRs "
-                        "remain open for human review; close superseded proposals manually. "
+                        f"{policy_note}Older release PRs remain open for human review; close superseded proposals manually. "
                         "The draft panemux release still requires human publication.\n\nRefs #437, #438.\n")
-        run(["gh", "pr", "create", "--repo", repo, "--head", branch, "--base", "main", "--title", title, "--body-file", str(body)], cwd=root)
+        cmd = ["gh", "pr", "create", "--repo", repo, "--head", branch, "--base", "main", "--title", title, "--body-file", str(body)]
+        if automerge:
+            cmd.extend(["--label", AUTOMERGE_LABEL])
+        run(cmd, cwd=root)
+
+
+def _reject(reason, pr_number="", head_sha="", tag=""):
+    return {"eligible": "false", "pr_number": str(pr_number), "head_sha": head_sha, "tag": tag, "reason": reason}
+
+
+def _gh_api_json(root, endpoint, paginate_slurp=False):
+    cmd = ["gh", "api"]
+    if paginate_slurp:
+        cmd.extend(["--paginate", "--slurp"])
+    cmd.append(endpoint)
+    return json.loads(run(cmd, cwd=root))
+
+
+def _gh_api_raw(root, endpoint):
+    return run(["gh", "api", "-H", "Accept: application/vnd.github.raw+json", endpoint], cwd=root)
+
+
+def evaluate_automerge(root, repo, head_sha):
+    if not SHA.fullmatch(head_sha):
+        return _reject("invalid head SHA")
+    pulls = [p for p in _gh_api_json(root, f"repos/{repo}/commits/{head_sha}/pulls") if p.get("state") == "open"]
+    if len(pulls) != 1:
+        return _reject(f"expected one open PR for commit, found {len(pulls)}", head_sha=head_sha)
+    number = pulls[0].get("number")
+    if not isinstance(number, int) or number <= 0:
+        return _reject("invalid PR number", head_sha=head_sha)
+    pr = _gh_api_json(root, f"repos/{repo}/pulls/{number}")
+    if pr.get("state") != "open":
+        return _reject("PR is not open", number, head_sha)
+    if pr.get("draft"):
+        return _reject("PR is a draft", number, head_sha)
+    if (pr.get("base") or {}).get("ref") != "main":
+        return _reject("PR base is not main", number, head_sha)
+    head = pr.get("head") or {}
+    if head.get("sha") != head_sha:
+        return _reject("PR head SHA moved", number, head_sha)
+    if (head.get("repo") or {}).get("full_name") != repo:
+        return _reject("PR head is not from this repository", number, head_sha)
+    head_ref = head.get("ref") or ""
+    if not head_ref.startswith(BRANCH_PREFIX):
+        return _reject("PR head branch is not an agmsg bump branch", number, head_sha)
+    tag = head_ref[len(BRANCH_PREFIX):]
+    if not TAG.fullmatch(tag):
+        return _reject("PR head branch tag is not a stable release", number, head_sha)
+    if (pr.get("user") or {}).get("type") != "Bot":
+        return _reject("PR author is not a bot", number, head_sha, tag)
+    labels = {label.get("name") for label in (pr.get("labels") or [])}
+    if AUTOMERGE_LABEL not in labels:
+        return _reject("automerge label is absent", number, head_sha, tag)
+    if pr.get("mergeable") is False or pr.get("mergeable_state") == "dirty":
+        return _reject("PR is not cleanly mergeable", number, head_sha, tag)
+
+    current_version, _ = pins(root)
+    if not is_automerge_eligible_version(current_version, tag):
+        return _reject("release is not a newer same-major version", number, head_sha, tag)
+
+    file_pages = _gh_api_json(root, f"repos/{repo}/pulls/{number}/files?per_page=100", paginate_slurp=True)
+    files = [entry for page in file_pages for entry in page]
+    expected_go = {"internal/agmsg/agmsg_version.go", "internal/agmsg/tool.go"}
+    expected_fixtures = {f"internal/agmsg/testdata/agmsg-{tag}/{name}" for name in FIXTURE_FILES}
+    by_name = {entry.get("filename"): entry for entry in files}
+    if len(files) != len(expected_go | expected_fixtures) or set(by_name) != (expected_go | expected_fixtures):
+        return _reject("PR modifies unexpected files", number, head_sha, tag)
+    for path in expected_go:
+        entry = by_name[path]
+        if entry.get("status") != "modified" or entry.get("additions") != 1 or entry.get("deletions") != 1:
+            return _reject(f"unexpected diff shape in {path}", number, head_sha, tag)
+    for path in expected_fixtures:
+        if by_name[path].get("status") != "added":
+            return _reject(f"fixture file {path} must be newly added", number, head_sha, tag)
+
+    ver_content = _gh_api_raw(root, f"repos/{repo}/contents/internal/agmsg/agmsg_version.go?ref={head_sha}")
+    tool_content = _gh_api_raw(root, f"repos/{repo}/contents/internal/agmsg/tool.go?ref={head_sha}")
+    fixture_ver = _gh_api_raw(root, f"repos/{repo}/contents/internal/agmsg/testdata/agmsg-{tag}/VERSION.txt?ref={head_sha}")
+    fixture_sha = _gh_api_raw(root, f"repos/{repo}/contents/internal/agmsg/testdata/agmsg-{tag}/COMMIT.txt?ref={head_sha}")
+    ver_match = re.search(r'^const TestedAgmsgVersion = "([^"]+)"$', ver_content, re.M)
+    sha_match = re.search(r'^const TestedAgmsgCommit = "([^"]+)"$', tool_content, re.M)
+    if not ver_match or not sha_match:
+        return _reject("could not parse version or commit constants in PR", number, head_sha, tag)
+    pr_version, agmsg_sha = ver_match[1], sha_match[1]
+    if pr_version != tag[1:] or not SHA.fullmatch(agmsg_sha):
+        return _reject("PR constants do not match branch tag or commit SHA format", number, head_sha, tag)
+    if fixture_ver.strip().removeprefix("v") != pr_version or fixture_sha.strip() != agmsg_sha:
+        return _reject("fixture provenance does not match PR constants", number, head_sha, tag)
+
+    check_pages = _gh_api_json(root, f"repos/{repo}/commits/{head_sha}/check-runs?per_page=100", paginate_slurp=True)
+    latest_checks = {}
+    for page in check_pages:
+        for check in page.get("check_runs") or []:
+            name = check.get("name")
+            if not name or name in SELF_CHECKS:
+                continue
+            prev = latest_checks.get(name)
+            if prev is None or (check.get("id") or 0) > (prev.get("id") or 0):
+                latest_checks[name] = check
+    for required in sorted(REQUIRED_CHECKS):
+        check = latest_checks.get(required)
+        if not check or check.get("status") != "completed" or check.get("conclusion") != "success":
+            return _reject(f"required check not successful: {required}", number, head_sha, tag)
+    for name, check in sorted(latest_checks.items()):
+        if check.get("status") != "completed":
+            return _reject(f"check still in progress: {name}", number, head_sha, tag)
+        if check.get("conclusion") not in ALLOWED_NON_REQUIRED_CONCLUSIONS:
+            return _reject(f"check did not succeed: {name} ({check.get('conclusion')})", number, head_sha, tag)
+
+    commit_status = _gh_api_json(root, f"repos/{repo}/commits/{head_sha}/status")
+    statuses = commit_status.get("statuses") or []
+    if statuses and commit_status.get("state") != "success":
+        return _reject(f"commit status is {commit_status.get('state')}", number, head_sha, tag)
+
+    return {"eligible": "true", "pr_number": str(number), "head_sha": head_sha, "tag": tag, "reason": "eligible"}
+
+
+def merge_pr(root, repo, pr_number, head_sha):
+    if not os.environ.get("GH_TOKEN"):
+        raise ValueError("GH_TOKEN is required to merge a PR")
+    if not re.fullmatch(r"[1-9][0-9]*\Z", str(pr_number)):
+        raise ValueError("expected a positive integer PR number")
+    if not SHA.fullmatch(head_sha):
+        raise ValueError("expected a full lowercase commit SHA")
+    run([
+        "gh", "pr", "merge", str(pr_number), "--repo", repo,
+        "--squash", "--delete-branch", "--match-head-commit", head_sha,
+    ], cwd=root)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["scope", "prepare", "capture", "apply", "preflight", "pr"])
+    parser.add_argument("operation", choices=["scope", "prepare", "capture", "apply", "preflight", "pr", "verify-automerge", "automerge"])
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     if args.operation == "scope":
         result = scope(root, os.environ["EVENT"], os.environ.get("BASE_REF", ""), os.environ.get("DISPATCH_REF", ""))
         with open(os.environ["GITHUB_OUTPUT"], "a") as output:
             output.writelines(f"{key}={value}\n" for key, value in result.items())
+    elif args.operation == "verify-automerge":
+        result = evaluate_automerge(root, os.environ["GITHUB_REPOSITORY"], os.environ["HEAD_SHA"])
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            output.writelines(f"{key}={value}\n" for key, value in result.items())
+    elif args.operation == "automerge":
+        merge_pr(root, os.environ["GITHUB_REPOSITORY"], os.environ["PR_NUMBER"], os.environ["HEAD_SHA"])
     else:
         tag, sha = os.environ["AGMSG_TAG"], os.environ["AGMSG_SHA"]
         if args.operation == "prepare":
@@ -238,7 +434,8 @@ def main():
             with open(os.environ["GITHUB_OUTPUT"], "a") as output:
                 output.write(f"mode={mode}\n")
         else:
-            open_pr(root, tag, sha, os.environ["GITHUB_REPOSITORY"])
+            base_version = os.environ.get("AGMSG_BASE_VERSION") or None
+            open_pr(root, tag, sha, os.environ["GITHUB_REPOSITORY"], base_version=base_version)
 
 
 if __name__ == "__main__":

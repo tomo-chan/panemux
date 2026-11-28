@@ -305,6 +305,200 @@ esac
                     automation.main()
                     self.assertEqual((directory / "output").read_text(), "mode=skip\n")
 
+    def test_open_pr_labels_same_major_only_and_skips_major(self):
+        for tag, base_version, expect_label in (
+            ("v1.9.3", "1.9.2", True),
+            ("v1.10.0", "1.9.2", True),
+            ("v2.0.0", "1.9.2", False),
+        ):
+            created = []
+            def fake(args, **kwargs):
+                if args[:3] == ["gh", "pr", "list"]:
+                    return "[]"
+                if args[:3] == ["git", "diff", "--name-only"]:
+                    return "internal/agmsg/tool.go\n"
+                if args[:3] == ["gh", "pr", "create"]:
+                    created.append((args, Path(args[args.index("--body-file") + 1]).read_text()))
+                return ""
+            with self.subTest(tag=tag), patch.dict(os.environ, {"GH_TOKEN": "fake"}), patch.object(automation, "run", side_effect=fake):
+                automation.open_pr(ROOT, tag, SHA, "owner/repo", base_version=base_version)
+            self.assertEqual(len(created), 1)
+            args, body = created[0]
+            if expect_label:
+                self.assertIn("--label", args)
+                self.assertEqual(args[args.index("--label") + 1], automation.AUTOMERGE_LABEL)
+                self.assertIn(automation.AUTOMERGE_LABEL, body)
+            else:
+                self.assertNotIn("--label", args)
+                self.assertIn("manual review", body.lower())
+
+    def test_open_pr_resume_labels_same_major(self):
+        created = []
+        def fake(args, **kwargs):
+            if args[:3] == ["gh", "pr", "list"]:
+                return "[]"
+            if args[:3] == ["git", "ls-remote", "--heads"]:
+                return f'{SHA}\trefs/heads/automation/agmsg-v1.9.3'
+            if args[:2] == ["git", "show"]:
+                return f'const TestedAgmsgCommit = "{SHA}"' if args[-1].endswith("tool.go") else 'const TestedAgmsgVersion = "1.9.3"'
+            if args[:3] == ["gh", "pr", "create"]:
+                created.append(args)
+            return ""
+        with patch.dict(os.environ, {"GH_TOKEN": "fake"}), patch.object(automation, "run", side_effect=fake):
+            automation.open_pr(ROOT, "v1.9.3", SHA, "owner/repo", base_version="1.9.2")
+        self.assertEqual(len(created), 1)
+        self.assertIn("--label", created[0])
+        self.assertEqual(created[0][created[0].index("--label") + 1], automation.AUTOMERGE_LABEL)
+
+    def _automerge_fixture(self, tag="v1.9.3", agmsg_sha=SHA, head_sha="b" * 40, base_version="1.9.2"):
+        ver = tag[1:]
+        pr = {
+            "number": 700,
+            "state": "open",
+            "draft": False,
+            "mergeable": True,
+            "mergeable_state": "clean",
+            "base": {"ref": "main"},
+            "head": {"ref": f"automation/agmsg-{tag}", "sha": head_sha, "repo": {"full_name": "owner/repo"}},
+            "user": {"login": "panemux-agmsg-bump[bot]", "type": "Bot"},
+            "labels": [{"name": automation.AUTOMERGE_LABEL}, {"name": "backend"}],
+        }
+        files = [
+            {"filename": "internal/agmsg/agmsg_version.go", "status": "modified", "additions": 1, "deletions": 1},
+            {"filename": "internal/agmsg/tool.go", "status": "modified", "additions": 1, "deletions": 1},
+            {"filename": f"internal/agmsg/testdata/agmsg-{tag}/COMMIT.txt", "status": "added", "additions": 1, "deletions": 0},
+            {"filename": f"internal/agmsg/testdata/agmsg-{tag}/README.md", "status": "added", "additions": 5, "deletions": 0},
+            {"filename": f"internal/agmsg/testdata/agmsg-{tag}/VERSION.txt", "status": "added", "additions": 1, "deletions": 0},
+            {"filename": f"internal/agmsg/testdata/agmsg-{tag}/capture.sh", "status": "added", "additions": 68, "deletions": 0},
+            {"filename": f"internal/agmsg/testdata/agmsg-{tag}/get_team_members.jsonl", "status": "added", "additions": 2, "deletions": 0},
+            {"filename": f"internal/agmsg/testdata/agmsg-{tag}/get_team_messages.jsonl", "status": "added", "additions": 4, "deletions": 0},
+            {"filename": f"internal/agmsg/testdata/agmsg-{tag}/get_teams.jsonl", "status": "added", "additions": 1, "deletions": 0},
+        ]
+        contents = {
+            "internal/agmsg/agmsg_version.go": f'package agmsg\nconst TestedAgmsgVersion = "{ver}"\n',
+            "internal/agmsg/tool.go": f'package agmsg\nconst TestedAgmsgCommit = "{agmsg_sha}"\n',
+            f"internal/agmsg/testdata/agmsg-{tag}/VERSION.txt": f"{tag}\n",
+            f"internal/agmsg/testdata/agmsg-{tag}/COMMIT.txt": f"{agmsg_sha}\n",
+        }
+        check_runs = [
+            {"id": idx + 10, "name": name, "status": "completed", "conclusion": "success"}
+            for idx, name in enumerate(sorted(automation.REQUIRED_CHECKS))
+        ]
+        check_runs.extend([
+            {"id": 1, "name": "ci", "status": "completed", "conclusion": "failure"},
+            {"id": 100, "name": "capture", "status": "completed", "conclusion": "skipped"},
+            {"id": 101, "name": "propose-bump", "status": "completed", "conclusion": "skipped"},
+            {"id": 102, "name": "scope", "status": "completed", "conclusion": "success"},
+            {"id": 103, "name": "agmsg-automerge-verify", "status": "in_progress", "conclusion": None},
+        ])
+        status = {"state": "pending", "statuses": []}
+        return {"pr": pr, "files": files, "contents": contents, "check_runs": check_runs, "status": status, "base_version": base_version}
+
+    def _run_evaluate(self, state):
+        head_sha = state["pr"]["head"]["sha"]
+        def fake(args, **kwargs):
+            endpoint = args[-1]
+            if endpoint.endswith(f"/commits/{head_sha}/pulls"):
+                return json.dumps([state["pr"]])
+            if endpoint.endswith(f"/pulls/{state['pr']['number']}"):
+                return json.dumps(state["pr"])
+            if f"/pulls/{state['pr']['number']}/files" in endpoint:
+                return json.dumps([state["files"]])
+            if "/contents/" in endpoint:
+                path = endpoint.split("/contents/", 1)[1].split("?", 1)[0]
+                return state["contents"][path]
+            if f"/commits/{head_sha}/check-runs" in endpoint:
+                return json.dumps([{"check_runs": state["check_runs"]}])
+            if endpoint.endswith(f"/commits/{head_sha}/status"):
+                return json.dumps(state["status"])
+            raise AssertionError(f"unexpected gh call: {args}")
+        with patch.object(automation, "pins", return_value=(state["base_version"], "c" * 40)), patch.object(automation, "run", side_effect=fake):
+            return automation.evaluate_automerge(ROOT, "owner/repo", head_sha)
+
+    def test_evaluate_automerge_accepts_verified_same_major_pr(self):
+        state = self._automerge_fixture()
+        result = self._run_evaluate(state)
+        self.assertEqual(result["eligible"], "true")
+        self.assertEqual(result["pr_number"], "700")
+        self.assertEqual(result["head_sha"], "b" * 40)
+        self.assertEqual(result["tag"], "v1.9.3")
+
+    def test_evaluate_automerge_rejects_unsafe_or_incomplete_prs(self):
+        def mutate(fn):
+            state = self._automerge_fixture()
+            fn(state)
+            return state
+
+        cases = {
+            "draft": mutate(lambda s: s["pr"].update(draft=True)),
+            "missing_label": mutate(lambda s: s["pr"].update(labels=[{"name": "backend"}])),
+            "non_bot_author": mutate(lambda s: s["pr"].update(user={"login": "human", "type": "User"})),
+            "fork_pr": mutate(lambda s: s["pr"]["head"].update(repo={"full_name": "evil/repo"})),
+            "non_main_base": mutate(lambda s: s["pr"]["base"].update(ref="develop")),
+            "dirty_mergeable": mutate(lambda s: s["pr"].update(mergeable=False, mergeable_state="dirty")),
+            "major_bump": self._automerge_fixture(tag="v2.0.0", base_version="1.9.2"),
+            "not_newer": self._automerge_fixture(tag="v1.9.2", base_version="1.9.2"),
+            "extra_file": mutate(lambda s: s["files"].append({"filename": "main.go", "status": "modified", "additions": 1, "deletions": 0})),
+            "extra_go_lines": mutate(lambda s: s["files"][1].update(additions=2)),
+            "version_mismatch": mutate(lambda s: s["contents"].update({"internal/agmsg/testdata/agmsg-v1.9.3/VERSION.txt": "v1.9.4\n"})),
+            "commit_mismatch": mutate(lambda s: s["contents"].update({"internal/agmsg/testdata/agmsg-v1.9.3/COMMIT.txt": "d" * 40 + "\n"})),
+            "missing_required_check": mutate(lambda s: s["check_runs"].__setitem__(0, {"id": 999, "name": "other", "status": "completed", "conclusion": "success"})),
+            "failed_required_check": mutate(lambda s: s["check_runs"].append({"id": 999, "name": "ci", "status": "completed", "conclusion": "failure"})),
+            "pending_required_check": mutate(lambda s: s["check_runs"].append({"id": 999, "name": "contract", "status": "in_progress", "conclusion": None})),
+            "failed_other_check": mutate(lambda s: s["check_runs"].append({"id": 999, "name": "Analyze (go)", "status": "completed", "conclusion": "failure"})),
+            "pending_other_check": mutate(lambda s: s["check_runs"].append({"id": 999, "name": "Analyze (go)", "status": "queued", "conclusion": None})),
+            "failed_commit_status": mutate(lambda s: s["status"].update(state="failure", statuses=[{"context": "ext", "state": "failure"}])),
+        }
+        for name, state in cases.items():
+            with self.subTest(case=name):
+                result = self._run_evaluate(state)
+                self.assertEqual(result["eligible"], "false", f"{name} should be rejected: {result}")
+
+    def test_merge_pr_uses_match_head_commit_and_validates_inputs(self):
+        calls = []
+        def fake(args, **kwargs):
+            calls.append(args)
+            return ""
+        with patch.dict(os.environ, {"GH_TOKEN": "fake"}), patch.object(automation, "run", side_effect=fake):
+            automation.merge_pr(ROOT, "owner/repo", "700", SHA)
+        self.assertEqual(calls, [[
+            "gh", "pr", "merge", "700", "--repo", "owner/repo",
+            "--squash", "--delete-branch", "--match-head-commit", SHA,
+        ]])
+        for bad_num, bad_sha in (("abc", SHA), ("0", SHA), ("700", "not-a-sha")):
+            with self.subTest(bad_num=bad_num, bad_sha=bad_sha), patch.dict(os.environ, {"GH_TOKEN": "fake"}), self.assertRaises(ValueError):
+                automation.merge_pr(ROOT, "owner/repo", bad_num, bad_sha)
+        with patch.dict(os.environ, {"GH_TOKEN": ""}), self.assertRaises(ValueError):
+            automation.merge_pr(ROOT, "owner/repo", "700", SHA)
+
+    def test_automerge_workflow_separates_verification_from_app_credentials(self):
+        workflow = (ROOT / ".github/workflows/agmsg-automerge.yml").read_text()
+        verify, merge = workflow.split("\n  agmsg-automerge-verify:\n")[1].split("\n  agmsg-automerge-merge:\n")
+        self.assertNotIn("secrets.", verify)
+        self.assertNotIn("create-github-app-token", verify)
+        self.assertNotIn("github.event.pull_request", verify)
+        self.assertIn("scripts/agmsg_contract.py verify-automerge", verify)
+        self.assertIn("needs: agmsg-automerge-verify", merge)
+        self.assertIn("needs.agmsg-automerge-verify.outputs.eligible == 'true'", merge)
+        self.assertIn("create-github-app-token", merge)
+        self.assertIn("scripts/agmsg_contract.py automerge", merge)
+
+    def test_cli_routes_verify_automerge_and_automerge(self):
+        with tempfile.TemporaryDirectory(prefix="panemux-agmsg-automerge-cli-") as tmp:
+            directory = Path(tmp)
+            output = directory / "output"
+            env = {"HEAD_SHA": SHA, "PR_NUMBER": "700", "GITHUB_OUTPUT": str(output), "GITHUB_REPOSITORY": "owner/repo"}
+            with patch.dict(os.environ, env), patch.object(automation, "merge_pr") as merge:
+                with patch.object(sys, "argv", ["automation", "verify-automerge"]), patch.object(
+                    automation, "evaluate_automerge", return_value={"eligible": "true", "pr_number": "700", "head_sha": SHA, "tag": "v1.9.3", "reason": "eligible"}
+                ):
+                    automation.main()
+                    merge.assert_not_called()
+                    self.assertIn("eligible=true\n", output.read_text())
+                with patch.object(sys, "argv", ["automation", "automerge"]):
+                    automation.main()
+                    merge.assert_called_once_with(ROOT, "owner/repo", "700", SHA)
+
 
 if __name__ == "__main__":
     unittest.main()

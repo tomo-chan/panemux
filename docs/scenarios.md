@@ -173,6 +173,7 @@ See [agmsg compatibility contract](backend/agent-board/agmsg.md#agmsg-compatibil
 | G12 | An operator runs a newer patch of agmsg | Warn against the pinned release without blocking startup | `auto`: `TestVersionMismatchWarning_NewerPatchesWarn` |
 | G12a | An operator runs a patch *older* than the pin | Warned — it never went through the canary. Unreachable while the pin's patch is 0, so the rule is tested apart from the pin | `auto`: `TestReleaseCovered` |
 | G13 | A new release passes the scheduled contract | App-authenticated fix PR updates version/SHA and captures without duplicate proposals; missing secrets skip creation | `auto`: `scripts/agmsg_contract_test.py` (`make test-agmsg-automation`); `manual`: scheduled App/PR delivery after owner setup |
+| G14 | A same-major agmsg bump PR passes every required check | Dedicated workflow verifies bot authorship, `agmsg-automerge` label, exact 9-file pin/fixture diff, same-major ordering, and all 10 required checks before squash-merging with `--match-head-commit`; major updates, drafts, unlabeled PRs, and failing/pending checks are held | `auto`: `scripts/agmsg_contract_test.py` (`make test-agmsg-automation`); `manual`: live `agmsg-automerge.yml` trigger after merge |
 | G13 | An operator runs a different minor/major, or an unreadable version | Warned, naming the version found and the pin | `auto`: `TestVersionMismatchWarning_StillWarnsWhereItMatters` |
 
 ## H. The core multiplexer
