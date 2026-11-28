@@ -10,7 +10,7 @@ const identity = (overrides: Partial<BoardIdentity> = {}): BoardIdentity => ({
   last_message_at: null, self_report: null, ...overrides,
 })
 
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers() })
 beforeEach(() => Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }))
 
 function serve(identities: Record<string, BoardIdentity>, messages: unknown[] = []) {
@@ -60,6 +60,34 @@ it('merges pane details once, separates equal host names and keeps reports suppl
   expect(screen.getByText('detected')).toBeDefined()
 })
 
+it('preserves detected agent type and host inside its matching unreported name card', async () => {
+  serve({ 'detected@local': identity({ name: 'detected', pane_id: 'detected' }), 'reader@local': identity({ name: 'reader' }) })
+  render(<BoardDashboardPanel isOpen token="tok" boardPanes={[{ id: 'detected', title: 'Editor' }]} onClose={() => {}} />)
+  const card = (await screen.findByText('detected@local')).closest('article')!
+  expect(within(card).getByText('agent detected')).toBeDefined()
+  expect(within(card).getByText('codex on local. No status report yet.')).toBeDefined()
+  expect(within(card).getByText('Unreported')).toBeDefined()
+  expect(screen.getAllByText('Editor')).toHaveLength(1)
+  expect(screen.queryByText('detected', { exact: true })).toBeNull()
+  const reader = screen.getByText('reader@local').closest('article')!
+  expect(within(reader).queryByText('agent detected')).toBeNull()
+})
+
+it('omits the summary toggle when no text is clipped and responds to later size changes', async () => {
+  serve({ 'worker@local': identity({ source: 'self_report', self_report: { updated_at: new Date().toISOString(), summary: 'Short summary' } }) })
+  render(<BoardDashboardPanel isOpen token="tok" boardPanes={[]} onClose={() => {}} />)
+  const report = await screen.findByText('Short summary')
+  expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull()
+  Object.defineProperty(report, 'clientHeight', { configurable: true, value: 56 })
+  Object.defineProperty(report, 'scrollHeight', { configurable: true, value: 84 })
+  fireEvent(window, new Event('resize'))
+  fireEvent.click(await screen.findByRole('button', { name: 'Show more' }))
+  expect(screen.getByRole('button', { name: 'Show less' })).toBeDefined()
+  Object.defineProperty(report, 'scrollHeight', { configurable: true, value: 56 })
+  fireEvent.click(screen.getByRole('button', { name: 'Show less' }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull())
+})
+
 it.each([
   ['busy', 'rgb(123, 216, 143)'], ['wait', 'rgb(244, 191, 79)'],
   ['idle', 'rgb(122, 162, 247)'], ['run', 'rgb(143, 166, 196)'],
@@ -81,6 +109,8 @@ it('keeps an arbitrary self-reported task-like state neutral', async () => {
 })
 
 it('renders self-reports as expandable text with visible control characters and copies exact addresses', async () => {
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(56)
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(140)
   const writeText = vi.fn().mockResolvedValue(undefined)
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
   const summary = '<img src=x onerror=alert(1)>\r\nline\tend\u001b\u202e' + ' long'.repeat(100)

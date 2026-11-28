@@ -74,7 +74,7 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
           <div style={sectionTitleStyle}>Names</div>
           <div style={{ ...notJoinedDetailStyle, marginBottom: 8 }}>Observed names do not guarantee registration, liveness or delivery.</div>
           {Object.entries(identities).sort(([a], [b]) => a.localeCompare(b)).map(([address, identity]) => (
-            <IdentityCard key={address} address={address} identity={identity} title={identity.pane_id ? titles.get(identity.pane_id) : undefined} />
+            <IdentityCard key={address} address={address} identity={identity} title={identity.pane_id ? titles.get(identity.pane_id) : undefined} participation={identity.pane_id ? participation[identity.pane_id] : undefined} />
           ))}
           {paneIds.length === 0 && Object.keys(identities).length === 0 && <div style={emptyStyle}>No agent detected or status reported yet.</div>}
           {paneIds.length > 0 && <div style={{ ...sectionTitleStyle, marginTop: 12 }}>Detected panes</div>}
@@ -93,7 +93,7 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
   )
 }
 
-const IdentityCard: React.FC<{ address: string; identity: BoardIdentity; title?: string }> = ({ address, identity, title }) => {
+const IdentityCard: React.FC<{ address: string; identity: BoardIdentity; title?: string; participation?: BoardParticipation }> = ({ address, identity, title, participation }) => {
   const [copyResult, setCopyResult] = React.useState('')
   const report = identity.self_report
   const task = identity.source === 'task'
@@ -106,6 +106,10 @@ const IdentityCard: React.FC<{ address: string; identity: BoardIdentity; title?:
     <strong style={{ overflowWrap: 'anywhere' }}>{boardText(address)}</strong>
     <div style={{ color: '#8f98a8', fontSize: 11, overflowWrap: 'anywhere' }}>{boardText(identity.host)} · {identity.pane_id ? `Pane: ${boardText(identity.pane_id)}` : 'No pane'}</div>
     {title && <div style={paneTitleStyle}>{title}</div>}
+    {participation?.agent_type && <div>
+      <span style={pillStyle('#3a2a2a', '#f08b8b')}>agent detected</span>
+      <div style={notJoinedDetailStyle}>{boardText(participation.agent_type)} on {boardText(participation.host)}.{report ? '' : ' No status report yet.'}</div>
+    </div>}
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
       <span style={statusDotStyle(identity.state ?? undefined, identity.source)} />
       <span>{task ? 'Task observed' : identity.source === 'self_report' ? 'Self-report' : 'Unreported'}</span>
@@ -131,9 +135,23 @@ const IdentityCard: React.FC<{ address: string; identity: BoardIdentity; title?:
 
 const ReportSummary: React.FC<{ summary: string }> = ({ summary }) => {
   const [expanded, setExpanded] = React.useState(false)
+  const [clipped, setClipped] = React.useState(false)
+  const ref = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => setExpanded(false), [summary])
+  React.useLayoutEffect(() => {
+    const element = ref.current
+    // Retain the collapse control while expanded. Measure again on collapse.
+    if (!element || expanded) return
+    const measure = () => setClipped(element.scrollHeight > element.clientHeight)
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(element)
+    window.addEventListener('resize', measure)
+    return () => { observer?.disconnect(); window.removeEventListener('resize', measure) }
+  }, [summary, expanded])
   return <>
-    <div style={{ ...summaryStyle, whiteSpace: 'pre-wrap', ...(expanded ? { display: 'block', WebkitLineClamp: 'unset', overflow: 'visible' } : {}) }}>{boardText(summary)}</div>
-    <button type="button" style={textButtonStyle} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'Show less' : 'Show more'}</button>
+    <div ref={ref} style={{ ...summaryStyle, whiteSpace: 'pre-wrap', ...(expanded ? { display: 'block', WebkitLineClamp: 'unset', overflow: 'visible' } : {}) }}>{boardText(summary)}</div>
+    {(clipped || expanded) && <button type="button" style={textButtonStyle} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'Show less' : 'Show more'}</button>}
   </>
 }
 

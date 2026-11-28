@@ -20,6 +20,8 @@ Agent Board reuses the shared modal, overlay-panel, color, status, and focus-res
   pane ID/title or `No pane`. Equal names on `local` and `ssh:build` have separate cards. Matching
   pane details appear once, in the name card; unmatched detected/reporting panes remain under
   `Detected panes`. Idle configured shells stay hidden. Detection does not claim a successful join.
+  A matching detected pane retains `agent detected`, agent type, and host in its name card, even
+  when the name's state source is `Unreported`; message-only names carry no detection claim.
 - `Task observed`, `Self-report`, and `Unreported` identify the source supplied by the server.
   Task state, waiting reason, state age, and observation age take priority; an accompanying
   self-report is explicitly supplemental. Ambiguous task locations, failed collections, and
@@ -38,7 +40,9 @@ Agent Board reuses the shared modal, overlay-panel, color, status, and focus-res
 - Qualified names, hosts, and unbroken task waiting reasons wrap rather than lose their
   distinguishing suffix. History sender/destination and host metadata lines wrap at narrow widths.
   Summaries preserve
-  newlines, initially wrap to four lines, and offer `Show more` / `Show less`. Display normalizes
+  newlines and initially wrap to four lines. Only text that actually overflows those four rendered
+  lines offers `Show more`; the expanded text keeps `Show less`. Resizing rechecks clipping, while
+  short summaries have no expansion control. Display normalizes
   CRLF to LF and tabs to spaces; other C0/C1 and bidirectional control characters appear as literal
   `\uXXXX` escapes. API data and accepted input lengths are unchanged.
 - Marks self-reports older than five minutes as `stale`, dimming cards whose primary state is a

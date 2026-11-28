@@ -75,7 +75,7 @@ test('observes pane-free names and sends to an unobserved qualified name from Me
   const helper = panel.getByRole('article').filter({ hasText: 'helper@local' })
   await expect(helper.getByText('Self-report', { exact: true })).toBeVisible()
   await expect(helper.getByText(/No pane/)).toBeVisible()
-  await expect(helper.getByRole('button')).toHaveCount(2) // expansion and copy; no pane actions
+  await expect(helper.getByRole('button')).toHaveCount(1) // short report: copy only; no pane actions
   const observer = panel.getByRole('article').filter({ hasText: 'observer@local' })
   await expect(observer.getByText('Unreported')).toBeVisible()
   await expect(observer.getByRole('button', { name: 'Copy address' })).toBeVisible()
@@ -197,4 +197,34 @@ test('closing and reopening during a real send preserves pending and yields one 
   await page.keyboard.press('Escape')
   await boardOpenButton(page).click()
   await expect(boardDialog(page).getByText(body, { exact: true })).toHaveCount(1, { timeout: 60_000 })
+})
+
+test('offers summary expansion only when four rendered lines clip the text', async ({ page }) => {
+  const now = new Date().toISOString()
+  const base = { host: 'local', team: 'demo', pane_id: null, source: 'self_report', state: 'idle',
+    waiting_for: null, status_since: null, task_observed_at: null, last_message_at: null }
+  const long = Array.from({ length: 12 }, (_, i) => `Report line ${i}`).join('\n')
+  const adaptive = 'Adaptive text '.repeat(12)
+  await page.route('**/api/board/status', route => route.fulfill({ json: { identities: {
+    'short@local': { ...base, name: 'short', self_report: { updated_at: now, summary: 'Ready' } },
+    'long@local': { ...base, name: 'long', self_report: { updated_at: now, summary: long } },
+    'adaptive@local': { ...base, name: 'adaptive', self_report: { updated_at: now, summary: adaptive } },
+  }, statuses: {}, participation: {} } }))
+  await page.setViewportSize({ width: 600, height: 860 })
+  await gotoAndReadSessionToken(page)
+  await boardOpenButton(page).click()
+  const panel = boardDialog(page)
+  const card = (name: string) => panel.getByRole('article').filter({ hasText: `${name}@local` })
+  await expect(card('short').getByRole('button', { name: 'Show more' })).toHaveCount(0)
+  await expect(card('adaptive').getByRole('button', { name: 'Show more' })).toHaveCount(0)
+  const report = card('long').getByText(/^Report line 0/)
+  const collapsed = (await report.boundingBox())!.height
+  await card('long').getByRole('button', { name: 'Show more' }).click()
+  expect((await report.boundingBox())!.height).toBeGreaterThan(collapsed)
+  await card('long').getByRole('button', { name: 'Show less' }).click()
+  await expect(card('long').getByRole('button', { name: 'Show more' })).toBeVisible()
+  await page.setViewportSize({ width: 300, height: 860 })
+  await expect(card('adaptive').getByRole('button', { name: 'Show more' })).toHaveCount(1)
+  await page.setViewportSize({ width: 600, height: 860 })
+  await expect(card('adaptive').getByRole('button', { name: 'Show more' })).toHaveCount(0)
 })
