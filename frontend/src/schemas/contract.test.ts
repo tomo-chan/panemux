@@ -152,6 +152,10 @@ const roundTrips: RoundTrip[] = [
 // merely red: a schema added without a fixture has to be classified here, in
 // the diff, and "component of X" is a claim a reviewer can check.
 const fixtureless: Record<string, string> = {
+  // Broadcast is side-effectful; its live response is checked by the isolated
+  // relay/script E2E, while form tests cover 422/502 and malformed responses.
+  BoardBroadcastResponseSchema: 'authenticated broadcast response checked by e2e/agent-board-agmsg.spec.ts',
+  BoardBroadcastFailureSchema: 'broadcast error variants checked by components/BoardMessageForm.test.tsx',
   // Request bodies. panemux never receives these from the server, so there is
   // no server output to round-trip them against; index.test.ts covers them.
   CreateSessionRequestSchema: 'request body sent to POST /api/sessions',
@@ -232,18 +236,14 @@ describe('API contract fixtures', () => {
   // A schema the frontend parses a response with, and that nothing here
   // captures, is a contract nobody is checking. Adding one forces a choice:
   // give it a fixture, or say in `fixtureless` why it does not need one.
-  it('classifies every exported schema as round-tripped or explained', () => {
+  it('keeps exported schemas and their round-trip or fixtureless classification in sync', () => {
     const roundTripped = roundTrips.map((r) => r.schemaName as string)
     const unclassified = exportedSchemaNames().filter(
       (name) => !roundTripped.includes(name) && !(name in fixtureless)
     )
 
     expect(unclassified).toEqual([])
-  })
-
-  // The complement: `fixtureless` must not outlive the schemas it names, or
-  // it becomes a list of excuses for code that no longer exists.
-  it('has no stale entries in the fixtureless list', () => {
+    // Check both directions together: explanations must not outlive schemas.
     const exported = exportedSchemaNames()
     const stale = Object.keys(fixtureless).filter((name) => !exported.includes(name))
 

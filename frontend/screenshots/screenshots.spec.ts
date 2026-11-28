@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import type { BoardIdentity, BoardStatusResponse } from '../src/schemas'
 
 // Captures the images README.md and docs/ show (`make screenshots`). Each
 // test writes one file under docs/images/. See playwright.config.ts in this
@@ -38,6 +39,7 @@ test('documentation screenshots', async ({ page }) => {
   // board API on another.
   test.setTimeout(120_000)
   await serveTasks(page)
+  await serveBoardIdentities(page)
   await page.goto('/')
   await expect(pane(page, 'editor')).toBeVisible()
 
@@ -68,9 +70,22 @@ test('documentation screenshots', async ({ page }) => {
     await expect(panel).toBeVisible()
     await expect(panel.getByText(/One flaky timeout/)).toBeVisible({ timeout: 30_000 })
     await expect(panel.getByText(/Adding pagination/)).toBeVisible()
+    await expect(panel.getByText('tests@local', { exact: true })).toBeVisible()
+    await expect(panel.getByText('tests@ssh:build', { exact: true })).toBeVisible()
+    await expect(panel.getByText('codex on local. No status report yet.')).toBeVisible()
     await page.screenshot({ path: imagePath('agent-board.png') })
     await panel.getByRole('button', { name: 'Close agent board panel' }).click()
     await expect(panel).toHaveCount(0)
+  })
+
+  await test.step('command center message', async () => {
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+k' : 'Control+Shift+k')
+    const palette = page.getByRole('dialog', { name: 'Command center', exact: true })
+    await palette.getByRole('button', { name: 'Message', exact: true }).click()
+    await palette.getByLabel('Add recipient').selectOption('tests@ssh:build')
+    await palette.getByLabel('Message body').fill('Please review the pagination change and report any blocking findings.')
+    await page.screenshot({ path: imagePath('command-center.png') })
+    await page.keyboard.press('Escape')
   })
 
   await test.step('task dashboard', async () => {
@@ -126,6 +141,24 @@ test('documentation screenshots', async ({ page }) => {
 })
 
 const MOCK_PATH = '/tmp/sample-project/mockups/index.html'
+
+// Presentation fixture only: equal names on different hosts and task priority
+// need no live SSH endpoint during capture. Real relay coverage lives in E2E.
+async function serveBoardIdentities(page: Page) {
+  const now = new Date().toISOString()
+  const base: BoardIdentity = { name: 'tests', team: 'panemux-screenshots', host: 'local', pane_id: null,
+    source: 'unreported', state: null, waiting_for: null, status_since: null, task_observed_at: null,
+    last_message_at: now, self_report: null }
+  const snapshot: BoardStatusResponse = { identities: {
+    'editor@local': { ...base, name: 'editor', pane_id: 'editor', source: 'task', state: 'wait', waiting_for: 'Review the pagination change',
+      task_observed_at: now, status_since: now, self_report: { updated_at: now, state: 'waiting',
+        summary: 'Adding pagination to the search endpoint', last_tool: 'Edit' } },
+    'tests@local': { ...base, pane_id: 'tests' },
+    'tests@ssh:build': { ...base, host: 'ssh:build', source: 'self_report', state: 'idle',
+      self_report: { updated_at: now, state: 'idle', summary: 'Ready to review without a pane' } },
+  }, statuses: {}, participation: { tests: { pane_id: 'tests', host: 'local', agent_type: 'codex', instructed: false } } }
+  await page.route('**/api/board/status', route => route.fulfill({ json: snapshot }))
+}
 
 // Clicks a link in a pane's terminal at the cells its text occupies, on the
 // last row that shows it.

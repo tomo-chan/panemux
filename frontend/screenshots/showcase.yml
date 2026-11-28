@@ -7,6 +7,9 @@
 server:
     host: 127.0.0.1
     port: 4180
+    auth_token: screenshot-board-token
+command_center:
+    enabled: true
 agent_board:
     enabled: true
     mode: monitor

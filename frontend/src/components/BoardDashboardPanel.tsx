@@ -2,7 +2,8 @@ import React from 'react'
 import { useBoardStatus } from '../hooks/useBoardStatus'
 import { useModalKeyboard } from '../hooks/useModalKeyboard'
 import { useRestoreFocusOnClose } from '../hooks/useRestoreFocusOnClose'
-import type { BoardParticipation, BoardMessage, BoardStatusEntry } from '../schemas'
+import type { BoardIdentity, BoardParticipation, BoardMessage, BoardStatusEntry } from '../schemas'
+import { boardText } from '../utils/boardText'
 import { TERMINAL_FONT_FAMILY } from '../utils/fonts'
 import { colorForBoardState, formatRelativeTime, isStaleUpdatedAt } from '../utils/boardStatusColors'
 
@@ -27,11 +28,10 @@ interface BoardDashboardPanelProps {
 // — see docs/backend/agent-board/relay.md and docs/ui/agent-board.md's
 // Dashboard section. Structure and styling deliberately mirror
 // CommandHistoryPanel.tsx (same right-docked overlay pattern), not a new
-// visual language. Broadcast sending is out of scope by design (see the
-// implementation plan's "Scope外" section) — this panel only ever reads
-// /api/board/status and /api/board/messages.
+// visual language. Sending lives in the command center's Message mode;
+// this panel reads status/history and copies exact qualified addresses.
 export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen, token, boardPanes, onClose }) => {
-  const { statuses, participation, messages, error } = useBoardStatus({ enabled: isOpen, token })
+  const { identities, statuses, participation, messages, error } = useBoardStatus({ enabled: isOpen, token })
   useRestoreFocusOnClose(isOpen)
   const dialogRef = React.useRef<HTMLDivElement>(null)
 
@@ -47,10 +47,9 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
 
   // A detected agent or report makes a pane visible; configuration supplies titles.
   const titles = new Map(boardPanes.map((pane) => [pane.id, pane.title]))
-  const paneIds = Array.from(new Set([...Object.keys(participation).filter(id => participation[id].agent_type !== '' || participation[id].last_report !== undefined), ...Object.keys(statuses)])).sort()
+  const representedPanes = new Set(Object.values(identities).flatMap(identity => identity.pane_id ? [identity.pane_id] : []))
+  const paneIds = Array.from(new Set([...Object.keys(participation).filter(id => participation[id].agent_type !== '' || participation[id].last_report !== undefined), ...Object.keys(statuses)])).filter(id => !representedPanes.has(id)).sort()
   const messagesNewestFirst = [...messages].reverse()
-  const hosts = new Set(messages.map((m) => m.host))
-  const showHost = hosts.size > 1
 
   return (
     <div
@@ -72,8 +71,13 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
         <div style={bodyStyle}>
           {error && <div style={errorStyle}>{error}</div>}
 
-          <div style={sectionTitleStyle}>Panes</div>
-          {paneIds.length === 0 && <div style={emptyStyle}>No agent detected or status reported yet.</div>}
+          <div style={sectionTitleStyle}>Names</div>
+          <div style={{ ...notJoinedDetailStyle, marginBottom: 8 }}>Observed names do not guarantee registration, liveness or delivery.</div>
+          {Object.entries(identities).sort(([a], [b]) => a.localeCompare(b)).map(([address, identity]) => (
+            <IdentityCard key={address} address={address} identity={identity} title={identity.pane_id ? titles.get(identity.pane_id) : undefined} participation={identity.pane_id ? participation[identity.pane_id] : undefined} />
+          ))}
+          {paneIds.length === 0 && Object.keys(identities).length === 0 && <div style={emptyStyle}>No agent detected or status reported yet.</div>}
+          {paneIds.length > 0 && <div style={{ ...sectionTitleStyle, marginTop: 12 }}>Detected panes</div>}
           {paneIds.map((paneId) => (
             <PaneStatusCard key={paneId} paneId={paneId} title={titles.get(paneId)} participation={participation[paneId]} status={statuses[paneId]} />
           ))}
@@ -81,13 +85,77 @@ export const BoardDashboardPanel: React.FC<BoardDashboardPanelProps> = ({ isOpen
           <div style={{ ...sectionTitleStyle, marginTop: '16px' }}>Messages</div>
           {messagesNewestFirst.length === 0 && <div style={emptyStyle}>No messages yet.</div>}
           {messagesNewestFirst.map((message, i) => (
-            <MessageRow key={i} message={message} showHost={showHost} />
+            <MessageRow key={i} message={message} />
           ))}
         </div>
       </div>
     </div>
   )
 }
+
+const IdentityCard: React.FC<{ address: string; identity: BoardIdentity; title?: string; participation?: BoardParticipation }> = ({ address, identity, title, participation }) => {
+  const [copyResult, setCopyResult] = React.useState('')
+  const report = identity.self_report
+  const task = identity.source === 'task'
+  const stale = !task && report !== null && isStaleUpdatedAt(report.updated_at)
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(address); setCopyResult('Address copied') }
+    catch { setCopyResult('Could not copy address') }
+  }
+  return <article style={{ ...cardStyle, opacity: stale ? 0.6 : 1 }}>
+    <strong style={{ overflowWrap: 'anywhere' }}>{boardText(address)}</strong>
+    <div style={{ color: '#8f98a8', fontSize: 11, overflowWrap: 'anywhere' }}>{boardText(identity.host)} · {identity.pane_id ? `Pane: ${boardText(identity.pane_id)}` : 'No pane'}</div>
+    {title && <div style={paneTitleStyle}>{title}</div>}
+    {participation?.agent_type && <div>
+      <span style={pillStyle('#3a2a2a', '#f08b8b')}>agent detected</span>
+      <div style={notJoinedDetailStyle}>{boardText(participation.agent_type)} on {boardText(participation.host)}.{report ? '' : ' No status report yet.'}</div>
+    </div>}
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+      <span style={statusDotStyle(identity.state ?? undefined, identity.source)} />
+      <span>{task ? 'Task observed' : identity.source === 'self_report' ? 'Self-report' : 'Unreported'}</span>
+      {identity.state && <span style={{ overflowWrap: 'anywhere', minWidth: 0 }}>{boardText(identity.state)}</span>}
+      {stale && <span>stale</span>}
+    </div>
+    {task && <>
+      {identity.waiting_for && <div style={notJoinedDetailStyle}>Waiting for: {boardText(identity.waiting_for)}</div>}
+      {identity.status_since && <div style={timestampStyle}>State since {formatRelativeTime(identity.status_since)}</div>}
+      {identity.task_observed_at && <div style={timestampStyle}>Observed {formatRelativeTime(identity.task_observed_at)}</div>}
+    </>}
+    {report && <div>
+      {task && <div style={mutedDetailStyle}>Self-report{isStaleUpdatedAt(report.updated_at) ? ' · stale' : ''}{report.state ? ` · ${boardText(report.state)}` : ''}</div>}
+      {report.summary && <ReportSummary summary={report.summary} />}
+      {report.last_tool && <div style={mutedDetailStyle}>tool: {boardText(report.last_tool)}</div>}
+      <div style={timestampStyle}>{formatRelativeTime(report.updated_at)}</div>
+    </div>}
+    {identity.last_message_at && <div style={timestampStyle}>Last message {formatRelativeTime(identity.last_message_at)}</div>}
+    <div><button type="button" onClick={() => void copy()} style={textButtonStyle}>Copy address</button></div>
+    {copyResult && <div role="status">{copyResult}</div>}
+  </article>
+}
+
+const ReportSummary: React.FC<{ summary: string }> = ({ summary }) => {
+  const [expanded, setExpanded] = React.useState(false)
+  const [clipped, setClipped] = React.useState(false)
+  const ref = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => setExpanded(false), [summary])
+  React.useLayoutEffect(() => {
+    const element = ref.current
+    // Retain the collapse control while expanded. Measure again on collapse.
+    if (!element || expanded) return
+    const measure = () => setClipped(element.scrollHeight > element.clientHeight)
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(element)
+    window.addEventListener('resize', measure)
+    return () => { observer?.disconnect(); window.removeEventListener('resize', measure) }
+  }, [summary, expanded])
+  return <>
+    <div ref={ref} style={{ ...summaryStyle, whiteSpace: 'pre-wrap', ...(expanded ? { display: 'block', WebkitLineClamp: 'unset', overflow: 'visible' } : {}) }}>{boardText(summary)}</div>
+    {(clipped || expanded) && <button type="button" style={textButtonStyle} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'Show less' : 'Show more'}</button>}
+  </>
+}
+
+const textButtonStyle: React.CSSProperties = { background: 'transparent', border: '1px solid #555', color: '#b7d9f7', borderRadius: 3, font: 'inherit', padding: '3px 6px', cursor: 'pointer' }
 
 // PaneStatusCard answers two questions and deliberately no others: is this
 // pane actually on the board, and what is it doing now.
@@ -114,35 +182,36 @@ const PaneStatusCard: React.FC<{ paneId: string; title?: string; status?: BoardS
         {title && <span style={paneTitleStyle}>{title}</span>}
         <span style={pillGroupStyle}>
           {!status && <span style={pillStyle('#3a2a2a', '#f08b8b')}>{participation?.instructed ? 'instruction sent' : 'agent detected'}</span>}
-          {status?.state && <span style={pillStyle('#2d253f', '#cbb3ff')}>{status.state}</span>}
+          {status?.state && <span style={{ ...pillStyle('#2d253f', '#cbb3ff'), maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{boardText(status.state)}</span>}
           {stale && <span style={pillStyle('#5a4311', '#f4bf4f')}>stale</span>}
         </span>
       </div>
       {!status && (
         <div style={notJoinedDetailStyle}>
-          {participation?.agent_type} on {participation?.host}. No status report yet.
+          {boardText(participation?.agent_type ?? '')} on {boardText(participation?.host ?? 'unknown host')}. No status report yet.
         </div>
       )}
-      {status?.summary && <div style={summaryStyle}>{status.summary}</div>}
-      {status?.last_tool && <div style={mutedDetailStyle}>tool: {status.last_tool}</div>}
+      {status && <div style={mutedDetailStyle}>Self-report · {boardText(participation?.host ?? 'host unavailable')}</div>}
+      {status?.summary && <ReportSummary summary={status.summary} />}
+      {status?.last_tool && <div style={mutedDetailStyle}>tool: {boardText(status.last_tool)}</div>}
       {status && <div style={timestampStyle}>{formatRelativeTime(status.updated_at)}</div>}
     </div>
   )
 }
 
-const MessageRow: React.FC<{ message: BoardMessage; showHost: boolean }> = ({ message, showHost }) => (
+const MessageRow: React.FC<{ message: BoardMessage }> = ({ message }) => (
   <div style={messageRowStyle}>
     <div style={timestampStyle}>
       {formatRelativeTime(message.at)}
-      {showHost && ` · ${message.host}`}
+      {` · ${boardText(message.host)}`}
     </div>
-    <div style={messageFromToStyle}>{message.from} → {message.to}</div>
-    <div style={messageBodyStyle}>{message.body}</div>
+    <div style={messageFromToStyle}>{boardText(message.from === '_system' || message.from.includes('@') ? message.from : `${message.from}@${message.host}`)} → {boardText(message.to)}</div>
+    <div style={messageBodyStyle}>{boardText(message.body)}</div>
   </div>
 )
 
-function statusDotStyle(state: string | undefined): React.CSSProperties {
-  const color = colorForBoardState(state)
+function statusDotStyle(state: string | undefined, source?: BoardIdentity['source']): React.CSSProperties {
+  const color = colorForBoardState(state, source)
   return {
     width: 8,
     height: 8,
@@ -307,12 +376,13 @@ const notJoinedDetailStyle: React.CSSProperties = {
   color: '#8f98a8',
   fontSize: 11,
   whiteSpace: 'normal',
+  overflowWrap: 'anywhere',
 }
 
-const timestampStyle: React.CSSProperties = { color: '#666', fontSize: '11px' }
+const timestampStyle: React.CSSProperties = { color: '#666', fontSize: '11px', overflowWrap: 'anywhere' }
 
 const messageRowStyle: React.CSSProperties = { marginBottom: '10px' }
 
-const messageFromToStyle: React.CSSProperties = { color: '#4ec9b0', fontSize: '11px' }
+const messageFromToStyle: React.CSSProperties = { color: '#4ec9b0', fontSize: '11px', overflowWrap: 'anywhere' }
 
 const messageBodyStyle: React.CSSProperties = { color: '#ccc', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }

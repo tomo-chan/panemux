@@ -71,7 +71,7 @@ Verification column values:
 | # | Scenario | Expected | Verification |
 |---|---|---|---|
 | C1 | agmsg is not installed on the host | No PTY write, one warning, retried on later ticks — the pane's shell is unaffected | `auto`: root — `TestBootstrapWatcher_AgmsgNotPresent_NoWrite_WarnsOnce` |
-| C2 | agmsg is present and an agent is detected | Detection is visible, instructed stays false, and no PTY input is sent | `auto`: root — `TestBoardDetectionNeverWritesToPTY`, `TestGlobalBoardIncludesShellAddressesAndPublishesParticipation`, `TestBoardPresenceDebouncesAndStopsAfterSessionConfirmation`, `TestBoardPresenceConfirmationFollowsPaneAndHostLifecycle`, `TestBoardPresenceRetriesUntilConfirmed` |
+| C2 | agmsg is present and an agent is detected | Detection remains visible with agent type and host, including inside a matching unreported name card; instructed stays false, and no PTY input is sent | `auto`: root — `TestBoardDetectionNeverWritesToPTY`, `TestGlobalBoardIncludesShellAddressesAndPublishesParticipation`, `TestBoardPresenceDebouncesAndStopsAfterSessionConfirmation`, `TestBoardPresenceConfirmationFollowsPaneAndHostLifecycle`, `TestBoardPresenceRetriesUntilConfirmed`; UI — `frontend/src/components/BoardIdentities.test.tsx` |
 | C3 | No agent running in the pane | Nothing is written | `auto`: root — `TestBootstrapWatcher_NoAgentDetected_NoWrite` |
 | C4 | Participation instructions | Retired; no instruction generation or PTY fallback | `auto`: root — `TestBoardDetectionNeverWritesToPTY` |
 | C5 | Participation registration | Detection does not join, claim, or configure delivery; participation, identity selection, and reception belong to agmsg's official workflow | `auto`: root — `TestBoardDetectionNeverWritesToPTY` |
@@ -96,7 +96,7 @@ Verification column values:
 |---|---|---|---|
 | D1 | A pane reports status | Its card shows state, summary, last tool and how long ago | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts` |
 | D2 | A configured shell has neither a detected agent nor a report | It is omitted; detected agents show detection state | `auto`: `frontend/e2e/agent-board.spec.ts`, `frontend/e2e/agent-board-agmsg.spec.ts` |
-| D3 | A long summary | Rendered in full over several lines, not clipped to one | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts` (asserts the rendered height) |
+| D3 | A long summary | Wraps to four lines; expansion appears only for actual clipping, remains collapsible, and updates on resize; short summaries have no extra control | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts` (asserts the rendered height), `frontend/src/components/BoardIdentities.test.tsx` |
 | D4 | repo / branch / PR | Not rendered, and the card contains no link | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts`, `frontend/src/components/BoardDashboardPanel.test.tsx` |
 | D5 | A cross-pane message arrives while the panel is open | It appears without reopening the panel | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts` |
 | D6 | A `board_status` row | Never rendered as a message in the feed | `auto`: `frontend/e2e/agent-board-agmsg.spec.ts`, `frontend/src/hooks/useBoardStatus.test.ts` |
@@ -108,6 +108,11 @@ Verification column values:
 | D12 | Validated message-only senders appear in API identities | Rejected copies and forged senders introduce no names; history-only names disappear with the bounded ring | `auto`: `internal/api` — `TestBoardIdentitiesUseOnlyRelayAcceptedSendersAndBoundedHistory` |
 | D13 | REST/MCP qualified broadcast and failures | Qualified names need no pane/roster; mixed invalid recipients and NUL send nothing; partial failure preserves delivered addresses and MCP errors | `auto`: `internal/api` — `TestBoardBroadcastQualifiedRecipientsAndPartialFailure`, `TestBoardBroadcastRejectsNULBeforeCallingRelay`; `internal/boardmcp` — `TestServerExplainsQualifiedRecipientsAndObservedIdentities`, `TestServerQualifiedBroadcastPreservesPartialDeliveryError`; `internal/commandcenter` — `TestSystemPromptExplainsQualifiedNamesAndObservationLimits` |
 | D14 | A connection is changed, removed or recreated while task observations exist | Affected pooled connections and pending dials are dropped before observation invalidation under the config lock; old in-flight results cannot restore them; failed saves and unchanged targets preserve priority; publisher-discarded live results do not commit | `auto`: `internal/api` — `TestBoardIdentitiesInvalidateChangedOrRecreatedConnection`, `TestBoardIdentitiesConnectionInvalidationPreservesOtherAndUnchangedHosts`, `TestBoardIdentitiesFailedConnectionSavePreservesObservation`, `TestBoardIdentitiesDeferLiveResultUntilPublisherAcceptance`, `TestBoardConnectionChangesRedialBeforeAcceptingFreshCollection`, `TestBoardConnectionUnchangedAndFailedSavePreservePool`; `internal/hostexec` — `TestForgetRemovedHostDiscardsReadyOrPendingConnection`; `internal/taskevents` — `TestPublisherCommitsOnlyAcceptedDeferredObservations` |
+
+| D15 | Equal names on separate hosts, with and without matching panes | Full qualified names and hosts remain distinct; matching pane details and agent detection appear once; pane-free names offer copy but no pane actions; unmatched detected panes remain separate | `auto`: `frontend/src/components/BoardIdentities.test.tsx`; pane-free names through real relay/REST with agmsg script stand-ins: `frontend/e2e/agent-board-agmsg.spec.ts` |
+| D16 | Task observation, supplemental self-report, or message-only name | Server source controls the primary state; self-report stays labelled; unreported does not promise liveness; full identity snapshots remove old entries | `auto`: `frontend/src/components/BoardIdentities.test.tsx`; message-only and self-report names: `frontend/e2e/agent-board-agmsg.spec.ts`; task matching/fallback: D11/D14 |
+| D17 | Agent text contains markup, long lines, terminal controls, or bidirectional controls; history contains qualified or bare destinations | Reports stay expandable plain text with visible controls; source host is always retained, senders are qualified, long unbroken waiting reasons and history addresses/hosts wrap inside narrow panels, and historical bare recipients are not reinterpreted using current pane ownership | `auto`: `frontend/src/components/BoardIdentities.test.tsx`, `frontend/src/utils/boardText.test.ts`; real relay history and browser layout assertions for long reasons/hosts: `frontend/e2e/agent-board-agmsg.spec.ts` |
+| D18 | Documentation captures name identities and Message mode | `agent-board.png` shows equal names on different hosts using a presentation-only status fixture; `command-center.png` shows a qualified recipient; all rewritten images use placeholder data and are visually inspected | `manual`: `make screenshots`, open every rewritten image; capture source: `frontend/screenshots/screenshots.spec.ts` |
 
 ## E. Command center
 
@@ -127,6 +132,7 @@ Verification column values:
 
 | E12 | Pane named board-command with command center enabled or disabled | Terminal input and output remain available at `/ws/board-command`; command queries use `/ws/board/command` | `auto`: `internal/server/ws_integration_test.go` — `TestWSIntegration_BoardCommandPane_DoesNotCollide` |
 | E13 | Browser WS from another loopback port, including without Fetch Metadata | All three streams refuse the upgrade with 403; their own Origin and CLI requests connect | `auto`: `internal/server/ws_integration_test.go` — `TestWSIntegration_AllStreams_OriginGuard`; `internal/requestsecurity/origin_test.go` — `TestAllowedOriginPolicy` |
+| E14 | Message mode selects observed qualified names or existing pane IDs, or accepts an unobserved qualified destination | Authenticated REST sends independently of Ask/Claude; mode switches and close/reopen preserve drafts, pending sends, and late results; validation sends nothing, downstream failures show actual delivered/unsent recipients, transport errors report uncertain delivery, and no automatic retry occurs | `auto`: `frontend/src/components/BoardMessageForm.test.tsx`, `frontend/src/components/CommandPalette.test.tsx`; qualified UI sends and pane-ID compatibility through relay/REST/agmsg script stand-ins: `frontend/e2e/agent-board-agmsg.spec.ts`; capability gating: E8 |
 
 ## F. Documentation
 
@@ -391,6 +397,12 @@ Stated explicitly, because an absent row reads as an oversight and these are dec
 - **Remote (`ssh` / `ssh_tmux`) board panes have no e2e scenario.** All three board fixtures use
   `type: local`. The remote paths are unit-tested (C7) but never walked end to end, because doing so
   needs a second host the suite cannot assume.
+- **Name-based UI E2E uses public agmsg script stand-ins, not an installed agmsg release.** It
+  exercises real script execution, relay/cache, bearer REST, and browser rendering/sending for
+  local pane-free names. Same-name cross-host UI uses component and screenshot status fixtures;
+  host routing combinations rely on S3a's `internal/board` `TestRelay_IdentityRoutes` and
+  `TestRelay_QualifiedBroadcast`, not live SSH. Real SSH delivery/failure and real Claude MCP
+  sending are not established by that spec or by the documentation screenshots.
 - **The command center's real `claude` binary is only exercised manually** (E7). The e2e fixture
   stubs the binary, deliberately: the shipped argv is pinned against the real CLI's documented
   behavior in `internal/commandcenter/runner_test.go`, and a stub cannot reproduce that parsing.

@@ -3,6 +3,7 @@
 Documentation screenshots captured from the product with placeholder content.
 
 * [agent-board.png](agent-board.png) - Agent Board status and messaging interface.
+* [command-center.png](command-center.png) - Command Center Message mode with a qualified recipient.
 * [agmsg-host-tool.png](agmsg-host-tool.png) - Per-host agmsg installation and update controls.
 * [mermaid-preview.png](mermaid-preview.png) - Mermaid diagram rendering in the split preview.
 * [pane-settings.png](pane-settings.png) - Pane settings and session configuration dialog.

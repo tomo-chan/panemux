@@ -225,7 +225,9 @@ Their lifetime is independent of terminal sessions. See [Split preview](backend/
 Agent Board enablement is instance-wide; delivery mode is deprecated and ignored. Its relay accepts valid unqualified
 agmsg names on their source hosts without pane or roster prerequisites, rejects qualified senders
 and wrong-host configured pane IDs, and routes qualified recipients by BoardID; bootstrap supplies a synchronized participation snapshot
-for the authenticated status API. Dashboard membership is based on detected agents or reports.
+for the authenticated status API. The dashboard combines host-qualified observed names with
+matching pane details and retains unmatched detected panes. The Command Center adds direct REST
+messaging alongside Claude queries; [Agent Board UI](ui/agent-board.md) owns these presentation rules.
 The agmsg installation location is fixed per host. Host tool management coordinates manual
 Install / Update and instance-wide automatic updates with board call leases and discovery revisions.
 Automatic checks run at startup, opt-in and persisted host addition, with retained results and manual retry.

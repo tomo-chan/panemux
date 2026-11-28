@@ -394,6 +394,9 @@ export const BoardStatusResponseSchema = z.object({
 
 export type BoardStatusResponse = z.infer<typeof BoardStatusResponseSchema>
 
+export const BoardBroadcastResponseSchema = z.object({ delivered: z.array(z.string()) })
+export const BoardBroadcastFailureSchema = z.object({ error: z.string(), delivered: z.array(z.string()).optional() })
+
 export const BoardMessageSchema = z.object({
   at: z.string(),
   host: z.string(),

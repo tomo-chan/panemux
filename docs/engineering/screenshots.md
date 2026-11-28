@@ -25,6 +25,12 @@ repository at `/tmp/sample-project`, a private tmux socket, a stub agmsg store, 
 `/api/tasks` fixture so real developer sessions are never exposed. Panes inherit logical
 `/tmp/sample-project` as `PWD` so prompts display the placeholder path.
 
+Agent Board's status response uses a presentation-only fixture showing task priority and equal
+names on `local` and `ssh:build`, including names without panes. This image does not establish an
+SSH routing result; the real relay/REST browser path is covered separately in
+`frontend/e2e/agent-board-agmsg.spec.ts` with public agmsg script stand-ins. The Command Center
+image captures Message mode with a qualified destination, without sending to an actual SSH host.
+
 ## Staging and recovery
 
 Staging lives under `$TMPDIR/panemux-screenshots`. A run empties it only when it carries the
