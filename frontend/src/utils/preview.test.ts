@@ -98,19 +98,44 @@ describe('PREVIEW_PATH_REGEX', () => {
     expect(paths(text)).toEqual(want)
   })
 
-  it.each([
-    'https://example.com/docs/design.md',
-    'http://localhost:5173/index.html',
-    'design.md.bak',
-    'index.htmlx',
-    'archive.md5',
-    '.md',
-    'docs/.md',
-    '~/notes/todo.md',
-    'C:\\docs\\a.md',
-    'design.mdx',
-  ])('ignores %s', (text) => {
-    expect(paths(text)).toEqual([])
+  it('matches ~/ paths and ignores unsupported tilde forms', () => {
+    for (const [text, want] of [
+      ['~/notes/todo.md', ['~/notes/todo.md']],
+      ['~/.agent/brain/session-1/plan.md', ['~/.agent/brain/session-1/plan.md']],
+      ['~/plan.md', ['~/plan.md']],
+      ['「~/docs/設計.md」を確認', ['~/docs/設計.md']],
+      ['~/notes/todo.md:12', ['~/notes/todo.md']],
+    ] as const) {
+      expect(paths(text), text).toEqual([...want])
+    }
+    for (const text of [
+      'https://example.com/~/a.md',
+      '~/a.md.bak',
+      '~/docs/.md',
+      '~/.md',
+      '~user/notes/todo.md',
+      'foo~/notes/todo.md',
+      '~~/notes/todo.md',
+    ]) {
+      expect(paths(text), text).toEqual([])
+    }
+  })
+
+  // efficacy:exempt ~/notes/todo.md moved to home-relative test above; remaining cases pin existing non-matches
+  it('ignores URLs, unsupported extensions and Windows paths', () => {
+    for (const text of [
+      'https://example.com/docs/design.md',
+      'http://localhost:5173/index.html',
+      'design.md.bak',
+      'index.htmlx',
+      'archive.md5',
+      '.md',
+      'docs/.md',
+      'C:\\docs\\a.md',
+      'design.mdx',
+    ]) {
+      expect(paths(text), text).toEqual([])
+    }
   })
 })
 

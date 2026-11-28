@@ -74,15 +74,26 @@ panemux host are framed, after operator approval for terminal-emitted requests.
 
 ### Paths, symbolic links, tokens, and size
 
-- Only HTML/Markdown files inside the server-determined session working directory and agent
-  worktrees resolve (`403` for escapes; unreadable files report not found). Deepest existing parent
-  directories are matched by `os.SameFile` through an `/` `os.Root` (supporting symlinked roots
-  and case-insensitive filesystems without expanding scope), and all file opens go strictly through
-  the root's `os.Root` via `filepath.Rel` (rejecting `..`, escaping or absolute symlinks, invalid
-  `fs.ValidPath`, backslashes, and non-regular files; directories are never listed).
-- Tokens are 128-bit `crypto/rand` values issued only by guarded `POST /api/sessions/{id}/preview`
-  and kept for server lifetime (`/preview/` itself is intentionally unguarded for opaque-origin
-  subresources).
+- Relative paths resolve against the server-determined session working directory and agent
+  worktrees. Deepest existing parent directories are checked by `os.SameFile` through an `/`
+  `os.Root` (supporting symlinked roots and case-insensitive filesystems without missing an escaping
+  symlink placed below a prefix symlink), and all opens inside a working directory go strictly
+  through its `os.Root` via `filepath.Rel` (`403` for escaping or absolute symlinks inside a working
+  directory; unreadable files report not found; invalid `fs.ValidPath`, backslashes, `..`, and
+  non-regular files are rejected; directories are never listed).
+- Explicit outside paths (absolute paths, `~/…` expanded via `internal/homedir`, and `../` leaving a
+  working directory) resolve symlinks first, verify that the canonical target still has an HTML or
+  Markdown extension (refusing `.md` symlinks disguised over non-previewable files such as
+  `/etc/passwd`), and open through an `os.Root` rooted at the innermost matching working directory
+  (if the target landed inside one) or the canonical file's parent directory. When that parent is `/`,
+  the home directory (or its symlink target), or `/tmp` / `os.TempDir()` (or their symlink targets),
+  the registry entry is marked `singleFile` so `/preview/<token>/*` refuses every path except the
+  registered file itself (`404`), preventing sandboxed HTML previews from reading sibling files or
+  subdirectories such as `~/.ssh` or `~/.config/panemux/token`.
+- Tokens are 128-bit `crypto/rand` values issued only by guarded `POST /api/sessions/{id}/preview`,
+  keyed by `(remote, root, file, singleFile)` so a single-file preview never shares a token with a
+  wider root registration, and kept for server lifetime (`/preview/` itself is intentionally
+  unguarded for opaque-origin subresources).
 - HTML and Markdown are capped at `preview.MaxDocumentBytes` (10 MiB; HTML served via
   `io.SectionReader` to prevent concurrent growth leaks).
 
@@ -91,13 +102,19 @@ panemux host are framed, after operator approval for terminal-emitted requests.
 - **Connection**: `session.DialPreviewConn` dials a dedicated per-`SSHConfig` connection using the
   pane's original `session.PreviewTarget` (never re-reading edited `ssh_connections`, never sharing
   the pane's session). **No shell command runs over it**—files use SFTP only (no `scp`/`cat`
-  fallback) and relays use `direct-tcpip`. Keepalive (`keepalive@openssh.com`) uses transport
-  liveness (`LastRead`, 15 s) so busy relays are not killed; SSH closes before SFTP on shutdown.
+  fallback), `~/…` expands via SFTP `Getwd()` rather than a shell probe, and relays use
+  `direct-tcpip`. Keepalive (`keepalive@openssh.com`) uses transport liveness (`LastRead`, 15 s) so
+  busy relays are not killed; SSH closes before SFTP on shutdown.
 - **Remote paths and symlinks**: `realPath` resolves component-by-component with SFTP `LSTAT`/
-  `READLINK` (never SFTP `REALPATH`, which servers may clean lexically; max 40 links). Every
-  request re-resolves against resolved working directories, checks `fs.ValidPath` and backslashes,
-  and applies the same 10 MiB limit and policies (an accepted check-to-`OPEN` race exists against a
-  host user who can already write inside the working directory).
+  `READLINK` (never SFTP `REALPATH`, which servers may clean lexically; max 40 links) while tracking
+  whether resolution entered any working directory so a symlink inside a working directory that
+  escapes it is still refused with `403`. Outside symlinks targeting non-previewable extensions are
+  refused, and outside files directly under `/`, the remote home directory, or `/tmp` (including
+  symlinked `/tmp` or home) are registered `singleFile` (failing closed to `singleFile` if the
+  remote home cannot be determined). Every request re-resolves against the registered root, enforces
+  `singleFile`, checks `fs.ValidPath` and backslashes, and applies the same 10 MiB limit and
+  policies (an accepted check-to-`OPEN` race exists against a host user who can already write inside
+  the registered root).
 - **Relays and origin**: Loopback relays bind `127.0.0.1:0` (never request-derived), accept only
   `http`/`https` loopback targets (`ParseLoopbackURL`), pass TLS through untouched (`https://localhost:<port>`),
   are keyed per `(Remote, host, port)`, and live until server shutdown. Any local process on the

@@ -22,20 +22,27 @@ localhost page on the right of the terminal (`50:50` split).
 ### Opening a file
 
 - `.html`, `.htm`, `.md`, and `.markdown` paths (any letter case) printed in `local`, `tmux`, `ssh`,
-  `ssh_tmux` panes and any task's Type in pane popup become links: absolute, `./`/`../`, and bare
-  relative paths; trailing `:12` or sentence punctuation is excluded, and paths inside URLs belong to
-  the URL.
+  `ssh_tmux` panes and any task's Type in pane popup become links: absolute, `~/…` (current user's
+  home only, not `~user/…`), `./`/`../`, and bare relative paths; trailing `:12` or sentence
+  punctuation is excluded, and paths inside URLs belong to the URL.
 - Clicking calls [`POST /api/sessions/{id}/preview`](../../api/workspace.md#post-apisessionsidpreview),
   resolving relative paths against the shell's working directory first, then each active coding
-  agent worktree. One match opens; multiple matches prompt to choose; zero matches or disallowed
-  paths show the reason naming searched/allowed directories.
-- Only files inside those directories open—regardless of prefix symlinks (`/tmp` vs `/private/tmp`)
-  or case-insensitive filesystem spelling. Escaping absolute paths, escaping `../`, escaping
-  symlinks, and unknown working directories are refused; `../` staying inside a root opens.
-- Files are served from the innermost working directory holding them (**root**): relative sibling
-  assets resolve inside that root, relative symlinks staying inside work, absolute-target symlinks
-  and cross-worktree symlinks are refused. The HTML/Markdown file itself is capped at **10 MiB**
-  (sibling assets are unbounded).
+  agent worktree. One match opens; multiple matches prompt to choose (deduplicated by resolved file);
+  zero matches or disallowed paths show the reason naming searched/allowed directories.
+- Files inside the working directories open regardless of prefix symlinks (`/tmp` vs `/private/tmp`)
+  or case-insensitive filesystem spelling and are served from the innermost working directory holding
+  them (**root**), so sibling assets and relative symlinks staying inside work while escaping or
+  absolute-target symlinks inside a working directory are refused (`403`).
+- Explicit paths outside the working directories—absolute paths, `~/…` paths (expanded via the
+  server's home directory), and `../` paths leaving a working directory—also open when they resolve
+  to a regular HTML or Markdown file, including when no working directory is known (relative paths
+  still require a known working directory). If an outside symlink resolves inside a working
+  directory, that innermost working directory becomes the root; otherwise the resolved file's parent
+  directory becomes the root. When that parent is `/`, the home directory, or `/tmp` (or
+  `os.TempDir()`), the preview is restricted to **single-file serving** so sibling files and
+  subdirectories return `404` (a pane whose own working directory is `~` or `/tmp` keeps normal
+  working-directory serving). The HTML/Markdown file itself is capped at **10 MiB** (sibling assets
+  are unbounded).
 
 ### Opening a localhost URL
 
@@ -69,9 +76,13 @@ tab.
 - Files are read exclusively over the SSH server's **SFTP subsystem** (no fallback if SFTP is
   absent), over a preview-owned SSH connection independent of the pane session so independent tabs
   outlive pane/popup/session closure.
-- Symlinks on the remote host are resolved inside the working directories (absolute or relative
-  targets staying inside work; escaping targets fail), serving from the innermost root holding the
-  resolved target with the same `10 MiB` cap.
+- Symlinks on the remote host are resolved component-by-component over SFTP. Leading `~/…` paths
+  are expanded against the remote home reported by SFTP `Getwd()` (no shell command runs). Files
+  inside the working directories are served from the innermost working directory holding them, and
+  symlinks inside a working directory that escape it are refused (`403`). Explicit outside paths
+  (absolute, `~/…`, or `../` leaving a working directory) open even when no working directory is
+  known and are served from the resolved file's parent directory—or restricted to single-file serving
+  when that parent is `/`, the remote home directory, or `/tmp`—with the same `10 MiB` cap.
 - **Liveness**: any arriving SSH traffic proves liveness. Idle connections are pinged after `15 s`;
   unanswered pings (`15 s`), stalled lookups (`15 s` with no incoming bytes), or a lost SFTP
   subsystem close and reconnect on the next request without prematurely killing slow active streams.

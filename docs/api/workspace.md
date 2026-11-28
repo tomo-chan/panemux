@@ -172,23 +172,27 @@ forwarding (no loopback callback port, or a `local`/`tmux` pane already running 
 
 ### `POST /api/sessions/{id}/preview`
 
-Accepts `{ "path": "<path as shown in terminal>" }`, resolves it from the session's working
-directory and agent worktrees, and registers the HTML or Markdown file for the
+Accepts `{ "path": "<path as shown in terminal>" }`, resolves relative paths against the session's
+working directory and agent worktrees (and explicit absolute, `~/…`, or escaping `../` paths
+outside them), and registers the HTML or Markdown file for the
 [split preview](../backend/workspace/preview-and-urls.md#split-preview). For `ssh`/`ssh_tmux` sessions (panes or task attaches), the
-path is resolved on and read from the SSH host.
+path is resolved on and read from the SSH host (expanding `~/…` via SFTP `Getwd()`).
 
 For `ssh`/`ssh_tmux` sessions, accepts `{ "url": "<localhost URL>" }` instead, relaying the host's
 address and port to a dedicated port on `127.0.0.1` of the panemux host
 ([Localhost URLs of an SSH host](../backend/workspace/preview-and-urls.md#localhost-urls-of-an-ssh-host)).
 
-- `400`: invalid JSON; path not `.html`/`.htm`/`.md`/`.markdown`; URL not `http`/`https` on
-  `localhost`/`127.0.0.1`/`[::1]`; URL for a panemux-host session; or `ssh`/`ssh_tmux` session with
-  no SSH connection
-- `403`: file outside the session's working directory and agent worktrees (absolute path elsewhere,
-  escaping `../`, or escaping symlink; reason names allowed directories)
-- `404`: no session exists for `id`, or no file exists at the path (reason names searched locations)
+- `400`: invalid JSON; path (or resolved symlink target) not `.html`/`.htm`/`.md`/`.markdown`; URL
+  not `http`/`https` on `localhost`/`127.0.0.1`/`[::1]`; URL for a panemux-host session; or
+  `ssh`/`ssh_tmux` session with no SSH connection
+- `403`: symbolic link inside a working directory that resolves outside every working directory (or
+  an absolute-target symlink inside a local working directory; reason names allowed directories)
+- `404`: no session exists for `id`, or no regular file exists at the path (reason names searched
+  locations when workdirs were searched)
 - `413`: file larger than `10 MiB`
-- `422`: working directory and agent worktrees are all unknown
+- `422`: relative path when working directory and agent worktrees are all unknown (absolute and
+  `~/…` paths still resolve)
+- `500`: home directory could not be determined when expanding `~/…`
 - `502`: SSH host unreachable, offers no SFTP subsystem for a path, or nothing answers at the URL
 - `200`: preview ready or candidates to choose from
 
@@ -214,9 +218,11 @@ Multiple relative-path matches (absolute paths in search order; the chosen path 
 
 ### `GET /preview/{token}/*`
 
-Serves a registered preview and files under its root. Intentionally outside `/api` and its request
-guard because the framed page runs in an opaque origin and all subresource requests are cross-site;
-the random token grants access. Missing tokens/files, directories, `..`, and escaping paths or
+Serves a registered preview and files under its root (or only the registered file itself when the
+entry is marked single-file because an outside file lives directly under `/`, the home directory, or
+`/tmp`). Intentionally outside `/api` and its request guard because the framed page runs in an
+opaque origin and all subresource requests are cross-site; the random token grants access. Missing
+tokens/files, sibling requests on single-file entries, directories, `..`, and escaping paths or
 symlinks return `404`; HTML or Markdown files over `10 MiB` return `413`. Markdown is returned
 rendered as HTML. Isolation headers and policies live in
 [Split preview and URL-open security](../security/preview-and-urls.md).
