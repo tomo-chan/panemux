@@ -8,7 +8,7 @@ description: "Task dashboard views, actions, terminal popups, host menus, attent
 
 ![The task dashboard layer: the top bar with host chips and its buttons, the filter row, one column per state with session cards, and the detail panel of the selected waiting session on the right.](../images/task-dashboard.png)
 
-The task dashboard ([behavior](../behavior/tasks.md)) is a second layer over the workspaces rather
+The task dashboard ([behavior](../backend/tasks/index.md)) is a second layer over the workspaces rather
 than an overlay panel: it covers the whole window while workspaces stay mounted beneath it so every
 terminal keeps its connection and scrollback. While the dashboard is shown, the workspace layer is
 `inert` so a focused terminal cannot receive dashboard keystrokes.
@@ -29,9 +29,9 @@ terminal keeps its connection and scrollback. While the dashboard is shown, the 
 
 ## Lists, filters, and cards
 
-[Task navigation](../behavior/task-navigation.md#opening-a-task) owns view-state lifetime, browser
+[Task navigation](../backend/tasks/lifecycle.md#opening-a-task-view-state-and-temporary-attaches) owns view-state lifetime, browser
 storage, filter restoration, grouping, sorting, notification focus/scroll, and selection across list
-changes. [Done and labels](../behavior/task-records.md#done-and-labels) own Done placement and label
+changes. [Done and labels](../backend/tasks/lifecycle.md#done-and-labels) own Done placement and label
 identity.
 
 ### Filters, table, and Kanban board
@@ -50,7 +50,7 @@ identity.
   panel on narrow screens.
 - Sortable headers are native buttons with an arrow, direction in their accessible name, and
   `aria-sort` only on the active heading. Defaults, ordering, and tie rules live in
-  [task navigation](../behavior/task-navigation.md#opening-a-task).
+  [task navigation](../backend/tasks/lifecycle.md#opening-a-task-view-state-and-temporary-attaches).
 - Kanban columns are `Waiting for input` (gold, `"Needs you"`), `Working`, `Idle`,
   `Running / unknown`, `Stopped`, and optionally `Done`. The board is a keyboard tab stop named
   `"Task board"`.
@@ -96,7 +96,7 @@ Label colors come from the fixed palette (`#569cd6`, `#4ec9b0`, `#9cdcfe`, `#d7a
 
 ### Starting and selecting
 
-[Starting a task](../behavior/task-launch.md#starting-a-task) owns launch fields, eligibility,
+[Starting a task](../backend/tasks/lifecycle.md#starting-a-task) owns launch fields, eligibility,
 validation, label persistence, and execution.
 
 - The modal shows `Host` (unreachable hosts marked `"(unreachable)"`), `Working directory`, `Agent`,
@@ -119,10 +119,10 @@ The right panel fills the window height; at `1000 px` and narrower it slides ove
 `Close` button. Its fixed head holds state, host, agent, start time, title, wait reason, and
 actions; only the body scrolls. Action visibility and disabled reasons follow the server's declared
 capabilities (unknown agents keep pane actions only).
-[Task navigation](../behavior/task-navigation.md#opening-a-task),
-[resuming](../behavior/task-launch.md#resuming-a-task),
-[permission input](../behavior/task-codex-permissions.md#codex-permission-requests), and
-[Done and labels](../behavior/task-records.md#done-and-labels) own availability, effects, and record
+[Task navigation](../backend/tasks/lifecycle.md#opening-a-task-view-state-and-temporary-attaches),
+[resuming](../backend/tasks/lifecycle.md#resuming-a-task),
+[permission input](../backend/tasks/collection.md#codex-permission-requests), and
+[Done and labels](../backend/tasks/lifecycle.md#done-and-labels) own availability, effects, and record
 identity.
 
 - `Type in pane` uses interactive blue; an unavailable waiting/idle task says
@@ -139,8 +139,8 @@ identity.
   explaining the log cannot be read; after a log change, re-enable it and note
   `"The conversation has changed since it could not be read."`. Missing session/log disables
   summaries with a reason; agents without summary capability show no control.
-  [Task summaries](../behavior/task-summaries.md#summaries) own scheduling, accounts, and retries;
-  [Codex sessions](../behavior/task-collection.md#codex-sessions) own state-note meanings.
+  [Task summaries](../backend/tasks/lifecycle.md#summaries) own scheduling, accounts, and retries;
+  [Codex sessions](../backend/tasks/collection.md#codex-sessions) own state-note meanings.
 - `Mark done` asks inline, explaining the destination column and whether `Show done` hides it.
   `Mark not done` and `Input given` do not ask. Failed input confirmation appears under actions as
   `"Could not mark the input given: <reason>"`.
@@ -155,7 +155,7 @@ identity.
 ### Labels used before
 
 Labels held in the record file (`known_labels`,
-[Done and labels](../behavior/task-records.md#done-and-labels)) appear as tags in a `Used before:`
+[Done and labels](../backend/tasks/lifecycle.md#done-and-labels)) appear as tags in a `Used before:`
 row under both label inputs (New task's `Labels` field and the detail panel's `Add a label` box)
 rather than a dropdown. The label filter does not offer them.
 
@@ -176,7 +176,7 @@ rather than a dropdown. The label filter does not offer them.
 ### Working directory suggestions
 
 The `Working directory` combobox lists `Recent on <host>`: monospace path, agent, and last-used time
-(`claude · 2h ago`, `codex · now`). [Starting a task](../behavior/task-launch.md#starting-a-task)
+(`claude · 2h ago`, `codex · now`). [Starting a task](../backend/tasks/lifecycle.md#starting-a-task)
 owns suggestion source, ordering, and lifetime.
 
 - Clicking the field, pressing the `▾` button, pressing `↓`/`↑`, or typing opens the list; initial
@@ -197,9 +197,9 @@ owns suggestion source, ordering, and lifetime.
 
 ## Terminal popups
 
-[Opening a task](../behavior/task-navigation.md#opening-a-task) owns Type in pane eligibility,
+[Opening a task](../backend/tasks/lifecycle.md#opening-a-task-view-state-and-temporary-attaches) owns Type in pane eligibility,
 attach/input states, status notes, closing, and focus restoration;
-[Opening a host](../behavior/task-navigation.md#opening-a-host) owns the host-terminal variant. Both
+[Opening a host](../backend/tasks/lifecycle.md#opening-a-host) owns the host-terminal variant. Both
 share this presentation:
 
 - Centered over a dark backdrop at up to `1100×760` with `24 px` margins. Backdrop clicks do not
@@ -226,7 +226,7 @@ share this presentation:
 
 ### Connection menu
 
-[Opening a host](../behavior/task-navigation.md#opening-a-host) owns chip availability, session
+[Opening a host](../backend/tasks/lifecycle.md#opening-a-host) owns chip availability, session
 naming, `Open` / `Type in pane` effects, dismissal, and focus restoration including connectivity
 loss. Remote chips carry a terminal icon and `aria-haspopup="dialog"` / `aria-expanded`; the local
 chip omits the terminal icon and opens tool items (including agmsg when Agent Board is enabled).
@@ -245,15 +245,15 @@ latter two interactive blue with accessible names `Open: <host>` and `Type in pa
   trust, while red text reports update failure, unreadable settings (disabling the checkbox), or
   save failure. The checkbox and `Install`/`Update` button disable each other while a request runs.
   The local menu shows tool items and `Close`;
-  [Codex permission requests](../behavior/task-codex-permissions.md#codex-permission-requests) own
+  [Codex permission requests](../backend/tasks/collection.md#codex-permission-requests) own
   installation and auto-update contracts.
 - **Unreadable state**: One amber warning covers all hosts (never placed beside individual host
   chips). It opens a modal anchored below the top bar at the right within viewport height titled
   `"Unreadable session state · <n> files on <m> hosts"`: one row per file (host, file name, reason
   with detail beneath, process `claude · pid <pid>` with location or `unknown` without a pid), plus
-  a footer naming the read fields, a link to fix steps in `docs/behavior/task-collection.md`, and
+  a footer naming the read fields, a link to fix steps in `docs/backend/tasks/collection.md`, and
   *Copy details* (disabled without clipboard support). Unreadable files never render as board cards
-  ([Unreadable state files](../behavior/task-collection.md#unreadable-state-files)).
+  ([Unreadable state files](../backend/tasks/collection.md#unreadable-state-files)).
 
 ### Editing hosts
 
@@ -271,7 +271,7 @@ validation renders below the form (missing/malformed/duplicate name, port outsid
 neither `Host` nor an SSH block); server failures show `"Could not save: …"` while preserving input.
 Deletion asks inline in red; an in-use host without an SSH block is refused before asking, naming
 panes; server-only dependency refusals show `"Could not delete …"`. A green notice confirms
-add/save/delete and triggers re-collection ([SSH behavior](../behavior/ssh.md)).
+add/save/delete and triggers re-collection ([SSH behavior](../backend/workspace/sessions.md#ssh-connections)).
 
 ## Attention indicators and browser notifications
 
@@ -283,7 +283,7 @@ Agent-attention cues remain visually distinct from blue layout-editing affordanc
 - Workspace attention uses an animated gold tab background.
 - Layout move targets use blue overlays instead of gold.
 
-[Task event receiver rules](../behavior/task-events.md#pane-and-workspace-attention) own wait
+[Task event receiver rules](../backend/tasks/events.md#pane-and-workspace-attention) own wait
 transitions and clearing on focus, workspace selection, or wait end. Clicking a notification focuses
 and briefly outlines the matched pane, or selects and highlights the task on the dashboard when no
 pane shows it.
@@ -298,18 +298,18 @@ count and offers `Review in Tasks` instead. The strip holds buttons only and tak
 (including `Tab` and `Escape`). It persists after attention clears or the popup closes; `Input
 given` restores terminal focus unless the operator moved to another pane while answering, and only
 that action or wait end removes the strip
-([permission strip behavior](../behavior/task-events.md#codex-permission-requests-in-a-pane)).
+([permission strip behavior](../backend/tasks/events.md#codex-permission-requests-in-a-pane)).
 
 ### Browser notifications
 
-The [task event stream](../behavior/task-events.md#task-events) observes agent state rather than
+The [task event stream](../backend/tasks/events.md) observes agent state rather than
 scanning terminal output for prompts; Codex command-approval waits require the host's
-[permission hook](../behavior/task-codex-permissions.md#codex-permission-requests).
+[permission hook](../backend/tasks/collection.md#codex-permission-requests).
 
 - If browser notification permission is undecided, panemux requests it on the first pointer or key
   interaction rather than waiting for the first agent wait.
-- [Store and connection](../behavior/task-events.md#store-and-connection) keeps one stream
+- [Store and connection](../backend/tasks/events.md#store-and-connection) keeps one stream
   connection per tab even while hidden;
-  [Browser notifications](../behavior/task-events.md#browser-notifications) own visibility checks,
+  [Browser notifications](../backend/tasks/events.md#browser-notifications) own visibility checks,
   `wait_id` deduplication, snapshot/reconnect eligibility, session-storage limits, notification
   content, and click navigation.

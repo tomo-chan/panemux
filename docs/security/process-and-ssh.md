@@ -66,7 +66,7 @@ User-supplied SSH `cwd` values reaching `cd <cwd> && exec $SHELL` must pass `val
 ```
 
 Host-reported paths cross the same guard: `remoteClaudeProjectProbeCmd`
-([pane metadata](../behavior/pane-metadata.md#pane-git-and-pr-metadata)) allowlists the input
+([pane metadata](../backend/workspace/sessions.md#pane-git-and-pr-metadata)) allowlists the input
 session ID with `validClaudeSessionID` (`^[a-zA-Z0-9_-]+$`) + `shellQuotePath` (only `*` is
 unquoted under a compile-time projects root), and checks the host-returned transcript path with
 `validRemotePath` plus a `<sessionId>.jsonl` match before passing it to `stat`/`cat`/`ls`.

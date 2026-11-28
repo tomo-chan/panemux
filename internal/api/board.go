@@ -37,7 +37,7 @@ type boardStatusResponse struct {
 
 // GetBoardStatus returns a snapshot of the board's in-memory status cache.
 // No MessageClient call happens on this request — the relay is what keeps
-// the cache current (see docs/agent-board.md's Architecture section).
+// the cache current (see docs/backend/agent-board/relay.md).
 func (h *Handler) GetBoardStatus(w http.ResponseWriter, r *http.Request) {
 	snapshot := h.boardCache.PaneStatusSnapshot()
 	resp := boardStatusResponse{
@@ -183,9 +183,9 @@ type commandHistoryResponse struct {
 // turn-by-turn conversation history — read directly from the local history
 // file the Runner appends to while streaming a query's output, never
 // re-derived from Claude Code's transcript after the fact. See
-// docs/agent-board.md's "API and streaming" section. An empty or missing
-// history file (the command center has never run, or is not enabled) is
-// not an error; it returns an empty list.
+// docs/api/agent-board.md and docs/backend/agent-board/command-center.md. An
+// empty or missing history file (the command center has never run, or is not
+// enabled) is not an error; it returns an empty list.
 func (h *Handler) GetBoardCommandHistory(w http.ResponseWriter, r *http.Request) {
 	entries, err := h.commandHistoryFn()
 	if err != nil {

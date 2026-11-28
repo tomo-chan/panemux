@@ -25,12 +25,11 @@ This installs npm packages, downloads Go modules, and configures the repo-local 
 3. Read [docs/overview.md](docs/overview.md) for the product purpose and current boundaries.
 4. Read [docs/architecture.md](docs/architecture.md) for current component ownership and trust boundaries.
 5. Read [docs/security/overview.md](docs/security/overview.md) before implementing changes that affect command execution, shell argument handling, SSH path handling, or `gosec` posture. It carries the rules that always apply and a map into [docs/security/](docs/security/), where each sink's requirements live.
-6. Read [docs/behavior.md](docs/behavior.md) for startup, configuration, and runtime behavior; per-surface detail is in [docs/behavior/](docs/behavior/).
+6. Read [docs/backend/](docs/backend/) for startup, configuration, sessions, tasks, Agent Board, and the agent registry.
 7. Read [docs/ui/overview.md](docs/ui/overview.md) and [docs/ui/](docs/ui/) when changing frontend interaction or presentation, and [docs/api/](docs/api/) when changing REST or WebSocket contracts.
 8. Read [docs/engineering/ci-and-releases.md](docs/engineering/ci-and-releases.md) when touching CI, release automation, or GitHub workflow operations.
-9. Read [docs/agent-board.md](docs/agent-board.md) before implementing cross-pane Claude
-   messaging/status features (the `internal/board` package), then use its document map to reach the
-   focused file under [docs/agent-board/](docs/agent-board/).
+9. Read [docs/backend/agent-board/](docs/backend/agent-board/) before implementing cross-pane
+   messaging/status features (`internal/board`, `internal/agmsg`, `internal/commandcenter`).
 10. Read [docs/scenarios.md](docs/scenarios.md) when adding or changing a user-facing feature: it
    maps each use case to where it is verified, and every feature change is expected to update it.
 11. Read [docs/engineering/quality-gates.md](docs/engineering/quality-gates.md) when changing what the test suite,
@@ -85,12 +84,10 @@ same name beside it, and the index's own document map routes by section name.
 - Product overview: [docs/overview.md](docs/overview.md)
 - Current architecture: [docs/architecture.md](docs/architecture.md)
 - Security requirements for implementation: [docs/security/overview.md](docs/security/overview.md) → [docs/security/](docs/security/)
-- Runtime behavior specification: [docs/behavior.md](docs/behavior.md) → [docs/behavior/](docs/behavior/)
 - API contracts (REST and WebSocket): [docs/api/index.md](docs/api/index.md) → [docs/api/](docs/api/)
 - UI intent, runtime, and interaction design: [docs/ui/overview.md](docs/ui/overview.md) → [docs/ui/](docs/ui/)
+- Backend specifications (workspace, tasks, Agent Board, agent registry): [docs/backend/index.md](docs/backend/index.md) → [docs/backend/](docs/backend/)
 - CI, releases, and agmsg maintenance: [docs/engineering/ci-and-releases.md](docs/engineering/ci-and-releases.md), [docs/engineering/agmsg-maintenance.md](docs/engineering/agmsg-maintenance.md)
-- Agent registry, capabilities and session keys: [docs/agent-registry.md](docs/agent-registry.md) → [docs/agent-registry/](docs/agent-registry/)
-- Cross-pane Claude messaging design: [docs/agent-board.md](docs/agent-board.md) → [docs/agent-board/](docs/agent-board/)
 - Use-case scenario coverage map: [docs/scenarios.md](docs/scenarios.md)
 - Quality gates, coverage, mutation, red-check, and accessibility ceilings: [docs/engineering/quality-gates.md](docs/engineering/quality-gates.md)
 - Design history and rejected alternatives: [decision index](docs/decisions/index.md)

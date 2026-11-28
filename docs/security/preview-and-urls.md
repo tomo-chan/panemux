@@ -10,7 +10,7 @@ description: "Local and SSH split preview isolation, Markdown/Mermaid rendering,
 
 ## Previewing local files
 
-The [split preview](../behavior/preview.md) renders local HTML and Markdown as untrusted content
+The [split preview](../backend/workspace/preview-and-urls.md#split-preview) renders local HTML and Markdown as untrusted content
 (including agent-written scripts).
 
 ### Isolation from the dashboard's origin

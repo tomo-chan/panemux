@@ -58,7 +58,7 @@ type previewResponse struct {
 // its agent is working in can be previewed; a relative path is looked for
 // in each of them. A file of an ssh or ssh_tmux pane is read from its host,
 // and a loopback URL of one is relayed from its host (issue #387). See
-// docs/behavior/preview.md.
+// docs/backend/workspace/preview-and-urls.md.
 func (h *Handler) PostSessionPreview(w http.ResponseWriter, r *http.Request) {
 	var req previewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

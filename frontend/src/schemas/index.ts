@@ -268,7 +268,7 @@ export type BoardSessionTokenResponse = z.infer<typeof BoardSessionTokenResponse
 // today only a failed history write. It is optional because the server omits
 // the key entirely when there is none, and it rides whichever terminal frame
 // ends the query rather than getting a frame of its own, so that exactly one
-// frame still ends it: see docs/behavior.md's command center WS protocol, and
+// frame still ends it: see docs/api/agent-board.md's command center WS protocol, and
 // #214. It is on `error` as well as `done` because a turn that failed for its
 // own reasons can also have lost its history record, and reporting it only on
 // the successful path hides it from precisely the operator who needs it.
@@ -660,7 +660,7 @@ export type TasksResponse = z.infer<typeof TasksResponseSchema>
 
 // ── Task events: GET /ws/tasks/events ──────────────────────────────────────
 //
-// The task event stream (docs/behavior/task-events.md): a snapshot, then one
+// The task event stream (docs/api/tasks.md and docs/backend/tasks/events.md): a snapshot, then one
 // frame per change. A frame that fails these schemas is treated like a gap
 // in seq: the receiver discards what it holds and reconnects.
 

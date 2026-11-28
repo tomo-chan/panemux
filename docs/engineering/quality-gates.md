@@ -80,7 +80,7 @@ touched tagged packages. Coverage, red-check, mutation (which names ignored tagg
 Claude Code `PostToolUse` hook operate on the untagged build. Task-dashboard E2E runs the tagged
 build with a fixture `HOME` and stand-in `ps`/`lsof`/`claude`/`codex` commands that expose only
 fixture descendants and verify a detached simulated developer session is never listed
-(`make test-screenshots-check`). See [Adding an agent](../agent-registry/adding-an-agent.md).
+(`make test-screenshots-check`). See [Adding an agent](../backend/agent-registry.md#adding-an-agent).
 
 ## Coverage gates
 

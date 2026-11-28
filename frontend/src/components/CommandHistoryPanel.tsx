@@ -15,7 +15,7 @@ interface CommandHistoryPanelProps {
 // CommandHistoryPanel is the persistently accessible history view for the
 // Agent Board command center — the same captured turn-by-turn record the
 // palette shows inline, but reachable outside the quick-palette flow for
-// scrolling back further. See docs/agent-board.md's Command center section
+// scrolling back further. See docs/backend/agent-board/command-center.md
 // and docs/ui/agent-board.md's Command center section (existing overlay-panel
 // pattern reused here, not a new visual language).
 export const CommandHistoryPanel: React.FC<CommandHistoryPanelProps> = ({ isOpen, token, onClose }) => {

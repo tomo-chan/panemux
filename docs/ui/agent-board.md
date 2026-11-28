@@ -38,7 +38,7 @@ Agent Board reuses the shared modal, overlay-panel, color, status, and focus-res
 - Command-center entry points are absent when the capability is disabled.
 - Global shortcuts register in capture phase so terminal focus does not swallow them. Closing any
   Agent Board surface restores the previously focused element. Full data-flow rules live in
-  [Command center](../agent-board/command-center.md#command-center).
+  [Command Center execution](../backend/agent-board/command-center.md).
 
 ## agmsg in the host menu
 

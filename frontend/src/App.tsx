@@ -349,7 +349,7 @@ export const App: React.FC = () => {
   // The latest applied store, so a notification's click finds the task where it is then.
   const taskStoreRef = useRef<TaskEventChange['after'] | null>(null)
 
-  // The task event stream (docs/behavior/task-events.md#receiver): every
+  // The task event stream (docs/backend/tasks/events.md#receiver): every
   // applied frame updates the attention and notifies the waits it starts that
   // the person cannot see, each wait_id once.
   const handleTaskEvent = useCallback(({ before, frame, after }: TaskEventChange) => {

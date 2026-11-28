@@ -351,7 +351,7 @@ test-require-pty:
 test-hooks:
 	sh .claude/hooks/hooks_test.sh
 
-# Tier 2 of docs/agent-board.md's agmsg compatibility contract: asserts the
+# Tier 2 of docs/backend/agent-board/agmsg.md's agmsg compatibility contract: asserts the
 # agmsg script behaviors panemux depends on against a REAL agmsg install.
 # Deliberately outside `make check`, which must stay hermetic — the tests
 # skip themselves when AGMSG_PATH is unset.

@@ -2,7 +2,7 @@ import { TaskEventFrameSchema, type Task, type TaskEventFrame, type TaskEventHos
 import { hostLabel, isPermissionWait, type TaskPaneRef } from './taskBoard'
 
 // The browser's side of the task event stream (issue #279,
-// docs/behavior/task-events.md#receiver). Everything here is pure: the hook
+// docs/backend/tasks/events.md#receiver). Everything here is pure: the hook
 // that owns the connection feeds frames through it, and the dashboard, the
 // pane and workspace attention and the browser notifications are projections
 // of what it returns.

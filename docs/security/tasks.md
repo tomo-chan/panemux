@@ -10,7 +10,7 @@ description: "Fixed task collection and probe scripts, launch/resume shell hando
 
 ## Task collection
 
-The task dashboard ([behavior](../behavior/task-collection.md)) collects on the panemux host and
+The task dashboard ([behavior](../backend/tasks/collection.md)) collects on the panemux host and
 every `ssh_connections` host without letting request, config, or host text become command text:
 
 - `collectScript` and `attentionScript` compose once at startup from Go constants and collect
@@ -56,7 +56,7 @@ sanitized via `boundedText` (120/32 chars, max 3 each) and rendered as text only
 
 ## Task launch and resume
 
-`POST /api/tasks` and `POST /api/tasks/resume` ([behavior](../behavior/task-launch.md)) compose
+`POST /api/tasks` and `POST /api/tasks/resume` ([behavior](../backend/tasks/lifecycle.md#starting-and-resuming-tasks)) compose
 constant `launchScriptTemplate` + adapter fragments (validated to set only their variable, stay in
 `case`, and use declared refusal codes) and execute via literal `sh -s`:
 
@@ -101,7 +101,7 @@ and double-quoted variables; session IDs and tmux names are single-quoted.
 ## Task summaries
 
 Summary sinks run only when `task_dashboard.summary.enabled` is true
-([behavior](../behavior/task-summaries.md#summaries)). Excerpts never cross agents; invalid IDs
+([behavior](../backend/tasks/lifecycle.md#summaries)). Excerpts never cross agents; invalid IDs
 fail with `ErrInvalidSummary` before execution; missing CLIs report fixed messages without paths.
 
 ### Log reading and Claude runner

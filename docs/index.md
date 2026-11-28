@@ -4,79 +4,53 @@ okf_version: "0.2"
 
 # Documentation
 
-This directory describes panemux at three levels. Start at the level that matches the question you
-are trying to answer; a reader should not have to reconstruct the current product from its project
-history.
+This directory is the current specification, design, and operating reference for panemux (end-user
+setup lives in [README.md](../README.md); developer workflow lives in
+[DEVELOPMENT.md](../DEVELOPMENT.md)). Start with the overview or jump directly by layer or
+cross-cutting concern.
 
-## 1. Overview
+## 1. Overview and system map
 
-Read [Application overview](overview.md) for a two-minute description of the product, its main
-capabilities, data flow, and current boundaries.
+- [Application overview](overview.md) - Two-minute description of product purpose, capabilities,
+  operating model, and boundaries.
+- [Architecture](architecture.md) - Component ownership, state lifecycle, data flows, and trust
+  boundaries.
+- [Scenario coverage](scenarios.md) - User-facing acceptance ledger mapping each scenario to its
+  automated or manual verification.
 
-## 2. Topic guides
+## 2. Layer-specific documentation
 
-Topic guides are concise explanation boards. They state the current model, the rules that always
-apply, and where to continue. They do not narrate how the model evolved.
+Organized by architectural layer, aligned along the same domain axis (`workspace`, `tasks`,
+`agent-board`):
 
-| Question | Guide |
-|---|---|
-| How is the system arranged? | [Architecture](architecture.md) |
-| What does the running product do? | [Behavior specification](behavior.md) |
-| Which security rules constrain a change? | [Security overview](security/overview.md) |
-| How should the interface behave and look? | [UI overview](ui/overview.md), [UI index](ui/index.md) |
-| What are the REST and WebSocket wire contracts? | [API index](api/index.md) |
-| Which agents are known, and how is one added? | [Agent registry](agent-registry.md), [Adding an agent](agent-registry/adding-an-agent.md) |
-| How does Agent Board work? | [Agent Board](agent-board.md) |
-| What must the test system protect? | [Quality gates](engineering/quality-gates.md) |
-| How is CI, dependency, and release work performed? | [CI and releases](engineering/ci-and-releases.md) |
-| Which user scenarios are verified? | [Scenario coverage](scenarios.md) |
+| Layer | Entrance | `workspace` | `tasks` | `agent-board` | Shared |
+|---|---|---|---|---|---|
+| **UI** | [ui/](ui/) | [workspace.md](ui/workspace.md) | [tasks.md](ui/tasks.md) | [agent-board.md](ui/agent-board.md) | [overview.md](ui/overview.md) |
+| **API** | [api/](api/) | [workspace.md](api/workspace.md) | [tasks.md](api/tasks.md) | [agent-board.md](api/agent-board.md) | — |
+| **Backend** | [backend/](backend/) | [workspace/](backend/workspace/) | [tasks/](backend/tasks/) | [agent-board/](backend/agent-board/) | [agent-registry.md](backend/agent-registry.md) |
 
-Developer workflow is defined in [DEVELOPMENT.md](../DEVELOPMENT.md), outside this directory because
-it is also the day-to-day command reference.
+## 3. Cross-cutting concerns
 
-## 3. Deep dives
-
-Topic guides link to focused deep dives when the summary is not enough:
-
-- [UI details](ui/) - Shared UI principles, frontend runtime, modals, workspace and pane chrome,
-  layout editing, previews, task dashboard, attention, and Agent Board presentation.
-- [API contracts](api/) - Workspace, task dashboard, and Agent Board REST and WebSocket protocols.
-- [Behavior details](behavior/) - SSH, split preview, URL opening, task events, and the task
-  dashboard.
-- [Security details](security/) - requirements grouped by command or trust boundary.
-- [Agent Board details](agent-board/) - architecture, relay, bootstrap, command center, integration,
-  and limitations.
-- [Engineering details](engineering/) - quality gates, testing contracts, runtimes, sandboxes,
-  screenshots, CI, releases, and agmsg maintenance.
-- [Decisions](decisions/index.md) - historical decisions grouped by topic.
-
-## Decision history
-
-[Decisions](decisions/index.md) records why consequential choices were made and what they replaced.
-Decisions are grouped into one `type: Decision` topic document per domain under `decisions/<topic>.md`;
-[decisions/index.md](decisions/index.md) lists those topics. Current-state contracts stay in guides
-and specifications; decisions link to those authorities rather than repeating them. Git history
-remains the authority for line-level chronology.
+| Concern | Entrance | Scope |
+|---|---|---|
+| **Security** | [security/overview.md](security/overview.md), [security/](security/) | Invariants, auth/browser guard, process/SSH, tasks, Agent Board, and split preview/URL-open boundaries |
+| **Engineering** | [engineering/](engineering/) | Quality gates, testing contracts, runtimes, sandboxes, Codex verification, screenshots, CI, releases, and agmsg maintenance |
+| **Decisions** | [decisions/](decisions/) | Historical design rationale and rejected alternatives grouped into one topic file per domain |
 
 ## Bundle contents
 
 * [Documentation](README.md) - GitHub landing page linking to the canonical documentation index.
-* [Agent Board](agent-board.md) - Agent Board capabilities, design principles, and routes to focused contracts.
-* [Agent Registry](agent-registry.md) - Agent registration, identities, capabilities, and routes to integration requirements.
-* [Architecture](architecture.md) - System structure, component ownership, data flow, and trust boundaries.
-* [Behavior Specification](behavior.md) - Startup, configuration, operational assumptions, and routes to runtime contracts.
 * [Application Overview](overview.md) - Product purpose, capabilities, operating model, and current boundaries.
+* [Architecture](architecture.md) - System structure, component ownership, data flow, and trust boundaries.
 * [Scenario Coverage](scenarios.md) - User-facing acceptance scenarios and the automated or manual verification for each.
-* [agent-board/](agent-board/) - Agent Board architecture, messaging, integration, and command center contracts.
-* [agent-registry/](agent-registry/) - Agent integration procedures and capability requirements.
-* [api/](api/) - REST API and WebSocket wire contracts grouped by domain.
 * [ui/](ui/) - Shared UI principles, frontend runtime, and domain screen contracts.
-* [behavior/](behavior/) - Runtime behavior, task events, and task dashboard details.
-* [decisions/](decisions/) - Design decisions grouped into topic documents.
+* [api/](api/) - REST API and WebSocket wire contracts grouped by domain.
+* [backend/](backend/) - Server-side runtime behavior, configuration, sessions, tasks, Agent Board, and agent registry.
+* [security/](security/) - Security requirements grouped by execution sink and trust boundary.
 * [engineering/](engineering/) - Quality gates, testing contracts, runtimes, sandboxes, screenshots, CI, releases, and agmsg maintenance.
+* [decisions/](decisions/) - Design decisions grouped into topic documents.
 * [images/](images/) - Documentation screenshots captured from the product with placeholder content.
 * [models/](models/) - Formal models of terminal replay behavior.
-* [security/](security/) - Security requirements grouped by execution sink and trust boundary.
 
 ## Writing rules
 
@@ -102,10 +76,9 @@ remains the authority for line-level chronology.
   because GitHub resolves the latter from the repository root.
 - Split by responsibility without over-fragmenting: one concept is authoritative for each contract
   or rule, and other concepts link to that authority rather than duplicating its contract. Prefer
-  cohesive documents (roughly 100–300 lines) over proliferation of tiny files. When creating or
-  reorganizing a topic directory, place its entrance inside the directory (`docs/<topic>/index.md`,
-  plus `overview.md` when needed) rather than adding a separate top-level `docs/<topic>.md`
-  (existing top-level topic guides are being migrated under #553).
+  cohesive documents (roughly 100–300 lines) over proliferation of tiny files. Place every topic
+  entrance inside its directory (`docs/<topic>/index.md`, plus `overview.md` when needed) rather
+  than adding top-level `docs/<topic>.md` files alongside the directory.
 - Write all bundle documentation in English; do not maintain parallel translated copies.
 - Update actual references when a document moves: Markdown links and filename labels, Go/TS/shell
   comments, and expected documentation paths in tests. Do not leave redirect stub files behind.

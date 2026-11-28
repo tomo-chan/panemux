@@ -7,7 +7,7 @@ description: "Deployment and message trust, remote agmsg writes, dashboard value
 # Agent Board and command center security
 
 > Part of [Security overview and invariants](overview.md). Authoritative security model for
-> [Agent Board](../agent-board.md).
+> [Agent Board](../backend/agent-board/index.md).
 
 ## Deployment and message trust
 
@@ -55,7 +55,7 @@ Remote agmsg calls must satisfy all of:
   has confirmed the taint break.)*
 - Export compile-time literal `AGMSG_SELF_NAME=off` (never from `os.Getenv`), unset `BASH_ENV` and
   `ENV`, and clear pinned built-in driver pane markers and Codex's thread identity
-  ([agmsg contract](../agent-board/agmsg-contract.md)) before running agmsg scripts or installers,
+  ([agmsg contract](../backend/agent-board/agmsg.md#agmsg-compatibility-contract)) before running agmsg scripts or installers,
   preserving `HOME`/`PATH`/storage and never modifying agent-owned marks.
 - Leave SQL escaping solely to agmsg; expand `~/` in `~/.agents/skills/agmsg` before shell quoting.
 

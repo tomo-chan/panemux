@@ -9,7 +9,7 @@ import (
 
 // defaultOwnSendLedgerTTL is how long a recorded Send stays matchable
 // against a later-observed row. "A few poll intervals" per
-// docs/agent-board.md's Package layout section — the relay this ledger
+// docs/backend/agent-board/relay.md — the relay this ledger
 // backs polls every few seconds, so this comfortably covers a handful of
 // poll cycles without accumulating stale entries indefinitely.
 const defaultOwnSendLedgerTTL = 30 * time.Second
@@ -29,8 +29,8 @@ type ownSendKey struct {
 // only to verify a row the relay later observes with From == SystemID
 // actually corresponds to one of panemux's own sends — the message transport
 // never checks From against a roster, so an ordinary board pane could
-// otherwise forge that identity. See docs/agent-board.md's Cross-host
-// relay and Security model sections.
+// otherwise forge that identity. See docs/backend/agent-board/relay.md and
+// docs/security/agent-board.md.
 //
 // entries is a multiset, not a set: it holds one expiry per occurrence of a
 // key, not one expiry per distinct key. Two broadcasts with the identical

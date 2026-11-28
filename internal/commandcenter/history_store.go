@@ -20,8 +20,8 @@ const historyFileMode os.FileMode = 0600
 // HistoryEntry is one line of the command center's own captured
 // conversation history: a raw --output-format=stream-json line, exactly as
 // captured while relaying it to the WS client — never re-derived from
-// Claude Code's transcript file after the fact. See docs/agent-board.md's
-// "API and streaming" section.
+// Claude Code's transcript file after the fact. See docs/api/agent-board.md
+// and docs/backend/agent-board/command-center.md.
 type HistoryEntry struct {
 	At  time.Time       `json:"at"`
 	Raw json.RawMessage `json:"raw"`

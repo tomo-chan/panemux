@@ -6,8 +6,8 @@ description: "Design rationale for static agent registration, consumer-owned cap
 
 # Agent Registry decisions
 
-Current contracts live in [Agent Registry](../agent-registry.md) and
-[Adding an agent](../agent-registry/adding-an-agent.md).
+Current contracts live in [Agent Registry](../backend/agent-registry.md) and
+[Adding an agent](../backend/agent-registry.md#adding-an-agent).
 
 ## One static registry; capabilities are consumer-owned ports (2026-10-12, issue #372)
 

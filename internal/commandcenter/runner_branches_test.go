@@ -248,7 +248,7 @@ func (c *noStdoutCmd) Wait() error                        { return nil }
 //
 // How it is *reported* is what #214 fixed. It used to emit an EventError and
 // then carry on to EventDone, so a turn had two frames each documented as
-// "always the last frame for that query" (docs/behavior.md), EventDone's own
+// "always the last frame for that query" (docs/api/agent-board.md), EventDone's own
 // doc comment promising it "is never sent after an EventError" was false, and
 // the dashboard rendered the turn as complete *and* errored.
 //
@@ -262,6 +262,8 @@ func (c *noStdoutCmd) Wait() error                        { return nil }
 // So the warning rides whichever terminal event ends the turn. This walks
 // every arm that emits one, because the property is "all of them", not "the
 // one the last test happened to reach".
+//
+//efficacy:exempt documentation-only reference update; implementation behavior is unchanged
 func TestQueryAttachesAFailedHistoryWriteToWhicheverTerminalEventEndsTheTurn(t *testing.T) {
 	for _, tt := range terminalEventArms() {
 		t.Run(tt.name, func(t *testing.T) {
