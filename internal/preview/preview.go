@@ -51,7 +51,7 @@ const MaxDocumentBytes int64 = 10 << 20
 // The reasons a path cannot be previewed. They are shown to the operator.
 var (
 	ErrNotPreviewable = errors.New("only .html, .htm, .md and .markdown files can be previewed")
-	ErrNoWorkdir      = errors.New("the pane's working directory is unknown, so no file can be previewed")
+	ErrNoWorkdir      = errors.New("the pane's working directory is unknown, so a relative path cannot be previewed")
 	ErrNotFound       = errors.New("file not found")
 	ErrEscapes        = errors.New("the file is outside the pane's working directory and its agent's worktrees")
 	ErrTooLarge       = fmt.Errorf("the file is larger than the %d MiB preview limit", MaxDocumentBytes>>20)
@@ -144,7 +144,7 @@ func Resolve(name string, workdirs []string) ([]Found, error) {
 	if notPreviewable {
 		return nil, ErrNotPreviewable
 	}
-	if len(dirs) == 0 {
+	if filepath.IsAbs(name) || strings.HasPrefix(name, "~/") {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, name)
 	}
 	return nil, fmt.Errorf("%w: %s (looked in %s)", ErrNotFound, name, strings.Join(dirs, ", "))
@@ -187,9 +187,6 @@ func resolveLocalCandidate(file string, dirs []string) (Found, error) {
 func resolveLocalOutside(file string, dirs []string) (Found, error) {
 	resolved, err := filepath.EvalSymlinks(file)
 	if err != nil {
-		if errors.Is(err, fs.ErrPermission) {
-			return Found{}, fmt.Errorf("%w: %s: permission denied", ErrNotFound, file)
-		}
 		return Found{}, fmt.Errorf("%w: %s", ErrNotFound, file)
 	}
 	if !IsPreviewable(resolved) {
@@ -214,22 +211,39 @@ const tmpRootDir = "/tmp"
 
 // isBroadLocalRoot reports whether dir is /, /tmp (or os.TempDir()), or the
 // user's home directory, where serving sibling files for an outside preview
-// would expose unrelated files.
+// would expose unrelated files. Directory identity is checked via os.SameFile
+// through an "/" os.Root so case-insensitive filesystems (macOS APFS) and
+// symlinked roots cannot bypass the restriction. Fails closed when the home
+// directory or dir's identity cannot be determined.
 func isBroadLocalRoot(dir string) bool {
 	dir = filepath.Clean(dir)
 	if dir == filepath.Dir(dir) {
 		return true
 	}
-	candidates := []string{tmpRootDir, os.TempDir()}
-	if home, err := homedir.Dir(); err == nil && home != "" {
-		candidates = append(candidates, home)
+	home, err := homedir.Dir()
+	if err != nil || home == "" {
+		return true
 	}
-	for _, c := range candidates {
+	host, err := os.OpenRoot(string(filepath.Separator))
+	if err != nil { //coverage:exempt the filesystem's root can always be opened
+		return true
+	}
+	defer func() { _ = host.Close() }()
+
+	fromRoot, err := filepath.Rel(string(filepath.Separator), dir)
+	if err != nil { //coverage:exempt dir is cleaned and absolute
+		return true
+	}
+	dirInfo, err := host.Stat(fromRoot)
+	if err != nil {
+		return true
+	}
+	for _, c := range []string{tmpRootDir, os.TempDir(), home} {
 		clean := filepath.Clean(c)
 		if dir == clean {
 			return true
 		}
-		if resolved, err := filepath.EvalSymlinks(clean); err == nil && dir == filepath.Clean(resolved) {
+		if cInfo, statErr := os.Stat(clean); statErr == nil && os.SameFile(dirInfo, cInfo) {
 			return true
 		}
 	}
@@ -268,6 +282,9 @@ func locateByIdentity(file string, dirs []string) (string, string) {
 			known = append(known, dir)
 			ids = append(ids, info)
 		}
+	}
+	if len(known) == 0 {
+		return "", ""
 	}
 	host, err := os.OpenRoot(string(filepath.Separator))
 	if err != nil { //coverage:exempt the filesystem's root can always be opened
@@ -530,12 +547,20 @@ func (r *Registry) open(token, rest string) (fileReader, fs.FileInfo, bool) {
 		return nil, nil, false
 	}
 	defer func() { _ = root.Close() }()
-	f, err := root.Open(filepath.FromSlash(rest))
+	rel := filepath.FromSlash(rest)
+	var linfo fs.FileInfo
+	if e.singleFile {
+		linfo, err = root.Lstat(rel)
+		if err != nil || !linfo.Mode().IsRegular() {
+			return nil, nil, false
+		}
+	}
+	f, err := root.Open(rel)
 	if err != nil {
 		return nil, nil, false
 	}
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil || !info.Mode().IsRegular() || (e.singleFile && !os.SameFile(linfo, info)) {
 		_ = f.Close()
 		return nil, nil, false
 	}

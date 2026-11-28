@@ -228,6 +228,9 @@ func TestResolveRefuses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Resolve(tc.path, tc.workdirs)
 			require.ErrorIs(t, err, tc.err)
+			if errors.Is(tc.err, ErrNotFound) && (filepath.IsAbs(tc.path) || strings.HasPrefix(tc.path, "~/")) {
+				assert.NotContains(t, err.Error(), "looked in")
+			}
 		})
 	}
 }
@@ -817,6 +820,10 @@ func TestResolveTildeAndBroadRoots(t *testing.T) {
 	_, err = Resolve("~user/notes/plan.md", nil)
 	require.ErrorIs(t, err, ErrNoWorkdir, "~user/ is not expanded and stays a relative path")
 
+	_, err = Resolve("~/missing.md", []string{cwd})
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.NotContains(t, err.Error(), "looked in")
+
 	homedir.SetForTest(t, "relative/home")
 	_, err = Resolve("~/notes/plan.md", []string{cwd})
 	require.Error(t, err)
@@ -847,8 +854,16 @@ func TestIsBroadLocalRoot(t *testing.T) {
 	}
 	assert.True(t, isBroadLocalRoot(homeAlias), "home symlink")
 	assert.True(t, isBroadLocalRoot(home), "resolved home")
+	upperHome := filepath.Join(base, "REAL-HOME")
+	if _, statErr := os.Stat(upperHome); statErr == nil {
+		assert.True(t, isBroadLocalRoot(upperHome), "another letter case on a case-insensitive filesystem")
+	}
+	assert.True(t, isBroadLocalRoot(filepath.Join(base, "missing-dir")), "missing dir fails closed")
 	assert.False(t, isBroadLocalRoot(filepath.Join(home, "notes")), "subdirectory under home")
 	assert.False(t, isBroadLocalRoot(base), "subdirectory under temp")
+
+	homedir.SetFailingForTest(t, errors.New("no home"))
+	assert.True(t, isBroadLocalRoot(filepath.Join(home, "notes")), "unknown home fails closed")
 }
 
 func TestOpenFoundRestrictsBroadRootToSingleFile(t *testing.T) {
@@ -882,6 +897,11 @@ func TestOpenFoundRestrictsBroadRootToSingleFile(t *testing.T) {
 	assert.NotEqual(t, topURL, fullURL)
 	assert.Equal(t, http.StatusNotFound, serve(t, reg, topBase+"secret.css").code)
 	assert.Equal(t, http.StatusOK, serve(t, reg, strings.TrimSuffix(fullURL, "top.html")+"secret.css").code)
+
+	// Replacing a single-file target with a relative symlink inside the same root is refused.
+	require.NoError(t, os.Remove(top))
+	require.NoError(t, os.Symlink(filepath.Join("sub", "token.txt"), top))
+	assert.Equal(t, http.StatusNotFound, serve(t, reg, topURL).code)
 }
 
 func TestOpenFoundBoundsOutsideSubdirectory(t *testing.T) {

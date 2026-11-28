@@ -335,10 +335,12 @@ func TestResolveRemoteRefuses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ResolveRemote(remote.Remote, tc.path, tc.dirs)
 			require.ErrorIs(t, err, tc.want)
-			if errors.Is(tc.want, ErrNotFound) && len(tc.dirs) == 0 {
-				assert.NotContains(t, err.Error(), "looked in")
-			} else if errors.Is(tc.want, ErrNotFound) {
-				assert.Contains(t, err.Error(), "looked in")
+			if errors.Is(tc.want, ErrNotFound) {
+				if filepath.IsAbs(tc.path) || strings.HasPrefix(tc.path, "~/") || len(tc.dirs) == 0 {
+					assert.NotContains(t, err.Error(), "looked in")
+				} else {
+					assert.Contains(t, err.Error(), "looked in")
+				}
 			}
 		})
 	}
@@ -381,6 +383,11 @@ func TestResolveRemoteTildeAndSingleFileServing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, serveRemote(t, reg, topURL).Code)
 	assert.Equal(t, http.StatusNotFound, serveRemote(t, reg, strings.TrimSuffix(topURL, "top.html")+"secret.css").Code)
+
+	// Replacing a single-file remote target with an intra-root symlink is refused.
+	require.NoError(t, os.Remove(top))
+	require.NoError(t, os.Symlink("secret.css", top))
+	assert.Equal(t, http.StatusNotFound, serveRemote(t, reg, topURL).Code)
 }
 
 func TestResolveRemoteOutsideSymlinkAndTildeRules(t *testing.T) {
@@ -411,10 +418,23 @@ func TestResolveRemoteOutsideSymlinkAndTildeRules(t *testing.T) {
 	_, err = ResolveRemote(remote.Remote, "~user/notes/plan.md", nil)
 	require.ErrorIs(t, err, ErrNoWorkdir)
 
-	// A broken SFTP connection during ~/ Getwd reports ErrRemote.
+	// Missing ~/ omits unrelated workdirs from the error message.
+	_, err = ResolveRemote(remote.Remote, "~/missing.md", []string{cwd})
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.NotContains(t, err.Error(), "looked in")
+
+	// A broken SFTP connection during ~/ Getwd or workdir-less absolute lookup reports ErrRemote.
 	require.NoError(t, remote.conns()[0].files.Close())
 	remote.failWith(errors.New("no route to host"))
 	_, err = ResolveRemote(remote.Remote, "~/notes/plan.md", nil)
+	require.ErrorIs(t, err, ErrRemote)
+
+	broken := newFakeRemote(t, nil)
+	_, err = ResolveRemote(broken.Remote, filepath.Join(outside, "secret.html"), nil)
+	require.NoError(t, err)
+	require.NoError(t, broken.conns()[0].files.Close())
+	broken.failWith(errors.New("no route to host"))
+	_, err = ResolveRemote(broken.Remote, filepath.Join(outside, "secret.html"), nil)
 	require.ErrorIs(t, err, ErrRemote)
 }
 
@@ -430,7 +450,7 @@ func TestIsBroadRemoteRoot(t *testing.T) {
 	require.NoError(t, err)
 	cache := &remoteBroadRoots{}
 
-	for _, dir := range []string{"/", tmpRootDir, homeAlias, home} {
+	for _, dir := range []string{"/", tmpRootDir, strings.ToUpper(tmpRootDir), homeAlias, home, strings.ToUpper(home)} {
 		broad, checkErr := isBroadRemoteRoot(files, dir, cache)
 		require.NoError(t, checkErr, dir)
 		assert.True(t, broad, dir)
@@ -446,9 +466,21 @@ func TestIsBroadRemoteRoot(t *testing.T) {
 		assert.False(t, broad, dir)
 	}
 
-	// A closed SFTP client during home lookup returns the transport error.
+	// Unresolvable home fails closed to single-file serving.
+	missingHome := filepath.Join(base, "gone-home")
+	broad, err := isBroadRemoteRoot(files, filepath.Join(home, "notes"),
+		&remoteBroadRoots{tmpLoaded: true, home: missingHome, homeLoaded: true})
+	require.NoError(t, err)
+	assert.True(t, broad)
+
+	// A closed SFTP client during /tmp, home Getwd, or home realPath returns the transport error.
 	require.NoError(t, files.Close())
+	_, err = isBroadRemoteRoot(files, filepath.Join(home, "notes"), &remoteBroadRoots{})
+	require.Error(t, err)
 	_, err = isBroadRemoteRoot(files, filepath.Join(home, "notes"), &remoteBroadRoots{tmpLoaded: true})
+	require.Error(t, err)
+	_, err = isBroadRemoteRoot(files, filepath.Join(home, "notes"),
+		&remoteBroadRoots{tmpLoaded: true, home: home, homeLoaded: true})
 	require.Error(t, err)
 }
 

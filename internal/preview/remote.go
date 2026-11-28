@@ -367,7 +367,7 @@ func ResolveRemote(remote *Remote, name string, workdirs []string) ([]Found, err
 	if notPreviewable {
 		return nil, ErrNotPreviewable
 	}
-	if len(dirs) == 0 {
+	if path.IsAbs(name) || isTilde {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, name)
 	}
 	return nil, fmt.Errorf("%w: %s (looked in %s)", ErrNotFound, name, strings.Join(dirs, ", "))
@@ -376,11 +376,13 @@ func ResolveRemote(remote *Remote, name string, workdirs []string) ([]Found, err
 var errRemoteHomeNotAbs = errors.New("remote home directory is not an absolute path")
 
 type remoteBroadRoots struct {
-	home         string
-	resolvedHome string
-	resolvedTmp  string
-	homeLoaded   bool
-	tmpLoaded    bool
+	home               string
+	resolvedHome       string
+	resolvedTmp        string
+	homeLoaded         bool
+	resolvedHomeLoaded bool
+	resolvedHomeFailed bool
+	tmpLoaded          bool
 }
 
 func (c *remoteBroadRoots) homeDir(files *sftp.Client) (string, error) {
@@ -438,7 +440,7 @@ func findRemote(
 	seen := map[string]bool{}
 	for _, file := range paths {
 		candidate, esc, badType, err := resolveRemoteCandidate(files, file, dirs, roots, cache)
-		if err != nil { //coverage:exempt only a connection loss mid-lookup fails here
+		if err != nil {
 			return nil, false, false, err
 		}
 		escaped = escaped || esc
@@ -463,7 +465,6 @@ func resolveRemoteCandidate(
 	insideWorkdir := remoteRootOf(file, dirs) != "" || remoteRootOf(file, roots) != ""
 	resolved, enteredWorkdir, err := realPathTracking(files, file, roots)
 	if err != nil {
-		//coverage:exempt the working directories were just looked up over this connection; only its loss fails here
 		if !isFileError(err) {
 			return remoteCandidate{}, false, false, err
 		}
@@ -504,12 +505,12 @@ func resolveRemoteCandidate(
 
 func isBroadRemoteRoot(files *sftp.Client, dir string, cache *remoteBroadRoots) (bool, error) {
 	dir = path.Clean(dir)
-	if dir == "/" || dir == tmpRootDir {
+	if dir == "/" || strings.EqualFold(dir, tmpRootDir) {
 		return true, nil
 	}
 	if !cache.tmpLoaded {
 		resolved, err := realPath(files, tmpRootDir)
-		if err != nil && !isFileError(err) { //coverage:exempt connection loss while probing /tmp
+		if err != nil && !isFileError(err) {
 			return false, err
 		}
 		if err == nil {
@@ -517,7 +518,7 @@ func isBroadRemoteRoot(files *sftp.Client, dir string, cache *remoteBroadRoots) 
 		}
 		cache.tmpLoaded = true
 	}
-	if cache.resolvedTmp != "" && dir == cache.resolvedTmp {
+	if cache.resolvedTmp != "" && strings.EqualFold(dir, cache.resolvedTmp) {
 		return true, nil
 	}
 	home, err := cache.homeDir(files)
@@ -528,19 +529,22 @@ func isBroadRemoteRoot(files *sftp.Client, dir string, cache *remoteBroadRoots) 
 		}
 		return false, err
 	}
-	if dir == home {
+	if strings.EqualFold(dir, home) {
 		return true, nil
 	}
-	if cache.resolvedHome == "" {
+	if !cache.resolvedHomeLoaded {
 		resolved, err := realPath(files, home)
-		if err != nil && !isFileError(err) { //coverage:exempt connection loss while probing home
+		if err != nil && !isFileError(err) {
 			return false, err
 		}
-		if err == nil {
+		cache.resolvedHomeLoaded = true
+		if err != nil {
+			cache.resolvedHomeFailed = true
+		} else {
 			cache.resolvedHome = resolved
 		}
 	}
-	return cache.resolvedHome != "" && dir == cache.resolvedHome, nil
+	return cache.resolvedHomeFailed || (cache.resolvedHome != "" && strings.EqualFold(dir, cache.resolvedHome)), nil
 }
 
 // maxRemoteLinks bounds the symbolic links one path may lead through, as
@@ -730,11 +734,12 @@ func openRemote(e entry, rest string) (fileReader, fs.FileInfo, bool) {
 	var f *sftp.File
 	var info fs.FileInfo
 	err := e.remote.withFiles(func(files *sftp.Client) error {
-		resolved, err := realPath(files, path.Join(e.root, rest))
+		target := path.Join(e.root, rest)
+		resolved, err := realPath(files, target)
 		if err != nil {
 			return err
 		}
-		if !remoteWithin(e.root, resolved) {
+		if !remoteWithin(e.root, resolved) || (e.singleFile && resolved != target) {
 			return fs.ErrNotExist
 		}
 		opened, err := files.Open(resolved)

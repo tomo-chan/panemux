@@ -86,10 +86,12 @@ panemux host are framed, after operator approval for terminal-emitted requests.
   Markdown extension (refusing `.md` symlinks disguised over non-previewable files such as
   `/etc/passwd`), and open through an `os.Root` rooted at the innermost matching working directory
   (if the target landed inside one) or the canonical file's parent directory. When that parent is `/`,
-  the home directory (or its symlink target), or `/tmp` / `os.TempDir()` (or their symlink targets),
-  the registry entry is marked `singleFile` so `/preview/<token>/*` refuses every path except the
-  registered file itself (`404`), preventing sandboxed HTML previews from reading sibling files or
-  subdirectories such as `~/.ssh` or `~/.config/panemux/token`.
+  the home directory, or `/tmp` / `os.TempDir()`—checked by `os.SameFile` through an `/` `os.Root`
+  so symlinks and case-insensitive filesystems cannot bypass it, failing closed when the home
+  directory or parent identity cannot be determined—the registry entry is marked `singleFile` so
+  `/preview/<token>/*` refuses every path except the registered file itself (`404`) and refuses
+  intra-root symlink replacements via `Lstat`/`os.SameFile`, preventing sandboxed HTML previews from
+  reading sibling files or subdirectories such as `~/.ssh` or `~/.config/panemux/token`.
 - Tokens are 128-bit `crypto/rand` values issued only by guarded `POST /api/sessions/{id}/preview`,
   keyed by `(remote, root, file, singleFile)` so a single-file preview never shares a token with a
   wider root registration, and kept for server lifetime (`/preview/` itself is intentionally
@@ -109,12 +111,14 @@ panemux host are framed, after operator approval for terminal-emitted requests.
   `READLINK` (never SFTP `REALPATH`, which servers may clean lexically; max 40 links) while tracking
   whether resolution entered any working directory so a symlink inside a working directory that
   escapes it is still refused with `403`. Outside symlinks targeting non-previewable extensions are
-  refused, and outside files directly under `/`, the remote home directory, or `/tmp` (including
-  symlinked `/tmp` or home) are registered `singleFile` (failing closed to `singleFile` if the
-  remote home cannot be determined). Every request re-resolves against the registered root, enforces
-  `singleFile`, checks `fs.ValidPath` and backslashes, and applies the same 10 MiB limit and
-  policies (an accepted check-to-`OPEN` race exists against a host user who can already write inside
-  the registered root).
+  refused, and outside files directly under `/`, the remote home directory, or `/tmp` (matched
+  case-insensitively including symlinked `/tmp` or home, failing closed to `singleFile` if the
+  remote home cannot be determined or resolved) are registered `singleFile`. Every request
+  re-resolves against the registered root, enforces `singleFile` (also refusing intra-root symlink
+  replacements where `resolved != target`), checks `fs.ValidPath` and backslashes, and applies the
+  same 10 MiB limit and policies (an accepted check-to-`OPEN` race exists against a host user who
+  can already write inside the registered root; because SFTP v3 carries no inode/device identity,
+  working-directory containment on case-insensitive remote filesystems remains lexical).
 - **Relays and origin**: Loopback relays bind `127.0.0.1:0` (never request-derived), accept only
   `http`/`https` loopback targets (`ParseLoopbackURL`), pass TLS through untouched (`https://localhost:<port>`),
   are keyed per `(Remote, host, port)`, and live until server shutdown. Any local process on the
