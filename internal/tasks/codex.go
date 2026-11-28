@@ -87,16 +87,43 @@ func (codexCollect) stateNote(task Task) string {
 // does not know is handed over rather than passed by. Only a session ID made of hex digits and dashes — the shape of
 // the UUID in the file name — is put into the query.
 const codexOpenScript = `db="$HOME/.codex/thread_history_1.sqlite"
+tab=$(printf '\t')
+codex_procs=$(
 ps -U "$uid" -o pid=,etime=,command= 2>/dev/null |
 awk '{ n = tolower($3); sub(/.*\//, "", n); if (n == "` + codexProgram + `") print $1, $2 }' |
-while read -r pid et; do
-	printf '%s\t%s\n' "$pid" "$et"
-	if [ -d "/proc/$pid/fd" ]; then
-		for fd in "/proc/$pid/fd"/*; do readlink "$fd"; done 2>/dev/null
+cat
+)
+if [ -n "$codex_procs" ]; then
+	printf '%s\n' "$codex_procs" | awk '{ printf "%s\t%s\n", $1, $2 }'
+	if [ "$(uname -s 2>/dev/null)" != Darwin ] && [ -d /proc/$$/fd ]; then
+		printf '%s\n' "$codex_procs" | while read -r pid et; do
+			for fd in "/proc/$pid/fd"/*; do
+				p=$(readlink "$fd" 2>/dev/null) || continue
+				case ${p##*/} in rollout-*.jsonl) printf '%s\t%s\t%s\n' "$pid" "$et" "$p" ;; esac
+			done
+		done
 	else
-		lsof -p "$pid" -Fn 2>/dev/null | sed -n 's/^n//p'
-	fi | while IFS= read -r p; do
-		case ${p##*/} in rollout-*.jsonl) ;; *) continue ;; esac
+		codex_pids=$(printf '%s\n' "$codex_procs" |
+			awk '$1 ~ /^[0-9]+$/ { if (s != "") s = s ","; s = s $1 } END { print s }')
+		if [ -n "$codex_pids" ]; then
+			{
+				printf '%s\n' "$codex_procs" | awk '{ printf "E\t%s\t%s\n", $1, $2 }'
+				lsof -n -P -p "$codex_pids" -Fpn 2>/dev/null
+			} | awk '
+				/^E\t/ {
+					n = split($0, a, "\t")
+					if (n >= 2) et[a[2]] = (n >= 3 ? a[3] : "")
+					next
+				}
+				/^p[0-9]+$/ { pid = substr($0, 2); next }
+				/^n/ && pid != "" && (pid in et) {
+					p = substr($0, 2)
+					base = p
+					sub(/.*\//, "", base)
+					if (base ~ /^rollout-.*\.jsonl$/) printf "%s\t%s\t%s\n", pid, et[pid], p
+				}'
+		fi
+	fi | while IFS="$tab" read -r pid et p; do
 		t=$(mtime "$p" 2>/dev/null) || continue
 		id=${p##*/}
 		id=${id%.jsonl}
@@ -118,7 +145,7 @@ while read -r pid et; do
 		o=$(printf '%s\n' "$l" | grep -o '"originator":"[^"]*"' | head -n 1)
 		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$et" "$t" "$st" "$marks" "$c" "$o" "$p"
 	done
-done
+fi
 `
 
 // codexPermissionScript prints "<session ID> <turn ID> <unix seconds>" for

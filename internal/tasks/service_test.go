@@ -552,8 +552,10 @@ func TestInspectGitContext_UsesTheOpenConnectionOnly(t *testing.T) {
 }
 
 // The script itself, run by the real local runner against a home directory
-// the test controls. `ps` and `tmux` report whatever this machine has, so the
-// assertions stay on what the test put there.
+// the test controls. `ps` is restricted to this test process so unrelated live
+// agents on the developer's machine do not slow or time out the run (issue #408).
+//
+//efficacy:exempt isolates ps probe to self PID (issue #408); collect parsing predates branch
 func TestRunLocal_CollectScriptRunsUnderShAndParses(t *testing.T) {
 	testcap.RequirePS(t)
 	home := t.TempDir()
@@ -562,6 +564,7 @@ func TestRunLocal_CollectScriptRunsUnderShAndParses(t *testing.T) {
 	sessions := filepath.Join(home, ".claude", "sessions")
 	require.NoError(t, os.MkdirAll(sessions, 0o700))
 	selfPID := os.Getpid()
+	isolateHostProcessesToPIDs(t, selfPID)
 	require.NoError(t, os.WriteFile(filepath.Join(sessions, strconv.Itoa(selfPID)+".json"),
 		[]byte(`{"pid":`+strconv.Itoa(selfPID)+`,"sessionId":"abc","status":"idle"}`), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(sessions, "ignored.key"), []byte("x"), 0o600))
@@ -637,7 +640,7 @@ func startFakeAgent(t *testing.T, cmd *exec.Cmd) {
 // The cwd probe reports a claude process's working directory, and ps lists
 // this user's own processes. `claude` here is a script that sleeps.
 //
-//efficacy:exempt only the fixture changed (issue #423); the cwd reading it pins predates this branch
+//efficacy:exempt isolates ps probe to fixture PID (issue #408); cwd reading predates branch
 func TestRunLocal_ReportsTheWorkingDirectoryOfAClaudeProcess(t *testing.T) {
 	testcap.RequirePS(t)
 	homedir.SetForTest(t, t.TempDir())
@@ -647,6 +650,7 @@ func TestRunLocal_ReportsTheWorkingDirectoryOfAClaudeProcess(t *testing.T) {
 	cmd := exec.Command(fake, "30")
 	cmd.Dir = workDir
 	startFakeAgent(t, cmd)
+	isolateHostProcessesToPIDs(t, cmd.Process.Pid)
 
 	out, err := runLocal(context.Background(), collectScript)
 	require.NoError(t, err)
@@ -699,6 +703,7 @@ func TestRunLocal_ReportsThePaneIDInAnAgentsEnvironment(t *testing.T) {
 		[]string{"NOTES=line1\nPANEMUX_PANE_ID=pane-other", "PANEMUX_PANE_ID=pane-real"}, "30")
 	onlyInAValue := start("claude", []string{"NOTES=line1\nPANEMUX_PANE_ID=pane-other"}, "30")
 	withoutPane := start("claude", []string{"PATH=/usr/bin:/bin"}, "30")
+	isolateHostProcessesToPIDs(t, withPane, codex, unsafe, onlyInArgs, inAValue, onlyInAValue, withoutPane)
 
 	out, err := runLocal(context.Background(), collectScript)
 	require.NoError(t, err)
@@ -759,6 +764,8 @@ case "$*" in
 esac
 `
 	writeExecutable(t, filepath.Join(bin, "ps"), fakePS)
+	writeExecutable(t, filepath.Join(bin, "lsof"), "#!/bin/sh\nexit 0\n")
+	writeExecutable(t, filepath.Join(bin, "tmux"), "#!/bin/sh\nexit 0\n")
 	writeExecutable(t, filepath.Join(bin, "uname"), "#!/bin/sh\necho Darwin\n")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
@@ -853,8 +860,67 @@ func TestRunLocal_ReadsPsEOnlyOnMacOS(t *testing.T) {
 	assert.Empty(t, raw.PaneIDs)
 }
 
+// On macOS, sectionCWD queries every candidate agent PID in a single lsof
+// invocation with -n -P instead of spawning lsof per PID (issue #408).
+func TestRunLocal_CollectScriptBatchesLsofForCWDOnMacOS(t *testing.T) {
+	homedir.SetForTest(t, t.TempDir())
+	bin := t.TempDir()
+	cwdLog := filepath.Join(t.TempDir(), "lsof-cwd.log")
+
+	fakePS := `#!/bin/sh
+case "$*" in
+"-U "*" -o pid=,ppid=,command=")
+	printf '301 1 /usr/local/bin/claude\n'
+	printf '302 1 /usr/local/bin/codex\n'
+	;;
+"-U "*" -o pid=,command=")
+	printf '301 /usr/local/bin/claude\n'
+	printf '302 /usr/local/bin/codex\n'
+	;;
+"-U "*" -o pid=,etime=,command=")
+	exit 0
+	;;
+esac
+`
+	fakeLsof := `#!/bin/sh
+printf '%s\n' "$*" >> '` + cwdLog + `'
+printf 'p301\n'
+printf 'fcwd\n'
+printf 'n/workspace/user/my project\n'
+printf 'p302\n'
+printf 'fcwd\n'
+printf 'n/workspace/user/api\n'
+`
+	writeExecutable(t, filepath.Join(bin, "ps"), fakePS)
+	writeExecutable(t, filepath.Join(bin, "lsof"), fakeLsof)
+	writeExecutable(t, filepath.Join(bin, "uname"), "#!/bin/sh\necho Darwin\n")
+	writeExecutable(t, filepath.Join(bin, "tmux"), "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	out, err := runLocal(context.Background(), attentionScript)
+	require.NoError(t, err)
+	raw, err := parseCollectOutput(out, collectPlan.live)
+	require.NoError(t, err)
+
+	callsRaw, err := os.ReadFile(cwdLog)
+	require.NoError(t, err)
+	calls := strings.Split(strings.TrimSpace(string(callsRaw)), "\n")
+	require.Len(t, calls, 1, "cwd section invokes lsof once for all candidate PIDs: %v", calls)
+	assert.Contains(t, calls[0], "-n")
+	assert.Contains(t, calls[0], "-P")
+	assert.Contains(t, calls[0], "-p 301,302")
+	assert.Contains(t, calls[0], "-d cwd")
+
+	assert.Equal(t, map[int]string{
+		301: "/workspace/user/my project",
+		302: "/workspace/user/api",
+	}, raw.ProcessCWDs)
+}
+
+//efficacy:exempt isolates host processes (issue #408); empty-home completion predates branch
 func TestRunLocal_EmptyHomeStillCompletes(t *testing.T) {
 	homedir.SetForTest(t, t.TempDir())
+	isolateEmptyProcesses(t)
 	out, err := runLocal(context.Background(), collectScript)
 	require.NoError(t, err)
 	raw, err := parseCollectOutput(out, collectPlan.full)

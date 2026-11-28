@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -315,21 +316,40 @@ func writeCodexHome(t *testing.T, home string) (live, livePath string, withSQLit
 	return live, livePath, true
 }
 
-// startStandInCodex starts a process named codex that holds path open.
+// startStandInCodex starts a process named codex that holds path open, and
+// waits until the descriptor is actually open before returning its PID.
 func startStandInCodex(t *testing.T, path string) int {
 	t.Helper()
 	shPath, err := exec.LookPath("sh")
 	require.NoError(t, err)
 	fake := filepath.Join(t.TempDir(), "codex")
 	require.NoError(t, os.Symlink(shPath, fake))
-	// The trailing ":" keeps sh from exec'ing sleep, which would take over
-	// the process and its name.
-	cmd := exec.Command(fake, "-c", `exec 3>>"$0"; sleep 30; :`, path) //nolint:gosec // test stand-in
+	readyR, readyW, err := os.Pipe()
+	require.NoError(t, err)
+	defer func() { _ = readyR.Close() }()
+	// ExtraFiles[0] is inherited as fd 3; open the rollout on fd 4, signal
+	// readiness on fd 3, then close fd 3 before sleeping. The trailing ":"
+	// keeps sh from exec'ing sleep, which would take over the process name.
+	standIn := `exec 4>>"$0"; printf ok >&3; exec 3>&-; sleep 30; :`
+	cmd := exec.Command(fake, "-c", standIn, path) //nolint:gosec // test stand-in
+	cmd.ExtraFiles = []*os.File{readyW}
 	require.NoError(t, cmd.Start())
+	_ = readyW.Close()
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	})
+	ready := make(chan error, 1)
+	go func() {
+		_, readErr := io.ReadAll(readyR)
+		ready <- readErr
+	}()
+	select {
+	case readErr := <-ready:
+		require.NoError(t, readErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("stand-in codex did not open rollout in time")
+	}
 	return cmd.Process.Pid
 }
 
@@ -337,12 +357,15 @@ func startStandInCodex(t *testing.T, path string) int {
 // the rollout a running `codex` holds open is found through its descriptors
 // (/proc/<pid>/fd, or lsof), with the last turn event and response item of
 // its tail and, where sqlite3 is installed, its newest thread_turns row.
+//
+//efficacy:exempt isolates ps probe to stand-in PID (issue #408); open-rollout reading predates branch
 func TestRunLocal_CollectScriptReadsCodexRollouts(t *testing.T) {
 	testcap.RequirePS(t)
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
 	live, livePath, withSQLite := writeCodexHome(t, home)
 	pid := startStandInCodex(t, livePath)
+	isolateHostProcessesToPIDs(t, pid)
 
 	var raw rawSnapshot
 	require.Eventually(t, func() bool {
@@ -387,9 +410,12 @@ func TestRunLocal_CollectScriptReadsCodexRollouts(t *testing.T) {
 
 // The 100 rollouts the script lists are the newest of the TUI's: newer
 // ones codex exec wrote, however many, do not push them out.
+//
+//efficacy:exempt isolates the test from unrelated host processes (issue #408); rollout listing predates this branch
 func TestRunLocal_CollectScriptListsTheTUIsRolloutsPastNewerOnes(t *testing.T) {
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
+	isolateEmptyProcesses(t)
 	tui := writeRollout(t, home, "2026/09/28", rolloutName("2026-09-28T01-00-00", codexSessionA),
 		sessionMeta(codexSessionA, "/workspace/user/api", codexOriginatorTUI))
 	twoHoursAgo := time.Now().Add(-2 * time.Hour)
@@ -406,4 +432,93 @@ func TestRunLocal_CollectScriptListsTheTUIsRolloutsPastNewerOnes(t *testing.T) {
 
 	require.Len(t, codexOf(raw).Rollouts, 1, "only the TUI's rollouts are listed")
 	assert.Equal(t, codexSessionA, codexOf(raw).Rollouts[0].SessionID)
+}
+
+func installFakeMacOSCodexOpenTools(t *testing.T, openLog, rolloutA, rolloutB string) {
+	t.Helper()
+	bin := t.TempDir()
+	fakePS := `#!/bin/sh
+case "$*" in
+"-U "*" -o pid=,etime=,command=")
+	printf '201 01:05 /usr/local/bin/codex\n'
+	printf '202 02:10 /usr/local/bin/codex\n'
+	printf '203 00:30 /usr/local/bin/codex\n'
+	printf '204 00:10 /bin/zsh\n'
+	;;
+"-U "*" -o pid=,ppid=,command=")
+	printf '201 1 /usr/local/bin/codex\n'
+	printf '202 1 /usr/local/bin/codex\n'
+	printf '203 1 /usr/local/bin/codex\n'
+	;;
+"-U "*" -o pid=,command=")
+	printf '201 /usr/local/bin/codex\n'
+	printf '202 /usr/local/bin/codex\n'
+	printf '203 /usr/local/bin/codex\n'
+	;;
+esac
+`
+	fakeLsof := `#!/bin/sh
+for arg in "$@"; do
+	if [ "$arg" = "cwd" ]; then
+		exit 0
+	fi
+done
+printf '%s\n' "$*" >> '` + openLog + `'
+printf 'p201\nf0\nn/dev/ttys001\nf3\nn%s\n' '` + rolloutA + `'
+printf 'p202\nf3\nn%s\n' '` + rolloutB + `'
+printf 'p203\nf0\nn/dev/ttys002\n'
+`
+	writeExecutable(t, filepath.Join(bin, "ps"), fakePS)
+	writeExecutable(t, filepath.Join(bin, "lsof"), fakeLsof)
+	writeExecutable(t, filepath.Join(bin, "uname"), "#!/bin/sh\necho Darwin\n")
+	writeExecutable(t, filepath.Join(bin, "tmux"), "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// On macOS, codex/open probes every live codex process in one lsof call with
+// -n -P rather than spawning lsof per PID (issue #408).
+func TestRunLocal_CollectScriptBatchesLsofForCodexOpenOnMacOS(t *testing.T) {
+	home := t.TempDir()
+	homedir.SetForTest(t, home)
+
+	rolloutA := writeRollout(t, home, "2026/09/27", rolloutName("2026-09-27T11-57-03", codexSessionA),
+		sessionMeta(codexSessionA, "/workspace/user/api", codexOriginatorTUI),
+		`{"timestamp":"2026-09-27T11:59:50.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}`,
+	)
+	rolloutB := writeRollout(t, home, "2026/09/27", rolloutName("2026-09-27T12-00-00", codexSessionB),
+		sessionMeta(codexSessionB, "/workspace/user/web", codexOriginatorTUI),
+		`{"timestamp":"2026-09-27T12:01:00.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"t2"}}`,
+	)
+
+	openLog := filepath.Join(t.TempDir(), "lsof-open.log")
+	installFakeMacOSCodexOpenTools(t, openLog, rolloutA, rolloutB)
+
+	out, err := runLocal(context.Background(), attentionScript)
+	require.NoError(t, err)
+	raw, err := parseCollectOutput(out, collectPlan.live)
+	require.NoError(t, err)
+
+	callsRaw, err := os.ReadFile(openLog)
+	require.NoError(t, err)
+	calls := strings.Split(strings.TrimSpace(string(callsRaw)), "\n")
+	require.Len(t, calls, 1, "codex/open invokes lsof once for all codex PIDs: %v", calls)
+	assert.Contains(t, calls[0], "-n")
+	assert.Contains(t, calls[0], "-P")
+	assert.Contains(t, calls[0], "-p 201,202,203")
+
+	assert.Equal(t, map[int]int64{201: 65, 202: 130, 203: 30}, codexOf(raw).Ages)
+	byPID := map[int]codexOpenRollout{}
+	for _, o := range codexOf(raw).Open {
+		byPID[o.PID] = o
+	}
+	require.Len(t, byPID, 2)
+	assert.Equal(t, codexSessionA, byPID[201].Rollout.SessionID)
+	assert.Equal(t, int64(65), byPID[201].Elapsed)
+	assert.Equal(t, "/workspace/user/api", byPID[201].Rollout.CWD)
+	assert.Equal(t, "task_started", byPID[201].Turn.Event)
+
+	assert.Equal(t, codexSessionB, byPID[202].Rollout.SessionID)
+	assert.Equal(t, int64(130), byPID[202].Elapsed)
+	assert.Equal(t, "/workspace/user/web", byPID[202].Rollout.CWD)
+	assert.Equal(t, "task_complete", byPID[202].Turn.Event)
 }

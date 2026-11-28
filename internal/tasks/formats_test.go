@@ -136,9 +136,12 @@ func TestParseCollectOutput_CodexRolloutRowWithAVersion(t *testing.T) {
 }
 
 // The script run for real reads the cli_version of each listed rollout.
+//
+//efficacy:exempt isolates the test from unrelated host processes (issue #408); version reading predates this branch
 func TestRunLocal_CollectScriptReadsTheCodexVersion(t *testing.T) {
 	home := t.TempDir()
 	homedir.SetForTest(t, home)
+	isolateEmptyProcesses(t)
 	meta := strings.Replace(sessionMeta(codexSessionA, "/workspace/user/api", codexOriginatorTUI),
 		`"source":"cli"`, `"source":"cli","cli_version":"0.160.1"`, 1)
 	writeRollout(t, home, "2026/09/28", rolloutName("2026-09-28T01-00-00", codexSessionA), meta)
@@ -153,6 +156,8 @@ func TestRunLocal_CollectScriptReadsTheCodexVersion(t *testing.T) {
 
 // The script run for real hands over the last turn event of the tail even
 // when this build does not know it, and skips turn_diff.
+//
+//efficacy:exempt isolates ps probe to stand-in PID (issue #408); event reading predates branch
 func TestRunLocal_CollectScriptReadsAnUnknownTurnEvent(t *testing.T) {
 	testcap.RequirePS(t)
 	home := t.TempDir()
@@ -164,6 +169,7 @@ func TestRunLocal_CollectScriptReadsAnUnknownTurnEvent(t *testing.T) {
 		`{"timestamp":"2026-09-28T01:00:03.000Z","type":"event_msg","payload":{"type":"turn_diff","unified_diff":""}}`,
 	)
 	pid := startStandInCodex(t, path)
+	isolateHostProcessesToPIDs(t, pid)
 
 	var held codexOpenRollout
 	require.Eventually(t, func() bool {
