@@ -392,4 +392,25 @@ describe('CommandPalette', () => {
     outside.remove()
   })
 
+  it('keeps Ask available while Message sends directly without a Claude connection and retains drafts between modes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => ({ ok: true, json: async () => {
+      if (url.endsWith('/status')) return { identities: {}, statuses: {}, participation: {} }
+      if (url.endsWith('/messages?since=0')) return { messages: [], epoch: 'test' }
+      if (url.endsWith('/broadcast')) return { delivered: ['helper@local'] }
+      return { entries: [] }
+    } })))
+    render(<CommandPalette isOpen token="tok" onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Command center prompt'), { target: { value: 'Who is working?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Message', exact: true }))
+    fireEvent.change(screen.getByLabelText('Recipients'), { target: { value: 'helper@local' } })
+    fireEvent.change(screen.getByLabelText('Message body'), { target: { value: 'Please review.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask', exact: true }))
+    expect(screen.getByLabelText('Command center prompt')).toHaveValue('Who is working?')
+    fireEvent.click(screen.getByRole('button', { name: 'Message', exact: true }))
+    expect(screen.getByLabelText('Message body')).toHaveValue('Please review.')
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+    expect(await screen.findByText('Sent to: helper@local')).toBeDefined()
+    expect(MockWebSocket.instances[0].sent).toHaveLength(0)
+  })
+
 })

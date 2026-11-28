@@ -11,8 +11,8 @@ import { boardDialog, boardOpenButton, gotoAndReadSessionToken } from './agent-b
 // docs/security.md); the two shell scripts under e2e/fixtures/agmsg stand in
 // for the ones a real installation provides. Everything the dashboard
 // actually depends on is the real implementation: the relay really execs
-// those scripts, parses their JSONL, validates each row's from/to against
-// the configured panes, writes the real BoardCache, and serves it over the
+// those scripts, parses their JSONL, validates host-local identities,
+// writes the real BoardCache, and serves it over the
 // real bearer-token-gated /api/board endpoints. No response is intercepted
 // or faked in the browser.
 
@@ -25,7 +25,7 @@ test('renders the pane status and message the relay read from the agmsg installa
 
   // Pane status card, from the board_status self-report row: the pane is on
   // the board, and this is what it is doing.
-  await expect(panel.getByText('board-main', { exact: true })).toBeVisible()
+  await expect(panel.getByText('board-main@local', { exact: true })).toBeVisible()
   await expect(panel.getByText('working', { exact: true })).toBeVisible()
   await expect(panel.getByText('tool: Edit')).toBeVisible()
 
@@ -57,7 +57,7 @@ test('renders the pane status and message the relay read from the agmsg installa
   await expect(panel.getByRole('link')).toHaveCount(0)
 
   // Ordinary cross-pane message row.
-  await expect(panel.getByText('board-main → board-worker')).toBeVisible()
+  await expect(panel.getByText('board-main@local → board-worker')).toBeVisible()
   await expect(panel.getByText('Handing the dashboard panel over for review.')).toBeVisible()
 
   // The status self-report is stored in agmsg history like any other
@@ -65,6 +65,38 @@ test('renders the pane status and message the relay read from the agmsg installa
   // board_status JSON must never show up as if someone had sent it.
   await expect(panel).not.toContainText('board_status')
   await expect(panel).not.toContainText('board-main → _system')
+})
+
+test('observes pane-free names and sends to an unobserved qualified name from Message mode', async ({ page }) => {
+  test.setTimeout(90_000)
+  await gotoAndReadSessionToken(page)
+  await boardOpenButton(page).click()
+  const panel = boardDialog(page)
+  const helper = panel.getByRole('article').filter({ hasText: 'helper@local' })
+  await expect(helper.getByText('Self-report', { exact: true })).toBeVisible()
+  await expect(helper.getByText(/No pane/)).toBeVisible()
+  await expect(helper.getByRole('button')).toHaveCount(2) // expansion and copy; no pane actions
+  const observer = panel.getByRole('article').filter({ hasText: 'observer@local' })
+  await expect(observer.getByText('Unreported')).toBeVisible()
+  await expect(observer.getByRole('button', { name: 'Copy address' })).toBeVisible()
+  await panel.getByRole('button', { name: 'Close agent board panel' }).click()
+
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+k' : 'Control+Shift+k')
+  const command = page.getByRole('dialog', { name: 'Command center', exact: true })
+  await command.getByRole('button', { name: 'Message', exact: true }).click()
+  await expect(command.getByRole('option', { name: 'helper@local · observed' })).toHaveCount(1)
+  await command.getByLabel('Add recipient').selectOption('helper@local')
+  await expect(command.getByLabel('Recipients')).toHaveValue('helper@local')
+  await command.getByLabel('Recipients').fill('helper@local, unseen@local')
+  const body = `Qualified UI message ${Date.now()}.`
+  await command.getByLabel('Message body').fill(body)
+  await command.getByRole('button', { name: 'Send message' }).click()
+  await expect(command.getByRole('status')).toHaveText('Sent to: helper@local, unseen@local')
+  await page.keyboard.press('Escape')
+  await boardOpenButton(page).click()
+  await expect(panel.getByText(body)).toHaveCount(2, { timeout: 60_000 })
+  await expect(panel.getByText('_system → helper@local')).toBeVisible()
+  await expect(panel.getByText('_system → unseen@local')).toBeVisible()
 })
 
 test('shows a message that arrives while the dashboard is already open', async ({ page }) => {

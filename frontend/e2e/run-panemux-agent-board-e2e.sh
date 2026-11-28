@@ -46,6 +46,10 @@ E2E_STATUS_BODY='{"kind":"board_status","state":"working","cwd":"/workspace/user
 "$E2E_AGMSG_DIR/scripts/send.sh" "$E2E_TEAM" board-main _system "$E2E_STATUS_BODY" --force
 "$E2E_AGMSG_DIR/scripts/send.sh" "$E2E_TEAM" board-main board-worker \
     'Handing the dashboard panel over for review.' --force
+"$E2E_AGMSG_DIR/scripts/send.sh" "$E2E_TEAM" helper _system \
+    '{"kind":"board_status","state":"idle","summary":"Ready to review without a pane"}' --force
+"$E2E_AGMSG_DIR/scripts/send.sh" "$E2E_TEAM" observer board-main \
+    'A message-only name is not a liveness report.' --force
 
 sh "$E2E_DIR/run-panemux-e2e.sh" agent-board-agmsg.yml 4175 &
 E2E_SERVER_PID=$!

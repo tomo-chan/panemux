@@ -911,6 +911,7 @@ export const App: React.FC = () => {
           <CommandPalette
             isOpen={isCommandPaletteOpen && commandCenterEnabled}
             token={boardToken}
+            boardPanes={boardPanes}
             onClose={() => setIsCommandPaletteOpen(false)}
           />
           <CommandHistoryPanel
